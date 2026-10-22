@@ -1547,6 +1547,10 @@ class Drive:
     stores: list = field(default_factory=list)
     raised: BaseException | None = None
     run_state: Any = None
+    #: #1108 P4 (O11): the tenant as published before `run.main` (a `PublishedTenant`: its
+    #: `export`, `commit`), or None with `publish_refusal` naming why the publish refused.
+    published: Any = None
+    publish_refusal: str | None = None
 
     # --- MAIN -----------------------------------------------------------------------------
     @property
@@ -1722,6 +1726,40 @@ def _alert_run_id(run_id: str | None) -> str:
     return run_id
 
 
+def publish_planted(tmp_path: Path, planted: Planted) -> tuple[Any, str | None]:
+    """#1108 P4 (O11): publish the planted tenant's folder, as it is NOW, for real through the
+    shared helper (`tenant_1108_p4._support.publish_once`), so the run has an export to read.
+    Returns `(PublishedTenant, None)`, or `(None, refusal)` when acceptance or P3's publish
+    refuses the folder (a scenario that plants a broken tenant on purpose); `(None, None)` when
+    the tenant was never placed (no row). Re-driving the same tenant publishes its edits."""
+    from defender.learning.author.version_control import DeliveryRefused, LockBusy
+    from defender.tenancy._tenant import TenantRefused
+    from defender.tests.tenancy.tenant_1108_p4._support import publish_once
+
+    if not (Path(planted.root) / planted.tenant_id / "tenant.json").is_file():
+        return None, None
+    try:
+        return publish_once(Path(tmp_path) / "p4-forge", root=planted.root,
+                            tenant_id=planted.tenant_id), None
+    except (DeliveryRefused, LockBusy, TenantRefused) as refused:
+        return None, str(refused)
+
+
+def publish_double(published: Any) -> Callable[..., str]:
+    """#1108 P4 (OD14, O11): only the CLI binds the real launch-time publish child; an
+    in-process caller of `run.main` passes `publish=`. This double only replays what already
+    happened: the tenant was published for real (`fresh <its commit>`, OD2's report line), or its
+    publish was refused (a stale:operator line, so with no export `run.main` reaches its own
+    refusal). It decides nothing else."""
+    report = (f"fresh {published.commit}" if published is not None
+              else "stale:operator planted tenant refused")
+
+    def publish(*_args: Any, **_kwargs: Any) -> str:
+        return report
+
+    return publish
+
+
 def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     tmp_path: Path, *,
     alert: Mapping[str, Any] | bytes | None = None,
@@ -1802,6 +1840,8 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     else:
         lifecycle_fn = lifecycle
 
+    d.published, d.publish_refusal = publish_planted(tmp_path, planted)
+
     def record_enqueue(*args: Any, **kw: Any) -> bool:
         # Recorded and forwarded exactly as received: the enqueue's call shape is production's
         # to change (C47 keys curation on the recorded digest), never this recorder's to pin.
@@ -1823,6 +1863,7 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     writer = tickets if tickets is not None else NoTicket()
     d.tickets = writer
     seams: dict[str, Any] = {} if roster is None else {"roster": roster}
+    seams["publish"] = publish_double(d.published)
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,

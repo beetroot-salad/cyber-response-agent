@@ -2,22 +2,14 @@
 
 Design (O-PIN): "`evaluations/held_out` pins every fixture to one commit (comparability)";
 O11: "Subprocess launchers (e2e, `held_out`) use O-PIN" (`run.py --knowledge-commit <sha>`).
+Orchestrator decision OD10: held_out resolves `current` ONCE, when the index is created, and
+records it with the index; every launch of that index pins to it, even after `current` moves.
+How the commit is recorded in F is not designed, so these tests observe it only through what
+each launch starts.
 
-WHAT IS NOT DESIGNED (reported, not frozen): where the one commit comes from — e.g. (a) the
-launch resolves `current` once and records it with the index so later launches into the same
-index reuse it, or (b) the operator names it (`held_out.py launch ... --knowledge-commit S`).
-These tests therefore drive the plain launch (`held_out.main(["launch", slug, "--tenant", T,
-"--index", F, "--fixtures-dir", D], spawn=)`) and assert only what holds under either answer:
-  - a launch never starts an UNPINNED `run.py`: it either starts `run.py` with exactly one
-    `--knowledge-commit <sha>` naming one of the tenant's exports, or refuses having started
-    nothing;
-  - launches into one index that do start runs pin them all to the same commit, even when a
-    publish moves `current` between them.
-Once the source is decided, the orchestrator should strengthen them (under (a): both launches
-start and the pin is the first launch's `current`; under (b): the given sha is passed through).
-
-Entry surface: `evaluations.held_out.main` with its existing `spawn=` seam (records argv; runs
-nothing). The tenant is the P4 fixture tenant published for real (`p4_tenant`).
+Entry surface: `evaluations.held_out.main(["launch", slug, "--tenant", T, "--index", F,
+"--fixtures-dir", D], spawn=)` with its existing `spawn=` seam (records argv; runs nothing).
+The tenant is the P4 fixture tenant published for real (`p4_tenant`).
 """
 from __future__ import annotations
 
@@ -74,39 +66,48 @@ def _assert_pinned_to_an_export(t, argv: list[str]) -> str:
     return pins[0]
 
 
-def test_o_pin_held_out_never_starts_an_unpinned_run(p4_tenant, tmp_path):
-    """O-PIN / O11: a held-out launch either starts `run.py` pinned to one of the tenant's
-    exports, or refuses having started nothing — it never starts a run that would publish and
-    read whatever `main` holds at that moment."""
+def _fresh_index(tmp_path: Path, name: str) -> Path:
+    index = tmp_path / name / "held-out-index.jsonl"
+    index.parent.mkdir()
+    return index
+
+
+def test_od10_the_first_launch_pins_to_current_at_index_creation(p4_tenant, tmp_path):
+    """OD10: the launch that creates the index starts `run.py --knowledge-commit <current>` —
+    exactly one pin, naming the export `current` names at that moment."""
     t = p4_tenant
     spawn = RecordingSpawn()
     fixtures = _fixtures(tmp_path / "fixtures")
-    index = tmp_path / "eval" / "held-out-index.jsonl"
-    index.parent.mkdir()
+    index = _fresh_index(tmp_path, "eval")
 
     rc = _launch(t, SLUGS[0], index, fixtures, spawn)
 
-    if not spawn.argvs:
-        assert rc not in (0, None), "held_out started nothing yet reported success"
-        return
-    for argv in spawn.argvs:
-        _assert_pinned_to_an_export(t, argv)
+    assert rc in (0, None), f"the held-out launch failed (exit {rc!r})"
+    assert len(spawn.argvs) == 1, spawn.argvs
+    assert _assert_pinned_to_an_export(t, spawn.argvs[0]) == t.commit, (
+        "the first launch did not pin to the commit `current` named at index creation")
 
 
-def test_o_pin_held_out_pins_every_fixture_of_one_index_to_one_commit(p4_tenant, tmp_path):
-    """O-PIN (comparability): two fixtures launched into one index, with a merged PR published
-    between them (so `current` moves), run on the same knowledge commit."""
+def test_od10_every_launch_of_an_index_pins_to_its_commit_after_current_moves(p4_tenant, tmp_path):
+    """OD10 (comparability): a merged PR published between two launches into one index moves
+    `current`, yet the second launch pins to the commit recorded at index creation. Positive
+    control on the same channel: a NEW index created after the publish pins to the new
+    `current` — so the pin follows the index, not a constant."""
     t = p4_tenant
     spawn = RecordingSpawn()
     fixtures = _fixtures(tmp_path / "fixtures")
-    index = tmp_path / "eval" / "held-out-index.jsonl"
-    index.parent.mkdir()
+    index = _fresh_index(tmp_path, "eval")
 
     _launch(t, SLUGS[0], index, fixtures, spawn)
     later = t.merge({"agent/lessons/merged-mid-evaluation.md": "a lesson merged mid-run\n"})
     assert t.publish().commit == later
     _launch(t, SLUGS[1], index, fixtures, spawn)
+    fresh = _fresh_index(tmp_path, "eval-after-publish")
+    _launch(t, SLUGS[0], fresh, fixtures, spawn)
 
-    pins = {_assert_pinned_to_an_export(t, argv) for argv in spawn.argvs}
-    assert len(pins) <= 1, (
-        f"fixtures of one held-out index ran on different knowledge commits: {sorted(pins)}")
+    assert len(spawn.argvs) == 3, spawn.argvs
+    pins = [_assert_pinned_to_an_export(t, argv) for argv in spawn.argvs]
+    assert pins[:2] == [t.commit, t.commit], (
+        f"launches of one index ran on different knowledge commits: {pins[:2]}")
+    assert pins[2] == later, (
+        f"control: an index created after the publish did not pin to the new current: {pins[2]}")

@@ -22,7 +22,6 @@ from defender.learning.core import config, drains, faults
 from defender.learning.core.cli import _run_stage
 from defender.learning.core.config import FatalConfigError, LoopPaths
 from defender.tests.support.shared.filesystem import _umask
-from defender.tests.e2e import _box665 as B
 from defender.tests.learning.state_contracts import _spec1135 as S
 
 ENV = "DEFENDER_LEARNING_STATE_DIR"
@@ -36,19 +35,42 @@ def _pitfall(pid: str) -> dict:
     return {"pitfall_id": pid, "system": "elastic", "failure": "a failing query"}
 
 
-def _drain_stage(tmp_path: Path, paths: LoopPaths) -> tuple[int | None, BaseException | None]:
-    """One curator-drain stage through `_run_stage`, every non-state seam faked (no git, no box,
-    no model): `(exit code, what escaped _run_stage)`."""
-    rec = B.BoxLifecycleRecorder()
+def _drain_stage(data_root: Path, shape: str) -> tuple[int | None, BaseException | None, Path]:
+    """One curator-drain stage through `_run_stage` over a tenant (#1108 P4 flow 4: the drain
+    serves an accepted tenant's own learning root) whose learning root has `shape` — `missing`,
+    `not-a-folder` or a `dangling` link — every non-state seam faked (no model, no box; the
+    forge and issuer P3's fakes): `(exit code, what escaped _run_stage, the root's spelling)`.
+    The tenant is a second one under the test's data root, its scratch kept outside `tmp_path`,
+    so the test's own snapshots and D9's runs are untouched."""
+    import tempfile
+
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        BoxSpy, author_drain, drain_paths, product_repo)
+    from defender.tests.tenancy.tenant_1108_p4._support import (
+        OTHER_TENANT_ID, bind_forge, published_tenant)
+
+    scratch = Path(tempfile.mkdtemp(prefix="p4-drain-stage-", dir=data_root.parent))
     out: dict[str, int] = {}
+    with published_tenant(scratch / "forge", root=data_root, tenant_id=OTHER_TENANT_ID,
+                          repo_name="stage") as t:
+        bind_forge(t)
+        root = Path(location_path(t.tenant.learning))
+        if shape == "not-a-folder":
+            root.write_text("a file, not a folder\n", encoding="utf-8")
+        elif shape == "dangling":
+            root.symlink_to(scratch / "gone" / "learning")
+        paths = drain_paths(t, product_repo(scratch))
 
-    def stage() -> None:
-        out["rc"] = _run_stage(lambda: drains.author_drain(
-            paths, branch=B.RecordingBranch(tmp_path / "worktrees"),
-            start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub))
+        def stage() -> None:
+            out["rc"] = author_drain(t, paths, trigger=None, box=BoxSpy())
 
-    escaped = S.caught(stage)
-    return out.get("rc"), escaped
+        escaped = S.caught(stage)
+        kind = S.entry_kind(root)
+    assert kind == {"missing": "absent", "not-a-folder": "file", "dangling": "link"}[shape], \
+        f"the tenant's {shape} learning root was created or replaced: {kind}"
+    if shape == "dangling":
+        assert S.entry_kind(scratch / "gone") == "absent", "something was created at the target"
+    return out.get("rc"), escaped, root
 
 
 def _critical_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -122,8 +144,8 @@ def test_open_holds_the_resolved_existing_scratch_root(tmp_path: Path):
 
 
 @pytest.mark.parametrize("shape", ["missing", "not-a-folder"])
-def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeypatch, caplog,
-                                                         shape):
+def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_root: Path,
+                                                         monkeypatch, caplog, shape):
     from defender import run_common
     from defender.box import _scrub as scrub_mod
     from defender.tests.support.sandbox._spec791 import make_run_dir
@@ -141,11 +163,11 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeyp
     assert str(root.resolve()) in str(opened), f"the error does not name the root: {opened}"
 
     caplog.set_level(logging.INFO)
-    rc, escaped = _drain_stage(tmp_path, paths)
+    rc, escaped, tenant_root = _drain_stage(data_root, shape)
     assert escaped is None, f"the drain stage raised {escaped!r}"
     assert rc == 2, f"the drain stage answered rc={rc}"
-    assert any(str(root.resolve()) in line for line in _critical_lines(caplog)), \
-        "the stage's CRITICAL line does not name the root"
+    assert any(str(tenant_root) in line for line in _critical_lines(caplog)), \
+        "the stage's CRITICAL line does not name the tenant's learning root"
 
     caplog.clear()
     planted = S.curation_run_dir("case-r15")
@@ -174,7 +196,7 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeyp
         "the spelled root was created or replaced"
 
 
-def test_1135_root_is_a_dangling_link(tmp_path: Path, monkeypatch, caplog):
+def test_1135_root_is_a_dangling_link(tmp_path: Path, data_root: Path, monkeypatch, caplog):
     from defender.learning.frontend import serialize_queues
 
     target = tmp_path / "gone" / "learning-state"
@@ -188,9 +210,11 @@ def test_1135_root_is_a_dangling_link(tmp_path: Path, monkeypatch, caplog):
     assert str(target) in str(opened), f"the error does not name the resolved root: {opened}"
 
     caplog.set_level(logging.INFO)
-    rc, escaped = _drain_stage(tmp_path, paths)
+    rc, escaped, tenant_root = _drain_stage(data_root, "dangling")
     assert escaped is None, f"the drain stage raised {escaped!r}"
     assert rc == 2, f"the drain stage answered rc={rc}"
+    assert any(str(tenant_root) in line or "gone" in line for line in _critical_lines(caplog)), \
+        "the stage's CRITICAL line does not name the tenant's learning root"
 
     page: dict[str, object] = {}
     built = S.caught(lambda: page.update(serialize_queues.stamped_view(paths)))

@@ -5,6 +5,7 @@ from defender.tests.support.shared._locations_1210 import fixture_data_root, loc
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
+import contextlib
 import functools
 import json
 from pathlib import Path
@@ -85,7 +86,23 @@ def world(tmp_path, monkeypatch):
         chosen["tenant"] = tenant_id
         return location_path(layout.runs)
 
-    return {"alert": alert, "root": root, "runs_base": runs_base, "chosen": chosen}
+    published: dict[str, Any] = {}
+
+    def publish_tenant(tenant_id: str, files: dict[str, str | None]) -> Any:
+        """#1108 P4: the tenant set up and published for real (S0's one helper) with `files`
+        (repo-relative, `None` deletes) over the committed fixture, so the run has an export
+        and its own refusal is the one that fires (not "no `current`")."""
+        from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+
+        published[tenant_id] = stack.enter_context(published_tenant(
+            tmp_path / "forge", root=root, tenant_id=tenant_id, files=files,
+            repo_name=f"t{len(published)}"))
+        chosen["tenant"] = tenant_id
+        return published[tenant_id]
+
+    with contextlib.ExitStack() as stack:
+        yield {"alert": alert, "root": root, "runs_base": runs_base, "chosen": chosen,
+               "publish_tenant": publish_tenant, "published": published}
 
 
 def _run():
@@ -112,8 +129,13 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     argv = [str(world["alert"]), "--tenant", world["chosen"]["tenant"], "--no-learn", *extra]
     text = ""
     try:
+        own = world["published"].get(world["chosen"]["tenant"])
+        # #1108 P4: a published tenant's launch reports its export fresh (O11 `publish=`); a
+        # tenant refused at acceptance never reaches the publish.
+        seams = ({} if own is None
+                 else {"publish": lambda *a, own=own, **k: f"fresh {own.commit}"})
         rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p, **kw: None,
-                         preflight=lambda m: 0)
+                         preflight=lambda m: 0, **seams)
     except _StartBoxReached:
         pytest.fail(f"start_box was reached for a tenant that must be refused: {start.calls}")
     except SystemExit as e:
@@ -137,32 +159,46 @@ def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(worl
     assert _names(text, world["root"] / fixture_uuid("tenant:ghost")), text
 
 
+#: #1108 P4: the file an operator edits is the tenant repo's `settings/...` (the run reads its
+#: copy of an export of it), so a refusal names it repo-relative; the clone, export or copy
+#: spelling of the same path all contain it.
+def _settings_named(text: str, rel: str) -> bool:
+    return f"settings/{rel}" in text
+
+
+def _published_without(world: dict, tenant_id: str, rel: str) -> Any:
+    """A published tenant whose `current` export lacks `settings/<rel>`: published whole (its
+    setup accepts only a complete tenant), then a merged commit deleting the file, published —
+    the state an operator reaches by merging the deletion."""
+    t = world["publish_tenant"](tenant_id, {})
+    t.merge({f"settings/{rel}": None}, message=f"delete settings/{rel}")
+    t.publish()
+    return t
+
+
 def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base(world, capsys):
-    """O4's second named case:"""
-    T.place_tenant(world["root"], T.PLAYGROUND_ID,
-                   omit=("systems/case-history/mapping.yaml",))
+    """O4's second named case (#1108 P4: over a published tenant, so "no `current`" cannot
+    mask it):"""
+    _published_without(world, T.PLAYGROUND_ID, "systems/case-history/mapping.yaml")
     base = world["runs_base"](T.PLAYGROUND_ID)
     text, _ = _refusal(world, capsys)
-    assert _names(
-        text, world["root"] / T.PLAYGROUND_ID / "knowledge" / "settings" / "systems"
-        / "case-history" / "mapping.yaml"), text
+    assert _settings_named(text, "systems/case-history/mapping.yaml"), text
     assert not base.exists(), "a refused run created its runs base"
 
 
 @pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])
 def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, capsys, missing):
-    T.place_tenant(world["root"], fixture_uuid("tenant:acme"), omit=(missing,))
-    world["runs_base"](fixture_uuid("tenant:acme"))
+    _published_without(world, fixture_uuid("tenant:acme"), missing)
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / fixture_uuid("tenant:acme") / "knowledge" / "settings" / missing), text
+    assert _settings_named(text, missing), text
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):
     """C9:"""
-    T.place_tenant(world["root"], fixture_uuid("tenant:newco"), table=T.TABLE_BLANK)
-    world["runs_base"](fixture_uuid("tenant:newco"))
+    world["publish_tenant"](fixture_uuid("tenant:newco"),
+                            {"settings/verb-grants.yaml": T.TABLE_BLANK})
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / fixture_uuid("tenant:newco") / "knowledge" / "settings" / "verb-grants.yaml"), text
+    assert _settings_named(text, "verb-grants.yaml"), text
 
 
 #: Gather is granted `health-check` and nothing else: the table loads, gather's grant is
@@ -177,20 +213,22 @@ dispositions:
 
 def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(world, capsys):
     """The template refusal's sibling:"""
-    T.place_tenant(world["root"], fixture_uuid("tenant:probe"), table=TABLE_HEALTH_CHECK_ONLY)
-    grants = T.run_grants(world["root"] / fixture_uuid("tenant:probe") / "knowledge" / "settings")
+    from defender.tests.tenancy.tenant_1108_p4._support import export_dir
+
+    t = world["publish_tenant"](fixture_uuid("tenant:probe"),
+                                {"settings/verb-grants.yaml": TABLE_HEALTH_CHECK_ONLY})
+    grants = T.run_grants(export_dir(t.tenant, t.commit) / "settings")
     assert {(s, v) for s, v, _ in grants.gather.entries} == {("cmdb", "health-check")}, \
         "the fixture must grant gather a health check and nothing else"
-    world["runs_base"](fixture_uuid("tenant:probe"))
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / fixture_uuid("tenant:probe") / "knowledge" / "settings" / "verb-grants.yaml"), text
+    assert _settings_named(text, "verb-grants.yaml"), text
     assert "query" in text, text
 
 
 def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, capsys):
     """M5 runs the lead-zero agreement check at start:"""
-    T.place_tenant(world["root"], fixture_uuid("tenant:drift"), lead_zero=T.lead_zero_text("elastic.no-such-template"))
-    world["runs_base"](fixture_uuid("tenant:drift"))
+    world["publish_tenant"](fixture_uuid("tenant:drift"),
+                            {"settings/lead-zero.yaml": T.lead_zero_text("elastic.no-such-template")})
     text, _ = _refusal(world, capsys)
     assert "elastic.no-such-template" in text, text
 
@@ -210,11 +248,13 @@ dispositions:
 def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_before_the_box(
         world, capsys):
     """M5's agreement half, not only its existence half:"""
-    T.place_tenant(world["root"], fixture_uuid("tenant:drift"), table=TABLE_LEAD_ON_QUERY)
-    grants = T.run_grants(world["root"] / fixture_uuid("tenant:drift") / "knowledge" / "settings")
+    from defender.tests.tenancy.tenant_1108_p4._support import export_dir
+
+    t = world["publish_tenant"](fixture_uuid("tenant:drift"),
+                                {"settings/verb-grants.yaml": TABLE_LEAD_ON_QUERY})
+    grants = T.run_grants(export_dir(t.tenant, t.commit) / "settings")
     assert {(s, v) for s, v, _ in grants.correlation.entries} == {
         ("elastic", "health-check"), ("elastic", "query")}, "the fixture's lead pair moved"
-    world["runs_base"](fixture_uuid("tenant:drift"))
     text, _ = _refusal(world, capsys)
     assert T.SHIPPED_CORRELATION_TEMPLATE in text, text
     assert "elastic.query" in text, text
@@ -257,7 +297,7 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
         published = {
             tenant_id: stack.enter_context(published_tenant(
                 scratch, root=root, tenant_id=tenant_id, repo_name=name,
-                files={**B.SEED_FILES, "settings/verb-grants.yaml": table}))
+                files={"settings/verb-grants.yaml": table}))
             for tenant_id, table, name in ((fixture_uuid("tenant:acme"), T.TABLE_A, "acme"),
                                            (fixture_uuid("tenant:bravo"), T.TABLE_B, "bravo"))}
         for tenant_id, other in ((fixture_uuid("tenant:acme"), fixture_uuid("tenant:bravo")),

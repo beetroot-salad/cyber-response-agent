@@ -238,14 +238,14 @@ def test_o2_lead_zero_templates_come_from_the_run_copys_catalog_not_the_product_
     product catalog holds. An export WITHOUT it refuses the run at start naming the template —
     the run did not fall back to the product's. (Control: every other test here, whose export
     carries it, runs.)"""
-    files = {k: v for k, v in B.SEED_FILES.items() if k != B.CORRELATE_PATH}
-    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+    with published_tenant(tmp_path / "forge", root=data_root,
+                          files={**B.SEED_FILES, B.CORRELATE_PATH: None}) as t:
         out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
     assert not out.reached, (
         "O2: the run started although its own export has no lead-zero template — it read the "
         "product catalog")
     assert out.refusal is not None, out.text()
-    assert "elastic.correlate-alerts-by-entity" in out.refusal, out.text()
+    assert B.CORRELATE_ID in out.refusal, out.text()
 
 
 # --- O8 parent half ---------------------------------------------------------------------------

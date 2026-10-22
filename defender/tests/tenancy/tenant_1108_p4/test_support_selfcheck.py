@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as tenants
 
 from ._support import (
@@ -19,6 +20,7 @@ from ._support import (
     export_dir,
     files_under,
     fixture_agent_files,
+    publish_once,
     second_tenant,
     unbind_forge,
 )
@@ -95,3 +97,22 @@ def test_forge_binding_round_trips_through_the_tenant_row(p4_tenant):
     assert str(tenants.accept(t.data_root, t.tenant_id).id) == t.tenant_id
     unbind_forge(t)
     assert json.loads(row_path.read_text(encoding="utf-8")) == before
+
+
+def test_publish_placed_exports_a_hand_planted_tenant_and_republishes_its_edits(tmp_path, data_root):
+    """`publish_once` over a tenant a suite planted itself (`_tenants1106.place_tenant`, its own
+    agent marker file): the export holds exactly the planted agent half; an edit to the folder
+    and a second call export the edit as a new commit and move `current` to it."""
+    tenant_id = fixture_uuid("tenant:p4-hand-planted")
+    knowledge = tenants.place_tenant(data_root, tenant_id)
+    planted = files_under(knowledge / "agent")
+    first = publish_once(tmp_path / "forge", root=data_root, tenant_id=tenant_id)
+    assert files_under(export_dir(first.tenant, first.commit) / "agent") == planted
+    assert current_commit(first.tenant) == first.commit
+    (knowledge / "agent" / "lessons").mkdir()
+    (knowledge / "agent" / "lessons" / "edit.md").write_text("edited\n", encoding="utf-8")
+    second = publish_once(tmp_path / "forge", root=data_root, tenant_id=tenant_id)
+    assert second.commit != first.commit
+    assert current_commit(second.tenant) == second.commit
+    assert files_under(export_dir(second.tenant, second.commit) / "agent") == {
+        **planted, "lessons/edit.md": b"edited\n"}

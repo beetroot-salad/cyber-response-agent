@@ -47,7 +47,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E4
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
     RecordingDocker,
-    drive_worktree_batch,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -592,30 +591,15 @@ def test_the_scrub_survives_a_crashed_investigation(tmp_path):
         f"the crash path did not reap in start -> investigate -> stop -> scrub order; got {kinds}"
 
 
-def test_the_drain_scrub_survives_a_crashed_do_work(tmp_path):
-    """d_scrub_survives_a_crashed_drain — the drain lane's scrub reaps EVERY exit from `do_work`,
-    not only the one that falls through."""
-    log: list[str] = []
-    rec = BoxLifecycleRecorder(events=log)
-    boom = RuntimeError("do_work exploded")
-
-    def crashing_do_work(wt_paths, *, box=None):
-        raise boom
-
-    with pytest.raises(RuntimeError) as e:
-        drive_worktree_batch(tmp_path, rec, do_work=crashing_do_work)
-    assert e.value is boom, "the drain swallowed or replaced do_work's own failure"
-
-    assert rec.stopped, "the box was not torn down on the crash path"
-    assert rec.scrubbed, \
-        "the scrub never ran on the crash path — a raising do_work jumped over it, " \
-        "leaving the tree the box wrote unwalked before cleanup deletes it"
-    stop_i = log.index(f"stop:{rec.boxes[0].name}")
-    scrub_i = next(i for i, ev in enumerate(log) if ev.startswith("scrub:"))
-    assert stop_i < scrub_i, \
-        "the scrub must stay behind the teardown: an unstopped box makes the walk a race"
-    assert "finish_batch" not in "".join(log), \
-        "the supply-chain step ran despite do_work failing"
+# `test_the_drain_scrub_survives_a_crashed_do_work` (the drain worktree's scrub reaping a
+# crashing `do_work`) is retired by #1108 P4 (OD12 class i): the P4 drain cuts no worktree and
+# never scrubs its draft (amendment 3 C3); the draft's claim refuses any link or special file
+# whole instead (tenant_1108_delivery/test_changes.py::
+# test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole). The rest of its
+# promise, the box stopped on a failing agent and nothing delivered, is
+# learning/retrieval/test_1195_lessons_run_windows.py::
+# test_a_stop_fault_under_a_failing_spawn_halts_author_drain_with_the_failure_as_context and
+# ::test_a_box_fault_escapes_author_drain_with_nothing_delivered.
 
 
 def _reap_probe(*, stop_fault=None, scrub_fault=None):

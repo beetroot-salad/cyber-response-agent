@@ -92,6 +92,7 @@ def test_no_model_supplied_query_id_reaches_the_reducer_surface():
         systems=DECLARED,
     ))
     assert surfaces["reducer"] == []
+    # #1108 P4 (OD6): handoff paths are spelled repo-relative to the tenant repo.
     assert [e["path"] for e in surfaces["system"]] == [
-        "defender/skills/elastic/execution.md"
+        "agent/skills/elastic/execution.md"
     ]

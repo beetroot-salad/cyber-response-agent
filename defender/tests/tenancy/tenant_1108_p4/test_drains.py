@@ -33,8 +33,6 @@ TenantDelivery.open's own keywords):
 """
 from __future__ import annotations
 
-import dataclasses
-import importlib
 import logging
 import subprocess
 import sys
@@ -43,174 +41,38 @@ from typing import Any
 
 import pytest
 
-from defender import box as box_mod
 from defender.tests.support.learning.curation import _spec773 as S
-from defender.tests.support.learning.curation._drain719 import seed
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._scenarios import _AnswerLost
 from defender.tests.tenancy.tenant_1108_delivery._support import (
+    FORK,
+    OURS,
     close_on_remote,
+    pr_row,
     fresh_process_env,
+)
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    LESSON_NAME,
+    LESSON_PATH,
+    BoxSpy,
+    CuratorTrigger,
+    author_drain,
+    critical_text,
+    draft_entries,
+    drafts_dir,
+    drain_paths,
+    product_repo,
+    product_state,
+    queue,
+    remote_branches,
+    touched,
+    under,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
     current_commit,
     git,
 )
-
-#: The lesson the fake curator writes, below the corpus dir its config names (the draft's lane).
-LESSON_NAME = "p4-drain-lesson.md"
-LESSON_PATH = f"agent/lessons/{LESSON_NAME}"
-LESSONS_PREFIX = "lessons/"
-
-# ---------------------------------------------------------------------------------------------
-# Machinery shared by S-D's files (test_writers.py, test_drain_credentials.py import it; S0 is
-# asked to host it in _support.py).
-# ---------------------------------------------------------------------------------------------
-
-
-def drains() -> Any:
-    return importlib.import_module("defender.learning.core.drains")
-
-
-def run_stage(stage) -> int:
-    """The CLI's stage runner (`loop.py --author-drain`'s): a systemic fault or configuration
-    refusal is logged `critical` and exits 2."""
-    from defender.learning.core.cli import _run_stage
-
-    return _run_stage(stage)
-
-
-def product_repo(tmp_path: Path) -> Path:
-    """A scratch product checkout: a real git repo with a `defender/` tree and one commit, used
-    as the drain's `paths.repo_root` (where the legacy drain cut worktrees and committed)."""
-    repo = tmp_path / "product"
-    (repo / "defender" / "lessons").mkdir(parents=True)
-    (repo / "defender" / "lessons" / "product-era.md").write_text("product era\n", encoding="utf-8")
-    (repo / "defender" / "README.md").write_text("scratch product checkout\n", encoding="utf-8")
-    git(repo, "init", "-b", "main")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-m", "product checkout")
-    return repo
-
-
-def product_state(repo: Path) -> dict:
-    """Everything a product-repo delivery would move: HEAD, every ref, the worktree list, the
-    status, and the files under `defender/`."""
-    return {
-        "head": git(repo, "rev-parse", "HEAD"),
-        "refs": git(repo, "for-each-ref", "--format=%(refname) %(objectname)"),
-        "worktrees": git(repo, "worktree", "list", "--porcelain"),
-        "status": git(repo, "status", "--porcelain", "--untracked-files=all"),
-        "files": sorted(str(p.relative_to(repo)) for p in (repo / "defender").rglob("*")),
-    }
-
-
-def drain_paths(t: Any, product: Path) -> Any:
-    """The accepted tenant's learning paths over the scratch product checkout (what
-    `LoopPaths.for_tenant` builds over `REPO_ROOT`)."""
-    from defender.learning.core.config import LoopPaths
-
-    return t.tenant.learning_paths(LoopPaths, repo_root=product)
-
-
-def queue(paths: Any, rows: list[dict], *, channel: Any = None) -> None:
-    from defender.learning.core.state import FINDINGS
-
-    seed(paths, channel if channel is not None else FINDINGS, rows)
-
-
-_BUILDERS = {
-    "author": ("defender.learning.author.lessons.run", "build_author_config"),
-    "questioner_curator": ("defender.learning.author.questioner.run", "build_questioner_config"),
-}
-
-
-class CuratorTrigger:
-    """The drain's `trigger_author` seam: runs the REAL curator module for the module it is asked
-    for, as the default step does (the lane's held trees, the real config builder, the module's
-    `run_batch`), with only the model spawn (`cfg.invoke_agent`) replaced by `curators[module]`.
-    A module with no fake is recorded and not run. Records each call's module."""
-
-    def __init__(self, **curators: Any) -> None:
-        self.curators = curators
-        self.calls: list[str] = []
-        self.handed: list[dict] = []
-
-    def __call__(self, paths: Any, state: Any, channel: Any, threshold_env: str,
-                 module_name: str, pending_label: str, **kw: Any) -> None:
-        from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-        from defender.learning.core.lane_trees import open_drain_trees
-
-        self.calls.append(module_name)
-        self.handed.append(dict(kw))
-        curator = self.curators.get(module_name)
-        if curator is None:
-            return
-        module, builder = _BUILDERS[module_name]
-        mod = importlib.import_module(module)
-        box = kw.pop("box", None)
-        with open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
-            cfg = getattr(mod, builder)(paths, state=state, trees=trees, box=box, **kw)
-            cfg = dataclasses.replace(cfg, invoke_agent=curator)
-            mod.run_batch(hold_committed=True, cfg=cfg, box=box)
-
-
-class BoxSpy:
-    """The drain's `start_box`/`stop_box` seams: records each `BoxRequest` and hands back an
-    unboxed executor (the box itself is P3's, tested there)."""
-
-    def __init__(self) -> None:
-        self.requests: list[Any] = []
-        self.stopped = 0
-
-    def start(self, request: Any, **_kw: Any) -> Any:
-        self.requests.append(request)
-        return box_mod.unboxed_executor()
-
-    def stop(self, _box: Any, **_kw: Any) -> None:
-        self.stopped += 1
-
-
-def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, **seams: Any) -> int:
-    """`author_drain` through the stage runner, the tenant's forge fake as its forge client and
-    a fresh identity over its issuer fake (login skipped) unless the case passes others."""
-    seams.setdefault("client", t.forge.client)
-    if "issuer_config" not in seams:
-        seams.setdefault("identity", t.vault.identity())
-    return run_stage(lambda: drains().author_drain(
-        paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop, **seams))
-
-
-def remote_branches(remote: Path, prefix: str = LESSONS_PREFIX) -> dict[str, str]:
-    """`{branch: tip}` of the bare origin's branches under `prefix`."""
-    out = git(remote, "for-each-ref", "--format=%(refname:strip=2) %(objectname)",
-              f"refs/heads/{prefix}")
-    return dict(line.split(" ", 1) for line in out.splitlines() if line)
-
-
-def touched(cwd: Path, base: str, tip: str) -> list[str]:
-    """Every path any commit in `base..tip` touched (git's word, renames off)."""
-    out = git(cwd, "log", "--no-renames", "--name-only", "--format=", f"{base}..{tip}")
-    return sorted({line for line in out.splitlines() if line})
-
-
-def drafts_dir(t: Any) -> Path:
-    return Path(location_path(t.tenant.tenant_root)) / "drafts"
-
-
-def draft_entries(t: Any) -> list[str]:
-    d = drafts_dir(t)
-    return sorted(p.name for p in d.iterdir()) if d.is_dir() else []
-
-
-def under(path: Path, root: Path) -> bool:
-    """`path` is `root` or below it (both resolved)."""
-    return Path(path).resolve().is_relative_to(Path(root).resolve())
-
-
-def critical_text(caplog) -> str:
-    return "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR)
 
 
 @pytest.fixture
@@ -232,7 +94,8 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     `lessons/` branch of the TENANT clone touching only `agent/lessons/<lesson>` (never
     `agent/.tenant-id`), pushed to the tenant origin with a PR against `main` on the tenant
     forge; no checkout moved (the clone sits clean on `main`, one worktree); the draft is
-    discarded; the box mounted the draft, never the clone; the row is consumed; and the product
+    discarded; the box mounted the draft, never the clone; the row stays queued until the lesson
+    reaches `main` (#922/#952: consumption follows durability, `hold_committed`); and the product
     checkout's git state is byte-for-byte what it was."""
     t = p4_tenant
     bind_forge(t)
@@ -279,8 +142,8 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     writable = sorted(Path(m.source).relative_to(staged[0].source).as_posix()
                       for m in mounts if m.writable)
     assert writable == ["agent/lessons", "agent/lessons-questioner"], writable
-    # The row was consumed; the product checkout never moved.
-    assert [r["finding_id"] for r in S.pending(paths, S.channel_of("findings"))] == []
+    # The row is held until its lesson reaches `main` (#952); the product checkout never moved.
+    assert [r["finding_id"] for r in S.pending(paths, S.channel_of("findings"))] == ["f1"]
     assert product_state(product) == before
     # Positive control: the same observation shows a product commit.
     (product / "defender" / "lessons" / "x.md").write_text("x\n", encoding="utf-8")
@@ -369,17 +232,17 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
     with caplog.at_level(logging.INFO):
         author_drain(t, paths, trigger=trigger, box=box, client=lost.client)
     assert critical_text(caplog), "a lost PR answer was silent"
-    # Carried policy (#952): consumption precedes the push, so tick 2 has nothing new to author
-    # and any PR it opens could only be the closed batch's again.
-    assert S.pending(paths, S.channel_of("findings")) == [], "tick 1 left its row queued"
     (branch, tip), = remote_branches(t.remote).items()
     assert [c["head"] for c in lost.creates] == [branch]
     close_on_remote(t.p3, branch)
     refs_before = git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)")
     caplog.clear()
+    # Tick 2's curator writes nothing (the held row is still queued, #952), so any PR or push it
+    # makes could only be the closed batch's.
+    quiet = CuratorTrigger()
 
     with caplog.at_level(logging.INFO):
-        rc = author_drain(t, paths, trigger=trigger, box=box)
+        rc = author_drain(t, paths, trigger=quiet, box=box)
 
     assert rc == 0, critical_text(caplog)
     assert t.forge.creates == [], "a closed batch's PR was opened again"
@@ -387,6 +250,53 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert "closed" in said, said
     assert branch in said, said
+
+
+# ---------------------------------------------------------------------------------------------
+# OD8: the writer lease (amendment 3 keeps the `state=open` listing; D-fork)
+# ---------------------------------------------------------------------------------------------
+
+#: An open PR row on the tenant forge, by who holds it: our own repository on this lane, a fork
+#: on this lane's prefix, a row whose head repository is gone (D-fork), our own repository on
+#: the OTHER lane's prefix.
+_LEASE_ROWS = {
+    "our-open-lessons-pr": lambda: pr_row(3, "lessons/earlier-batch", repo=OURS),
+    "fork-pr": lambda: pr_row(3, "lessons/earlier-batch", repo=FORK),
+    "no-head-repository": lambda: pr_row(3, "lessons/earlier-batch", repo=None),
+    "our-open-lead-author-pr": lambda: pr_row(3, "lead-author/earlier-batch", repo=OURS),
+}
+
+
+@pytest.mark.parametrize("holder", sorted(_LEASE_ROWS))
+def test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does(
+        p4_tenant, tmp_path, thresholds, caplog, holder):
+    """OD8 (amendment 3 C1, D-fork): an open PR of OUR tenant repository on this lane's branch
+    prefix holds the lane's writer lease: the tick starts no batch — no curator, box, draft,
+    branch or PR — and leaves its row queued. A fork's PR on the same prefix, a PR row with no
+    head repository, and our own open PR on the other lane's prefix hold nothing: the tick
+    serves and opens its PR (positive controls on the same channels)."""
+    t = p4_tenant
+    bind_forge(t)
+    t.forge.add_pr(_LEASE_ROWS[holder]())
+    paths = drain_paths(t, product_repo(tmp_path))
+    queue(paths, [S.finding_row("f1", run_id="f1")])
+    curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})
+    trigger, box = CuratorTrigger(author=curator), BoxSpy()
+
+    with caplog.at_level(logging.INFO):
+        rc = author_drain(t, paths, trigger=trigger, box=box)
+
+    assert rc == 0, critical_text(caplog)
+    if holder == "our-open-lessons-pr":
+        assert trigger.calls == []
+        assert box.requests == []
+        assert draft_entries(t) == []
+        assert remote_branches(t.remote) == {}
+        assert t.forge.creates == []
+        assert [r["finding_id"] for r in S.pending(paths, S.channel_of("findings"))] == ["f1"]
+    else:
+        (branch, _tip), = remote_branches(t.remote).items()
+        assert [c["head"] for c in t.forge.creates] == [branch]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -482,23 +392,3 @@ def test_o_sweep_a_draft_never_shows_an_unowned_moment_to_a_publisher(p4_tenant)
 
     assert draft_entries(t) == ["fresh"]
     assert batch.draft_root.is_dir()
-
-
-__all__ = [
-    "LESSON_NAME",
-    "LESSON_PATH",
-    "BoxSpy",
-    "CuratorTrigger",
-    "author_drain",
-    "critical_text",
-    "draft_entries",
-    "drain_paths",
-    "drains",
-    "product_repo",
-    "product_state",
-    "queue",
-    "remote_branches",
-    "run_stage",
-    "touched",
-    "under",
-]

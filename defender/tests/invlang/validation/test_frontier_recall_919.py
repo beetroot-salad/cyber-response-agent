@@ -207,6 +207,7 @@ def _lessons_frontier():
 # `_write_lesson` and `_main_deps` live in `_lessons_corpus` so a second suite can use them
 # without importing this COLLECTED module (which would load it twice in one session).
 from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
+from defender.tests.support.learning.retrieval._lessons_corpus import _run_copy_main_deps  # noqa: E402
 
 
 def _corpus(parent: Path, name: str = "lessons") -> Path:
@@ -216,31 +217,6 @@ def _corpus(parent: Path, name: str = "lessons") -> Path:
     d = parent / name
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-def _run_copy_deps(tmp_path: Path):
-    """MAIN deps through the real `bind` seam (`_main_deps`'s), bound over this run's copy of
-    its tenant's knowledge — #1108 P4: the recall's corpus is the run copy's `lessons/`
-    (`<T>/run-knowledge/<run_id>/agent/lessons`, threaded as `RunScope(tenant_agent=...)`),
-    never `defender_dir/lessons` (O2, O4). Returns `(deps, run, agent_root, defender_dir)`; the
-    caller plants lessons under `agent_root` and, where it wants the stale reader caught, a
-    decoy under `defender_dir`."""
-    from dataclasses import replace
-
-    from defender.agents import MAIN_DEF
-    from defender.run_repository import Run
-    from defender.runtime.agent_definition import RunScope, bind
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
-    from defender.tests.support.shared._locations_1210 import fixture_runs_base
-
-    run = tmp_path / fixture_uuid("run")
-    run.mkdir()
-    dfn = tmp_path / "defender"
-    dfn.mkdir()
-    agent = tmp_path / "tenant" / "run-knowledge" / run.name / "agent"
-    agent.mkdir(parents=True)
-    deps = bind(MAIN_DEF, run, defender_dir=dfn, scope=RunScope(tenant_agent=agent))
-    return replace(deps, run=Run.under(fixture_runs_base(run.parent), run.name)), run, agent, dfn
 
 
 def _names(hits) -> list[str]:
@@ -444,7 +420,7 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
     same open slot) is never recalled."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, run, agent, dfn = _run_copy_deps(tmp_path)
+    deps, run, agent, dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
     _write_lesson(corpus, "process-class-open", nodes=("type: process, slot: class",))
     _write_lesson(_corpus(dfn), "checkout-decoy-class-open", nodes=("type: process, slot: class",))
@@ -498,7 +474,7 @@ def test_an_append_landing_a_half_written_block_still_leads_with_its_byte_count(
     """CLAIM: the recall never turns a write that LANDED into a failed tool call."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     _write_lesson(_corpus(agent), "process-class-open", nodes=("type: process, slot: class",))
     _tool_append_block(deps, PROLOGUE)
 
@@ -625,7 +601,7 @@ def test_the_recall_is_omitted_when_the_corpus_is_missing_or_malformed(tmp_path)
     """CLAIM: the recall never turns a landed write into a failed tool call."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, _run, agent, dfn = _run_copy_deps(tmp_path)
+    deps, _run, agent, dfn = _run_copy_main_deps(tmp_path)
     opening = PROLOGUE + OPEN_LOGINUID_BLOCK
 
     # No corpus at all (in the run copy, nor in the checkout).
@@ -673,7 +649,7 @@ def test_the_tool_pushes_only_the_lessons_that_matched(tmp_path):
     """CLAIM: `_tool_append_block` is wired to `match_lessons`, not to a directory listing."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, _run, agent, _dfn = _run_copy_deps(tmp_path)
+    deps, _run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
     _write_lesson(corpus, "matches-the-open-loginuid",
                   nodes=("type: process, slot: attrs.loginuid",))
@@ -821,7 +797,7 @@ def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
     """CLAIM: the repair verb pushes lessons on the same terms `append_block` does."""
     from defender.runtime.tools import _tool_append_block, _tool_fix_row
 
-    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
     _write_lesson(corpus, "tty-open", nodes=("type: process, slot: attrs.tty",))
 
@@ -844,7 +820,7 @@ def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
     from defender.runtime.tools import _tool_append_block, _tool_read_file
     from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
-    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
     _write_lesson(corpus, "readable-from-the-block", nodes=("type: process, slot: class",))
     lf = _lessons_frontier()
@@ -878,7 +854,7 @@ def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
 
     from defender.runtime.tools import _tool_append_block
 
-    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
     _write_lesson(corpus, "recorded-on-push", nodes=("type: process, slot: class",))
 

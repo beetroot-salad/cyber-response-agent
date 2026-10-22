@@ -42,34 +42,10 @@ from typing import Any
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
-#: The template the fixture's `settings/lead-zero.yaml` names. The committed fixture `agent/`
-#: lacks it (the product catalog has its own), so a run whose lead-zero templates come from the
-#: run copy (O2) needs it in the export. Made-up content, same id/verb/params shape.
+#: The lead-zero template the fixture's `settings/lead-zero.yaml` names (S0's fixture `agent/`
+#: carries it; the product catalog has its own copy).
 CORRELATE_PATH = "agent/skills/gather/queries/elastic/correlate-alerts-by-entity.md"
-CORRELATE_TEMPLATE = """\
----
-id: elastic.correlate-alerts-by-entity
-status: established
-verb: alerts
-params: [end, start]
-body_substitutions: [entity_filter]
----
-
-## Goal
-
-Fixture content for tests (#1108 P4, slice S-B): alerts naming one entity over a window
-(correlate, entity, prior alert).
-
-## What to summarize
-
-- how many alerts name the entity in the window
-
-## Query
-
-```
-${entity_filter}
-```
-"""
+CORRELATE_ID = "elastic.correlate-alerts-by-entity"
 
 #: A lesson whose bytes change between the seeded commit and a later merge, so "which revision
 #: did the run read" is answerable from content alone.
@@ -101,14 +77,13 @@ def cmdb_env(mark: str) -> str:
     return base + f'\n{MARK_KEY}="{mark}"\n'
 
 
-SEED_FILES = {CORRELATE_PATH: CORRELATE_TEMPLATE, LESSON: lesson_text(SEEDED_MARK),
-              CMDB_ENV: cmdb_env(SEEDED_MARK)}
+SEED_FILES = {LESSON: lesson_text(SEEDED_MARK), CMDB_ENV: cmdb_env(SEEDED_MARK)}
 MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), CMDB_ENV: cmdb_env(MERGED_MARK)}
 
 
 @contextlib.contextmanager
 def run_tenant(tmp_path: Path, data_root: Path, **kw: Any) -> Iterator[Any]:
-    """S0's `published_tenant` with the seed files above (lead-zero template + marks)."""
+    """S0's `published_tenant` with the revision marks above written over the fixture."""
     files = {**SEED_FILES, **kw.pop("files", {})}
     with published_tenant(tmp_path / "forge", root=data_root, files=files, **kw) as t:
         yield t
@@ -389,3 +364,70 @@ def drive_main(  # noqa: PLR0913 — the e2e entry: one keyword per seam
     return launch(t, tmp_path, publish=publish if publish_seam else None,
                   lifecycle=lifecycle, during=during,
                   alert_dir=alert_dir)
+
+
+# --- O-BUDGET parent half (OD11) --------------------------------------------------------------
+#
+# ASSUMED SEAMS (reported):
+# - the parent launcher, the callable the CLI binds to `run.main(publish=...)`:
+#   `defender.run.launch_publish(tenant_id, *, data_root, budget: float = 60.0,
+#   command: Sequence[str] | None = None) -> str` — spawns the child process (`command`
+#   replaces the default argv prefix of the real child's process entry; the parent appends its
+#   own arguments after it), waits up to `budget` seconds while the child is in its network
+#   phase, never kills a child that holds the tenant lock, and returns the report line
+#   (`stale:transient <reason>` when it stopped waiting).
+# - the real child's process entry: `defender.learning.author.version_control.publish_child_main(
+#   argv, *, issuer_config=None, client=None, identity=None, network_timeout=None,
+#   locked_hook=None) -> int` — `argv` is what the parent appended; the keywords are the
+#   in-process fakes (as `publish_for_run`) and `locked_hook`, the ONE injectable slow point of
+#   the locked phase: called once, while the child holds the tenant lock, before it touches the
+#   clone.
+
+def launcher() -> Callable[..., str]:
+    run_py = importlib.import_module("defender.run")
+    return run_py.launch_publish
+
+
+#: The child process a budget test spawns: the REAL child process entry, its fakes rebuilt
+#: inside the subprocess (P3's issuer fake has a fixed clock, so it mints the token the test's
+#: `GitHTTP` accepts), forwarding whatever arguments the parent appended.
+CHILD_WRAPPER = '''
+import json, sys, time
+from pathlib import Path
+
+spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+marks = Path(spec["marks"])
+(marks / "started").write_text(repr(time.time()), encoding="utf-8")
+
+from defender.learning.author import version_control as vc
+from defender.tests.tenancy.tenant_1108_delivery._identity import VaultHTTP
+from defender.tests.tenancy.tenant_1108_delivery._support import ForgeHTTP
+
+
+def locked_hook():
+    (marks / "locked").write_text(repr(time.time()), encoding="utf-8")
+    time.sleep(spec["locked_sleep"])
+    (marks / "locked-done").write_text(repr(time.time()), encoding="utf-8")
+
+
+forge = ForgeHTTP(remote=Path(spec["remote"]), origin=spec["origin"])
+sys.exit(vc.publish_child_main(
+    sys.argv[2:], issuer_config=Path(spec["issuer_config"]), client=forge.client,
+    identity=VaultHTTP(spec["tenant_id"]).identity(), network_timeout=spec["network_timeout"],
+    locked_hook=locked_hook if spec["locked_sleep"] else None))
+'''
+
+
+def child_command(t: Any, tmp_path: Path, issuer_config: Path, *, network_timeout: float,
+                  locked_sleep: float) -> tuple[list[str], Path, Path]:
+    """`(command, spec path, marks dir)` for a budget test's child process."""
+    marks = tmp_path / "child-marks"
+    marks.mkdir(parents=True, exist_ok=True)
+    wrapper = tmp_path / "publish_child_wrapper.py"
+    wrapper.write_text(CHILD_WRAPPER, encoding="utf-8")
+    spec = tmp_path / "publish_child_spec.json"
+    spec.write_text(json.dumps({
+        "tenant_id": t.tenant_id, "remote": str(t.remote), "origin": t.origin,
+        "issuer_config": str(issuer_config), "marks": str(marks),
+        "network_timeout": network_timeout, "locked_sleep": locked_sleep}), encoding="utf-8")
+    return [sys.executable, str(wrapper), str(spec)], spec, marks

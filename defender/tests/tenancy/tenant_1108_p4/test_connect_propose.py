@@ -36,7 +36,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
     git,
 )
-from defender.tests.tenancy.tenant_1108_p4.test_drains import remote_branches, touched
+from defender.tests.tenancy.tenant_1108_p4._drain_support import remote_branches, touched
 
 SYSTEM = "acme-cmdb"
 CONNECT = DEFENDER / "skills" / "connect"

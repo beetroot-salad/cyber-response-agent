@@ -52,8 +52,8 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
             assert state in p.parents, f"{name}: {p} is not under the state root"
             assert paths.repo_root not in p.parents
 
-    cfg = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("s"))
-    assert cfg.corpus_dir.is_relative_to(paths.repo_root), "the corpus is repo-rooted"
+    # The corpus is no longer repo-rooted (#1108 P4: it is the batch draft's lane, tenant
+    # repo; covered by tenant_1108_p4/test_writers.py::test_o7_each_author_lane_writer_...).
 
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])

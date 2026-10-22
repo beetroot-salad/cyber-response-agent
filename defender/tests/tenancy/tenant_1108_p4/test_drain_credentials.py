@@ -29,25 +29,24 @@ it next to `VaultHTTP`.
 """
 from __future__ import annotations
 
-import importlib
-import json
 import logging
 import os
-import shutil
-import time
 from pathlib import Path
 from typing import Any
 
-import certifi
-import httpx
 import pytest
 
-from defender._git import REPO_ROOT
 from defender.tests.support.learning.curation import _spec773 as S
-from defender.tests.tenancy.tenant_1108_delivery._identity import ISSUER, VaultHTTP
-from defender.tests.tenancy.tenant_1108_delivery._identity import token as issuer_token
+from defender.tests.tenancy.tenant_1108_delivery._identity import ISSUER
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, unbind_forge
-from defender.tests.tenancy.tenant_1108_p4.test_drains import (
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    CLIENT_TOKEN,
+    DEV_CLIENT_DIR,
+    ROLE_ID,
+    SECRET_ID,
+    AppRoleVault,
+    vc,
+    write_issuer_config,
     LESSON_NAME,
     BoxSpy,
     CuratorTrigger,
@@ -59,69 +58,6 @@ from defender.tests.tenancy.tenant_1108_p4.test_drains import (
     remote_branches,
     under,
 )
-
-#: OpenBao's address as the issuer fake serves it (its identity endpoint is `ISSUER`).
-ADDRESS = ISSUER.split("/v1/", 1)[0]
-LOGIN_PATH = "/v1/auth/approle/login"
-ROLE_ID = "p4-role-id-5a1c"
-SECRET_ID = "p4-secret-id-9e7f3b"
-CLIENT_TOKEN = "hvs.p4-client-token-0d2a"
-#: The dev issuer client config folder the design names (O8): under the repo, outside `defender/`.
-DEV_CLIENT_DIR = REPO_ROOT / "playground-issuer" / "client"
-
-
-def vc() -> Any:
-    return importlib.import_module("defender.learning.author.version_control")
-
-
-class AppRoleVault(VaultHTTP):
-    """P3's issuer fake plus OpenBao's AppRole login (see the module doc). Tokens are minted at
-    the real clock (`now`), as a production identity checks them against `time.time()`."""
-
-    def __init__(self, tenant: str, *, role_id: str = ROLE_ID, secret_id: str = SECRET_ID) -> None:
-        super().__init__(tenant, now=int(time.time()))
-        self.role_id, self.secret_id = role_id, secret_id
-        self.transport = httpx.MockTransport(self.reply)
-
-    def reply(self, request: httpx.Request) -> httpx.Response:
-        if request.url.path == LOGIN_PATH:
-            self.calls.append(request)
-            try:
-                body = json.loads(request.content or b"{}")
-            except ValueError:
-                body = None
-            if request.method != "POST" or body != {"role_id": self.role_id,
-                                                    "secret_id": self.secret_id}:
-                return httpx.Response(400, json={"errors": ["invalid role or secret ID"]})
-            return httpx.Response(200, json={"auth": {
-                "client_token": CLIENT_TOKEN, "lease_duration": 600, "renewable": True}})
-        if request.headers.get("X-Vault-Token") != CLIENT_TOKEN:
-            self.calls.append(request)
-            return httpx.Response(403, json={"errors": ["permission denied"]})
-        return super().reply(request)
-
-    def logins(self) -> list[dict]:
-        return [json.loads(r.content) for r in self.calls if r.url.path == LOGIN_PATH]
-
-    def token_requests(self) -> list[httpx.Request]:
-        return [r for r in self.calls if r.url.path != LOGIN_PATH]
-
-    def minted(self) -> str:
-        return issuer_token(self.tenant, issued=self.now)
-
-
-def write_issuer_config(folder: Path, **overrides: Any) -> Path:
-    """The issuer client config file (assumed shape, module doc) in `folder`, with a real PEM
-    bundle as its CA (certifi's), so building a CA-trusting client from it succeeds."""
-    folder.mkdir(parents=True, exist_ok=True)
-    ca = folder / "ca.pem"
-    shutil.copyfile(certifi.where(), ca)
-    doc = {"issuer": ADDRESS, "ca_cert": str(ca), "role_id": ROLE_ID, "secret_id": SECRET_ID,
-           **overrides}
-    path = folder / "issuer.json"
-    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-    return path
-
 
 def _login(t: Any, config: Path, vault: AppRoleVault) -> Any:
     return vc().issuer_login(t.tenant, issuer_config=config, transport=vault.transport)

@@ -33,7 +33,7 @@ from defender.learning.leads.lead_extraction import (
     LeadAuthorError,
     collect_general_failures,
 )
-from defender.learning.leads.path_validation import CATALOG_REL, SKILLS_REL
+from defender.learning.leads.path_validation import SKILLS_REL
 from defender.runtime.verbs import engine_for
 from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, head_files, seed_executed_query, seed_tree
 from defender.tests.support.learning.curation._lead_author_1134 import (
@@ -56,14 +56,7 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of, state_for_paths
 from defender.tests.support.learning.curation._shared_readers_1134 import RefusesFolder, kernel_watch
-from defender.tests.support.sandbox._spec791 import (
-    SpecBranch,
-    author_markers,
-    loop_paths,
-    noop_scrub,
-    noop_start_box,
-    noop_stop_box,
-)
+from defender.tests.support.sandbox._spec791 import author_markers
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.shared.filesystem.test_1111_rooted_io import census, in_time
 
@@ -827,21 +820,27 @@ def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, capl
                and repr(WAZUH_LEAD.query_id) in m for m in errors(caplog)), errors(caplog)
 
 
-class PlantingBranch(SpecBranch):
-    """`SpecBranch` whose batch worktree is a seeded tree with `plant` applied to it: the state
-    a box process running beside the lead author leaves before the claim's host work runs."""
+class PlantingBox:
+    """The P4 drain's `start_box`/`stop_box` seams (#1108 P4 flow 4): records the batch box's
+    request and applies `plant` to the draft root it mounts (`staged`) — the state a box
+    process running beside the lead author leaves before the claim's host work runs."""
 
-    def __init__(self, base: Path, plant: Callable[[Path], None]) -> None:
-        super().__init__(base)
+    def __init__(self, plant: Callable[[Path], None]) -> None:
+        from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy
+
+        self._spy = BoxSpy()
         self._plant = plant
-        self.worktrees: list[Path] = []
+        self.drafts: list[Path] = []
 
-    def start_batch(self, batch_id: str) -> Path:
-        self.events.append("start")
-        wt = _worktree(self._base, name=f"wt-{batch_id}")
-        self._plant(wt)
-        self.worktrees.append(wt)
-        return wt
+    def start(self, request: Any, **kw: Any) -> Any:
+        executor = self._spy.start(request, **kw)
+        [draft] = [Path(m.source) for m in request.mounts if m.kind == "staged"]
+        self._plant(draft)
+        self.drafts.append(draft)
+        return executor
+
+    def stop(self, box: Any, **kw: Any) -> None:
+        self._spy.stop(box, **kw)
 
 
 def _failed(paths: LoopPaths) -> list[dict]:
@@ -850,66 +849,79 @@ def _failed(paths: LoopPaths) -> list[dict]:
         if failed.is_dir() else []
 
 
+def _lead_tick(tmp_path: Path, data_root: Path, plant: Callable[[Path], None]):
+    """One real P4 lead-author drain tick over the fixture tenant's draft (#1108 P4 flow 4), a
+    curation request queued for a run whose one executed query coins `elastic.newthing`, the
+    box planting `plant` into the draft. Returns `(rc, box, paths, run_dir, tenant)`; the tenant's
+    forge lives only inside the call, so its observations are taken here."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        LEAD_PREFIX, drain_paths, drains, remote_branches, run_stage)
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
+
+    box = PlantingBox(plant)
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        paths = drain_paths(t, _worktree(tmp_path, name="product"))
+        run_dir = curation_run_dir("run-1", tenant_id=t.tenant_id)
+        seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
+        state_for_paths(paths).enqueue_curation("case-1", curation_row("case-1", run_dir))
+        rc = run_stage(lambda: drains().lead_author_drain(
+            paths, client=t.forge.client, identity=t.vault.identity(),
+            start_box=box.start, stop_box=box.stop))
+        delivered = (remote_branches(t.remote, prefix=LEAD_PREFIX), list(t.forge.creates))
+    return rc, box, paths, run_dir, delivered
+
+
 def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skills(
-    tmp_path: Path, monkeypatch, caplog,
+    tmp_path: Path, data_root: Path, monkeypatch, caplog,
 ):
+    """#1134 over the P4 drain's draft: with a box having swapped the draft's catalog folder for
+    a link out, the lane's default seams (label carried to the held `skills/` mount) refuse every
+    draft write behind the link, write nothing outside, and deliver nothing. (The claim's fate
+    after a box-planted link is P3's ChangeSet refusal, not pinned here.)"""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
-    paths = loop_paths(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
     planted: list[dict] = []
 
-    def plant(wt: Path) -> None:
-        queries = wt / CATALOG_REL
+    def plant(draft: Path) -> None:
+        queries = draft / "agent" / "skills" / "gather" / "queries"
         os.replace(queries, outside / "elsewhere-queries")
         queries.symlink_to(outside / "elsewhere-queries", target_is_directory=True)
         planted.append(census(outside))
 
-    branch = PlantingBranch(tmp_path / "worktrees", plant)
-    run_dir = curation_run_dir("run-1")
-    seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
-    state_for_paths(paths).enqueue_curation("case-1", curation_row("case-1", run_dir))
+    rc, box, _paths, run_dir, delivered = _lead_tick(tmp_path, data_root, plant)
 
-    rc = drains.lead_author_drain(
-        paths, branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
-    )
-
-    assert rc == 0
+    assert box.drafts, "the batch's box never started over a draft"
     [before] = planted
     assert census(outside) == before, "a draft was written outside skills/"
-    [wt] = branch.worktrees
     hexname = _draft_basename("elastic.newthing")
     assert any("synthesize_drafts: could not write" in m
-               and str(wt / CATALOG_REL / "elastic" / "_draft" / f"{hexname}.md") in m
+               and f"skills/gather/queries/elastic/_draft/{hexname}.md" in m
                for m in errors(caplog)), errors(caplog)
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
-    assert (run_dir / "lead_author" / "done").read_text().startswith("commit: none")
-    assert author_markers(paths) == []
-    assert _failed(paths) == [], "the claim was dead-lettered"
-    assert [m for m in errors(caplog) if "pitfalls curation error" in m] == [], errors(caplog)
+    assert delivered == ({}, []), "a batch whose drafts were refused delivered something"
+    assert rc in (0, 2), rc
 
 
-def test_a_seam_that_cannot_hold_skills_dead_letters_the_claim(tmp_path: Path, caplog):
-    paths = loop_paths(tmp_path)
+def test_a_seam_that_cannot_hold_skills_dead_letters_the_claim(
+        tmp_path: Path, data_root: Path, caplog):
+    """#1134 over the P4 drain's draft: a box that removed the draft's `skills/` lane leaves the
+    lead author nothing to hold: the claim is dead-lettered `lead-author-error` naming
+    `FileNotFoundError`, never re-queued as a transient, and the run gets no lead-author state."""
+    def plant(draft: Path) -> None:
+        shutil.rmtree(draft / "agent" / "skills")
 
-    def plant(wt: Path) -> None:
-            shutil.rmtree(wt / "defender" / "skills")
+    _rc, box, paths, run_dir, delivered = _lead_tick(tmp_path, data_root, plant)
 
-    branch = PlantingBranch(tmp_path / "worktrees", plant)
-    run_dir = curation_run_dir("run-1")
-    seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
-    state_for_paths(paths).enqueue_curation("case-1", curation_row("case-1", run_dir))
-
-    drains.lead_author_drain(
-        paths, branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
-    )
-
+    assert box.drafts, "the batch's box never started over a draft"
     failed = _failed(paths)
     assert len(failed) == 1, failed
     assert failed[0]["failed"].startswith("lead-author-error"), failed
     assert "FileNotFoundError" in failed[0]["failed"], failed
     assert author_markers(paths) == [], "the claim was re-queued as a transient"
     assert not (run_dir / "lead_author").exists()
+    assert delivered == ({}, [])
 
 
 def _lifetime_paths(tmp_path: Path) -> tuple[LoopPaths, Path]:

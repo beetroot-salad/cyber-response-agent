@@ -186,3 +186,67 @@ def test_o2_the_gather_dispatch_prompt_shows_the_copys_descriptor_index(tenants,
     assert "CMDB stub system reference" not in prompt, "O2: the product's cmdb skill was shown"
     assert "/defender/skills/cmdb" not in prompt, (
         "O2/O-TEXT: the gather prompt points the model at the product tree's cmdb skill")
+
+
+# --- the tacit adapter ------------------------------------------------------------------------
+
+REGISTRY = "agent/skills/tacit-knowledge/registry.yaml"
+TACIT_LEAD = "l-001"
+
+
+def _registry(entry_id: str, pattern: str, host_scope: str) -> str:
+    """One hand-written registry entry valid today (S0: the fixture registry is empty because a
+    dated entry expires; `find_entry` answers only while `added_at <= today <= review_by`)."""
+    import datetime as dt
+
+    today = dt.datetime.now(dt.UTC).date()
+    fields = {"id": entry_id, "pattern": pattern, "actor_scope": "svc-sb-backup",
+              "host_scope": host_scope, "added_by": "ops@example.invalid",
+              "added_at": (today - dt.timedelta(days=10)).isoformat(),
+              "review_by": (today + dt.timedelta(days=30)).isoformat(),
+              "justification": "Made-up fixture sanction (#1108 P4, slice S-B)."}
+    lines = ["entries:"]
+    for i, (key, value) in enumerate(fields.items()):
+        lines.append(f"{'  - ' if i == 0 else '    '}{key}: {value!r}")
+    return "\n".join(lines) + "\n"
+
+
+OWN_ENTRY = ("tk-sb-own-nightly-backup", "nightly rsync of /srv/backup", "backup-node-*.sb")
+OTHER_ENTRY = ("tk-sb-other-tenant-only", "weekly tar of /srv/archive", "archive-node-*.sb")
+
+
+def _lookup(pattern: str, host: str) -> R.Turn:
+    return R.Turn(tool_calls=[("query", {
+        "system": "tacit-knowledge", "verb": "lookup",
+        "params": {"actor": "svc-sb-backup", "host": host, "pattern": pattern}})])
+
+
+def test_o2_the_tacit_adapter_answers_from_the_run_copys_registry_and_not_another_tenants(
+        tmp_path, data_root, monkeypatch):
+    """O2 (tacit adapter): this tenant's registry entry (only in its export) answers a lookup
+    the run's gather lead makes through the real adapter; the second tenant's entry, whose
+    scope covers the second lookup, answers nothing. The product registry holds neither."""
+    import json
+
+    with B.run_tenant(tmp_path, data_root, files={REGISTRY: _registry(*OWN_ENTRY)}) as t, \
+            second_tenant(t, files={REGISTRY: _registry(*OTHER_ENTRY)}):
+        main = R.ReplayFn([
+            R.Turn(tool_calls=[("gather", {
+                "lead_id": TACIT_LEAD, "system": "tacit-knowledge",
+                "goal": "is the backup service account's rsync sanctioned",
+                "what_to_summarize": ["the matching entry id, if any"]})]),
+            R.Turn(text="done")])
+        gather = R.ReplayFn([
+            _lookup(OWN_ENTRY[1], "backup-node-03.sb"),
+            _lookup(OTHER_ENTRY[1], "archive-node-03.sb"),
+            R.Turn(text="Summary: reported what the registry answered.")])
+        out = B.drive_main(t, tmp_path, monkeypatch, main=main, gather=gather)
+
+    assert out.reached, out.text()
+    assert out.rc == 0, out.text()
+    raw = out.run_dir / "gather_raw" / TACIT_LEAD
+    payloads = [json.loads((raw / f"{i}.json").read_text(encoding="utf-8")) for i in (0, 1)]
+    assert (payloads[0].get("matched") or {}).get("id") == OWN_ENTRY[0], (
+        f"O2: the tacit adapter did not read the run copy's registry: {payloads[0]}")
+    assert payloads[1].get("matched") is None, (
+        f"O2: another tenant's registry entry answered this run's lookup: {payloads[1]}")

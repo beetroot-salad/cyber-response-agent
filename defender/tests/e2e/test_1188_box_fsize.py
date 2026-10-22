@@ -17,17 +17,21 @@ import pytest
 
 from defender._io import READ_LIMIT
 from defender.tenancy._tenant import TenantId, tenant_id_file_text
-from defender.learning.core import drains
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.execution import bash_exec
 from defender import box as box_mod
 from defender.box._image import HASH_INPUTS
 from defender.tests.support.runtime.state._1255_view import MODEL_RUN
 from defender.tests.support.storage._alert_plant import plant_alert
-from defender.tests.support.runtime.engine._declared869 import commit_all, init_git
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
-from defender.tests.support.learning.curation._lead_author_1134 import write
 from defender.tests.e2e._spec771 import AliasProbeDocker
+from defender.tests.tenancy.tenant_1108_delivery._support import (
+    LANES,
+    ForgeHTTP,
+    build_tenant,
+    configured_origin,
+    fixture_identity,
+)
+from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
 
 pytestmark = pytest.mark.e2e
 
@@ -116,9 +120,9 @@ def _start_lane(tmp_path: Path, rec: AliasProbeDocker, spec) -> None:
     src.mkdir(parents=True, exist_ok=True)
     box_mod.start_box(
         box_mod.BoxRequest(
-            # The name `drains._drain_box_request` gives a drain box, so a limit keyed on the
+            # The name shape `Batch.box_request` gives a drain box, so a limit keyed on the
             # lane's name must not pass.
-            name="defender-drain-1188",
+            name="defender-tenant-1188-batch",
             mounts=(box_mod.Mount(source=src, target=src, writable=True),),
             workdir=src, env={}, spec=spec,
         ),
@@ -282,39 +286,44 @@ def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
         box_mod.stop_box(box)
 
 
-def _drain_worktree(base: Path) -> Path:
-    """A throwaway git worktree in test_1178's shape: a committed seed under
-    `defender/skills/`, then the files the box image's name is a function of copied into
-    `defender/`, so the drain request resolves the image this checkout's CI built, and the
-    product's code check file its read-only `code` mount is read back at (#1108 D7 amended)."""
-    wt = init_git(base / "wt")
-    write(wt / "defender" / "skills" / "seed-1188.md", "seed\n")
-    commit_all(wt, "seed")
+def _drain_code(base: Path) -> Path:
+    """The product code the drain box mounts as its `code` mount, under `base` (daemon-visible
+    under DooD): the files the box image's name is a function of and the code check file, so the
+    request resolves the image this checkout's CI built (#1108 D7 amended)."""
+    code = base / "defender"
+    code.mkdir(parents=True)
     for name in (*HASH_INPUTS, box_mod.CODE_CHECK_FILE):
-        shutil.copyfile(DEFENDER / name, wt / "defender" / name)
-    assert box_mod.image_tag(wt / "defender") == box_mod.image_tag(DEFENDER)
-    return wt
+        shutil.copyfile(DEFENDER / name, code / name)
+    assert box_mod.image_tag(code) == box_mod.image_tag(DEFENDER)
+    return code
 
 
 @contextlib.contextmanager
 def _lane_box(base: Path, runtime: str) -> Iterator[_DockerExec]:
-    """A REAL lane box, requested the way the lead-author drain requests one (`drains._drain_box_request` over a..."""
-    wt = _drain_worktree(base)
-    paths = LoopPaths(repo_root=wt, state_dir=base / "state")
-    request = drains._drain_box_request(
-        wt, f"t1188-{uuid.uuid4().hex[:8]}", LEAD_AUTHOR_DRAIN_LABEL, paths,
-    )
-    request = dataclasses.replace(
-        request, spec=dataclasses.replace(request.spec, runtime=runtime),
-    )
-    writable = [m for m in request.mounts if m.writable]
-    assert len(writable) == 1, f"the lead-author drain box mounts {writable} writable, not one"
-    box = box_mod.start_box(request, docker=box_mod._docker)
-    try:
-        assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
-        yield _DockerExec(box.name, Path(writable[0].source), Path(writable[0].target))
-    finally:
-        box_mod.stop_box(box)
+    """A REAL lane box, requested the way a P4 drain requests one (#1108 P4 re-spelling, OD12
+    class ii): `Batch.box_request()` over a tenant batch's git-free draft (its lanes the only
+    writable mounts), the tenant and the draft under `base`."""
+    with build_tenant(base / "tenant") as built:
+        http = ForgeHTTP(remote=built[1])
+        origin = configured_origin(built[0].knowledge)
+        if origin is not None:
+            http.serve(origin)
+        delivery = p3_target().TenantDelivery.open(
+            built[0], defender_dir=_drain_code(base), client=http.client,
+            identity=fixture_identity(str(built[0].id)), origin=origin)
+        batch = delivery.start_batch(f"t1188-{uuid.uuid4().hex[:8]}", lanes=LANES)
+        request = batch.box_request()
+        request = dataclasses.replace(
+            request, spec=dataclasses.replace(request.spec, runtime=runtime),
+        )
+        writable = [m for m in request.mounts if m.writable]
+        assert len(writable) == 1, f"the drain box mounts {writable} writable, not its one lane"
+        box = box_mod.start_box(request, docker=box_mod._docker)
+        try:
+            assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
+            yield _DockerExec(box.name, Path(writable[0].source), Path(writable[0].target))
+        finally:
+            box_mod.stop_box(box)
 
 
 _PROBE = r'''

@@ -3,18 +3,21 @@ from __future__ import annotations
 import errno
 import logging
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from defender.configuration._env import FatalConfigError
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.lane_trees import DrainTrees, kind_at
 from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.tests.support.learning.curation._lead_author_1134 import outcome, place, raised, scene_over, write
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.support.learning.core._state1135 import run_of
@@ -48,27 +51,41 @@ def _bad_fd(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
 
 
+def _draft_lane(tmp_path: Path) -> C.DraftLane:
+    """`_worktree`'s seeded tree after P4: its `skills/` as the tenant's `agent/skills` (one
+    export commit) under a P3 batch with the lead lane `skills`; the product checkout keeps the
+    adapters and no corpus (O1, #1172)."""
+    repo = _worktree(tmp_path)
+    agent = tmp_path / "agent-src"
+    shutil.copytree(repo / "defender" / "skills", agent / "skills")
+    subprocess.run(["git", "rm", "-r", "-q", "defender/skills"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "the product holds no corpus"], cwd=repo,
+                   check=True)
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=repo)
+
+
 def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
         tmp_path: Path, monkeypatch, caplog):
+    """#1134 + #1108 P4 O7: with no deps the tick opens its own trees over the batch's draft,
+    mints each draft there and reaches its agent, leaving no descriptor open below the draft.
+    ASSUMED SEAM (S-H): `lead_author.run(run, *, label, paths, batch)`."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     caplog.set_level(logging.DEBUG)
-    repo = _worktree(tmp_path)
-    (tmp_path / "state").mkdir()  # the state root is never created lazily (#1135)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    lane = _draft_lane(tmp_path)
     run_dir = _run_dir(("wazuh.hunt-creds", "wazuh", "esql"),
                        ("elastic.hunt-creds", "elastic", "esql"))
 
     with pytest.raises(FatalConfigError, match=NO_MODEL):
-        lead_author.run(run_of(run_dir), label=LEAD, paths=paths)
+        lead_author.run(run_of(run_dir), label=LEAD, paths=lane.paths, batch=lane.batch)
 
     for system in ("wazuh", "elastic"):
         qid = f"{system}.hunt-creds"
-        draft = paths.skills_dir / f"gather/queries/{system}/_draft/{_draft_basename(qid)}.md"
+        draft = lane.skills_dir / f"gather/queries/{system}/_draft/{_draft_basename(qid)}.md"
         assert qid in draft.read_text(encoding="utf-8"), draft
     assert not (run_dir / "lead_author" / "done").exists(), "recorded done before its agent"
     assert _bad_fd(caplog) == []
     assert wrote_errors(caplog) == []
-    assert descriptors_under(repo) == []
+    assert descriptors_under(lane.agent) == []
 
 
 @pytest.mark.parametrize("route", ["scandir", "reopen"])

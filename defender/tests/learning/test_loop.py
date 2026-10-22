@@ -78,10 +78,6 @@ def _noop_stop_box(_box, **_kw):
     pass
 
 
-def _noop_scrub(_path, **_kw):
-    pass
-
-
 def _isolate(tmp_path: Path) -> tuple[object, Path]:
     paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     learning_run_dir = location_path(paths.state_root) / "runs" / "case-x"
@@ -126,45 +122,31 @@ def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
     assert spec == {"case_id": rid, "tenant_id": run_dir.parent.parent.name, "run_id": rid}
 
 
-class _FakeBranch:
+@pytest.fixture
+def tenant(tmp_path, data_root):
+    """The fixture tenant published for real, its forge bound: #1108 P4's drains batch into the
+    tenant repo (flow 4), so every drain case below runs over it."""
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
-    def __init__(
-        self, *, prefix: str = "lessons/", pr_exists: bool = False, commits: int = 1,
-        worktree: Path | None = None,
-    ):
-        self.branch_prefix = prefix
-        self._pr_exists = pr_exists
-        self._commits = commits
-        self._worktree = worktree
-        self.events: list[str] = []
-
-    def branch_name(self, batch_id: str) -> str:
-        # The real `AuthorBranch.branch_name`, verbatim: #952's failure log names the local
-        # branch the commit was retained on, so the fake has to answer for it.
-        return f"{self.branch_prefix}{batch_id}"
-
-    def open_pr_exists(self) -> bool:
-        self.events.append("lease-check")
-        return self._pr_exists
-
-    def start_batch(self, batch_id: str) -> Path:
-        self.events.append("start")
-        return self._worktree if self._worktree is not None else Path(f"/tmp/wt-{batch_id}")
-
-    def finish_batch(self, batch_id: str, wt: Path):
-        self.events.append("finish")
-        return f"PR/{batch_id}" if self._commits else None
-
-    def cleanup(self, wt: Path) -> None:
-        self.events.append("cleanup")
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        yield t
 
 
-def _declarable_worktree(tmp_path: Path) -> Path:
-    """A committed tree declaring one system, for `_FakeBranch(worktree=...)`."""
-    from defender.tests.support.runtime.engine._declared869 import seed_tree
+def _tenant_paths(t, tmp_path: Path):
+    """The tenant's learning paths over a scratch product checkout, its state root made."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
 
-    return seed_tree(tmp_path, name="wt", adapters=("elastic",), markers=("elastic",),
-                     skills=("elastic",), catalog=("elastic",))
+    paths = drain_paths(t, product_repo(tmp_path))
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
+    return paths
+
+
+def _seams(t) -> dict:
+    """The drain's delivery and box seams over the tenant (assumed seams, #1108 P4: the
+    tenant forge fake's client, an identity over its issuer fake, a no-op box)."""
+    return {"client": t.forge.client, "identity": t.vault.identity(),
+            "start_box": _noop_start_box, "stop_box": _noop_stop_box}
 
 
 def _seed_curator_findings(paths, n: int = 5) -> None:
@@ -174,15 +156,15 @@ def _seed_curator_findings(paths, n: int = 5) -> None:
             fh.write(json.dumps({"finding_id": f"f{i}"}) + "\n")
 
 
-def test_author_drain_triggers_all_curators(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
+def test_author_drain_triggers_all_curators(tenant, tmp_path: Path):
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     _seed_curator_findings(paths)
     triggered: list[str] = []
     drains.author_drain(
         paths,
         trigger_author=lambda paths, state, channel, env, module, label, **_kw: triggered.append(module),
-        branch=_FakeBranch(),
-        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        **_seams(t),
     )
     assert triggered == [
         "author",
@@ -190,25 +172,29 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
     ]
 
 
-def test_author_drain_skips_when_no_work(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
+def test_author_drain_skips_when_no_work(tenant, tmp_path: Path):
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     triggered: list = []
-    branch = _FakeBranch()
     rc = drains.author_drain(
         paths,
         trigger_author=lambda *a, **_kw: triggered.append(a),
-        branch=branch,
-        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        **_seams(t),
     )
     assert rc == 0
-    assert branch.events == []
     assert triggered == []
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import draft_entries, remote_branches
+
+    assert draft_entries(t) == [], "a batch was started with nothing queued"
+    assert remote_branches(t.remote, "") == {"main": t.origin_main()}
+    assert t.forge.creates == []
 
 
-def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
+def test_author_drain_singleton_lock_exits_without_work(tenant, tmp_path: Path):
     import fcntl
 
-    paths, _ = _isolate(tmp_path)
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     _seed_curator_findings(paths)
     (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
     holder = (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).open("a+")
@@ -218,8 +204,7 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
         rc = drains.author_drain(
             paths,
             trigger_author=lambda *a, **_kw: worked.append("trigger"),
-            branch=_FakeBranch(),
-            start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+            **_seams(t),
         )
         assert rc == 0
         assert worked == []
@@ -228,27 +213,25 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
         holder.close()
 
 
-def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
+def test_lead_author_drain_runs_lead_author_then_clears_marker(tenant, tmp_path: Path):
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-b")
     enqueue_run(state_for_paths(paths), run_dir)
     seen: list[tuple[Path, Path]] = []
-    branch = _FakeBranch(prefix="lead-author/")
     drains.lead_author_drain(
         paths,
         run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(
             (wt_paths.repo_root, run.run_dir)),
-        branch=branch,
-        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        **_seams(t),
     )
     assert [rd for _, rd in seen] == [run_dir.resolve()]
-    assert str(seen[0][0]).startswith("/tmp/wt-")
     assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
-    assert branch.events == ["lease-check", "start", "finish", "cleanup"]
 
 
-def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
+def test_lead_author_drain_runs_pitfalls_after_markers(tenant, tmp_path: Path):
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-p")
     enqueue_run(state_for_paths(paths), run_dir)
     order: list[str] = []
@@ -256,8 +239,7 @@ def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
         paths,
         run_lead_author=lambda wt_paths, state, rd, **_kw: order.append("marker"),
         run_pitfalls=lambda wt_paths, state, **_kw: (order.append("pitfalls"), 0)[1],
-        branch=_FakeBranch(prefix="lead-author/"),
-        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        **_seams(t),
     )
     assert order == ["marker", "pitfalls"]
 
@@ -275,8 +257,9 @@ def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkey
     assert drains._has_lead_author_work(state_for_paths(paths)) is True
 
 
-def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
+def test_lead_author_drain_marks_artifact_missing(tenant, tmp_path: Path):
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-real")
     enqueue_run(state_for_paths(paths), run_dir)
     # A row naming a run its tenant's repository cannot open (#1105 PR 2): the address is
@@ -287,8 +270,7 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     drains.lead_author_drain(
         paths,
         run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
-        branch=_FakeBranch(prefix="lead-author/"),
-        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        **_seams(t),
     )
     assert seen == [run_dir.resolve()]
     assert not (location_path(paths.state_root) / "author-queue" / f"{gone.name}.json").exists()
@@ -308,8 +290,9 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     ],
     ids=["torn", "null", "list", "run_dir-null", "run_dir-number", "run_dir-absent"],
 )
-def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, body: str):
-    paths, _ = _isolate(tmp_path)
+def test_lead_author_drain_dead_letters_an_unservable_marker(tenant, tmp_path: Path, body: str):
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-real")
     enqueue_run(state_for_paths(paths), run_dir)
     (location_path(paths.state_root) / "author-queue").mkdir(parents=True, exist_ok=True)
@@ -319,8 +302,7 @@ def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, bod
     drains.lead_author_drain(
         paths,
         run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
-        branch=_FakeBranch(prefix="lead-author/"),
-        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        **_seams(t),
     )
 
     assert seen == [run_dir.resolve()], "the healthy request in the same pass was not served"
@@ -333,10 +315,11 @@ def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, bod
         "the queue still reports work on a request nothing can ever serve"
 
 
-def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
+def test_lead_author_drain_singleton_lock_distinct_from_lessons(tenant, tmp_path: Path):
     import fcntl
 
-    paths, _ = _isolate(tmp_path)
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-d")
     enqueue_run(state_for_paths(paths), run_dir)
     (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
@@ -347,8 +330,7 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
         rc = drains.lead_author_drain(
             paths,
             run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
-            branch=_FakeBranch(prefix="lead-author/"),
-            start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+            **_seams(t),
         )
         assert rc == 0
         assert seen == [run_dir.resolve()]
@@ -357,8 +339,9 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
         holder.close()
 
 
-def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
+def test_lead_author_drain_quarantines_poison_run_dir(tenant, tmp_path: Path):
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     poison = curation_run_dir("case-poison")
     good = curation_run_dir("case-good")
     enqueue_run(state_for_paths(paths), poison)
@@ -371,8 +354,7 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
         seen.append(run.run_dir)
 
     drains.lead_author_drain(
-        paths, run_lead_author=maybe_boom, branch=_FakeBranch(prefix="lead-author/"),
-        start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
+        paths, run_lead_author=maybe_boom, **_seams(t),
     )
     assert seen == [good.resolve()]
     assert not (location_path(paths.state_root) / "author-queue" / f"{poison.name}.json").exists()
@@ -380,25 +362,26 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
-def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch):
+def test_lead_author_drain_quarantines_on_nonzero_rc(tenant, tmp_path: Path, monkeypatch):
     import defender.learning.leads.lead_author as la
 
-    paths, _ = _isolate(tmp_path)
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-rc")
     enqueue_run(state_for_paths(paths), run_dir)
     # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
     monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
-    branch = _FakeBranch(prefix="lead-author/", worktree=_declarable_worktree(tmp_path))
-    drains.lead_author_drain(paths, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    drains.lead_author_drain(paths, **_seams(t))
     assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
     failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
-def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeypatch):
+def test_lead_author_drain_bounded_retry_then_quarantine(tenant, tmp_path: Path, monkeypatch):
     import defender.learning.leads.lead_author as la
 
-    paths, _ = _isolate(tmp_path)
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-transient")
     enqueue_run(state_for_paths(paths), run_dir)
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
@@ -410,14 +393,13 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     monkeypatch.setattr(la, "run_under_held_queue_lock", boom)  # lint-monkeypatch: ok
     marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
     failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
-    wt = _declarable_worktree(tmp_path)
 
     for expected in (1, 2):
-        drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/", worktree=wt), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+        drains.lead_author_drain(paths, **_seams(t))
         assert marker.exists()
         assert json.loads(marker.read_text())["attempts"] == expected
         assert not failed.exists()
 
-    drains.lead_author_drain(paths, branch=_FakeBranch(prefix="lead-author/", worktree=wt), start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
+    drains.lead_author_drain(paths, **_seams(t))
     assert not marker.exists()
     assert json.loads(failed.read_text())["failed"].startswith("transient-exhausted")

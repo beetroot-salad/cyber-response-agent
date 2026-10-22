@@ -1,26 +1,22 @@
 """A missing box image faults naming the build command; start_box never builds."""
 from __future__ import annotations
 
-import re
+import contextlib
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from defender.learning.core.config import AUTHOR_DRAIN_LABEL
 from defender import box as box_mod
 from defender.box import BoxRequest, Mount
 from defender.execution.box_codec import BoxFault
-from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.sandbox._spec1092 import (
     BUILD_COMMAND_TAIL,
     DEFENDER,
     REPO_ROOT,
     DockerFault,
-    FaultingStartBox,
-    GitWorktreeBranch,
     NoSuchImageDocker,
     RecordingDocker,
     image_tag,
@@ -31,7 +27,14 @@ from defender.tests.support.sandbox._spec1092 import (
     remedy_command,
     subcommands,
 )
-from defender.tests.e2e._box665 import BoxLifecycleRecorder, loop_paths
+from defender.tests.tenancy.tenant_1108_delivery._support import (
+    LANES,
+    ForgeHTTP,
+    build_tenant,
+    configured_origin,
+    fixture_identity,
+)
+from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
 
 
 def _request(root: Path, run_dir: Path) -> BoxRequest:
@@ -225,55 +228,57 @@ def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failu
     ], message
 
 
-# ---- MF2: the drain lane's fault names the commit the deleted worktree was cut from --------------
-def test_the_drain_lanes_missing_image_fault_names_the_cut_commit_and_a_checkout_instruction_after_cleanup(tmp_path, monkeypatch):
-    from defender.learning.core.drains import _run_worktree_batch
+# ---- MF2 on the P4 drain (#1108 P4 re-spelling, OD12 class ii): the tenant drain's box --------
+# The drain box is `Batch.box_request()` over a git-free draft, started through
+# `TenantDelivery.start_box`; its `code` mount is the product's defender dir. The legacy row's
+# cut-commit pointer (`origin/main @ <sha>` + a checkout instruction) is gone with the worktree:
+# there is no deleted tree to point back to, so the message must not carry one.
+@contextlib.contextmanager
+def _tenant_batch(tmp_path: Path, defender_dir: Path) -> Iterator[tuple[Any, Any]]:
+    with build_tenant(tmp_path / "tenant") as built:
+        http = ForgeHTTP(remote=built[1])
+        origin = configured_origin(built[0].knowledge)
+        if origin is not None:
+            http.serve(origin)
+        delivery = p3_target().TenantDelivery.open(
+            built[0], defender_dir=defender_dir, client=http.client,
+            identity=fixture_identity(str(built[0].id)), origin=origin)
+        yield delivery, delivery.start_batch("mf2", lanes=LANES)
 
+
+def _tree(root: Path) -> list[str]:
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+
+
+def test_the_tenant_drains_missing_image_fault_names_the_build_command_and_no_cut_commit(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    defender_dir = plant_tree(tmp_path / "product tree", copy_code=False)
+    expected = image_tag(defender_dir)
+    with _tenant_batch(tmp_path, defender_dir) as (delivery, batch):
+        drafts = batch.draft_root.parent
+        before = _tree(drafts)
 
-    def drive(docker: RecordingDocker) -> tuple[str, GitWorktreeBranch, FaultingStartBox]:
-        rec = BoxLifecycleRecorder()
-        branch: Any = GitWorktreeBranch(tmp_path / f"wt-{id(docker)}", events=rec.events)
-        starter = FaultingStartBox(docker)
-        paths = loop_paths(tmp_path)
-        state = open_state(paths)
-        with pytest.raises(BoxFault) as e:
-            _run_worktree_batch(
-                paths, state, branch, label=AUTHOR_DRAIN_LABEL, has_work=lambda p: True,
-                do_work=lambda *a, **k: None, start_box=starter, stop_box=rec.stop_box,
-                scrub=rec.scrub,
-            )
-        assert "cleanup" in rec.events, rec.events
-        assert len(starter.requests) == 1
-        assert not Path(starter.requests[0].workdir).exists(), "the worktree survived cleanup"
-        return str(e.value), branch, starter
+        def fault(docker: RecordingDocker) -> str:
+            with pytest.raises(BoxFault) as e:
+                delivery.start_box(batch.box_request(), docker=docker)
+            assert _tree(drafts) == before, "a start fault left something under the drafts"
+            return str(e.value)
 
-    message, branch, starter = drive(NoSuchImageDocker())
-    wt = Path(starter.requests[0].workdir)
-    assert "No such image:" in message, message
-    assert remedy_command(message) == [
-        "python3", f"{wt.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
-    ], message
-    pointer = re.search(r"origin/main @ ([0-9a-f]{12,40})", message)
-    assert pointer, message
-    assert branch.cut_commit is not None
-    assert branch.cut_commit.startswith(pointer.group(1)), (pointer.group(1), branch.cut_commit)
-    tail = message[pointer.end():].lower()
-    assert "check out" in tail, message
-    assert "build" in tail, message
+        rec = NoSuchImageDocker()
+        message = fault(rec)
+        assert inspected_image(rec.calls) == expected, rec.calls
+        assert "run" not in subcommands(rec.calls), rec.calls
+        assert f"No such image: {expected}" in message
+        assert remedy_command(message) == [
+            "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
+        ], message
+        assert "origin/main @" not in message, f"a cut-commit pointer with no worktree: {message}"
 
-    other = RecordingDocker(create=DockerFault(
-        rc=125, stderr="docker: Error response from daemon: bind source path does not exist\n",
-        cite="po1",
-    ))
-    message, branch, _ = drive(other)
-    assert "bind source path does not exist" in message
-    pointer = re.search(r"origin/main @ ([0-9a-f]{12,40})", message)
-    assert pointer, message
-    assert branch.cut_commit is not None
-    assert branch.cut_commit.startswith(pointer.group(1)), (pointer.group(1), branch.cut_commit)
-    tail = message[pointer.end():].lower()
-    assert "check out" in tail, message
-    assert "build" not in tail, message
-    assert remedy_command(message) is None, message
-    assert "box_image.py" not in message, message
+        message = fault(RecordingDocker(create=DockerFault(
+            rc=125, stderr="docker: Error response from daemon: bind source path does not exist\n",
+            cite="po1",
+        )))
+        assert "bind source path does not exist" in message
+        assert remedy_command(message) is None, message
+        assert "box_image.py" not in message, message
+        assert "origin/main @" not in message, message

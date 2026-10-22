@@ -223,3 +223,25 @@ def test_flow7_a_source_knowledge_commit_absent_from_the_clone_refuses_before_sp
     assert not launch.questioner.prompts, "the questioner was paid for before the refusal"
     assert not launch.spawn.launches, "a sibling started on knowledge that cannot be pinned"
     assert not export_dir(scene.t.tenant, ABSENT_COMMIT).exists()
+
+
+@pytest.mark.parametrize("argv_extra", [(), ("--allow-dirty",)], ids=["plain", "allow-dirty"])
+@pytest.mark.parametrize(("knowledge", "cause"), [
+    ("unversioned", "unversioned"),
+    ({"unavailable": "OD9-REASON-the-source-clone-could-not-be-read"},
+     "OD9-REASON-the-source-clone-could-not-be-read"),
+], ids=["unversioned", "unavailable"])
+def test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty(
+        scene, knowledge, cause, argv_extra):
+    """OD9 (flow 7, fail closed): a source whose knowledge stamp is `unversioned` or
+    `unavailable` names no commit to materialise and pin siblings to, so the launch is refused
+    naming why — and `--allow-dirty` does not waive it (there is nothing to pin, not merely
+    nothing proven). Nothing is spawned and the questioner is not paid for. Positive control on
+    the same channels: the pinned launch above (a versioned source launches pinned)."""
+    _stamp_source(scene, knowledge=knowledge)
+    launch = _launch(scene, argv_extra=argv_extra, live_tree=T.source_capture(knowledge=knowledge))
+
+    assert launch.rc not in (0, None), "a source with no knowledge commit launched"
+    assert cause in launch.message, f"the refusal does not name why ({cause!r}): {launch.message!r}"
+    assert not launch.spawn.launches, "a sibling started with no knowledge commit to pin"
+    assert not launch.questioner.prompts, "the questioner was paid for before the refusal"

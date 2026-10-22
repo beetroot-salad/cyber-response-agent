@@ -1,4 +1,6 @@
-"""#870 M9 — three ways to leave the queue uncurated, told apart."""
+"""#870 M9 — three ways to leave the queue uncurated, told apart.
+
+#1108 P4 (O7): the one lane tick here runs over a batch draft (`_curator1134.draft_lane`)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,17 +12,30 @@ from defender.learning.core.config import LoopPaths
 from defender.learning.leads import pitfalls_curator
 from defender.runtime.verbs import is_system_name
 from defender.tests.support.learning.core._declared870 import (
+    PITFALLS_SECTION,
     Spawn,
-    commit_all,
     consumed_by_id,
-    curate_execution_md,
     graveyard_by_id,
     pitfall_row,
-    seed_tree,
-    write_reducer_surface,
 )
 from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.curation._lead_author_1134 import lead_trees
+from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.runtime.engine._declared869 import write_adapter
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
+
+#: The tenant's learned-SQL-pitfalls add-on (carried decision; the fixture's committed copy).
+ADDON = FIXTURE_AGENT / "skills" / "gather" / "defender-sql.pitfalls.md"
+
+
+def _curate_execution_md(system: str, bullet: str = "use the key, not the id"):
+    """`_declared870.curate_execution_md` at the draft's spelling: one bullet in
+    `agent/skills/<system>/execution.md` under the root the spawn is handed."""
+
+    def _edit(root: Path) -> None:
+        C.put(root / "agent" / "skills" / system / "execution.md",
+              f"# {system}\n\n{PITFALLS_SECTION}\n\n- {bullet}\n")
+
+    return _edit
 
 REASONS = ("no-system", "malformed-system", "undeclared-system", "batch-error")
 
@@ -71,19 +86,25 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
         assert _reason(paths, pitfall_row(f"u:l-00{i}:0", outside)) == "malformed-system"
 
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
-                     skills=("elastic",), catalog=(), non_systems=("gather",), name="inert")
-    write_reducer_surface(repo)
-    commit_all(repo, "seed the reducer surface")
-    inert = LoopPaths(repo_root=repo, state_dir=tmp_path / "state-inert")
+    # #1108 P4 (O7): the lane writes a batch draft carrying the declared system's marker and the
+    # pitfalls add-on; adapters stay in the product checkout.
+    product = tmp_path / "product"
+    write_adapter(product, "elastic")
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files={
+        "skills/elastic/execution.md": "# execution\n",
+        "skills/gather/defender-sql.pitfalls.md": ADDON.read_text(encoding="utf-8"),
+    })
+    inert = LoopPaths(repo_root=product, state_dir=tmp_path / "state-inert")
     idless = {k: v for k, v in pitfall_row("x:l-000:0", "elastic").items() if k != "pitfall_id"}
     persist.append_pitfalls([idless, pitfall_row("k:l-000:0", "elastic")], state=_state1135.state_for_paths(inert))
     assert len(persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(inert)))) == 2, (
         "an id-less row stopped counting toward the threshold arithmetic"
     )
 
+    # ASSUMED SEAM (S-H): `run_pitfalls(..., batch=)`; the spawn's `repo_root` is the draft root.
     assert pitfalls_curator.run_pitfalls(
-        paths=inert, invoke=Spawn(curate_execution_md("elastic")), trees=lead_trees(inert),
+        paths=inert, invoke=Spawn(_curate_execution_md("elastic")), trees=C.draft_trees(lane),
+        batch=lane.batch,
     ) == 0
     survivors = persist.read_pitfalls(_state1135.state_for_paths(inert))
     assert [r.get("pitfall_id") for r in survivors] == [None], (

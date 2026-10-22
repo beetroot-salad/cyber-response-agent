@@ -25,7 +25,7 @@ from defender._git import REPO_ROOT
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._support import merged_agent_lesson
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, git
-from defender.tests.tenancy.tenant_1108_p4.test_drains import critical_text, remote_branches, touched
+from defender.tests.tenancy.tenant_1108_p4._drain_support import critical_text, remote_branches, touched
 
 LESSON = "p4-reverted"
 LESSON_PATH = f"agent/lessons/{LESSON}.md"

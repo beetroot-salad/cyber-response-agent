@@ -11,10 +11,8 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.learning.curation._claim1175 import claim_git
 from defender._io import ALIAS_READ_REFUSAL
 from defender.knowledge._scaffold_rules import check_system_skill
-from defender.learning.author import shared as _author_shared
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender._tree_listing import list_tree
 from defender.learning.core.lane_trees import DrainTrees, read_at
@@ -509,12 +507,6 @@ def _rewrite_reducer_frontmatter(copy: Path) -> None:
     _put(copy, REDUCER_NAME, REDUCER_TEXT.replace("name: defender-sql", "name: rewritten"))
 
 
-def _strays(s: Scene) -> list[str]:
-    """The working copy's changes outside `skills/` as the call is made (the copy of the
-    tree among them), the baseline a verifier is handed so that only `skills/` is judged."""
-    return _author_shared.changes_outside(s.repo, SKILLS_REL)
-
-
 FOLLOWS = [
     Follow("_frontmatter_id",
            lambda s: place(s, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain"),
@@ -582,21 +574,19 @@ FOLLOWS = [
                s.repo, pitfalls_curator.REDUCER_REL, tree_for=tf),
            lane=lambda got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
-    # The four composites (the per-path gates and the whole-tree verifiers over git status):
-    # each must hand its parts the `tree_for` it was given (adversary E1).
+    # The per-path composite gates: each must hand its parts the `tree_for` it was given
+    # (adversary E1). The two whole-tree verifiers over git status (`_verify_skills_state`,
+    # `_verify_pitfalls_state` with a `ClaimGit` and a git-status stray baseline) were deleted
+    # (#1108 P4 OD12 i): after P4 the claim is the batch's ChangeSet, derived from the draft
+    # no-follow by P3 (tests/tenancy/tenant_1108_delivery/test_changes.py::
+    # test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole), and the gates'
+    # verdicts over a draft are driven end to end in test_lead_author.py / test_pitfalls_curator.py.
     Follow("_skills_rule",
            lambda s: place(s, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain"),
            lambda c: _put(c, TEMPLATE_NAME, BAD_TEMPLATE),
            lambda s, tf: lead_author._skills_rule(
                s.repo, resolver(s), "??", s.rel(TEMPLATE_NAME), systems=DECLARED, tree_for=tf),
            lane=lambda got: got == ("returned", None),
-           copy=lambda got: raised(got, "LeadAuthorError", CONTENT_CASES[1].bad_says)),
-    Follow("_verify_skills_state",
-           lambda s: place(s, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain"),
-           lambda c: _put(c, TEMPLATE_NAME, BAD_TEMPLATE),
-           lambda s, tf: lead_author._verify_skills_state(
-               s.repo, _strays(s), systems=DECLARED, tree_for=tf, git=claim_git(s.repo)),
-           lane=lambda got: got[0] == "returned" and got[1] == [f"{SKILLS_REL}{TEMPLATE_NAME}"],
            copy=lambda got: raised(got, "LeadAuthorError", CONTENT_CASES[1].bad_says)),
     Follow("_pitfalls_rule",
            _seed_reducer_edit,
@@ -605,13 +595,6 @@ FOLLOWS = [
                s.repo, " M", pitfalls_curator.REDUCER_REL, systems=DECLARED,
                reducer_offered=True, tree_for=tf),
            lane=lambda got: got == ("returned", None),
-           copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
-    Follow("_verify_pitfalls_state",
-           _seed_reducer_edit,
-           _rewrite_reducer_frontmatter,
-           lambda s, tf: pitfalls_curator._verify_pitfalls_state(
-               s.repo, _strays(s), systems=DECLARED, reducer_offered=True, tree_for=tf, git=claim_git(s.repo)),
-           lane=lambda got: got == ("returned", [pitfalls_curator.REDUCER_REL]),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
 ]
 

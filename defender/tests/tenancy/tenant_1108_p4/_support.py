@@ -14,8 +14,12 @@ Interface (other slices code against this; ask the orchestrator for changes):
 
     FIXTURE, FIXTURE_AGENT, FIXTURE_SETTINGS     # knowledge/tenant-fixture/{,agent,settings}
     FIXTURE_TENANT_ID, OTHER_TENANT_ID, OTHER_LESSON
-    published_tenant(scratch, *, root, tenant_id=FIXTURE_TENANT_ID, files=None,
+    published_tenant(scratch, *, root, tenant_id=FIXTURE_TENANT_ID, files=None, agent=None,
                      repo_name="fixture") -> ContextManager[PublishedTenant]
+    place_fixture(root, tenant_id=FIXTURE_TENANT_ID, *, files=None, agent=None) -> Path
+    publish_placed(scratch, *, root, tenant_id, repo_name=None) -> ContextManager[PublishedTenant]
+                                                  # an ALREADY-placed tenant, current content; re-callable
+    publish_once(scratch, *, root, tenant_id, repo_name=None) -> PublishedTenant  # server closed after
     second_tenant(first, *, tenant_id=OTHER_TENANT_ID, files=None, repo_name="other")
                      -> ContextManager[PublishedTenant]
     PublishedTenant: .tenant .tenant_id .data_root .clone .remote .origin .forge .vault
@@ -167,45 +171,67 @@ class PublishedTenant:
         return git(self.remote, "rev-parse", "refs/heads/main")
 
 
-@contextlib.contextmanager
-def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENANT_ID,
-                     files: Files | None = None,
-                     repo_name: str = "fixture") -> Iterator[PublishedTenant]:
-    """The fixture tenant set up under the data root `root` and published for real.
-
-    Set up as an operator does it (P3's `place_tenant`: the knowledge folder, `agent/.tenant-id`
-    naming `tenant_id`, the row), its `settings/` and `agent/` then replaced by the committed
-    fixture's, `files` written over them, and the whole committed as the clone's one commit on
-    `main`. That commit is cloned bare to `<scratch>/tenants/<repo_name>.git`, served by P3's
-    `GitHTTP` as `origin`, and published through P3's real `TenantDelivery.open(...).publish()`,
-    which exports it and points `current` at it.
-
-    `scratch` holds the served remotes and merge checkouts; keep it apart from `root`. `root`
-    must not already hold `tenant_id` (do not combine with the `d9_tenant` fixture or
-    `fixture_tenant()` on one id). The server lives until the context exits."""
-    root, scratch = Path(root), Path(scratch)
+def place_fixture(root: Path, tenant_id: str = FIXTURE_TENANT_ID, *,
+                  files: Files | None = None, agent: Path | None = None) -> Path:
+    """Set up `tenant_id` under the data root `root` the way an operator does (P3's
+    `place_tenant`: the knowledge folder, `agent/.tenant-id` naming it, the row), with the
+    committed fixture's `settings/` and `agent/` (or, with `agent=`, that directory's tree as
+    `agent/`, e.g. a golden replay's own agent content), then `files` written over them
+    (repo-relative; `None` deletes). Returns the knowledge folder. Publishes nothing."""
+    root = Path(root)
     knowledge = tenants.place_tenant(root, tenant_id)
     marker = (knowledge / "agent" / ".tenant-id").read_bytes()
-    for half in ("settings", "agent"):
+    for half, source in (("settings", FIXTURE / "settings"),
+                         ("agent", Path(agent) if agent is not None else FIXTURE / "agent")):
         shutil.rmtree(knowledge / half)
-        shutil.copytree(FIXTURE / half, knowledge / half, symlinks=True)
+        shutil.copytree(source, knowledge / half, symlinks=True)
     (knowledge / "agent" / ".tenant-id").write_bytes(marker)
     _write_files(knowledge, files)
+    return knowledge
+
+
+@contextlib.contextmanager
+def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
+                   repo_name: str | None = None) -> Iterator[PublishedTenant]:
+    """Publish for real a tenant ALREADY placed under `root` (its knowledge folder, its
+    `agent/.tenant-id` and its row exist; e.g. `place_fixture`, `_tenants1106.place_tenant`, or a
+    suite's own planter), with whatever content the folder holds now.
+
+    The knowledge folder becomes (or stays) a git repo on `main`; everything in it is committed
+    (nothing when it is unchanged since the last call). The commit goes to the bare remote
+    `<scratch>/tenants/<repo_name>.git` (default name: the tenant id), served by P3's `GitHTTP`
+    as `origin` for the length of the context, and P3's real `TenantDelivery.open(...).publish()`
+    exports it and points `current` at it. Calling it again for the same tenant (same `scratch`)
+    publishes the folder's new content as a fast-forward on the same remote.
+
+    P3's publish refusals propagate (`DeliveryRefused`: a link or special entry, a missing or
+    foreign `agent/.tenant-id`), as does acceptance's (`TenantRefused`): a caller that plants a
+    deliberately broken tenant decides what a failed publish means for its scenario."""
+    root, scratch = Path(root), Path(scratch)
+    name = repo_name if repo_name is not None else tenant_id
     tenant = tenants.accept(root, tenant_id)
     clone = Path(location_path(tenant.knowledge))
-    git(clone, "init", "-b", "main")
-    git(clone, "config", "user.name", "P4 fixture")
-    git(clone, "config", "user.email", "p4@test.invalid")
-    git(clone, "add", ".")
-    git(clone, "commit", "-m", "fixture tenant content")
-    seeded = git(clone, "rev-parse", "HEAD")
-    remote = scratch / "tenants" / f"{repo_name}.git"
-    remote.parent.mkdir(parents=True, exist_ok=True)
-    git(scratch, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
+    if not (clone / ".git").exists():
+        git(clone, "init", "-b", "main")
+        git(clone, "config", "user.name", "P4 fixture")
+        git(clone, "config", "user.email", "p4@test.invalid")
+    git(clone, "add", "-A")
+    if git(clone, "status", "--porcelain"):
+        git(clone, "commit", "-m", "tenant content")
+    head = git(clone, "rev-parse", "HEAD")
+    remote = scratch / "tenants" / f"{name}.git"
+    if remote.exists():
+        git(clone, "push", "-q", remote, "main:main")
+    else:
+        remote.parent.mkdir(parents=True, exist_ok=True)
+        git(scratch, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
     server = GitHTTP(scratch, token=issuer_token(tenant_id))
     try:
-        origin = f"{server.url}/tenants/{repo_name}.git"
-        git(clone, "remote", "add", "origin", origin)
+        origin = f"{server.url}/tenants/{name}.git"
+        if git(clone, "remote"):
+            git(clone, "remote", "set-url", "origin", origin)
+        else:
+            git(clone, "remote", "add", "origin", origin)
         git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
         forge = ForgeHTTP(remote=remote, origin=origin)
         vault = VaultHTTP(tenant_id)
@@ -213,13 +239,37 @@ def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENA
         export = target().TenantDelivery.open(
             tenant, defender_dir=DEFENDER, client=forge.client, identity=identity,
             origin=origin).publish()
-        assert export.commit == seeded, (export.commit, seeded)
+        assert export.commit == head, (export.commit, head)
         yield PublishedTenant(
             tenant=tenant, data_root=root, clone=clone, remote=remote, origin=origin,
             forge=forge, vault=vault, identity=identity, server=server, scratch=scratch,
             export=export, p3=(tenant, remote, None))
     finally:
         server.close()
+
+
+def publish_once(scratch: Path, *, root: Path, tenant_id: str,
+                 repo_name: str | None = None) -> PublishedTenant:
+    """`publish_placed` for a caller that needs only the export: publishes and closes the
+    origin server again. The returned value's `export`, `commit`, `tenant` and `merge` stay
+    usable; `server` is closed, so `publish()` needs another `publish_placed`/`publish_once`."""
+    with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
+        return done
+
+
+@contextlib.contextmanager
+def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENANT_ID,
+                     files: Files | None = None, agent: Path | None = None,
+                     repo_name: str = "fixture") -> Iterator[PublishedTenant]:
+    """The fixture tenant set up under the data root `root` (`place_fixture`) and published for
+    real (`publish_placed`): the clone holds one commit on `main`, exported, `current` naming it.
+
+    `scratch` holds the served remotes and merge checkouts; keep it apart from `root`. `root`
+    must not already hold `tenant_id` (do not combine with the `d9_tenant` fixture or
+    `fixture_tenant()` on one id). The server lives until the context exits."""
+    place_fixture(root, tenant_id, files=files, agent=agent)
+    with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
+        yield done
 
 
 @contextlib.contextmanager
@@ -303,6 +353,9 @@ __all__ = [
     "export_dir",
     "files_under",
     "fixture_agent_files",
+    "place_fixture",
+    "publish_once",
+    "publish_placed",
     "git",
     "index_entry",
     "published_tenant",

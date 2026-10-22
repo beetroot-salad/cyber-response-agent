@@ -467,3 +467,247 @@ def world(tmp_path: Path) -> World:
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     return World(tmp=tmp_path, repo=repo, paths=paths, outside=outside, trees=author_trees(paths),
                  state=open_state(paths))
+
+
+# ---------------------------------------------------------------------------------------
+# #1108 P4 (O7, amendments 2-3): a lane over a git-free draft
+# ---------------------------------------------------------------------------------------
+#
+# After P4 a lane's corpus is the draft of a P3 batch (`<T>/drafts/<id>/agent`, no `.git`), its
+# claim is the `ChangeSet` the batch derives from it, and the one commit-maker commits on the
+# batch branch of the tenant clone. These helpers build that world for real (`published_tenant`
+# then P3's `start_batch`) and read back what landed from git. Nothing here decides policy.
+#
+# ASSUMED SEAM (S-H, one spelling for every lane builder; the implementer provides it):
+#   lessons_run.build_author_config(paths, *, state, trees, batch, ...)
+#   questioner_run.build_questioner_config(paths, *, state, trees, batch, ...)
+#   lead_author.build_lead_author_deps(paths, *, state, trees, batch, ...)
+#   pitfalls_curator.run_pitfalls(*, paths, state, trees, batch, ...)
+#   lead_author.run(run, *, label, paths, batch, ...)   (the no-deps path opens its trees over the draft)
+# `batch` is P3's `version_control.Batch`: the lane's corpus dirs are
+# `KnowledgePaths(agent_root=batch.draft_root / "agent")`'s, its claim is `batch.change_set()`
+# judged by the lane's gates, its commit is `batch.commit(<admitted ChangeSet>, message)`, and its
+# per-claim reset is `batch.reset()`. `paths` keeps the learning state (queues, locks) and the
+# product checkout (`repo_root`: adapters stay in the product repo, #1172), never a corpus.
+
+#: A lane draft's own agent content (`agent=` of `published_tenant`): both curator corpora and the
+#: skills tree, empty but tracked, so every lane's mount point exists in the export.
+DRAFT_AGENT_FILES: dict[str, str] = {
+    "lessons/.gitkeep": "",
+    "lessons-questioner/.gitkeep": "",
+    "skills/elastic/SKILL.md": "---\nname: defender-elastic\n---\n# elastic\n",
+    "skills/gather/queries/.gitkeep": "",
+}
+AUTHOR_LANES = ("lessons", "lessons-questioner")
+LEAD_LANES = ("skills",)
+#: The repo-relative spellings after P4 (OD6): commit, ChangeSet and handoff paths are `agent/...`.
+DRAFT_LESSONS_REL = "agent/lessons/"
+DRAFT_SIBLING_REL = "agent/lessons-questioner/"
+DRAFT_SKILLS_REL = "agent/skills/"
+
+_DRAFT_SEQ = iter(range(1, 1_000_000))
+
+
+@dataclasses.dataclass
+class DraftLane:
+    """One batch of the fixture tenant, started for real: its git-free draft (the lane's corpus
+    root), its branch in the tenant clone, and scratch learning state. The origin server is
+    already closed: change sets, commits and resets are local work."""
+
+    tmp: Path
+    clone: Path
+    batch: Any
+    paths: LoopPaths
+    lanes: tuple[str, ...]
+
+    @property
+    def agent(self) -> Path:
+        return Path(self.batch.draft_root) / "agent"
+
+    @property
+    def lessons_dir(self) -> Path:
+        return self.agent / "lessons"
+
+    @property
+    def sibling_dir(self) -> Path:
+        return self.agent / "lessons-questioner"
+
+    @property
+    def skills_dir(self) -> Path:
+        return self.agent / "skills"
+
+    @property
+    def base(self) -> str:
+        return str(self.batch.export.commit)
+
+    def git(self, *args: str, check: bool = True) -> Any:
+        from defender.tests.support.learning.curation._drain719 import git
+
+        return git(self.clone, *args, check=check)
+
+    def tip(self) -> str:
+        """The batch branch's tip, or its base while the commit-maker has made no commit."""
+        proc = self.git("rev-parse", "--verify", "-q", f"refs/heads/{self.batch.branch}^{{commit}}",
+                        check=False)
+        return proc.stdout.strip() if proc.returncode == 0 else self.base
+
+    def commits(self) -> list[str]:
+        """The commit-maker's commits on the batch branch, oldest first."""
+        out = self.git("rev-list", "--reverse", f"{self.base}..{self.tip()}").stdout
+        return [line for line in out.splitlines() if line.strip()]
+
+    def landed(self) -> list[str]:
+        """Every repo-relative path the batch's commits changed (`agent/...`), asked of git."""
+        if self.tip() == self.base:
+            return []
+        out = self.git("diff", "--no-renames", "--name-only", self.base, self.tip()).stdout
+        return sorted(p for p in out.splitlines() if p.strip())
+
+    def message(self) -> str:
+        return self.git("log", "-1", "--format=%B", self.tip()).stdout
+
+    def text_at_tip(self, rel: str) -> str | None:
+        proc = self.git("cat-file", "-p", f"{self.tip()}:{rel}", check=False)
+        return proc.stdout if proc.returncode == 0 else None
+
+    def mode_at_tip(self, rel: str) -> str | None:
+        out = self.git("ls-tree", self.tip(), "--", rel).stdout.split()
+        return out[0] if out else None
+
+
+def draft_agent(at: Path, files: dict[str, str | bytes] | None = None) -> Path:
+    """An `agent/` tree at `at`: `DRAFT_AGENT_FILES` plus `files` (agent-relative)."""
+    for rel, text in {**DRAFT_AGENT_FILES, **(files or {})}.items():
+        put(at / rel, text)
+    return at
+
+
+def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
+               files: dict[str, str | bytes] | None = None, agent: Path | None = None,
+               batch_id: str = "b1", state_dir: Path | None = None,
+               product: Path | None = None) -> DraftLane:
+    """The fixture tenant published for real over its own data root (its agent content
+    `draft_agent(files)`, or `agent`), then P3's real `start_batch(batch_id, lanes=lanes)`: the
+    draft is built from that export, no branch yet. `files` are agent-relative
+    (`"lessons/x.md"`). `product` is the product checkout `paths.repo_root` names (adapters; a
+    scratch folder with no corpus by default). Each call gets its own data root, so a test may
+    build several."""
+    from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+
+    n = next(_DRAFT_SEQ)
+    scene = tmp_path / f"draft-lane-{n}"
+    source = agent if agent is not None else draft_agent(scene / "agent-source", files)
+    with published_tenant(scene / "forge", root=scene / "data", agent=source) as t:
+        batch = t.open_delivery().start_batch(batch_id, lanes=lanes)
+        clone = t.clone
+    state = state_dir if state_dir is not None else scene / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    # The product checkout holds no corpus after P4 (O1): the lane's `paths` name a scratch
+    # checkout with none, so a lane still reading `paths.lessons_dir` finds nothing there.
+    if product is None:
+        product = scene / "product"
+        product.mkdir(exist_ok=True)
+    paths = LoopPaths(repo_root=product, state_dir=state)
+    return DraftLane(tmp=scene, clone=clone, batch=batch, paths=paths, lanes=tuple(lanes))
+
+
+def draft_trees(lane: DraftLane) -> DrainTrees:
+    """The lane's held mounts over its draft: each declared lane folder under `agent/`, held as
+    `DrainTrees.open` holds any mount (the draft's lanes are the box's writable mounts)."""
+    return DrainTrees.open(tuple(lane.agent / name for name in lane.lanes))
+
+
+def draft_author_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
+                     manifest_seed: str | None = None, box: Any = None, state: Any = None,
+                     **replaced: Any) -> Any:
+    """The REAL lessons config over a draft lane (ASSUMED SEAM `batch=`), `replaced` swapped in."""
+    from defender.learning.author.lessons import run as lessons_run
+
+    cfg = lessons_run.build_author_config(
+        lane.paths, state=state if state is not None else open_state(lane.paths),
+        trees=trees if trees is not None else draft_trees(lane),
+        manifest_seed=manifest_seed, box=box, batch=lane.batch)
+    return dataclasses.replace(cfg, **replaced) if replaced else cfg
+
+
+def draft_questioner_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
+                         manifest_seed: str | None = None, box: Any = None, state: Any = None,
+                         **replaced: Any) -> Any:
+    """The REAL questioner config over a draft lane (ASSUMED SEAM `batch=`)."""
+    from defender.learning.author.questioner import run as questioner_run
+
+    cfg = questioner_run.build_questioner_config(
+        lane.paths, state=state if state is not None else open_state(lane.paths),
+        trees=trees if trees is not None else draft_trees(lane),
+        manifest_seed=manifest_seed, box=box, batch=lane.batch)
+    return dataclasses.replace(cfg, **replaced) if replaced else cfg
+
+
+@dataclasses.dataclass
+class DraftWorld:
+    """`World` after P4: a draft lane (`draft_lane`) carrying both curator corpora as the
+    batch's declared lanes, a folder outside the tenant's data root where every link points,
+    and the lane's held mounts over the draft, open for as long as the world is referenced.
+    `cfg()` is the REAL lessons config over the draft (assumed `batch=` seam); every head
+    observation reads the batch branch (what the commit-maker made)."""
+
+    tmp: Path
+    lane: DraftLane
+    outside: Path
+    trees: DrainTrees
+    state: Any = None
+
+    @property
+    def paths(self) -> LoopPaths:
+        return self.lane.paths
+
+    @property
+    def corpus_dir(self) -> Path:
+        return self.lane.lessons_dir
+
+    @property
+    def sibling_dir(self) -> Path:
+        return self.lane.sibling_dir
+
+    @property
+    def corpus(self) -> Held:
+        return self.trees.mount(self.corpus_dir)
+
+    @property
+    def sibling(self) -> Held:
+        return self.trees.mount(self.sibling_dir)
+
+    @property
+    def view(self) -> Bound:
+        return self.corpus.view()
+
+    @property
+    def tree_for(self) -> TreeForFn:
+        return self.trees.tree_for
+
+    def cfg(self, **replaced: Any) -> Any:
+        return draft_author_cfg(self.lane, trees=self.trees, state=self.state, **replaced)
+
+    def questioner_cfg(self, **replaced: Any) -> Any:
+        return draft_questioner_cfg(self.lane, trees=self.trees, state=self.state, **replaced)
+
+    def target(self, name: str, text: str | bytes | None = None) -> Path:
+        at = self.outside / name
+        put(at, text if text is not None else lesson_text("f1", mark=OUT_MARK))
+        return at
+
+    def head(self) -> str:
+        return self.lane.tip()
+
+    def head_text(self, rel: str) -> str | None:
+        return self.lane.text_at_tip(rel)
+
+
+def draft_world(tmp_path: Path, *, files: dict[str, str | bytes] | None = None) -> DraftWorld:
+    """A `DraftWorld`: the fixture tenant's batch over `draft_agent(files)` (agent-relative),
+    lanes `lessons` and `lessons-questioner`, an `outside/` folder, the draft's trees open."""
+    lane = draft_lane(tmp_path, files=files)
+    outside = lane.tmp / "outside"
+    outside.mkdir()
+    return DraftWorld(tmp=lane.tmp, lane=lane, outside=outside, trees=draft_trees(lane),
+                      state=open_state(lane.paths))

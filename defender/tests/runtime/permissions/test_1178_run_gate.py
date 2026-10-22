@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
+import contextlib
 import dataclasses
 import json
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,7 @@ from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender import box as box_mod
 from defender.runtime.agent_definition import bind
-from defender.box import BoxFault
+from defender.box import AliasBanNotInForce, BoxFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.sandbox import _box1195 as X
 from defender.tests.support.learning.core import _state1135
@@ -40,7 +41,6 @@ from defender.tests.support.learning.core._declared870 import (
 )
 from defender.tests.support.learning.curation._lead_author_1134 import clear, lane_tree_for, lead_trees, write
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
-from defender.tests.e2e.test_922_spine import RepoBranch
 from defender.tests.learning.curation.test_1134_lead_author_handle import (
     ELASTIC_LEAD,
     NO_MODEL,
@@ -1205,120 +1205,211 @@ def test_a_swallowed_stop_fault_in_the_last_claim_makes_the_pitfalls_run_refuse(
     assert daemon.status(NAME) == "exited"
 
 
-def _held_lead_drain(s: LeadScene, monkeypatch: Any, **seams: Any
-                     ) -> tuple[BaseException | None, list[str], list[str], X.ScanWatch]:
+# ---------------------------------------------------------------------------------------------
+# The drain-level rows (#1108 P4 re-spelling, OD12 class ii): the lane runs over a tenant draft
+# and delivers to the tenant forge (`lead_author_drain(..., client=, identity=, start_box=,
+# stop_box=)`), not a product worktree through `branch=`/`scrub=`. The #1178/#1195 promises
+# stand: a box fault halts the lane before anything is committed, pushed or opened, no claim is
+# dead-lettered for it, and a claim is charged its one serve. "Nothing delivered" is read on the
+# tenant origin (`lead-author/` branches) and the forge's PR creates; the product checkout's HEAD
+# never moves. The batch scan (`scrub=`) and the worktree cut-commit pointer are gone with the
+# worktree (amendment 3 C3: a draft is never scrubbed) and are not re-asserted.
+# ---------------------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class TenantLeadScene:
+    """`LeadScene`'s fields over the P4 tenant path: `repo` is the product checkout the drain
+    runs over (adapters declaring elastic/wazuh, as the legacy worktree had), `paths` the
+    tenant's learning paths over it, `t` the published tenant whose `agent/skills/` holds the
+    same catalog and skills the legacy worktree's `defender/skills/` did."""
+
+    tmp: Path
+    repo: Path
+    paths: LoopPaths
+    run_dir: Path
+    head: str
+    t: Any
+
+
+@contextlib.contextmanager
+def _tenant_lead_scene(tmp_path: Path, data_root: Path) -> Iterator[TenantLeadScene]:
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
+
+    repo = _worktree(tmp_path)
+    skills = repo / "defender" / "skills"
+    files = {f"agent/skills/{p.relative_to(skills).as_posix()}": p.read_bytes()
+             for p in skills.rglob("*") if p.is_file()}
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+        bind_forge(t)
+        yield TenantLeadScene(tmp=tmp_path, repo=repo, paths=drain_paths(t, repo),
+                              run_dir=_run_dir(), head=_git.git_head_sha(repo), t=t)
+
+
+def _delivered(s: TenantLeadScene) -> dict[str, str]:
+    """The tenant origin's `lead-author/` branches (`{branch: tip}`)."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import LEAD_PREFIX, remote_branches
+
+    return remote_branches(s.t.remote, LEAD_PREFIX)
+
+
+def _nothing_delivered(s: TenantLeadScene) -> None:
+    assert _delivered(s) == {}, f"a lead-author branch reached the tenant origin: {_delivered(s)}"
+    assert s.t.forge.creates == [], f"a PR was opened: {s.t.forge.creates}"
+    assert _git.git_head_sha(s.repo) == s.head, "the product checkout moved"
+
+
+def _delivered_text(s: TenantLeadScene, name: str) -> str:
+    """`agent/skills/<name>` at the tip of the one delivered `lead-author/` branch, whose PR the
+    forge was asked to open."""
+    (branch, tip), = _delivered(s).items()
+    assert [c["head"] for c in s.t.forge.creates] == [branch], s.t.forge.creates
+    return _git.git(["show", f"{tip}:agent/skills/{name}"], cwd=s.t.remote)
+
+
+class TenantLanes(Lanes):
+    """`Lanes` whose agent writes where the lane's own deps put its skills (the draft's, on the
+    P4 path): `skills_dir` is read off the deps the claim's run is served with."""
+
+    skills_dir: Path | None = None
+
+    def run_lead(self, paths: LoopPaths, state: Any, run: Any, *, box: Any = None,
+                 on_done: Any, **_kw: Any) -> int:
+        self.handed.append(box)
+        with lead_trees(paths) as trees:
+            deps = dataclasses.replace(_deps(paths, trees, self.agent, [ELASTIC_LEAD]), state=state)
+            self.skills_dir = deps.paths.skills_dir
+            return lead_author._run_locked(run.run_dir, deps, box=box, on_done=on_done)
+
+
+def _vetted_author(lanes_ref: list) -> Callable[[Path], None]:
+    def author(_run_dir: Path) -> None:
+        write(lanes_ref[0].skills_dir / AGENT_NAME, VETTED)
+    return author
+
+
+def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any, **seams: Any
+                     ) -> tuple[BaseException | None, list[str]]:
     """`lead_author_drain` with its DEFAULT work steps over the fake daemon, whose first run
-    start is refused; only `start_box=` injected: `HeldStart` (a real create, minus the probes),
-    whose executor carries the daemon, so the drain's own post-create stop, the runs and the
-    removal reach it through that executor (a `Tripwire` is the `docker` on `PATH`). What it
-    raised, the batch box's docker calls from its post-create stop on, the branch's events and
-    the scan's watch."""
+    start is refused; `start_box=` is `HeldStart` (a real create, minus the probes), whose
+    executor carries the daemon, so the drain's own post-create stop, the runs and the removal
+    reach it through that executor (a `Tripwire` is the `docker` on `PATH`). What it raised and
+    the batch box's docker calls from its post-create stop on."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)  # the agent, if ever reached, calls no model
     X.clear_opt_out(monkeypatch)
     daemon = X.FakeDaemon(s.tmp)
     daemon.tripwire = X.Tripwire(s.tmp).install(monkeypatch)
     daemon.refuse_start(at=[1])
-    events: list[str] = []
-    watch = X.ScanWatch(daemon, events)
     start = X.HeldStart(daemon)
-    got = X.caught(lambda: drains.lead_author_drain(
-        s.paths, branch=RepoBranch(s.repo, branch_prefix="lead-author/", events=events),
-        start_box=start, scrub=watch, **seams))
+    got = _p4_caught(lambda: drains.lead_author_drain(
+        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), start_box=start,
+        **seams))
     [request] = start.requests
     X.no_path_docker(daemon)
-    return got, daemon.calls_from_the_first_stop(request.name), events, watch
+    return got, daemon.calls_from_the_first_stop(request.name)
 
 
 @pytest.mark.parametrize("first", ["box-faults", "nothing-to-author"])
 def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
-        tmp_path: Path, monkeypatch, first: str):
-    s = _lead_scene(tmp_path)
-    leads = {"claim-0": WAZUH_LEAD if first == "box-faults" else None, "claim-1": ELASTIC_LEAD}
-    for name, lead in leads.items():
-        rows = [(lead.query_id, lead.system, lead.verb)] if lead is not None else []
-        _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}",
-                                _run_dir(*rows, run_id=name))
+        tmp_path: Path, monkeypatch, data_root: Path, first: str):
+    """#1178/#1195 on the P4 lane: a run-start fault in the default claim step halts the lane
+    with nothing delivered, nothing dead-lettered, the claim charged its one serve."""
+    with _tenant_lead_scene(tmp_path, data_root) as s:
+        leads = {"claim-0": WAZUH_LEAD if first == "box-faults" else None, "claim-1": ELASTIC_LEAD}
+        for name, lead in leads.items():
+            rows = [(lead.query_id, lead.system, lead.verb)] if lead is not None else []
+            _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}",
+                                    _run_dir(*rows, run_id=name))
 
-    got, calls, events, watch = _held_lead_drain(s, monkeypatch)
+        got, calls = _held_lead_drain(s, monkeypatch)
 
-    assert isinstance(got, BoxFault), got
-    assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
-    assert calls == X.REFUSED_FIRST_RUN, f"a default step called docker outside its run: {calls}"
-    assert _failed(s) == [], "a claim was dead-lettered for a box that would not start"
-    assert _git.git_head_sha(s.repo) == s.head
-    assert not any(e.startswith("finish_batch:") for e in events), events
-    watch.assert_scanned_once_the_box_was_gone()
-    queued, claimed = _claim_files(s)
-    if first == "nothing-to-author":
-        assert queued == [], queued
-        assert "case-claim-1.json" in claimed, claimed
-        return
-    assert queued == ["case-claim-1.json"], (
-        f"the next claim was served, or the first handed back as a transient: {queued}")
-    assert claimed == ["case-claim-0.json"], claimed
-    assert _claim_attempts(s) == {"case-claim-0.json": 1}, (
-        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
+        assert isinstance(got, BoxFault), got
+        assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
+        assert calls == X.REFUSED_FIRST_RUN, f"a default step called docker outside its run: {calls}"
+        assert _failed(s) == [], "a claim was dead-lettered for a box that would not start"
+        _nothing_delivered(s)
+        queued, claimed = _claim_files(s)
+        if first == "nothing-to-author":
+            assert queued == [], queued
+            assert "case-claim-1.json" in claimed, claimed
+            return
+        assert queued == ["case-claim-1.json"], (
+            f"the next claim was served, or the first handed back as a transient: {queued}")
+        assert claimed == ["case-claim-0.json"], claimed
+        assert _claim_attempts(s) == {"case-claim-0.json": 1}, (
+            f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
 
 
 def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
-        tmp_path: Path, monkeypatch):
-    s = _lead_scene(tmp_path)
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
-    attempts_before = _attempts(s.paths)
+        tmp_path: Path, monkeypatch, data_root: Path):
+    """#1178/#1195 on the P4 lane: a run-start fault in the default pitfalls step halts the lane,
+    bumps no pitfalls row and delivers nothing."""
+    with _tenant_lead_scene(tmp_path, data_root) as s:
+        monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+        persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
+        attempts_before = _attempts(s.paths)
 
-    got, calls, events, watch = _held_lead_drain(s, monkeypatch)
+        got, calls = _held_lead_drain(s, monkeypatch)
 
-    assert isinstance(got, BoxFault), got
-    assert calls == X.REFUSED_FIRST_RUN, f"the default step called docker outside its run: {calls}"
-    assert _attempts(s.paths) == attempts_before, "a pitfalls row was bumped for a box fault"
-    assert _git.git_head_sha(s.repo) == s.head
-    assert not any(e.startswith("finish_batch:") for e in events), events
-    watch.assert_scanned_once_the_box_was_gone()
+        assert isinstance(got, BoxFault), got
+        assert calls == X.REFUSED_FIRST_RUN, f"the default step called docker outside its run: {calls}"
+        assert _attempts(s.paths) == attempts_before, "a pitfalls row was bumped for a box fault"
+        _nothing_delivered(s)
 
 
-def _production_lead_scene(tmp_path: Path, monkeypatch: Any, *claims: str,
-                           path_default: bool = False) -> tuple[LeadScene, X.FakeDaemon]:
-    """The lead scene as `lead_author_drain` serves it in production: the box image inputs
-    committed under the repo's `defender/`, `claims` queued, the opt-out unset. The real
-    `start_box` creates the box over the fake daemon, given as its `docker=`
+@contextlib.contextmanager
+def _production_tenant_lead_scene(tmp_path: Path, monkeypatch: Any, data_root: Path, *claims: str,
+                                  path_default: bool = False
+                                  ) -> Iterator[tuple[TenantLeadScene, X.FakeDaemon]]:
+    """The tenant lead scene as `lead_author_drain` serves it in production: the box image
+    inputs committed under the product checkout's `defender/`, `claims` queued, the opt-out
+    unset. The real `start_box` creates the box over the fake daemon, given as its `docker=`
     (`_production_lead_drain`), with a `Tripwire` the `docker` on `PATH`; with `path_default`,
-    production's own default docker reaches the daemon installed on `PATH`. Either way the
-    post-create stop, each spawn's run and the removal reach the daemon through the executor."""
+    production's own default docker reaches the daemon installed on `PATH`."""
     X.clear_opt_out(monkeypatch)
-    s = _lead_scene(tmp_path)
-    X.plant_image_inputs(s.repo)
-    s = dataclasses.replace(s, head=commit_all(s.repo, "the box image inputs"))
-    _queue_claims(s, *claims)
-    daemon = X.FakeDaemon(tmp_path)
-    if path_default:
-        daemon.install(monkeypatch)
-    else:
-        daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
-    return s, daemon
+    with _tenant_lead_scene(tmp_path, data_root) as s:
+        X.plant_image_inputs(s.repo)
+        s = dataclasses.replace(s, head=commit_all(s.repo, "the box image inputs"))
+        _queue_claims(s, *claims)
+        daemon = X.FakeDaemon(tmp_path)
+        if path_default:
+            daemon.install(monkeypatch)
+        else:
+            daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
+        yield s, daemon
 
 
-def _production_lead_drain(s: LeadScene, daemon: X.FakeDaemon, author: Callable[[Path], None]
-                           ) -> tuple[BaseException | None, Lanes, list[str], X.ScanWatch]:
-    """`lead_author_drain` with only the lanes (their agent: `author`), the branch, the scan and
-    (unless the daemon is on `PATH`) the real `start_box`'s docker injected: what it raised, the
-    lanes, the branch's events and the scan's watch."""
-    lanes = Lanes(BoxSeenLeadSpawn(author))
-    events: list[str] = []
-    branch = RepoBranch(s.repo, branch_prefix="lead-author/", events=events)
-    watch = X.ScanWatch(daemon, events)
+def _p4_caught(fn: Callable[[], Any]) -> BaseException | None:
+    """`X.caught`, but a drain refusing the P4 seams (`client=`/`identity=`) fails here, named,
+    rather than as a downstream observation of a drain that never ran."""
+    got = X.caught(fn)
+    assert not (isinstance(got, TypeError) and "unexpected keyword" in str(got)), (
+        f"the drain does not take the P4 seams yet: {got}")
+    return got
+
+
+def _production_lead_drain(s: TenantLeadScene, daemon: X.FakeDaemon,
+                           author: Callable[[Path], None] | None = None, *,
+                           lanes: TenantLanes | None = None,
+                           ) -> tuple[BaseException | None, TenantLanes]:
+    """`lead_author_drain` over the tenant with only the lanes (their agent: `author`), the
+    forge client and identity and (unless the daemon is on `PATH`) the real `start_box`'s docker
+    injected: what it raised and the lanes."""
+    if lanes is None:
+        lanes = TenantLanes(BoxSeenLeadSpawn(author))
     seams: dict[str, Any] = {}
     if daemon.tripwire is not None:
         seams["start_box"] = partial(box_mod.start_box, docker=daemon)
-    got = X.caught(lambda: drains.lead_author_drain(
-        s.paths, run_lead_author=lanes.run_lead, run_pitfalls=lanes.run_pitfalls, branch=branch,
-        scrub=watch, **seams))
-    return got, lanes, events, watch
+    got = _p4_caught(lambda: drains.lead_author_drain(
+        s.paths, run_lead_author=lanes.run_lead, run_pitfalls=lanes.run_pitfalls,
+        client=s.t.forge.client, identity=s.t.vault.identity(), **seams))
+    return got, lanes
 
 
 def _kept(daemon: X.FakeDaemon) -> list[str]:
     return [x for x in daemon.steps()
-            if x in ("create", "start", "stop", "rm", "scan") or x.startswith("agent:")]
+            if x in ("create", "start", "stop", "rm") or x.startswith("agent:")]
 
 
 LEAD_F1_FAILURES = [
@@ -1332,110 +1423,122 @@ LEAD_F1_FAILURES = [
 @pytest.mark.parametrize("stop", STOP_FAULTS)
 @pytest.mark.parametrize("failure", LEAD_F1_FAILURES)
 def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failure_as_context(
-        tmp_path: Path, monkeypatch, failure: Any, stop: str, follows: str):
+        tmp_path: Path, monkeypatch, data_root: Path, failure: Any, stop: str, follows: str):
+    """#1195 F1 on the P4 lane: a stop fault under a failing agent halts the drain with the
+    agent's failure as context, nothing delivered, nothing dead-lettered; with the stop holding
+    (control) the failing claim is dead-lettered and the next claim's commit is delivered as a
+    `lead-author/` PR on the tenant forge."""
     claims = ("run-0", "run-1") if follows == "next-claim" else ("run-0",)
-    s, daemon = _production_lead_scene(tmp_path, monkeypatch, *claims)
-    raised = failure()
+    with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, *claims) as (s, daemon):
+        raised = failure()
+        ref: list = []
 
-    def author(run_dir: Path) -> None:
-        daemon.mark(f"agent:{run_dir.name}")
-        if run_dir.name != fixture_uuid("run-0"):
-            write(s.at(AGENT_NAME), VETTED)
+        def author(run_dir: Path) -> None:
+            daemon.mark(f"agent:{run_dir.name}")
+            if run_dir.name != fixture_uuid("run-0"):
+                write(ref[0].skills_dir / AGENT_NAME, VETTED)
+                return
+            if stop != "holds":  # 1: the post-create stop; 2: this run's; its proof: the next ask
+                X.fail_stop(daemon, stop, at=2, inspect_at=daemon.inspect_count() + 1)
+            raise raised
+
+        lanes = TenantLanes(BoxSeenLeadSpawn(author))
+        ref.append(lanes)
+        got, lanes = _production_lead_drain(s, daemon, lanes=lanes)
+
+        assert len(daemon.created()) == 1, "the batch did not create exactly its one box"
+        assert daemon.names() == [], "a box outlived the batch"
+        X.no_path_docker(daemon)
+        kept = _kept(daemon)
+        if stop == "holds":
+            assert got is None, got
+            assert _failed(s) == ["case-run-0.json"], _failed(s)
+            if follows == "next-claim":
+                assert kept == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}", "stop",
+                                "start", f"agent:{fixture_uuid('run-1')}", "stop", "rm"], kept
+                assert _delivered_text(s, AGENT_NAME) == VETTED.strip()
             return
-        if stop != "holds":  # 1: the post-create stop; 2: this run's; its proof: the next ask
-            X.fail_stop(daemon, stop, at=2, inspect_at=daemon.inspect_count() + 1)
-        raise raised
-
-    got, lanes, events, watch = _production_lead_drain(s, daemon, author)
-
-    assert len(daemon.created()) == 1, "the batch did not create exactly its one box"
-    assert daemon.names() == [], "a box outlived the batch"
-    watch.assert_scanned_once_the_box_was_gone()
-    X.no_path_docker(daemon)
-    kept = _kept(daemon)
-    if stop == "holds":
-        assert got is None, got
-        assert _failed(s) == ["case-run-0.json"], _failed(s)
-        if follows == "next-claim":
-            assert kept == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}", "stop", "start",
-                            f"agent:{fixture_uuid('run-1')}", "stop", "rm", "scan"], kept
-            assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
-            assert any(e.startswith("finish_batch:") for e in events), events
-        return
-    X.assert_the_stop_fault_won(got, raised, daemon, stop)
-    assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
-    assert _failed(s) == [], "a claim was dead-lettered under a box fault"
-    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
-        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
-    assert _claim_files(s) == (["case-run-1.json"] if follows == "next-claim" else [],
-                               ["case-run-0.json"]), _claim_files(s)
-    assert kept[:4] == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}"], kept
-    assert "start" not in kept[4:], f"a later run was started beside the box: {kept}"
-    assert kept[-2:] == ["rm", "scan"], kept
-    assert lanes.pitfalls_ticks == 0
-    assert _git.git_head_sha(s.repo) == s.head, "a commit landed beside a box that would not stop"
-    assert not any(e.startswith("finish_batch:") for e in events), events
+        X.assert_the_stop_fault_won(got, raised, daemon, stop)
+        assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
+        assert _failed(s) == [], "a claim was dead-lettered under a box fault"
+        assert _claim_attempts(s) == {"case-run-0.json": 1}, (
+            f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
+        assert _claim_files(s) == (["case-run-1.json"] if follows == "next-claim" else [],
+                                   ["case-run-0.json"]), _claim_files(s)
+        assert kept[:4] == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}"], kept
+        assert "start" not in kept[4:], f"a later run was started beside the box: {kept}"
+        assert kept[-1:] == ["rm"], kept
+        assert lanes.pitfalls_ticks == 0
+        _nothing_delivered(s)
 
 
 @pytest.mark.parametrize("docker", ["carried", "path-default"])
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
-        tmp_path: Path, monkeypatch, stop: str, docker: str):
-    s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0",
-                                       path_default=docker == "path-default")
+        tmp_path: Path, monkeypatch, data_root: Path, stop: str, docker: str):
+    """#1195 on the P4 lane: a claim's stop fault after a clean agent halts the production drain
+    with nothing delivered and the claim charged once; with the stop holding (control) the
+    agent's draft is delivered as a `lead-author/` PR on the tenant forge."""
+    with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0",
+                                       path_default=docker == "path-default") as (s, daemon):
+        ref: list = []
 
-    def author(run_dir: Path) -> None:
-        daemon.mark(f"agent:{run_dir.name}")
-        write(s.at(AGENT_NAME), VETTED)
-        if stop == "refused":
-            daemon.refuse_stop()
+        def author(run_dir: Path) -> None:
+            daemon.mark(f"agent:{run_dir.name}")
+            write(ref[0].skills_dir / AGENT_NAME, VETTED)
+            if stop == "refused":
+                daemon.refuse_stop()
 
-    got, _lanes, events, watch = _production_lead_drain(s, daemon, author)
+        lanes = TenantLanes(BoxSeenLeadSpawn(author))
+        ref.append(lanes)
+        got, _lanes = _production_lead_drain(s, daemon, lanes=lanes)
 
-    assert f"agent:{fixture_uuid('run-0')}" in daemon.steps(), "the agent was never reached"
-    assert daemon.names() == [], "a box outlived the batch"
-    watch.assert_scanned_once_the_box_was_gone()
-    if docker == "carried":
+        assert f"agent:{fixture_uuid('run-0')}" in daemon.steps(), "the agent was never reached"
+        assert daemon.names() == [], "a box outlived the batch"
+        if docker == "carried":
+            X.no_path_docker(daemon)
+        if stop == "holds":
+            assert got is None, got
+            assert _delivered_text(s, AGENT_NAME) == VETTED.strip()
+            return
+        assert isinstance(got, BoxFault), got
+        _nothing_delivered(s)
+        assert _failed(s) == [], "the claim was dead-lettered for a box that would not stop"
+        assert _claim_attempts(s) == {"case-run-0.json": 1}, (
+            f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
+
+
+def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(
+        tmp_path: Path, monkeypatch, data_root: Path):
+    """#1195 on the P4 lane: a claim a box fault halted is served again on the next tick, and its
+    commit is then delivered on the tenant forge."""
+    with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0") as (s, daemon):
+        served: list[str] = []
+        ref: list = []
+
+        def author(run_dir: Path) -> None:
+            daemon.mark(f"agent:{run_dir.name}")
+            served.append(run_dir.name)
+            write(ref[0].skills_dir / AGENT_NAME, VETTED)
+            if len(served) == 1:
+                daemon.refuse_stop()  # tick 1's run only
+
+        lanes = TenantLanes(BoxSeenLeadSpawn(author))
+        ref.append(lanes)
+        got1, _ = _production_lead_drain(s, daemon, lanes=lanes)
+        assert isinstance(got1, BoxFault), f"tick 1 did not halt on its box fault: {got1!r}"
+        _nothing_delivered(s)
+        assert _claim_attempts(s) == {"case-run-0.json": 1}, _claim_attempts(s)
+
+        got2, _ = _production_lead_drain(s, daemon, lanes=lanes)
+
+        assert got2 is None, f"tick 2 did not serve the claim: {got2!r}"
+        assert served == [fixture_uuid("run-0"), fixture_uuid("run-0")], (
+            f"tick 2 did not serve the claim again: {served}")
+        assert _failed(s) == [], f"the claim was quarantined or dead-lettered: {_failed(s)}"
+        assert _delivered_text(s, AGENT_NAME) == VETTED.strip()
+        assert _claim_files(s) == ([], []), _claim_files(s)
         X.no_path_docker(daemon)
-    if stop == "holds":
-        assert got is None, got
-        assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
-        assert any(e.startswith("finish_batch:") for e in events), events
-        return
-    assert isinstance(got, BoxFault), got
-    assert _git.git_head_sha(s.repo) == s.head, "a commit landed beside a box that would not stop"
-    assert not any(e.startswith("finish_batch:") for e in events), events
-    assert _failed(s) == [], "the claim was dead-lettered for a box that would not stop"
-    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
-        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
-
-
-def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(tmp_path: Path, monkeypatch):
-    s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0")
-    served: list[str] = []
-
-    def author(run_dir: Path) -> None:
-        daemon.mark(f"agent:{run_dir.name}")
-        served.append(run_dir.name)
-        write(s.at(AGENT_NAME), VETTED)
-        if len(served) == 1:
-            daemon.refuse_stop()  # tick 1's run only
-
-    got1, _lanes, events1, _watch = _production_lead_drain(s, daemon, author)
-    assert isinstance(got1, BoxFault), f"tick 1 did not halt on its box fault: {got1!r}"
-    assert not any(e.startswith("finish_batch:") for e in events1), events1
-    assert _claim_attempts(s) == {"case-run-0.json": 1}, _claim_attempts(s)
-
-    got2, _lanes, events2, watch2 = _production_lead_drain(s, daemon, author)
-
-    assert got2 is None, f"tick 2 did not serve the claim: {got2!r}"
-    assert served == [fixture_uuid("run-0"), fixture_uuid("run-0")], f"tick 2 did not serve the claim again: {served}"
-    assert _failed(s) == [], f"the claim was quarantined or dead-lettered: {_failed(s)}"
-    assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
-    assert any(e.startswith("finish_batch:") for e in events2), events2
-    assert _claim_files(s) == ([], []), _claim_files(s)
-    watch2.assert_scanned_once_the_box_was_gone()
-    X.no_path_docker(daemon)
 
 
 @pytest.mark.parametrize("handed", ["handle", "executor"])
@@ -1457,29 +1560,37 @@ def test_the_lead_authors_deps_refuse_the_handle_as_its_box(tmp_path: Path, monk
     assert built == []
 
 
-@pytest.mark.parametrize(("knob", "kind", "pointed"), X.BATCH_START_FAULTS)
+#: A batch box that never comes up (#1195): the create refused, the sentinel refused, the alias
+#: ban not in force. The legacy worktree cut-commit pointer is gone with the worktree.
+BATCH_START_FAULTS = [
+    pytest.param("refuse_create", BoxFault, id="create"),
+    pytest.param("refuse_sentinel", BoxFault, id="sentinel"),
+    pytest.param("allow_an_alias", AliasBanNotInForce, id="link-ban"),
+]
+
+
+@pytest.mark.parametrize(("knob", "kind"), BATCH_START_FAULTS)
 def test_a_batch_start_fault_claims_nothing_and_dead_letters_nothing(
-        tmp_path: Path, monkeypatch, knob: str, kind: type, pointed: bool):
-    s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0", "run-1")
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
-    attempts_before = _attempts(s.paths)
-    qdir = _request_dir(s)
-    markers_before = {p.name: p.read_bytes() for p in qdir.glob("*.json")}
-    getattr(daemon, knob)()
+        tmp_path: Path, monkeypatch, data_root: Path, knob: str, kind: type):
+    """#1195 on the P4 lane: a batch box that never comes up claims and charges nothing, runs no
+    lane step and delivers nothing."""
+    with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0", "run-1") as (s, daemon):
+        monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+        persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
+        attempts_before = _attempts(s.paths)
+        qdir = _request_dir(s)
+        markers_before = {p.name: p.read_bytes() for p in qdir.glob("*.json")}
+        getattr(daemon, knob)()
 
-    got, lanes, events, _watch = _production_lead_drain(
-        s, daemon, lambda _rd: write(s.at(AGENT_NAME), VETTED))
+        got, lanes = _production_lead_drain(s, daemon, lambda _rd: None)
 
-    assert isinstance(got, kind), got
-    assert (f"{X.POINTER}{s.head}" in str(got)) is pointed, got
-    assert {p.name: p.read_bytes() for p in qdir.glob("*.json")} == markers_before, (
-        "a claim was claimed or charged for a box that never came up")
-    assert _claim_files(s)[1] == [], "a claim was claimed for a box that never came up"
-    assert _failed(s) == []
-    assert lanes.agent.calls == []
-    assert lanes.pitfalls_ticks == 0
-    assert _attempts(s.paths) == attempts_before
-    assert _git.git_head_sha(s.repo) == s.head
-    assert not any(e.startswith("finish_batch:") for e in events), events
-    X.no_path_docker(daemon)
+        assert isinstance(got, kind), got
+        assert {p.name: p.read_bytes() for p in qdir.glob("*.json")} == markers_before, (
+            "a claim was claimed or charged for a box that never came up")
+        assert _claim_files(s)[1] == [], "a claim was claimed for a box that never came up"
+        assert _failed(s) == []
+        assert lanes.agent.calls == []
+        assert lanes.pitfalls_ticks == 0
+        assert _attempts(s.paths) == attempts_before
+        _nothing_delivered(s)
+        X.no_path_docker(daemon)

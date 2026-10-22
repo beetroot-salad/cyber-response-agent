@@ -1,4 +1,9 @@
-"""The lead author's PERMISSION gate must not admit agent system prompts (gather/SKILL.md, invlang/SKILL.md) as writable skills paths. Probes go through the real `decide_write` / `decide_bash` with a positive control per refusal."""
+"""The lead author's PERMISSION gate must not admit agent system prompts (gather/SKILL.md, invlang/SKILL.md) as writable skills paths. Probes go through the real `decide_write` / `decide_bash` with a positive control per refusal.
+
+#1108 P4 (O7, OD6): the lane writes a batch draft's `agent/skills/`; the product prompts stay in the
+product tree. ASSUMED SEAM (S-H): the lead author's write lanes compile under
+`RunScope(tenant_agent=<draft agent/>)` (`bind(LEAD_AUTHOR_DEF, run, defender_dir=<product>,
+scope=...)`), its systems the product's adapters (plus the draft's markers)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,25 +12,28 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
-from defender import _git  # noqa: E402
 from defender.learning.leads import lead_author, pitfalls_curator  # noqa: E402
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF  # noqa: E402
 from defender.learning.leads.lead_author import _membership_segment  # noqa: E402
 from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
+from defender.learning.core.lane_trees import DrainTrees  # noqa: E402
 from defender.learning.leads.path_validation import (  # noqa: E402
-    SKILLS_REL,
     _is_draft_readme,
     _is_in_scope,
     _is_schema_md,
     _is_system_execution_md,
 )
 from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.tests.support.shared.contracts._repo import (  # noqa: E402
-    seed_adapter_stubs,
-    seed_repo,
-)
-from defender.tests.support.learning.curation._lead_author_1134 import lane_tree_for  # noqa: E402
+from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
+from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
+
+#: The draft's repo-relative skills spelling after P4 (OD6).
+SKILLS_REL = "agent/skills/"
+
+
+def lane_tree_for(root: Path):
+    """The lead lane's held `skills/` mount over the draft at `root` (open while referenced)."""
+    return DrainTrees.open((root / "agent" / "skills",)).tree_for
 
 
 #: The systems the probe trees declare. Two is the minimum that shows the lanes are an
@@ -36,32 +44,45 @@ _SYSTEMS = ("elastic", "cmdb")
 _AUTHORED_SURFACES = ("advisory", "connect", "gather", "handbook", "invlang")
 
 
-def _tree(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS) -> Path:
-    """A worktree declaring `systems`, with the authored surfaces of the shipped tree beside
-    them — so a probe at `gather/SKILL.md` is asking about a directory that really is there."""
+def _tree(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS) -> tuple[Path, Path]:
+    """`(product defender dir, draft agent root)`: the product checkout declares `systems` by
+    adapter and keeps the authored surfaces; the draft holds each system's folder beside the
+    authored surfaces' names — so a probe at `gather/SKILL.md` asks about a folder that is there."""
     defender_dir = tmp_path / "wt" / "defender"
-    for name in (*systems, *_AUTHORED_SURFACES):
+    for name in _AUTHORED_SURFACES:
         (defender_dir / "skills" / name).mkdir(parents=True, exist_ok=True)
-    (defender_dir / "skills" / "gather" / "queries").mkdir(exist_ok=True)
     seed_adapter_stubs(defender_dir, systems)
-    return defender_dir
+    agent = tmp_path / "draft" / "agent"
+    for name in (*systems, *_AUTHORED_SURFACES):
+        (agent / "skills" / name).mkdir(parents=True, exist_ok=True)
+    (agent / "skills" / "gather" / "queries").mkdir(exist_ok=True)
+    return defender_dir, agent
+
+
+def _bind(run: Path, defender_dir: Path, agent: Path):
+    return bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir,
+                scope=RunScope(tenant_agent=agent))
 
 
 def _gate(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS):
-    """`(admits, defender_dir)` — `admits(rel)` runs a skills-relative path through the REAL
-    write gate under a policy bound to a tree declaring `systems`."""
-    defender_dir = _tree(tmp_path, systems)
+    """`(admits, draft root)` — `admits(rel)` runs a skills-relative path of the draft through
+    the REAL write gate under a policy bound to a product tree declaring `systems`.
+    `admits.product(rel)` asks the same of the product tree's own `skills/`."""
+    defender_dir, agent = _tree(tmp_path, systems)
     run = tmp_path / "run"
     run.mkdir(parents=True, exist_ok=True)
-    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir)
+    deps = _bind(run, defender_dir, agent)
 
-    def admits(rel: str) -> bool:
+    def decide(path: Path) -> bool:
         return permission.decide_write(
-            defender_dir / "skills" / rel, "body\n",
-            run_dir=run, defender_dir=defender_dir, policy=deps.policy,
+            path, "body\n", run_dir=run, defender_dir=defender_dir, policy=deps.policy,
         ).allow
 
-    return admits, defender_dir
+    def admits(rel: str) -> bool:
+        return decide(agent / "skills" / rel)
+
+    admits.product = lambda rel: decide(defender_dir / "skills" / rel)  # type: ignore[attr-defined]
+    return admits, agent.parent
 
 
 # 1. The two `SKILL.md` files that are agent system prompts.
@@ -70,6 +91,7 @@ def test_the_lane_cannot_write_gathers_system_prompt(tmp_path: Path):
     """`defender/skills/gather/SKILL.md` is not a system's skill doc — it is the whole of gather's `instructions=` (`runtime/driver._gather_instructions`), loaded on every dispatch."""
     admits, _ = _gate(tmp_path)
     assert not admits("gather/SKILL.md")
+    assert not admits.product("gather/SKILL.md")
     assert admits("elastic/SKILL.md")
 
 
@@ -77,6 +99,7 @@ def test_the_lane_cannot_write_the_invlang_grammar_main_is_handed(tmp_path: Path
     """`skills/invlang/SKILL.md` is read by `runtime/orient._invlang_grammar` and inlined verbatim into MAIN's ORIENT message, under a heading that calls it *authoritative* and tells the agent not to Read the file because it is reproduced there."""
     admits, _ = _gate(tmp_path)
     assert not admits("invlang/SKILL.md")
+    assert not admits.product("invlang/SKILL.md")
     assert admits("cmdb/SKILL.md")
 
 
@@ -133,56 +156,52 @@ def test_a_tree_that_declares_no_system_is_refused_rather_than_bound_lane_less(t
     """An empty system set compiles no lane, and a writer whose `write_allow` admits nothing is a dead writer — it burns its whole request budget returning denials for the edits its own handoff just asked for."""
     defender_dir = tmp_path / "wt" / "defender"
     (defender_dir / "skills").mkdir(parents=True)
+    agent = tmp_path / "draft" / "agent"
+    (agent / "skills").mkdir(parents=True)
     run = tmp_path / "run"
     run.mkdir()
     with pytest.raises(LeadAuthorError, match="not a directory this process can read"):
-        bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir)
+        _bind(run, defender_dir, agent)
 
     (defender_dir / "integrations").mkdir(parents=True)
     with pytest.raises(ValueError, match="write scope is empty"):
-        bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir)
+        _bind(run, defender_dir, agent)
 
     seed_adapter_stubs(defender_dir, ("elastic",))
-    assert bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir).policy.write_allow
+    assert _bind(run, defender_dir, agent).policy.write_allow
 
 
 def test_the_lanes_read_the_tree_that_was_bound_not_a_sibling_of_it(tmp_path: Path):
     """The lanes resolve their systems under the BOUND `defender_dir`, never under a repo root reconstructed from it."""
     root = tmp_path / "wt"
     bound = root / "tree"                      # deliberately not named `defender`
-    (bound / "skills" / "elastic").mkdir(parents=True)
+    bound.mkdir(parents=True)
     seed_adapter_stubs(bound, ("elastic",))
     decoy = root / "defender"                  # what `.parent / "defender"` would have read
     (decoy / "skills").mkdir(parents=True)
     seed_adapter_stubs(decoy, ("ghost",))
+    agent = tmp_path / "draft" / "agent"
+    for name in ("elastic", "ghost"):
+        (agent / "skills" / name).mkdir(parents=True)
 
     run = tmp_path / "run"
     run.mkdir()
-    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=bound).policy
+    pol = _bind(run, bound, agent).policy
 
     def admits(rel: str) -> bool:
         return permission.decide_write(
-            bound / "skills" / rel, "body\n", run_dir=run, defender_dir=bound, policy=pol,
+            agent / "skills" / rel, "body\n", run_dir=run, defender_dir=bound, policy=pol,
         ).allow
 
     assert admits("elastic/SKILL.md")          # the bound tree's system has its lane
     assert not admits("ghost/SKILL.md")        # the sibling's does not
 
 
-# 3. The frame-injection channel, which was open — not "saved by accident".
-
-
-def test_the_porcelain_reader_does_not_quote_so_the_commit_gate_never_saw_this(tmp_path: Path):
-    """#772 asserted this channel was "saved by accident:"""
-    repo = seed_repo(tmp_path / "repo", add="README")
-    rel = "defender/skills/gather/queries/elastic/a b.md"
-    (repo / rel).parent.mkdir(parents=True)
-    (repo / rel).write_text("x\n", encoding="utf-8")
-
-    assert rel in [p for _xy, p in _git.git_status(repo)]   # RAW — no quotes, not torn
-    assert rel.startswith(SKILLS_REL)          # `_verify_corpus_scope._in_corpus`, both halves
-    assert rel.endswith(".md")
-    assert _is_in_scope(rel)
+# 3. The frame-injection channel. #1108 P4 OD12(i): `test_the_porcelain_reader_does_not_quote_so_
+# the_commit_gate_never_saw_this` pinned how `git status --porcelain` spells a spaced name in the
+# worktree. A claim is now the draft read by name off the filesystem (`ChangeSet`), never
+# porcelain: P3 tenant_1108_delivery/test_change_set_fuzz.py::test_derivation_keeps_its_invariant_on_random_box_output;
+# the write-gate half stays above (`gather/queries/elastic/a b.md` is not writable).
 
 
 # 4. The two gates stop disagreeing in the direction that discards a batch.
@@ -245,8 +264,7 @@ def _commit_scopes_admit(repo_root: Path, path: str) -> bool:
 
 def test_nothing_the_write_gate_admits_is_refused_at_the_drain(tmp_path: Path):
     """The anti-drift invariant, and the second half of what #772 asked for."""
-    admits, defender_dir = _gate(tmp_path)
-    repo_root = defender_dir.parent
+    admits, repo_root = _gate(tmp_path)
     admitted = [f"{SKILLS_REL}{rel}" for rel in _EVERY_SHAPE if admits(rel)]
     # A gate that admitted nothing would satisfy the implication vacuously.
     assert len(admitted) >= 5, admitted
@@ -275,22 +293,24 @@ def test_the_write_gate_refuses_the_protected_surfaces_first(tmp_path: Path):
 
 def test_rm_can_no_longer_name_an_agent_prompt(tmp_path: Path):
     """`rm defender/skills/gather/SKILL.md` used to MATCH the grant — the old pattern was `(?:/{seg})+`, unbounded in depth and indifferent to the filename — and was refused only by the commit-gate delete-prohibition, i.e."""
-    defender_dir = _tree(tmp_path)
+    defender_dir, agent = _tree(tmp_path)
     run = tmp_path / "run"
     run.mkdir()
-    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir).policy
+    pol = _bind(run, defender_dir, agent).policy
 
     def bash(cmd: str) -> bool:
+        # The drain box's cwd is the draft's `agent/` (P3 `Batch.box_request`).
         return permission.decide_bash(
-            cmd, policy=pol, run_dir=run, cwd_anchor=defender_dir.parent,
+            cmd, policy=pol, run_dir=run, cwd_anchor=agent,
         ).allow
 
-    assert not bash("rm defender/skills/gather/SKILL.md")
+    assert not bash("rm skills/gather/SKILL.md")
+    assert not bash(f"rm {agent}/skills/gather/SKILL.md")
     assert not bash(f"rm {defender_dir}/skills/gather/SKILL.md")
-    assert not bash("rm defender/skills/elastic/SKILL.md")
-    assert not bash("rm defender/skills/gather/queries/elastic/auth-events.md")
-    assert not bash("rm defender/skills/elastic/_draft/x y.md")     # the SEG narrowing, on rm too
+    assert not bash("rm skills/elastic/SKILL.md")
+    assert not bash("rm skills/gather/queries/elastic/auth-events.md")
+    assert not bash("rm skills/elastic/_draft/x y.md")     # the SEG narrowing, on rm too
     # controls: the two draft lanes the prompt does point it at
-    assert bash("rm defender/skills/elastic/_draft/falco-na.md")
-    assert bash("rm defender/skills/gather/queries/elastic/_draft/newthing.md")
-    assert bash(f"rm {defender_dir}/skills/elastic/_draft/falco-na.md")
+    assert bash("rm skills/elastic/_draft/falco-na.md")
+    assert bash("rm skills/gather/queries/elastic/_draft/newthing.md")
+    assert bash(f"rm {agent}/skills/elastic/_draft/falco-na.md")

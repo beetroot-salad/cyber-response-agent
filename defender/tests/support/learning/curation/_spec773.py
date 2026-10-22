@@ -269,6 +269,107 @@ def build_questioner_scene(
 
 
 # ---------------------------------------------------------------------------
+# #1108 P4 (O7): the same tick over a git-free draft
+# ---------------------------------------------------------------------------
+
+#: The repo-relative spelling of a lesson after P4 (OD6).
+DRAFT_LESSONS = "agent/lessons"
+DRAFT_QUESTIONER = "agent/lessons-questioner"
+
+
+@dataclass
+class DraftScene(Scene):
+    """`Scene` over a P3 batch: `corpus` is the draft's lane, `repo` the tenant clone, and every
+    head observation reads the batch branch (what the commit-maker made), never a checkout.
+    `head_files()` names `agent/...` paths; `commit_count()` counts the branch tip's history
+    (the export commit is the only commit before the tick)."""
+
+    lane: Any = None
+
+    def head_files(self) -> list[str]:
+        return self.lane.landed()
+
+    def head_message(self) -> str:
+        return self.lane.message()
+
+    def head_sha(self) -> str:
+        return self.lane.tip()
+
+    def head_text(self, rel: str) -> str | None:
+        return self.lane.text_at_tip(rel)
+
+    def commit_count(self) -> int:
+        return int(git(self.repo, "rev-list", "--count", self.lane.tip()).stdout.strip())
+
+    def draft_drift(self) -> list[str]:
+        """Every `agent/...` path whose bytes differ between the draft and the batch tip (a
+        file only one side has included): `[]` is "the draft is re-synced to what landed"."""
+        listed = git(self.repo, "ls-tree", "-r", "--name-only", self.lane.tip(), "--",
+                     "agent").stdout.split("\n")
+        tip = {rel: git(self.repo, "cat-file", "-p", f"{self.lane.tip()}:{rel}").stdout
+               for rel in listed if rel.strip()}
+        draft = {f"agent/{p.relative_to(self.lane.agent).as_posix()}":
+                 p.read_text(encoding="utf-8", errors="surrogateescape")
+                 for p in self.lane.agent.rglob("*") if p.is_file() or p.is_symlink()}
+        return sorted(rel for rel in tip.keys() | draft.keys() if tip.get(rel) != draft.get(rel))
+
+
+def _draft_scene(tmp_path: Path, *, corpus_name: str, rows: list[dict], channel: Channel,
+                 curator: FakeCurator | None, seed_corpus: dict[str, str] | None,
+                 state_dir: Path | None, build: Callable[..., Any], runner: Callable[..., int],
+                 cfg_overrides: dict[str, Any]) -> DraftScene:
+    from defender.tests.support.learning.curation import _curator1134 as C
+
+    files = {f"{corpus_name}/{rel}": text for rel, text in (seed_corpus or {}).items()}
+    lane = C.draft_lane(tmp_path, files=files, state_dir=state_dir)
+    seed(lane.paths, channel, rows)
+    curator = curator if curator is not None else FakeCurator()
+    curator.outside_root = Path(lane.batch.draft_root)
+    base = build(lane, state=LearningState.open(lane.paths))
+    wiring: dict[str, Any] = {"invoke_agent": curator}
+    wiring.update(cfg_overrides)
+    cfg = dataclasses.replace(base, **wiring)
+    return DraftScene(
+        paths=lane.paths, cfg=cfg, channel=channel, repo=lane.clone,
+        corpus=lane.agent / corpus_name, rows=rows, curator=curator, runner=runner,
+        base_sha=lane.base, lane=lane,
+    )
+
+
+def build_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
+                      state_dir: Path | None = None, curator: FakeCurator | None = None,
+                      seed_corpus: dict[str, str] | None = None, channel_name: str = "findings",
+                      **cfg_overrides: Any) -> DraftScene:
+    """`build_scene` after P4: the lessons tick over a draft lane (`_curator1134.draft_lane`),
+    `seed_corpus` published in the export commit, the config built with the assumed `batch=`
+    seam (`_curator1134.draft_author_cfg`)."""
+    from defender.tests.support.learning.curation import _curator1134 as C
+
+    return _draft_scene(
+        tmp_path, corpus_name="lessons",
+        rows=list(rows if rows is not None else [finding_row("f1", run_id="f1")]),
+        channel=channel_of(channel_name), curator=curator, seed_corpus=seed_corpus,
+        state_dir=state_dir, build=C.draft_author_cfg, runner=lessons_run.run_batch,
+        cfg_overrides=cfg_overrides)
+
+
+def build_questioner_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
+                                 curator: FakeCurator | None = None,
+                                 seed_corpus: dict[str, str] | None = None,
+                                 **cfg_overrides: Any) -> DraftScene:
+    """`build_questioner_scene` after P4, over a draft lane (`draft_questioner_cfg`)."""
+    from defender.learning.author.questioner import run as questioner_run
+    from defender.tests.support.learning.curation import _curator1134 as C
+
+    return _draft_scene(
+        tmp_path, corpus_name="lessons-questioner",
+        rows=list(rows if rows is not None else [world_row("w1")]),
+        channel=QUESTIONER_FINDINGS, curator=curator, seed_corpus=seed_corpus,
+        state_dir=None, build=C.draft_questioner_cfg, runner=questioner_run.run_batch,
+        cfg_overrides=cfg_overrides)
+
+
+# ---------------------------------------------------------------------------
 # fakes — each injects faults or canned content, and classifies nothing
 # ---------------------------------------------------------------------------
 
@@ -294,6 +395,9 @@ class FakeCurator:
     raises: BaseException | None = None
     also: Callable[..., None] | None = None
     calls: list[dict] = field(default_factory=list)
+    #: Where `outside` writes land: the repo root by default; a draft scene sets the draft's
+    #: root, so `outside` names `agent/<not a lane>/...` (#1108 P4).
+    outside_root: Path | None = None
 
     def __call__(self, rows: list[dict], batch_id: str, cfg: Any) -> dict:
         self.calls.append({"rows": list(rows), "batch_id": batch_id, "cfg": cfg})
@@ -308,7 +412,8 @@ class FakeCurator:
             if target.is_file():
                 target.unlink()
         for rel, text in self.outside.items():
-            target = cfg.repo_root / rel
+            root = self.outside_root if self.outside_root is not None else cfg.repo_root
+            target = root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
         if self.also is not None:

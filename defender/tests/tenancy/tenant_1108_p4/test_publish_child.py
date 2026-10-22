@@ -274,3 +274,117 @@ def test_o9_a_misconfigured_tenant_refuses_the_run_before_any_model_call(
     assert not out.reached, f"O9: a misconfigured tenant's run reached its box: {out.text()}"
     assert out.raised is None or not isinstance(out.raised, TypeError), out.text()
     assert out.refusal is not None, out.text()
+
+
+# --- O-BUDGET, parent half (OD11): a REAL child process under a REAL lock ---------------------
+#
+# The parent launcher (`run.launch_publish`, assumed seam) runs the REAL child's process entry
+# (`publish_child_main`) in a subprocess whose fakes are rebuilt inside it (`_s_b_support.
+# CHILD_WRAPPER`). Budgets are small but must exceed the child's interpreter start-up and
+# imports, which the budget counts; the locked phase is slowed through the child's one
+# injectable slow point (`locked_hook`).
+
+WORKTREE = Path(__file__).resolve().parents[4]
+#: The parent's budget in these tests, and how long the locked phase is held.
+BUDGET = 4.0
+LOCKED_SLEEP = 6.0
+#: Scheduling slack on every wall-clock bound.
+SLACK = 8.0
+
+
+@pytest.fixture
+def child_env(monkeypatch):
+    """The child subprocess imports this worktree's `defender` (and the test fakes)."""
+    import os
+
+    monkeypatch.setenv("PYTHONPATH", f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+
+
+def _no_leftovers(t, spec: Path) -> None:
+    clone = B.clone_dir(t)
+    assert quiet(clone, naming=(str(spec),), seconds=5) == [], (
+        "O-BUDGET: a child (or its git) outlived the launch")
+    assert not (clone / ".git" / "index.lock").exists(), "O-BUDGET: index.lock left behind"
+    with _lock(t):  # the tenant lock is free again
+        pass
+
+
+def test_o_budget_the_parent_stops_waiting_at_the_budget_in_the_network_phase(
+        tenant, issuer_config, tmp_path, child_env):
+    """O-BUDGET: origin stalls the fetch for ever and the child's own network timeout is far
+    beyond the budget: the parent stops waiting at the budget, ends the child (no process, no
+    `index.lock`, lock free) and reports `stale:transient`; `current` is unchanged."""
+    tenant.merge(B.MERGE_FILES)
+    stop = threading.Event()
+    tenant.server.on_service = lambda service: (
+        Trickle(stop, limit=300.0) if service == "git-upload-pack" else None)
+    tenant.server.rearm()
+    command, spec, marks = B.child_command(tenant, tmp_path, issuer_config,
+                                           network_timeout=300.0, locked_sleep=0)
+    launch = B.launcher()
+    started = time.monotonic()
+    try:
+        line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=BUDGET,
+                      command=command)
+    finally:
+        elapsed = time.monotonic() - started
+        stop.set()
+    assert (marks / "started").exists(), "premise: the child process ran"
+    _stale(line, "transient")
+    assert elapsed < BUDGET + SLACK, f"O-BUDGET: the launch waited {elapsed:.1f}s"
+    assert not (marks / "locked").exists(), "premise: the child never reached its locked phase"
+    _no_leftovers(tenant, spec)
+    _unchanged(tenant)
+
+
+def test_o_budget_a_child_holding_the_lock_is_allowed_to_finish(tenant, issuer_config, tmp_path,
+                                                                child_env):
+    """O-BUDGET: the child takes the tenant lock inside the budget and then holds it past the
+    budget (its locked phase is slowed). The parent does not kill it: it waits for the child to
+    finish, reports `fresh <merge>`, `current` is the merge, and nothing is left behind. It
+    never waits past budget + locked phase."""
+    merged = tenant.merge(B.MERGE_FILES)
+    command, spec, marks = B.child_command(tenant, tmp_path, issuer_config,
+                                           network_timeout=30.0, locked_sleep=LOCKED_SLEEP)
+    launch = B.launcher()
+    started_wall, started = time.time(), time.monotonic()
+    line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=BUDGET, command=command)
+    elapsed = time.monotonic() - started
+    locked_at = float((marks / "locked").read_text(encoding="utf-8")) - started_wall
+    assert locked_at < BUDGET, (
+        f"premise: the child took the lock {locked_at:.1f}s in, after the {BUDGET}s budget")
+    assert (marks / "locked-done").exists(), (
+        "O-BUDGET: the parent returned before the lock-holding child finished (killed it?)")
+    assert B.outcome_class(line) == "fresh", line
+    assert B.outcome_detail(line) == merged, line
+    assert current_commit(tenant.tenant) == merged
+    assert elapsed > BUDGET, "premise: the locked phase outlasted the budget"
+    assert elapsed < BUDGET + LOCKED_SLEEP + SLACK, f"O-BUDGET: the launch waited {elapsed:.1f}s"
+    _no_leftovers(tenant, spec)
+
+
+def test_o_budget_a_run_whose_publish_ran_out_of_budget_proceeds_stale_on_the_last_snapshot(
+        tenant, issuer_config, tmp_path, child_env):
+    """O-BUDGET/O-STALE through `run.main`: the launcher bound to `publish=` with a stalled
+    network phase — the run starts within the budget on `current`, recorded stale/transient."""
+    import functools
+
+    tenant.merge(B.MERGE_FILES)
+    stop = threading.Event()
+    tenant.server.on_service = lambda service: (
+        Trickle(stop, limit=300.0) if service == "git-upload-pack" else None)
+    tenant.server.rearm()
+    command, _spec, _marks = B.child_command(tenant, tmp_path, issuer_config,
+                                             network_timeout=300.0, locked_sleep=0)
+    publish = functools.partial(B.launcher(), budget=BUDGET, command=command)
+    started = time.monotonic()
+    try:
+        out = B.launch(tenant, tmp_path, publish=publish)
+    finally:
+        stop.set()
+    assert out.reached, out.text()
+    assert time.monotonic() - started < BUDGET + 2 * SLACK
+    assert B.SEEDED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
+    source = B.knowledge_source(out.stamp_after)
+    assert (source.get("kind"), source.get("stale_kind"), source.get("commit")) == (
+        "stale", "transient", tenant.commit), source

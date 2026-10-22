@@ -427,10 +427,20 @@ class Estate:
 
     def place(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT) -> Any:
         """Set the tenant up under the data root (`DEFENDER_DATA_ROOT` by default) and return
-        it accepted (`Tenant`)."""
+        it accepted (`Tenant`).
+
+        #1108 P4 (OD5, O11): the tenant is a REAL published tenant — a git clone holding the
+        P4 fixture's `agent/` and this estate's settings (grant table), exported for real by
+        S0's one helper (`tenant_1108_p4._support.published_tenant`) — so a branch launch has a
+        knowledge commit to materialise and pin (flow 7). Publishing costs ~0.4 s, so each
+        `(tenant id, grant table)` is published once per process (`_published_template`) and
+        its tenant folder (row, clone, exports) copied in; nothing in it names its root."""
         root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
         if not (root / tenant_id / "tenant.json").is_file():
-            T6.place_tenant(root, tenant_id, table=self.table(), configs={})
+            import shutil
+
+            shutil.copytree(_published_template(tenant_id, self.table()), root / tenant_id,
+                            symlinks=True)
         return T6.accept(root, tenant_id)
 
     def run_tenant(self, data_root: Path | None = None,
@@ -457,6 +467,59 @@ class Estate:
 
 def estate(tmp_path: Path, **kw: Any) -> Estate:
     return Estate(tmp_path / "estate", **kw)
+
+
+# --------------------------------------------------------------------------------------
+# #1108 P4 (OD5): the estate's tenant is published for real, and the stamps name its commit.
+# --------------------------------------------------------------------------------------
+
+_TEMPLATES: dict[tuple[str, str], Path] = {}
+_TEMPLATE_HOME: list[Any] = []
+
+
+def _published_template(tenant_id: str, table: str) -> Path:
+    """`<process scratch>/<n>/root/<tenant_id>`: the tenant `tenant_id` with grant table
+    `table`, set up and published ONCE per process through S0's `published_tenant` (the P4
+    fixture's `agent/`, the estate's settings in place of the fixture's), its origin server
+    closed after — a published tenant needs no network to be read or materialised."""
+    key = (tenant_id, table)
+    if key in _TEMPLATES:
+        return _TEMPLATES[key]
+    import tempfile
+
+    from defender.tests.tenancy.tenant_1108_p4._support import (
+        FIXTURE_SETTINGS,
+        files_under,
+        published_tenant,
+    )
+
+    if not _TEMPLATE_HOME:
+        _TEMPLATE_HOME.append(tempfile.TemporaryDirectory(prefix="spec1224-tenants-"))
+    home = Path(_TEMPLATE_HOME[0].name) / str(len(_TEMPLATES))
+    planted = T6.place_tenant(home / "settings-source", tenant_id, table=table, configs={})
+    wanted = {f"settings/{rel}": data for rel, data in files_under(planted / "settings").items()}
+    stale = {f"settings/{rel}": None for rel in files_under(FIXTURE_SETTINGS)
+             if f"settings/{rel}" not in wanted}
+    with published_tenant(home / "forge", root=home / "root", tenant_id=tenant_id,
+                          files={**stale, **wanted}):
+        pass
+    # Deleting the fixture's other system configs leaves their folders in the clone's working
+    # tree; git tracks no empty folder (the commit and its export hold none), so they go too —
+    # an empty `settings/systems/<s>/` would read as a configured-but-broken system.
+    clone_settings = home / "root" / tenant_id / "knowledge" / "settings"
+    for folder in sorted(clone_settings.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()
+    _TEMPLATES[key] = home / "root" / tenant_id
+    return _TEMPLATES[key]
+
+
+def knowledge_commit(tenant_id: str = FIXTURE_TENANT, data_root: Path | None = None) -> str | None:
+    """The commit the tenant's `exports/current` names (read as a plain file), or `None` when
+    the tenant was not published (a tenant set up some other way)."""
+    root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
+    pointer = root / tenant_id / "exports" / "current"
+    return pointer.read_text(encoding="utf-8").strip() if pointer.is_file() else None
 
 
 # --------------------------------------------------------------------------------------
