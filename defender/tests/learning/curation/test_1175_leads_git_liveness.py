@@ -1,9 +1,14 @@
+"""#1175 scene helpers for the lead-author lane's per-claim worktree commits (`ClaimGit`).
+
+Its own cases were removed by #1108 P4 (slice S-D): they pinned `ClaimGit`'s worktree
+commit/cleanup over the product repo, which P4 replaces with P3's git-free draft and
+commit-maker. The helpers stay only because `test_1175_claim_session.py` and
+`test_1175_adversary_holes.py` import them."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
 import dataclasses
-import inspect
 import json
 import os
 import shutil
@@ -15,12 +20,9 @@ from typing import Any
 
 import pytest
 
-from defender.configuration._env import FatalConfigError
 from defender._git import GitError
-from defender.learning.author import _config
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
-from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.core.lane_trees import open_drain_trees
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.draft_synthesis import _draft_basename
@@ -35,7 +37,6 @@ from defender.tests.support.runtime.engine._declared869 import (
     commit_all,
     git,
     pitfall_row,
-    seed_executed_query,
     seed_tree,
     write,
 )
@@ -449,98 +450,6 @@ FIFO_SITES = [
 ]
 
 
-@pytest.mark.parametrize("site", FIFO_SITES)
-def test_t1_t2_a_fifo_the_lead_author_agent_leaves_hangs_nothing_and_the_scrub_refuses_it(
-    tmp_path, monkeypatch, site,
-):
-    sc = _lead_scene(tmp_path, monkeypatch)
-    fifo = sc.wt / site
-    lane = _LeadLane(_edits(EDIT_LIFT, _fifo(site)))
-
-    got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation, fifos=[fifo], what=site)
-
-    assert [r["pending"] for r in lane.reached] == [[LIFT]], "the claim never reached the agent"
-    _assert_tainted_by(got, fifo)
-    _assert_lead_claim_held(sc)
-    assert "finish" not in sc.branch.events
-    fifo.unlink()  # observed; the test's own git reads below must not meet it
-    assert _commits(sc.wt) == 2
-    assert _head_changes(sc.wt) == {f"M\t{LIFT}"}
-
-
-@pytest.mark.parametrize("site", FIFO_SITES)
-def test_t1_t2_a_fifo_the_pitfalls_agent_leaves_hangs_nothing_and_the_scrub_refuses_it(
-    tmp_path, monkeypatch, site,
-):
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-    fifo = sc.wt / site
-    lane = _PitfallsLane(_edits(CURATE, _fifo(site)))
-
-    got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=lane, fifos=[fifo], what=site)
-
-    assert len(lane.spawn.calls) == 1, "the curation never reached the agent"
-    _assert_tainted_by(got, fifo)
-    _assert_rows_untouched(sc)
-    assert "finish" not in sc.branch.events
-    fifo.unlink()
-    assert _commits(sc.wt) == 2
-    assert _head_changes(sc.wt) == {f"M\t{EXEC}"}
-
-
-def test_t1_control_the_same_lead_author_claim_without_a_plant_lands(tmp_path, monkeypatch):
-    """T1's positive control at the same address: the same edit, no FIFO. The tick lands (rc 0):
-    the claim consumed and its run recorded done with the commit carrying exactly `M LIFT`."""
-    sc = _lead_scene(tmp_path, monkeypatch)
-
-    got = _tick(sc, run_lead_author=_LeadLane(EDIT_LIFT), run_pitfalls=_no_curation)
-
-    assert got == ("value", 0), got
-    _assert_lead_served(sc, {f"M\t{LIFT}"})
-
-
-def test_t1_control_the_same_curation_without_a_plant_lands(tmp_path, monkeypatch):
-    """T1's positive control, pitfalls: the same edit, no FIFO. The row is consumed as
-    `consumed_committed` against the commit, which carries exactly `M EXEC`."""
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-
-    got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=_PitfallsLane(CURATE))
-
-    assert got == ("value", 0), got
-    _assert_rows_consumed(sc, {f"M\t{EXEC}"})
-
-
-@pytest.mark.parametrize("site", FIFO_SITES)
-def test_t1b_a_new_draft_commits_past_a_fifo_on_its_path(tmp_path, monkeypatch, site):
-    sc = _lead_scene(tmp_path, monkeypatch)
-    fifo = sc.wt / site
-    lane = _LeadLane(_edits(_put(NEW, "# new\n\nA new elastic skill draft.\n"), _fifo(site)))
-
-    got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation, fifos=[fifo], what=site)
-
-    assert len(lane.reached) == 1
-    _assert_tainted_by(got, fifo)
-    _assert_lead_claim_held(sc)
-    fifo.unlink()
-    assert _commits(sc.wt) == 2
-    assert _head_changes(sc.wt) == {f"A\t{NEW}"}
-
-
-def test_t1b_the_minted_draft_commits_past_a_fifo_at_the_mount_root(tmp_path, monkeypatch):
-    sc = _lead_scene(tmp_path, monkeypatch, lift_threshold=False)
-    site = f"{SKILLS_REL}.gitignore"
-    fifo = sc.wt / site
-    lane = _LeadLane(_fifo(site), leads=[MINT_LEAD])
-
-    got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation, fifos=[fifo], what=site)
-
-    assert len(lane.reached) == 1
-    _assert_tainted_by(got, fifo)
-    _assert_lead_claim_held(sc)
-    fifo.unlink()
-    assert _commits(sc.wt) == 2
-    assert _head_changes(sc.wt) == {f"A\t{MINTED}"}
-
-
 STAR = "*\n"
 PLAINS = {
     # name: (the agent's extra writes, the non-`.md` new paths the refusal must name)
@@ -554,86 +463,7 @@ PLAINS = {
 }
 
 
-@pytest.mark.parametrize("plant", list(PLAINS))
-def test_t3_a_plain_star_gitignore_hides_nothing_from_the_lead_author_scope_check(
-    tmp_path, monkeypatch, plant,
-):
-    writes, named = PLAINS[plant]
-    sc = _lead_scene(tmp_path, monkeypatch)
-    lane = _LeadLane(_edits(EDIT_LIFT, *(_put(rel, text) for rel, text in writes.items())))
-
-    got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation)
-
-    assert got == ("value", 0), got
-    assert len(lane.reached) == 1
-    if not named:
-        _assert_lead_served(sc, {f"M\t{LIFT}"})
-        return
-    [failed] = _failed(sc.paths)
-    reason = failed["failed"]
-    assert reason.startswith("lead-author-error: LeadAuthorError("), reason
-    for rel in named:
-        assert rel in reason, (rel, reason)
-    assert _commits(sc.wt) == 1, "the refused claim committed"
-    assert _inflight(sc.paths) == {}
-    assert author_markers(sc.paths) == []
-    assert _done_sha(sc.run_dir) is None
-
-
-@pytest.mark.parametrize("plant", ["none", "stray", "star+stray"])
-def test_t3_a_plain_star_gitignore_hides_nothing_from_the_pitfalls_scope_check(
-    tmp_path, monkeypatch, plant,
-):
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
-    writes, named = PLAINS[plant]
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-    lane = _PitfallsLane(_edits(CURATE, *(_put(rel, text) for rel, text in writes.items())))
-
-    got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=lane)
-
-    assert got == ("value", 0), got
-    assert len(lane.spawn.calls) == 1
-    if not named:
-        _assert_rows_consumed(sc, {f"M\t{EXEC}"})
-        return
-    graveyard = graveyard_by_id(sc.paths)
-    assert PID in graveyard, f"the batch was not retired; consumed: {consumed_by_id(sc.paths)}"
-    reason = graveyard[PID]["deadletter_reason"]
-    assert reason.startswith("batch-error:LeadAuthorError"), reason
-    for rel in named:
-        assert rel in reason, (rel, reason)
-    assert _commits(sc.wt) == 1, "the refused curation committed"
-    assert persist.read_pitfalls(state_for_paths(sc.paths)) == []
-
-
 PYC = b"\x00\x0d\x0d\x0a not really bytecode"
-
-
-@pytest.mark.parametrize("package", ["invlang", "connect"])
-def test_t4_a_pycache_made_during_the_lead_author_claim_is_no_stray(
-    tmp_path, monkeypatch, package,
-):
-    sc = _lead_scene(tmp_path, monkeypatch)
-    pyc = f"{SKILLS_REL}{package}/__pycache__/__init__.cpython-312.pyc"
-
-    got = _tick(sc, run_lead_author=_LeadLane(_edits(EDIT_LIFT, _put_bytes(pyc, PYC))),
-                run_pitfalls=_no_curation)
-
-    assert got == ("value", 0), got
-    _assert_lead_served(sc, {f"M\t{LIFT}"})
-
-
-def test_t4_a_pycache_made_during_the_curation_is_no_stray(tmp_path, monkeypatch):
-    """T4 (O5), pitfalls: the same `.pyc` under `skills/invlang` during the curation; the row is
-    consumed against a commit of exactly `M EXEC`."""
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-    pyc = f"{SKILLS_REL}invlang/__pycache__/__init__.cpython-312.pyc"
-
-    got = _tick(sc, run_lead_author=_no_claim,
-                run_pitfalls=_PitfallsLane(_edits(CURATE, _put_bytes(pyc, PYC))))
-
-    assert got == ("value", 0), got
-    _assert_rows_consumed(sc, {f"M\t{EXEC}"})
 
 
 ON_PATH = ["defender/.gitignore", "defender/skills/.gitignore",
@@ -642,148 +472,7 @@ ON_PATH = ["defender/.gitignore", "defender/skills/.gitignore",
 OFF_PATH = "evaluations/.gitignore"
 
 
-@pytest.mark.parametrize("committed", [*ON_PATH, OFF_PATH])
-def test_a_gitignore_committed_on_the_path_to_skills_is_a_systemic_refusal(
-    tmp_path, monkeypatch, committed,
-):
-    sc = _lead_scene(tmp_path, monkeypatch, committed={committed: "*.tmp\n"})
-
-    got = _tick(sc, run_lead_author=_LeadLane(EDIT_LIFT), run_pitfalls=_no_curation)
-
-    if committed == OFF_PATH:
-        assert got == ("value", 0), got
-        _assert_lead_served(sc, {f"M\t{LIFT}"})
-        return
-    result, exc = got
-    assert result == "raised", got
-    assert isinstance(exc, SYSTEMIC_FAULTS), repr(exc)
-    assert not isinstance(exc, box_mod.RunTainted), repr(exc)
-    _assert_lead_claim_held(sc)
-    assert _commits(sc.wt) == 1
-    assert "finish" not in sc.branch.events
-
-
-@pytest.mark.parametrize("committed", ["defender/skills/.gitignore", OFF_PATH])
-def test_a_gitignore_committed_inside_skills_is_a_systemic_refusal_for_the_curation(
-    tmp_path, monkeypatch, committed,
-):
-    sc = _pitfalls_scene(tmp_path, monkeypatch, committed={committed: "*.tmp\n"})
-
-    got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=_PitfallsLane(CURATE))
-
-    if committed == OFF_PATH:
-        assert got == ("value", 0), got
-        _assert_rows_consumed(sc, {f"M\t{EXEC}"})
-        return
-    result, exc = got
-    assert result == "raised", got
-    assert isinstance(exc, SYSTEMIC_FAULTS), repr(exc)
-    assert not isinstance(exc, box_mod.RunTainted), repr(exc)
-    _assert_rows_untouched(sc)
-    assert _commits(sc.wt) == 1
-    assert "finish" not in sc.branch.events
-
-
-@pytest.mark.parametrize("stall", [True, False], ids=["stalled", "control"])
-def test_t5_an_overrun_through_the_default_lead_author_seam_is_systemic(
-    tmp_path, monkeypatch, stall,
-):
-    monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
-    monkeypatch.delenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", raising=False)
-    sc = _lead_scene(tmp_path, monkeypatch, lift_threshold=False)
-    seed_executed_query(sc.run_dir, query_id="wazuh.search", system="wazuh", verb="search")
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, READS if stall else ())
-        got = _tick(sc, shim=shim, git_timeout=BOUND)
-
-    if not stall:
-        assert got == ("value", 0), got
-        assert _done_sha(sc.run_dir) == "none"
-        assert _inflight(sc.paths) == {}
-        assert _failed(sc.paths) == []
-        assert "finish" in sc.branch.events
-        return
-    result, exc = got
-    assert result == "raised", got
-    assert _is_systemic_git_fault(exc), repr(exc)
-    assert _stalled(shim), "nothing was stalled: the overrun under test never happened"
-    _assert_lead_claim_held(sc)
-    assert "finish" not in sc.branch.events
-
-
-@pytest.mark.parametrize("stall", [True, False], ids=["stalled", "control"])
-def test_t5_an_overrun_through_the_default_pitfalls_seam_is_systemic(
-    tmp_path, monkeypatch, stall,
-):
-    monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, READS if stall else ())
-        got = _tick(sc, shim=shim, git_timeout=BOUND)
-
-    result, exc = got
-    assert result == "raised", got
-    if stall:
-        assert _is_systemic_git_fault(exc), repr(exc)
-        assert _stalled(shim), "nothing was stalled: the overrun under test never happened"
-    else:
-        assert isinstance(exc, FatalConfigError), repr(exc)
-        assert NO_MODEL in str(exc), repr(exc)
-    _assert_rows_untouched(sc)
-    assert "finish" not in sc.branch.events
-
-
 AFTER_AGENT = {"scope-check": READS, "commit": WRITES}
-
-
-@pytest.mark.parametrize("stall", [*AFTER_AGENT, None], ids=[*AFTER_AGENT, "control"])
-def test_t5_an_overrun_after_the_lead_author_agent_is_systemic(tmp_path, monkeypatch, stall):
-    sc = _lead_scene(tmp_path, monkeypatch)
-    flag = tmp_path / "agent-ran"
-    lane = _LeadLane(_edits(EDIT_LIFT, lambda _root: flag.write_text("")), git_timeout=BOUND)
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, AFTER_AGENT.get(stall or "", ()),
-                          flag=flag)
-        got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation, shim=shim)
-
-    assert len(lane.reached) == 1
-    if stall is None:
-        assert got == ("value", 0), got
-        _assert_lead_served(sc, {f"M\t{LIFT}"})
-        return
-    result, exc = got
-    assert result == "raised", got
-    assert _is_systemic_git_fault(exc), repr(exc)
-    assert _stalled(shim), "nothing was stalled: the overrun under test never happened"
-    _assert_lead_claim_held(sc)
-    assert _commits(sc.wt) == 1
-
-
-@pytest.mark.parametrize("stall", [*AFTER_AGENT, None], ids=[*AFTER_AGENT, "control"])
-def test_t5_an_overrun_after_the_pitfalls_agent_is_systemic(tmp_path, monkeypatch, stall):
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-    flag = tmp_path / "agent-ran"
-    lane = _PitfallsLane(_edits(CURATE, lambda _root: flag.write_text("")), git_timeout=BOUND)
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, AFTER_AGENT.get(stall or "", ()),
-                          flag=flag)
-        got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=lane, shim=shim)
-
-    assert len(lane.spawn.calls) == 1
-    if stall is None:
-        assert got == ("value", 0), got
-        _assert_rows_consumed(sc, {f"M\t{EXEC}"})
-        return
-    result, exc = got
-    assert result == "raised", got
-    assert _is_systemic_git_fault(exc), repr(exc)
-    assert _stalled(shim), "nothing was stalled: the overrun under test never happened"
-    _assert_rows_untouched(sc)
-    assert _commits(sc.wt) == 1
 
 
 CLEANUP = ["reset", "clean"]
@@ -814,141 +503,3 @@ def _curating(_paths, _state, *, box=None, on_curated) -> int:
     return 0
 
 
-@pytest.mark.parametrize("stall", [*CLEANUP, None], ids=[*CLEANUP, "control"])
-def test_t5b_a_cleanup_overrun_under_a_lead_author_fault_keeps_that_fault(
-    tmp_path, monkeypatch, stall,
-):
-    sc = _lead_scene(tmp_path, monkeypatch)
-    fault = GitError(["status"], 128, "the claim's own git fault")
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, [stall] if stall else ())
-        got = _tick(sc, run_lead_author=_raising(fault), run_pitfalls=_no_curation, shim=shim,
-                    git_timeout=BOUND)
-
-    assert got[0] == "raised", got
-    assert got[1] is fault, got
-    assert _stalled(shim) == ([stall] if stall else []), _stalled(shim)
-    _assert_lead_claim_held(sc)
-
-
-@pytest.mark.parametrize("stall", [*CLEANUP, None], ids=[*CLEANUP, "control"])
-def test_t5b_a_cleanup_overrun_after_a_clean_claim_ends_the_tick(tmp_path, monkeypatch, stall):
-    sc = _lead_scene(tmp_path, monkeypatch, cases=("case-a", "case-b"))
-    served: list[Path] = []
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, [stall] if stall else ())
-        got = _tick(sc, run_lead_author=_serving(served), run_pitfalls=_no_curation, shim=shim,
-                    git_timeout=BOUND)
-
-    run_a, run_b = sc.run_dirs
-    if stall is None:
-        assert got == ("value", 0), got
-        assert served == [run_a, run_b]
-        assert _inflight(sc.paths) == {}
-        assert author_markers(sc.paths) == []
-        assert _done_sha(run_a) == "none"
-        assert _done_sha(run_b) == "none"
-        return
-    result, exc = got
-    assert result == "raised", got
-    assert _is_systemic_git_fault(exc), repr(exc)
-    assert _stalled(shim) == [stall], _stalled(shim)
-    assert served == [run_a], "the next claim was served over the first one's leftovers"
-    assert _inflight(sc.paths) == {"case-a.json": {
-        **curation_row("case-a", run_a), "attempts": 1}}, _inflight(sc.paths)
-    assert author_markers(sc.paths) == ["case-b.json"]
-    assert marker_body(location_path(sc.paths.state_root) / "author-queue" / "case-b.json") == \
-        curation_row("case-b", run_b)
-    assert _failed(sc.paths) == []
-    assert _done_sha(run_a) is None
-    assert "finish" not in sc.branch.events
-
-
-@pytest.mark.parametrize("stall", [*CLEANUP, None], ids=[*CLEANUP, "control"])
-def test_t5b_a_cleanup_overrun_after_a_clean_curation_ends_the_tick(
-    tmp_path, monkeypatch, stall,
-):
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, [stall] if stall else ())
-        got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=_curating, shim=shim,
-                    git_timeout=BOUND)
-
-    if stall is None:
-        assert got == ("value", 0), got
-        assert consumed_by_id(sc.paths)[PID]["consumed_commit"] == "abc1175"
-        assert "finish" in sc.branch.events
-        return
-    result, exc = got
-    assert result == "raised", got
-    assert _is_systemic_git_fault(exc), repr(exc)
-    assert _stalled(shim) == [stall], _stalled(shim)
-    _assert_rows_untouched(sc)
-    assert "finish" not in sc.branch.events
-
-
-@pytest.mark.parametrize("stall", ["clean", None], ids=["clean", "control"])
-def test_t5b_a_cleanup_overrun_under_a_curation_fault_keeps_that_fault(
-    tmp_path, monkeypatch, stall,
-):
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-    fault = GitError(["status"], 128, "the curation's own git fault")
-
-    with monkeypatch.context() as patch:
-        shim = _stall_git(tmp_path / "git-shim", patch, [stall] if stall else ())
-        got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=_raising(fault), shim=shim,
-                    git_timeout=BOUND)
-
-    assert got[0] == "raised", got
-    assert got[1] is fault, got
-    assert _stalled(shim) == ([stall] if stall else []), _stalled(shim)
-    _assert_rows_untouched(sc)
-
-
-@pytest.mark.parametrize("stray", [False, True], ids=["control", "baseline-stray"])
-def test_t6_the_lead_author_commit_is_exactly_what_the_check_admitted(
-    tmp_path, monkeypatch, stray,
-):
-    sc = _lead_scene(tmp_path, monkeypatch)
-    if stray:
-        write(sc.wt / NOTES, "left here before the claim\n")
-    lane = _LeadLane(_edits(_remove(LIFT), _put(NEW, "# new\n\nA new elastic skill draft.\n")))
-
-    got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation)
-
-    assert got == ("value", 0), got
-    assert [r["pending"] for r in lane.reached] == [[LIFT]]
-    _assert_lead_served(sc, {f"D\t{LIFT}", f"A\t{NEW}"})
-
-
-@pytest.mark.parametrize("stray", [False, True], ids=["control", "baseline-stray"])
-def test_t6_the_curation_commit_is_exactly_what_the_check_admitted(
-    tmp_path, monkeypatch, stray,
-):
-    """T6 (O4, M2), pitfalls: with `NOTES` standing under `skills/` before the curation's
-    baseline (`baseline-stray`), the commit still carries exactly `M EXEC`."""
-    sc = _pitfalls_scene(tmp_path, monkeypatch)
-    if stray:
-        write(sc.wt / NOTES, "left here before the curation\n")
-
-    got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=_PitfallsLane(CURATE))
-
-    assert got == ("value", 0), got
-    _assert_rows_consumed(sc, {f"M\t{EXEC}"})
-
-
-def test_the_lanes_default_bound_is_the_curators_sixty_seconds(tmp_path):
-    assert _config.GIT_TIMEOUT_SECONDS == 60.0
-    assert inspect.signature(drains.lead_author_drain).parameters["git_timeout"].default \
-        == _config.GIT_TIMEOUT_SECONDS
-    assert inspect.signature(pitfalls_curator.run_pitfalls).parameters["git_timeout"].default \
-        == _config.GIT_TIMEOUT_SECONDS
-    wt = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
-    state = state_for_paths(paths)
-    with open_drain_trees(paths, LEAD) as trees:
-        assert lead_author.build_lead_author_deps(paths, state=state, trees=trees).git_timeout \
-            == _config.GIT_TIMEOUT_SECONDS

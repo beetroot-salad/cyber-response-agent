@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.learning.curation._claim1175 import claim_git
-from defender import _git
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.leads.path_validation import (
@@ -14,33 +13,44 @@ from defender.learning.leads.path_validation import (
     _is_in_scope,
     _is_schema_md,
 )
-from defender.runtime import verbs
 from defender.tests.support.runtime.engine._declared869 import (
-    ADAPTERS_REL,
+    CATALOG_REL,
     NESTED_MARKER_RELS,
     SKILLS_REL,
-    git,
+    commit_all,
     head_files,
     seed_tree,
     write,
     write_template,
 )
 from defender.tests.support.learning.curation._lead_author_1134 import lane_tree_for
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 NON_SYSTEMS = ("advisory", "connect", "gather", "handbook", "invlang", "judge")
 
 DECLARED = frozenset({"elastic", "cmdb"})
 
 
-def _real_adapter_systems() -> frozenset[str]:
-    """The real tree's declared set, computed HERE from the adapter glob.
+#: The fixture tenant's committed catalog (made-up content, `knowledge/tenant-fixture/agent/`).
+#: #1108 P4 O1/O11: the product tree holds no catalog, so a catalog-wide control drives this
+#: content instead of the checkout's.
+FIXTURE_CATALOG = FIXTURE_AGENT / "skills" / "gather" / "queries"
+#: The systems the fixture tenant declares (its one system skill and catalog folder).
+FIXTURE_SYSTEMS = frozenset({"cmdb"})
 
-    On the committed tree the union equals the adapter set exactly, and that equality is
-    itself a demand (`declared_systems_union_is_a_noop_here`) — so a corpus-wide parity drive
-    can take the cheaper half without depending on the resolver, and its red stays about the
-    rule under test rather than about a module that does not exist yet."""
-    d = _git.REPO_ROOT / ADAPTERS_REL
-    return frozenset(verbs._system_of(p) for p in d.glob("*" + verbs.ADAPTER_SUFFIX))
+
+def _fixture_catalog_lane(tmp_path: Path) -> tuple[Path, list[str]]:
+    """A gate repo declaring the fixture's systems, holding the fixture's catalog committed at
+    the lane's catalog spelling. Returns the repo and the catalog paths it committed."""
+    lane = seed_tree(tmp_path, adapters=tuple(FIXTURE_SYSTEMS), markers=tuple(FIXTURE_SYSTEMS),
+                     skills=tuple(FIXTURE_SYSTEMS), catalog=(), name="fixture-lane")
+    paths = []
+    for src in sorted(FIXTURE_CATALOG.rglob("*.md")):
+        rel = CATALOG_REL + src.relative_to(FIXTURE_CATALOG).as_posix()
+        write(lane / rel, src.read_text(encoding="utf-8"))
+        paths.append(rel)
+    commit_all(lane, "fixture catalog")
+    return lane, paths
 
 
 def _gate_repo(tmp_path: Path, name: str = "repo") -> Path:
@@ -80,7 +90,7 @@ def test_skills_path_rule_refuses_an_undeclared_catalog_system(tmp_path):
             systems=DECLARED, tree_for=lane_tree_for(repo))
 
 
-def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
+def test_skills_path_rule_still_admits_the_fixture_tenants_catalog(tmp_path):
     repo = _gate_repo(tmp_path)
     assert "gather" not in DECLARED
     assert lead_author._skills_path_rule(
@@ -90,17 +100,15 @@ def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
         repo, "A ", "defender/skills/gather/queries/elastic/_draft/new-verb.md",
         systems=DECLARED, tree_for=lane_tree_for(repo)) is None
 
-    real = _real_adapter_systems()
+    lane, committed = _fixture_catalog_lane(tmp_path)
     catalog_paths = [
-        p for p in git(_git.REPO_ROOT, "ls-files", "defender/skills/gather/queries/").stdout.split()
-        if p.endswith(".md") and not _is_schema_md(p) and not _is_draft_readme(p)
+        p for p in committed if not _is_schema_md(p) and not _is_draft_readme(p)
     ]
     assert catalog_paths, "no committed catalog paths, so the control would be vacuous"
     for path in catalog_paths:
         assert path.split("/")[2] == "gather"
         assert lead_author._skills_path_rule(
-            _git.REPO_ROOT, "A ", path, systems=real,
-            tree_for=lane_tree_for(_git.REPO_ROOT)) is None
+            lane, "A ", path, systems=FIXTURE_SYSTEMS, tree_for=lane_tree_for(lane)) is None
 
 
 def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):

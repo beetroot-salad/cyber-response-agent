@@ -6,6 +6,7 @@ import importlib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -98,14 +99,41 @@ def _imports_module(relpath: str, dotted: str) -> bool:
     return False
 
 
+def _main_deps_over_run_copy(tmp_path: Path) -> tuple[Any, Path]:
+    """MAIN deps through the real `bind` seam with the run's tenant agent root — a run copy's
+    `agent/` (`<T>/run-knowledge/<run_id>/agent/`, r3 data model) — handed through the
+    existing `RunScope(tenant_agent=...)` keyword, over a code tree holding no corpus."""
+    from dataclasses import replace
+
+    from defender.agents import MAIN_DEF
+    from defender.run_repository import Run
+    from defender.runtime.agent_definition import RunScope, bind
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    run = tmp_path / fixture_uuid("run")
+    run.mkdir()
+    dfn = tmp_path / "defender"
+    dfn.mkdir()
+    agent = tmp_path / "tenant" / "run-knowledge" / run.name / "agent"
+    agent.mkdir(parents=True)
+    deps = bind(MAIN_DEF, run, defender_dir=dfn, scope=RunScope(tenant_agent=agent))
+    return replace(deps, run=Run.under(fixture_runs_base(run.parent), run.name)), agent
+
+
 def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_not(tmp_path):
+    """Both consumers of the moved frontier engine push lessons from the RUN COPY (#1108 P4
+    O2: pushed lessons and the document tool's recall read the run copy's corpus; O-TEXT: the
+    model is shown it at `/agent/lessons/<name>`, the model view's agent root, never under
+    `/defender`). ASSUMED SEAM (S-G2): the push lanes' corpus is the deps' tenant agent root's
+    `lessons/` (`RunScope.tenant_agent`, already a `bind` keyword), not `defender_dir/lessons`."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.support.shared.contracts import _fold_936 as F
-    from defender.tests.support.learning.retrieval._lessons_corpus import _main_deps, _write_lesson
+    from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson
 
     engine = S.dotted(S.home_of("FOLD_LEAD"))
-    deps, _run, defender_dir = _main_deps(tmp_path)
-    corpus = defender_dir / "lessons"
+    deps, agent = _main_deps_over_run_copy(tmp_path)
+    corpus = agent / "lessons"
     corpus.mkdir()
     lesson = _write_lesson(corpus, F.CLASS_LESSON, nodes=F.CLASS_SELECTOR)
 
@@ -114,7 +142,7 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
     assert on_minted is not None, "the fold push produced no block (it failed open)"
     block = text[len("the record"):]
     assert block.startswith("\n\n"), text
-    model_lesson = f"- /defender/lessons/{lesson.name} — matched"
+    model_lesson = f"- /agent/lessons/{lesson.name} — matched"
     assert model_lesson in block, block
     assert F.FOLD_HEADER in block.strip().splitlines()[0], block
 
@@ -129,10 +157,10 @@ def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
     g = _g("location_values")
     assert Path(S.moved_module("cmd_tags").REPO_ROOT).resolve() \
         == (S.REPO_ROOT / g["lessons_fm_REPO_ROOT"]).resolve()
-    # `lessons_frontier` no longer derives a root from its own location: its default corpus
-    # comes from `defender.knowledge._knowledge` (#1108), so the cell checks that corpus's checkout.
-    assert Path(S.moved_module("WRITE_RETURN_LEAD").DEFAULT_CORPUS).resolve().parents[1] \
-        == (S.REPO_ROOT / g["lessons_frontier_REPO_ROOT"]).resolve()
+    # `lessons_frontier`'s cell is retired with its subject (#1108 P4 O4): the import-time
+    # `DEFAULT_CORPUS` (the checkout's corpus) becomes a function of an agent root, and S-A's
+    # symbol census (`tenant_1108_p4/test_census.py`) bans the constant. The golden's
+    # `lessons_frontier_REPO_ROOT` value is kept as base history and read by nothing.
     assert Path(S.moved_module("reexec_into_venv", home=S.VENV)._DEFENDER_DIR).resolve() \
         == (S.REPO_ROOT / g["venv_DEFENDER_DIR"]).resolve()
 

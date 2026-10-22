@@ -51,6 +51,7 @@ from defender.runtime.verbs import (  # noqa: E402
     verb,
 )
 from defender.tests.support.learning.curation._lead_author_1134 import held_skills, lead_trees, skills_view  # noqa: E402
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -611,36 +612,68 @@ _ALL_SEVEN = ["elastic", "cmdb", "identity", "ticket", "change-mgmt", "host-stat
 _SPELLING_SPLIT = ["change-mgmt", "host-state", "threat-intel"]
 
 
-def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER):
+#: #1108 P4 flow 6: connect stages the tenant half (system skill, seed queries) in a host
+#: directory, and `validate_scaffold` checks THAT staged half — the product tree holds no
+#: system skill and no catalog (O1); only the adapter stays in the product (#1172).
+#: ASSUMED SEAM (S-G2): `validate_scaffold.py <system> --agent-dir <staged agent root>`, the
+#: staged root laid out as a tenant `agent/` is (`skills/<system>/{SKILL.md,execution.md}`,
+#: `skills/gather/queries/<system>/*.md`). A scaffold's staged half sits beside its code tree.
+def _staged_agent(defender_dir: Path) -> Path:
+    return defender_dir.with_name(defender_dir.name + "-agent")
+
+
+def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER,
+                           agent_dir: Path | None = None):
+    staged = agent_dir if agent_dir is not None else _staged_agent(defender_dir)
     env = {"DEFENDER_DIR": str(defender_dir), "PATH": os.environ.get("PATH", "")}
-    return subprocess.run([sys.executable, str(VALIDATE_SCAFFOLD), system],
+    return subprocess.run([sys.executable, str(VALIDATE_SCAFFOLD), system,
+                           "--agent-dir", str(staged)],
                           capture_output=True, text=True, env=env, timeout=60)
 
 
-def test_validate_scaffold_normalizes_the_spelling_split():
-    results = {s: _run_validate_scaffold(s) for s in _SPELLING_SPLIT}
+def _staged_skill(agent: Path, system: str) -> None:
+    """A made-up system skill for `system` in a staged tenant half (decision 4: no lab
+    content): a `SKILL.md` named `defender-<system>` and an `execution.md`."""
+    d = agent / "skills" / system
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(
+        f"---\nname: defender-{system}\ndescription: staged fixture skill for {system}.\n---\n\n"
+        f"# {system}\n\nFixture content for tests (#1108 P4).\n", encoding="utf-8")
+    (d / "execution.md").write_text(f"# {system} — execution\n\nFixture content.\n",
+                                    encoding="utf-8")
+
+
+def test_validate_scaffold_normalizes_the_spelling_split(tmp_path):
+    """The hyphen/underscore split (`change-mgmt` vs `change_mgmt_adapter.py`) never sinks a
+    system: the checkout's real adapters, each system's skill read from the STAGED tenant half
+    (#1108 P4 flow 6, O1) — the product tree holds none of these skills after P4."""
+    staged = tmp_path / "staged-agent"
+    for system in _SPELLING_SPLIT:
+        _staged_skill(staged, system)
+    results = {s: _run_validate_scaffold(s, agent_dir=staged) for s in _SPELLING_SPLIT}
     for system, res in results.items():
         assert res.returncode == 0, \
-            f"the hyphen/underscore split still sinks {system}: rc={res.returncode}\n{res.stdout}"
+            f"the hyphen/underscore split still sinks {system}: rc={res.returncode}\n{res.stdout}\n{res.stderr}"
 
 
 def _scaffold_cmdb_tree(root: Path, template_body: str, *, verb: str = "get-host",
                         params: tuple[str, ...] = ("host",)) -> Path:
     """A minimal defender tree that otherwise passes the registry probe: the REAL cmdb adapter +
-    shared modules + skill + execution.md, plus one crafted cmdb query template."""
+    shared modules; and beside it its staged tenant half (`_staged_agent(root)`): the FIXTURE
+    tenant's cmdb skill + execution.md (#1108 P4, decision 4) plus one crafted cmdb query
+    template. Returns the defender tree."""
     (root / "integrations").mkdir(parents=True)
     for f in ("cmdb_adapter.py", "_stub_transport.py", "faults.py"):
         src = DEFENDER / "integrations" / f
         if src.exists():
             (root / "integrations" / f).write_text(
                 src.read_text(encoding="utf-8"), encoding="utf-8")
+    agent = _staged_agent(root)
     for rel in ("skills/cmdb/SKILL.md", "skills/cmdb/execution.md"):
-        src = DEFENDER / rel
-        dst = root / rel
+        dst = agent / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.exists():
-            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    _catalog_template(root / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
+        dst.write_bytes((FIXTURE_AGENT / rel).read_bytes())
+    _catalog_template(agent / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
                       "query", template_body, verb=verb, params=params)
     return root
 
@@ -666,8 +699,8 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
             mutated = src.replace(_GET_HOST_SIG, mutated_signature)
             assert mutated != src, "the get_host signature moved — this mutation no longer applies"
             adapter.write_text(mutated, encoding="utf-8")
-            _catalog_template(root / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
-                              "query", "list-roles", verb="list-roles")
+            _catalog_template(_staged_agent(root) / "skills" / "gather" / "queries", "cmdb",
+                              "cmdb.tmpl", "query", "list-roles", verb="list-roles")
         return root
 
     good = _run_validate_scaffold("cmdb", defender_dir=tree(f"ok-{label}", None))

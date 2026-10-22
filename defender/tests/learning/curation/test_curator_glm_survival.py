@@ -216,7 +216,7 @@ def _spawn_curator(**over):
         system_prompt_file=Path("/tmp/curator-prompt.md"),
         batch_id="batch-C",
         user_prompt="u",
-        corpus_dir=Path("/tmp/wt/defender/lessons-environment"),
+        corpus_dir=Path("/tmp/wt/defender/lessons-questioner"),  # #1108 P4 U5: retired corpus deleted
         repo_root=Path("/tmp/wt"),
         learning_run_dir=Path("/tmp/state/_pending"),
         model="glm-5.3",

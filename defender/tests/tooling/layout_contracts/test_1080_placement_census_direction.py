@@ -277,10 +277,17 @@ def test_1080_the_moved_lessons_frontier_keeps_its_main_block():
 
 
 def test_1080_no_python_module_lands_in_the_lesson_content_folder():
-    on_disk = [p for p in S.LESSONS_CONTENT.rglob("*")
+    """The lesson content folder is a tenant's `agent/lessons/` (#1108 P4, decision 4: the
+    product tree holds none — S-A's `tenant_1108_p4/test_layout.py` pins that absence, O1), so
+    the content checked is the committed fixture tenant's: lessons and no code. The engines
+    stay out of the content folder's spelling and out of `scripts/`."""
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
+
+    content = FIXTURE_AGENT / "lessons"
+    on_disk = [p for p in content.rglob("*")
                if p.is_file() and not set(p.relative_to(S.REPO_ROOT).parts) & S.JUNK_DIRS]
     assert [S.rel(p) for p in on_disk if p.suffix == ".py"] == []
-    assert any(p.suffix == ".md" for p in on_disk), "the lesson .md files are gone"
+    assert any(p.suffix == ".md" for p in on_disk), "the fixture tenant's lesson .md files are gone"
     for anchor in ("cmd_tags", "match_lessons"):
         engine = S.home_of(anchor)
         assert not S.under(engine, "defender/lessons")

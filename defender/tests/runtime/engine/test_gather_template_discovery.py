@@ -1,4 +1,10 @@
-"""Gather query-template discovery: the template walk, the per-dispatch index, and the template_search tool (path confinement, literal case-insensitive matching, bounded output, untrusted draft hits)."""
+"""Gather query-template discovery: the template walk, the per-dispatch index, and the template_search tool (path confinement, literal case-insensitive matching, bounded output, untrusted draft hits).
+
+#1108 P4 (O2, O4, O-TEXT): the catalog is the TENANT's — `skills/gather/queries/` under the
+run's agent root (the run copy), handed to the bound role as `RunScope(tenant_agent=...)` — and
+never the checkout's. Every tree below is a synthetic AGENT root; the code tree each role is
+bound with carries a decoy catalog template (`elastic.falco-alerts`) that must never surface,
+and the paths the model is shown are the model view's `/agent/...` spellings."""
 from __future__ import annotations
 
 import re
@@ -23,7 +29,11 @@ from defender.presentation import workspace_map as wsm  # noqa: E402
 from defender.tests.support.learning.curation._lead_author_1134 import skills_view  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[3]
-_REAL_CATALOG = _DEFENDER / "skills" / "gather" / "queries"
+#: A run copy's catalog as the host holds it (`<T>/run-knowledge/<run_id>/agent/...`, #1108 P4).
+#: Only a path shape for the trust predicate below — nothing reads it.
+_RUN_COPY_CATALOG = Path("/data/t/run-knowledge/r/agent/skills/gather/queries")
+#: The decoy the code tree carries: a checkout catalog no P4 reader may consult (O1, O4).
+_DECOY_ID = "elastic.falco-alerts"
 
 
 def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "", query: str = "",
@@ -35,8 +45,9 @@ def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "", 
 
 
 def _catalog(tmp_path: Path) -> Path:
-    """A synthetic defender tree with a 3-system catalog: 3 established + 2 drafts."""
-    dfn = tmp_path / "wt" / "defender"
+    """A synthetic AGENT root (a run copy's `agent/`) with a 3-system catalog: 3 established +
+    2 drafts."""
+    dfn = tmp_path / "wt" / "agent"
     q = dfn / "skills" / "gather" / "queries"
     for system, tid, goal in [
         ("elastic", "sshd-auth-history", "SSH authentication history — accepted and failed logins by user and source.ip. Keyword recall: sshd, invalid user, Failed password."),
@@ -57,24 +68,38 @@ def _catalog(tmp_path: Path) -> Path:
     return dfn
 
 
-def _deps(tmp_path: Path, defender_dir: Path, *, role=None) -> tools.AgentDeps:
+def _code_tree(tmp_path: Path) -> Path:
+    """The code tree a role is bound with (`defender_dir`), carrying a DECOY catalog template:
+    after #1108 P4 the checkout holds no catalog (O1), so a reader that still walks
+    `defender_dir`'s `skills/gather/queries/` surfaces `_DECOY_ID` and is caught."""
+    code = tmp_path / "code" / "defender"
+    decoy = code / "skills" / "gather" / "queries" / "elastic" / "falco-alerts.md"
+    decoy.parent.mkdir(parents=True, exist_ok=True)
+    decoy.write_text(_tpl("elastic", "falco-alerts",
+                          goal="Decoy in the checkout: Failed password widget LIMIT sshd."))
+    return code
+
+
+def _deps(tmp_path: Path, agent_root: Path, *, role=None) -> tools.AgentDeps:
     """Bind `role` — gather by default, bound WITH a run's grant (#1106 M4: `GATHER_DEF`
-    carries none of its own; the committed fixture tenant's is what these tests bind)."""
+    carries none of its own; the committed fixture tenant's is what these tests bind) — over
+    the run's agent root `agent_root` (#1108 P4: `RunScope(tenant_agent=...)`, the seam the
+    real gather dispatch already binds with) and a code tree holding only a decoy catalog."""
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    from defender.runtime.agent_definition import bind
+    from defender.runtime.agent_definition import RunScope, bind
     from defender.tests.support.tenancy import _tenants1106 as T1106
     return bind(role if role is not None else T1106.fixture_gather_def(), run_dir,
-                defender_dir=defender_dir)
+                defender_dir=_code_tree(tmp_path), scope=RunScope(tenant_agent=agent_root))
 
 
 def _request(system: str = "elastic") -> tools.GatherRequest:
     return tools.GatherRequest("l-001", system, "measure the thing", ("dim-a",))
 
 
-def _prompt_for(tmp_path: Path, defender_dir: Path, system: str = "elastic") -> str:
+def _prompt_for(tmp_path: Path, agent_root: Path, system: str = "elastic") -> str:
     """The REAL entry point: the dispatch prompt _run_gather hands the gather subagent."""
-    deps = _deps(tmp_path, defender_dir)
+    deps = _deps(tmp_path, agent_root)
     return tools_gather._gather_prompt(deps, _request(system), catalog="- `elastic`: the SIEM")
 
 
@@ -159,10 +184,14 @@ def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
 
 
 def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
+    """#1108 P4 O2/O-TEXT: the index is the run's agent root's catalog, each entry named by its
+    model-view path under `/agent/`; the code tree's catalog (a decoy) is never indexed."""
     prompt = _prompt_for(tmp_path, _catalog(tmp_path))
 
     assert "elastic.sshd-auth-history" in prompt
-    assert "skills/gather/queries/elastic/sshd-auth-history.md" in prompt
+    assert "/agent/skills/gather/queries/elastic/sshd-auth-history.md" in prompt
+    assert _DECOY_ID not in prompt and "falco-alerts.md" not in prompt, \
+        "the index walked the checkout's catalog, not the run's agent root"
     assert "Failed password" in prompt
     assert "FROM elastic | LIMIT 1" not in prompt
     assert "status: established" not in prompt
@@ -227,7 +256,7 @@ def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
 def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
     """`if catalog:` is fail-open (tools_gather.py:237) — the block is silently omitted when it
     cannot be built. That was safe while gather could still `ls` the catalog."""
-    dfn = tmp_path / "empty" / "defender"
+    dfn = tmp_path / "empty" / "agent"
     (dfn / "skills").mkdir(parents=True)
     prompt = _prompt_for(tmp_path, dfn)
 
@@ -243,7 +272,12 @@ def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
     deps = _deps(tmp_path, dfn)
     request = _request("elastic")
 
-    denied = tools_gather._template_index(dfn, "elastic", VerbGrant(role="gather", entries=()))
+    # #1108 P4 (O4): the index is a function of the agent knowledge (`deps.knowledge`, rooted at
+    # the run's agent root), not of `defender_dir`. ASSUMED SEAM: `_template_index(knowledge,
+    # system, verb_grant, view=None)`.
+    assert deps.knowledge.agent_root == dfn
+    denied = tools_gather._template_index(deps.knowledge, "elastic",
+                                          VerbGrant(role="gather", entries=()))
     assert denied.text == "", "a grant that allows nothing still rendered entries"
     assert denied.established_seen > 0, \
         "the walk must report what it FOUND, not what survived the grant — that is the whole bit"
@@ -260,9 +294,9 @@ def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
 
     # The positive control on the same address: a real read failure still says so. Without it,
     # deleting the UNAVAILABLE arm entirely would pass every assertion above.
-    empty = tmp_path / "empty" / "defender"
+    empty = tmp_path / "empty" / "agent"
     (empty / "skills").mkdir(parents=True)
-    unreadable = tools_gather._template_index(empty, "elastic")
+    unreadable = tools_gather._template_index(_deps(tmp_path / "empty", empty).knowledge, "elastic")
     assert unreadable.text == ""
     assert unreadable.established_seen == 0
     assert "could not be read" in _prompt_for(tmp_path, empty)
@@ -270,7 +304,7 @@ def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
 
 def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path):
     tree_a = _catalog(tmp_path / "a")
-    tree_b = tmp_path / "b" / "defender"
+    tree_b = tmp_path / "b" / "agent"
     qb = tree_b / "skills" / "gather" / "queries" / "identity"
     qb.mkdir(parents=True)
     (qb / "only-one.md").write_text(_tpl("identity", "only-one", goal="the sole template in tree B"))
@@ -282,8 +316,8 @@ def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path)
     assert "identity.only-one" not in prompt_a
     assert "identity.only-one" in prompt_b
     assert "elastic.sshd-auth-history" not in prompt_b
-    assert "elastic.falco-alerts" not in prompt_a
-    assert "elastic.falco-alerts" not in prompt_b
+    assert _DECOY_ID not in prompt_a, "tree A's index read the code tree's catalog (O2, O4)"
+    assert _DECOY_ID not in prompt_b, "tree B's index read the code tree's catalog (O2, O4)"
 
 
 class _ToolRecorder:
@@ -317,7 +351,7 @@ def test_d5_gather_registers_template_search_and_main_does_not():
 
 
 def test_d6_template_search_exposes_no_path_parameter():
-    """The corpus root is HARNESS-owned (deps.defender_dir), unlike lesson_read, whose path arg is
+    """The corpus root is HARNESS-owned (the run's agent root, #1108 P4), unlike lesson_read, whose path arg is
     model-supplied and decide_read-gated."""
     rec = _ToolRecorder()
     tools.register_tools(rec, GATHER_DEF.tools, FakeVerbs({}))
@@ -375,8 +409,10 @@ def test_d0b_a_hit_carries_the_template_id_and_its_path(tmp_path):
     out = tools_gather._tool_template_search(deps, "Failed password")
 
     assert "elastic.sshd-auth-history" in out
-    assert "skills/gather/queries/elastic/sshd-auth-history.md" in out
+    assert "/agent/skills/gather/queries/elastic/sshd-auth-history.md" in out, \
+        "a hit is named by its model-view path under the run's agent root (O-TEXT)"
     assert "Failed password" in out
+    assert _DECOY_ID not in out, "template_search walked the checkout's catalog (O2, O4)"
 
 
 def test_d9_search_admits_drafts_while_the_index_excludes_them(tmp_path):
@@ -451,7 +487,7 @@ def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
 def test_d10_is_untrusted_read_distinguishes_a_draft_from_an_established_template():
     """The predicate itself, at its own seam — so the wrap in the tool above cannot be satisfied
     by a string hack inside template_search."""
-    q = _REAL_CATALOG
+    q = _RUN_COPY_CATALOG
     assert permission.is_untrusted_read(q / "elastic" / "_draft" / "x.md") is True
     assert permission.is_untrusted_read(q / "elastic" / "sshd-auth-history.md") is False
     assert permission.is_untrusted_read(Path("/tmp/run/alert.json")) is True
@@ -491,7 +527,7 @@ def test_a_broad_pattern_is_bounded_and_says_that_it_truncated(tmp_path):
     assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
     assert lines_each > tools_gather._SEARCH_LINES_PER_TEMPLATE, "fixture too thin for the cap"
 
-    dfn = tmp_path / "wt" / "defender"
+    dfn = tmp_path / "wt" / "agent"
     q = dfn / "skills" / "gather" / "queries" / "elastic"
     q.mkdir(parents=True)
     body = "\n".join(f"widget line {j}" for j in range(lines_each))
@@ -513,7 +549,7 @@ def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
     corpus = 40
     assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
 
-    dfn = tmp_path / "wt" / "defender"
+    dfn = tmp_path / "wt" / "agent"
     q = dfn / "skills" / "gather" / "queries" / "zzz-last-system"
     q.mkdir(parents=True)
     (q / "the-one.md").write_text(

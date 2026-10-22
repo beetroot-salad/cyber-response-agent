@@ -27,6 +27,7 @@ from defender.learning.author.curator_engine import (  # noqa: E402
 )
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
+    RunScope,
     bind,
     compile_policy_for,
 )
@@ -382,13 +383,24 @@ def test_d5_read_bash_allow_matrix_agrees(env, which, tmpl):
 
 
 def test_d6_denylist_still_applies_inside_scope(env):
-    """d6: the secret denylist still applies INSIDE the scope — being in-shape is necessary, not sufficient."""
-    for secret in (f"{env.dfn}/lessons/.env.md", f"{env.run}/x/.ssh/id_rsa"):
-        assert not _bash(env, f"cat {secret}", "main").allow, secret
-        assert not _read(env, secret, "main").allow, secret
-    ok = f"{env.dfn}/lessons/notes.md"
-    assert _bash(env, f"cat {ok}", "main").allow
-    assert _read(env, ok, "main").allow
+    """d6: the secret denylist still applies INSIDE the scope — being in-shape is necessary, not sufficient.
+
+    #1108 P4 (O2, P-1): the lesson corpus a run reads is its tenant agent root (the run copy,
+    `RunScope.tenant_agent`), not the product tree, so the in-shape secret and its positive
+    control live there — a test-local made-up tree standing in for
+    `<T>/run-knowledge/<run_id>/agent/`."""
+    agent = env.tmp / "data" / "tenant-a" / "run-knowledge" / "run-1" / "agent"
+    (agent / "lessons").mkdir(parents=True)
+    for rel in ("lessons/notes.md", "lessons/.env.md"):
+        (agent / rel).write_text("x\n")
+    main = compile_policy_for(MAIN_DEF, run_dir=env.run, defender_dir=env.dfn,
+                              scope=RunScope(tenant_agent=agent))
+    for secret in (f"{agent}/lessons/.env.md", f"{env.run}/x/.ssh/id_rsa"):
+        assert not _bash(env, f"cat {secret}", main).allow, secret
+        assert not _read(env, secret, main).allow, secret
+    ok = f"{agent}/lessons/notes.md"
+    assert _bash(env, f"cat {ok}", main).allow
+    assert _read(env, ok, main).allow
 
 
 def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):

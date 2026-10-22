@@ -59,7 +59,7 @@ def confine(wt: Path) -> tuple[Path, ...]:
 
 def rel(corpus_name: str, filename: str = "lesson.md") -> str:
     """The repo-relative operand spelling the agent (cwd=worktree) types, e.g.
-    ``defender/lessons-actor/x.md`` — rebased on the deps' ``cwd_anchor`` by ``_resolve_operand``."""
+    ``defender/lessons-questioner/x.md`` — rebased on the deps' ``cwd_anchor`` by ``_resolve_operand``."""
     return f"defender/{corpus_name}/{filename}"
 
 

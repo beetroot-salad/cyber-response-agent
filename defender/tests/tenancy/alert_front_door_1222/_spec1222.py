@@ -493,10 +493,9 @@ LEAD_ZERO_ELASTIC = T6.lead_zero_text(T6.SHIPPED_CORRELATION_TEMPLATE)
 TABLE_WITHHELD = T6.TABLE_B
 #: Correlation on a NON-Elastic system (O1): the shipped, established, non-Elastic template
 #: `cmdb.list-all-hosts` (`verb: list-hosts`) — `_agreement` needs an established template on the
-#: dispatched system binding the holder's one query pair, and this one is in the catalog already
-#: (LZ08; executed by R92-01: base run start resolves it on this tenant, so O1 needs no planted
-#: catalog — RC21's contrary note is overturned). Coupling: if that template is ever demoted or
-#: renamed, O1's test fails for a reason unrelated to #1222.
+#: dispatched system binding the holder's one query pair. #1108 P4: the catalog is the
+#: tenant's, so `plant_tenant` writes a made-up one into the tenant's own catalog
+#: (`TENANT_CATALOG`) instead of relying on the lab's shipped template in the checkout.
 #: No Elastic row at all, and no `systems/elastic/` config (see `plant_tenant(configs=...)`).
 NON_ELASTIC_TEMPLATE = "cmdb.list-all-hosts"
 TABLE_NON_ELASTIC = """\
@@ -510,6 +509,54 @@ dispositions:
     health-check: {roles: [gather]}
 """
 LEAD_ZERO_NON_ELASTIC = T6.lead_zero_text(NON_ELASTIC_TEMPLATE)
+
+#: The made-up catalog templates a planted tenant's lead-zero config names, written into the
+#: tenant's OWN catalog (`agent/skills/gather/queries/<system>/<name>.md`). #1108 P4 (flow 3,
+#: O1, O2): run start resolves `lead-zero.yaml` against the run copy's catalog — the checkout
+#: holds none — so a tenant that grants the correlation lead carries the template it names.
+#: Front matter mirrors the template schema (id agreeing with the path, established, the verb
+#: the holder's grant binds); the bodies are made up (decision 4: no copy of lab content).
+TENANT_CATALOG: dict[str, str] = {
+    "elastic/correlate-alerts-by-entity.md": """\
+---
+id: elastic.correlate-alerts-by-entity
+status: established
+verb: alerts
+params: [end, start]
+body_substitutions: [entity_filter]
+---
+
+## Goal
+
+Fixture template (#1222 suite, #1108 P4): alerts naming one entity over a window, counted
+across every rule (correlate alerts, same host, prior alert).
+
+## Query
+
+```
+${entity_filter}
+```
+""",
+    "cmdb/list-all-hosts.md": """\
+---
+id: cmdb.list-all-hosts
+status: established
+verb: list-hosts
+params: []
+---
+
+## Goal
+
+Fixture template (#1222 suite, #1108 P4): the whole host inventory, to find the registered
+name of a host a lookup did not recognise.
+
+## Query
+
+```query
+verb: list-hosts
+```
+""",
+}
 
 
 @dataclass(frozen=True)
@@ -567,7 +614,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     (written verbatim — for a malformed file), or None (NOT written: the missing-file shape).
     `case_mapping` defaults to `case_mapping_text()` (no top-level `source:`). `lead_zero`
     defaults to the template the table's correlation holder needs. `omit_systems` drops those
-    systems' `config.env` (an unconfigured system). `lessons` plants files in the isolated product checkout (name -> text); it does not relocate the corpus into the tenant."""
+    systems' `config.env` (an unconfigured system). `lessons` plants files (name -> text) in the
+    tenant's own `agent/lessons/` (#1108 P4: the tenant owns its corpus; the checkout has none)."""
     root = Path(root) if root is not None else D.current_data_root()
     if lead_zero is None:
         lead_zero = LEAD_ZERO_NON_ELASTIC if table is TABLE_NON_ELASTIC else LEAD_ZERO_ELASTIC
@@ -584,8 +632,13 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
         planted.alert_mapping.write_text(alert_mapping, encoding="utf-8")
     elif alert_mapping is not None:
         planted.alert_mapping.write_text(alert_mapping_text(alert_mapping), encoding="utf-8")
+    for rel, text in TENANT_CATALOG.items():
+        template = planted.agent / "skills" / "gather" / "queries" / rel
+        template.parent.mkdir(parents=True, exist_ok=True)
+        template.write_text(text, encoding="utf-8")
+    _LAST_PLANTED[Path(root)] = planted
     for name, text in (lessons or {}).items():
-        plant_lesson(name, text=text)
+        plant_lesson(name, text=text, tenant=planted)
     return planted
 
 
@@ -706,26 +759,42 @@ LESSON_CHECKOUT: ContextVar[Path | None] = ContextVar("lesson_checkout_1222", de
 
 
 def checkout_defender() -> Path:
-    """The test's real product checkout, never a tenant-owned corpus."""
+    """The test's real product checkout (code only: its shims run the copied implementation).
+    #1108 P4 (O1): it holds no lesson corpus — lessons are the tenant's."""
     return LESSON_CHECKOUT.get() or DEFENDER
 
 
-def checkout_lessons() -> Path:
-    return sym("knowledge._knowledge", "KnowledgePaths").of_defender_dir(checkout_defender()).lessons_dir
+#: The tenant each test's data root last planted (`plant_tenant`), keyed by that root so no
+#: test sees another's: the tenant a bare `plant_lesson(name)` writes into.
+_LAST_PLANTED: dict[Path, Planted] = {}
+
+
+def tenant_lessons(tenant: Planted | None = None) -> Path:
+    """The runtime lesson corpus a run of `tenant` reads (default: the tenant this test last
+    planted): its OWN `agent/lessons/` (#1108 P4, O2 — a run reads `<run copy>/agent/lessons/`,
+    copied from the tenant's export; the product tree holds no corpus, O1). Spelled from the
+    tenant's agent half, never through `KnowledgePaths.of_defender_dir` (O4's census)."""
+    if tenant is None:
+        tenant = _LAST_PLANTED.get(Path(D.current_data_root()))
+        if tenant is None:
+            raise AssertionError("tenant_lessons()/plant_lesson(): no tenant planted under this "
+                                 "test's data root yet — plant_tenant() first, or pass tenant=")
+    return tenant.agent / "lessons"
 
 
 def prepare_checkout(defender_dir: Path) -> Path:
-    """Copy the real product into an isolated checkout, preserving any curator-written lessons.
+    """Copy the real product into an isolated checkout (code only).
 
     The shims run the copied implementation in a child process; no corpus reader is patched.
-    Large test/eval artifacts and caches are irrelevant to this runtime fixture.
+    Large test/eval artifacts and caches are irrelevant to this runtime fixture. #1108 P4 (O1):
+    no lesson corpus is copied or created here — a run's lessons come from its tenant's
+    knowledge (`plant_lesson` writes them there), so a lesson found by a run in this suite
+    can only have reached it through the tenant, never through the checkout.
     """
     shutil.copytree(DEFENDER, defender_dir, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns(".venv", "tests", "evals", "fixtures-e2e",
                                                  "__pycache__", "*.pyc", "lessons"))
     (defender_dir / ".venv").symlink_to(DEFENDER / ".venv", target_is_directory=True)
-    corpus = sym("knowledge._knowledge", "KnowledgePaths").of_defender_dir(defender_dir).lessons_dir
-    corpus.mkdir(exist_ok=True)
     return defender_dir
 
 
@@ -754,8 +823,11 @@ def lesson_text(name: str, *, source_signature: Sequence[str] | None = (),  # no
 
 
 def plant_lesson(name: str, *, text: str | None = None,
-                 source_signature: Sequence[str] | None = ()) -> Path:
-    corpus = checkout_lessons()
+                 source_signature: Sequence[str] | None = (),
+                 tenant: Planted | None = None) -> Path:
+    """One lesson in `tenant`'s own runtime corpus (default: the tenant this test last
+    planted) — `tenant_lessons`, #1108 P4."""
+    corpus = tenant_lessons(tenant)
     corpus.mkdir(parents=True, exist_ok=True)
     path = corpus / f"{name}.md"
     path.write_text(text if text is not None else lesson_text(

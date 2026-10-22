@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 
 from defender._io import Bound, Held, hold
-from defender._paths import PATHS
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
 #: `None` outside the lane's mounts.
@@ -88,9 +88,13 @@ def skills_view(root: Path) -> Bound:
 
 
 def repo_skills() -> dict[str, Any]:
-    """`skills=` / `where=` for a reader whose call read this checkout's own catalog (the
-    default it had before step 6): the view of `PATHS.skills_dir`, spelled as that folder."""
-    return {"skills": skills_view(PATHS.skills_dir), "where": PATHS.skills_dir}
+    """`skills=` / `where=` for a reader that needs a real-shaped skills tree it does not write:
+    the committed fixture tenant's `agent/skills` (made-up content), spelled as that folder.
+
+    #1108 P4 O1/O11: it was the view of this checkout's `PATHS.skills_dir`; the product tree
+    holds no tenant skills or catalog after P4, so product tests read the fixture instead."""
+    root = FIXTURE_AGENT / "skills"
+    return {"skills": skills_view(root), "where": root}
 
 
 @contextmanager

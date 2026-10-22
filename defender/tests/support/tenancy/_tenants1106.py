@@ -7,6 +7,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
 import importlib
+import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -38,9 +39,11 @@ REQUIRED_FILES: tuple[str, ...] = (
     "systems/case-history/mapping.yaml",
 )
 
-#: The shipped lead-zero template (it exists in the real catalog, and its front matter binds
-#: `elastic.alerts`). A fixture tenant that grants the correlation lead names it, so the
-#: run-start agreement check (#1003) passes against the checkout's own catalog.
+#: The lead-zero template the committed fixture tenant names (its front matter binds
+#: `elastic.alerts`). #1108 P4: the catalog is the TENANT's (`agent/skills/gather/queries/`, in
+#: the run copy), never the checkout's, so the run-start agreement check (#1003) passes only
+#: when the fixture's own `agent/` carries this template (old design D8: "the queries its
+#: grants and lead-zero need, `elastic.correlate-alerts-by-entity` at least").
 SHIPPED_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
 
@@ -105,10 +108,30 @@ def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
     other grants plants a tenant whose `verb-grants.yaml` says so."""
     rt = mod("runtime.run_tenant")
     ready = rt.resolve_run_tenant(
-        tenant.settings, defender_dir=defender_dir if defender_dir is not None else DEFENDER,
+        tenant.settings, **_lead_zero_catalog(rt, tenant, defender_dir),
         dispatches_lead_zero=dispatches_lead_zero)
     return rt.RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
                         **rt.resolved_settings(tenant))
+
+
+def _lead_zero_catalog(rt: Any, tenant: Any, defender_dir: Path | None) -> dict[str, Any]:
+    """Where run start resolves the lead-zero template: the tenant's own catalog.
+
+    #1108 P4 (O2, O4, flow 3 "lead-zero (templates from the copy's catalog)"): the catalog is
+    a function of an agent root, never of `defender_dir` (`KnowledgePaths.of_defender_dir` is
+    in O4's census). ASSUMED SEAM (S-G2): `resolve_run_tenant(settings, *, agent_root=<agent
+    root>, dispatches_lead_zero=...)`. A replay has no run copy of its own (the harness drives
+    the driver, not `run.py`), so the agent root it hands is the accepted tenant's own
+    `agent/` — fixture content, never the product tree.
+
+    Transitional only: until the seam exists the pre-P4 keyword (`defender_dir`, the checkout's
+    catalog) is passed, so the ~130 suites that build a tenant through this helper keep
+    reaching their own promises instead of all failing on one missing keyword. Once P4 lands
+    the checkout holds no catalog (O1), so the old branch can no longer pass a lead-zero
+    replay and is dead."""
+    if "agent_root" in inspect.signature(rt.resolve_run_tenant).parameters:
+        return {"agent_root": Path(tenant.agent)}
+    return {"defender_dir": defender_dir if defender_dir is not None else DEFENDER}
 
 
 def fixture_run_tenant(**kw: Any) -> Any:

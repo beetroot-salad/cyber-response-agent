@@ -8,12 +8,9 @@ import pytest
 
 from defender import run as run_py
 from defender import box as box_mod
-from defender.execution.box_codec import BOX_ENV_ALLOWLIST, BoxFault
 from defender.tests.support.tenancy import _tenants1106 as T
-from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS, make_run_dir, plant_tree
-from defender.tests.e2e import _replay_harness as R
-from defender.tests.tenancy.tenant_1108_p2._support import AgentReadDocker, MountedReadDocker, start_with, tree_bytes
+from defender.tests.tenancy.tenant_1108_p2._support import MountedReadDocker
 
 pytestmark = pytest.mark.e2e
 
@@ -26,156 +23,64 @@ def clean_box_env(monkeypatch):
     monkeypatch.setenv('DEFENDER_AGENT_DIR', '/wrong/inherited/agent')
 
 
-@pytest.fixture
-def scene(tmp_path):
-    tenant = T.fixture_tenant()
-    run_tenant = T.run_tenant(tenant)
-    run_dir = R.materialize(tmp_path / 'replay', R.GOLDEN_AB3)
-    return tenant, run_tenant, run_dir
+# #1108 P4 (O-A) retired P2's in-box `.tenant-id` check and the `agent` mount kind: identity is
+# checked once, at publish, and the box mounts the run copy's `agent/` plus a staged token. The
+# P2 cases that pinned the retired check moved:
+#   - test_matching_identity_is_read_only_and_precedes_message_zero  -> tenant_1108_p4/
+#     test_run_copy.py::test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_token_back
+#     (the `.tenant-id` ending partitions are the publish's, P3 `parse_tenant_id_bytes`);
+#   - test_wrong_or_malformed_box_identity_refuses_before_message_zero -> tenant_1108_p4/
+#     test_run_copy.py::test_o_a_a_box_bound_to_another_copy_refuses_before_message_zero
+#     (a merged wrong `.tenant-id` -> test_publish_child.py, stale:operator);
+#   - test_orient_host_shims_receive_the_run_tenants_agent_path -> tenant_1108_p4/
+#     test_run_isolation_e2e.py::test_o2_the_opening_messages_orientation_shows_the_copys_lessons.
+# The unsandboxed opt-out case is rewritten below onto the run copy.
 
 
-def _lifecycle(scene, docker, main, *, observed_env=None):
-    tenant, run_tenant, run_dir = scene
-    run = fixture_run(run_dir)
+def test_explicit_unsandboxed_lane_hands_its_programs_the_run_copy_not_an_inherited_path(
+        tmp_path, data_root, monkeypatch):
+    """O3 opt-out, re-rooted by #1108 P4 (O-A/O2): under the explicit unsandboxed opt-out the
+    bash lane's `DEFENDER_AGENT_DIR` is neither the inherited shell value nor the tenant's
+    clone, and the files it names are the run copy's (the clone's working tree holds a
+    different, unpublished lesson). No identity file is re-read (identity is checked at
+    publish)."""
+    import functools
+
+    from defender.execution.bash_exec import parse
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    monkeypatch.setenv('DEFENDER_ALLOW_UNSANDBOXED', '1')
+    observed: list[tuple[str, bytes]] = []
 
     def investigate(**kw):
-        assert kw['run'] is run
-        handed_run = kw['run']
-        if observed_env is not None:
-            from defender.execution.bash_exec import parse
-            command = 'printenv DEFENDER_AGENT_DIR'
-            # A neutral cwd (#1255): the executor's own model view, not this test, decides
-            # where the run folder is.
-            result = kw['box'].run_parsed(parse(command), command=command,
-                                          cwd=Path('/'), timeout=10)
-            seen = result.out.decode().strip()
-            # The identity file as the executor's programs see it, read while the run's
-            # executor (and whatever tree it stages) is live.
-            command = f'cat {seen}/.tenant-id'
-            ident = kw['box'].run_parsed(parse(command), command=command,
-                                         cwd=Path('/'), timeout=10)
-            observed_env.append((seen, ident.out))
-        return R.drive(handed_run.run_dir, run_id=str(handed_run.id), main=main,
-                       tenant=tenant, box=kw['box'])
+        command = 'printenv DEFENDER_AGENT_DIR'
+        seen = kw['box'].run_parsed(parse(command), command=command, cwd=Path('/'),
+                                    timeout=10).out.decode().strip()
+        command = f'cat {seen}/{B.LESSON_REL}'
+        lesson = kw['box'].run_parsed(parse(command), command=command, cwd=Path('/'),
+                                      timeout=10).out
+        observed.append((seen, lesson))
+        return {'output': 'p2-opt-out', 'requests': 0, 'truncated_by': None}
 
-    return run_py._run_investigation_lifecycle(
-        run=run, model='test-model', model_override=None,
-        defender_dir=T.DEFENDER, tenant=run_tenant, investigate=investigate,
-        start_box=start_with(docker), stop_box=box_mod.stop_box,
-    )
+    def no_daemon(argv, **_kw):
+        raise FileNotFoundError('docker: no daemon in this test')
 
-
-@pytest.mark.parametrize('ending', ['', '\n', '\r\n'])
-def test_matching_identity_is_read_only_and_precedes_message_zero(scene, ending):
-    """O3 positive: all three accepted tenant-id endings work through the box read-back."""
-    tenant, _, _ = scene
-    (tenant.agent / '.tenant-id').write_bytes((tenant.id + ending).encode())
-    before = tree_bytes(tenant.agent)
-    docker = AgentReadDocker(tenant.agent)
-    main = R.ReplayFn([R.Turn(text='done')])
-    _lifecycle(scene, docker, main)
-    assert main.calls == 1, 'right identity must permit the model request'
-    assert len(docker.identity_reads) == 1, 'run start never read the mounted identity'
-    # #1255 (design rev 4, P1): inside the box the agent half is `/agent`, so the identity is
-    # read there, the bind lands there, and the env names it there.
-    assert docker.identity_reads[0][-1] == '/agent/.tenant-id'
-    assert all(snapshot == before for snapshot in docker.snapshots)
-    assert tree_bytes(tenant.agent) == before, 'startup dirtied the tenant clone'
-    assert [m for m in docker.mounts() if m['source'] == str(tenant.agent)] == [
-        {'source': str(tenant.agent), 'target': '/agent', 'readonly': True}]
-    assert 'DEFENDER_AGENT_DIR' in BOX_ENV_ALLOWLIST
-    assert docker.env()['DEFENDER_AGENT_DIR'] == '/agent'
-
-
-@pytest.mark.parametrize('contents', [
-    (fixture_uuid("tenant:another-tenant") + "\n"), '', ' fixture\n', 'fixture \n', 'fixture\n\n',
-    '\ufefffixture\n', 'fixture\r', 'fixture\nother\n', 'x' * 129,
-    None, b'\xff', 'directory', 'symlink',
-], ids=['wrong-id', 'empty', 'leading-space', 'trailing-space', 'second-newline',
-        'bom', 'bare-cr', 'second-line', 'oversize', 'missing', 'invalid-utf8', 'directory', 'symlink'])
-def test_wrong_or_malformed_box_identity_refuses_before_message_zero(scene, tmp_path, contents):
-    """O3/D3: wrong mounts and every tenant-id format partition fail closed before spending."""
-    tenant, _, _ = scene
-    wrong = tmp_path / 'daemon-mapped-agent'
-    wrong.mkdir()
-    if contents == 'directory':
-        (wrong / '.tenant-id').mkdir()
-    elif contents == 'symlink':
-        (wrong / '.tenant-id').symlink_to(tenant.agent / '.tenant-id')
-    elif contents is not None:
-        # Use the actual accepted id so whitespace/format cases cannot pass as just mismatch.
-        data = contents if isinstance(contents, bytes) else contents.replace('fixture', str(tenant.id)).encode()
-        (wrong / '.tenant-id').write_bytes(data)
-    before = tree_bytes(tenant.agent)
-    docker = AgentReadDocker(tenant.agent, inside=wrong)
-    main = R.ReplayFn([R.Turn(text='must never be requested')])
-    with pytest.raises((BoxFault, SystemExit, run_py._tenant.TenantRefused)) as caught:
-        _lifecycle(scene, docker, main)
-    assert main.calls == 0, 'identity refusal came after message zero'
-    diagnostic = str(caught.value)
-    assert '.tenant-id' in diagnostic, 'refusal must name the failing identity file'
-    if contents == (fixture_uuid("tenant:another-tenant") + "\n"):
-        assert fixture_uuid("tenant:another-tenant") in diagnostic, 'mismatch must report the found tenant'
-        assert str(tenant.id) in diagnostic, 'mismatch must report the expected tenant'
-    elif contents is None:
-        assert any(word in diagnostic.lower() for word in ('missing', 'no such', 'could not read'))
-    elif contents in ('directory', 'symlink'):
-        assert any(word in diagnostic.lower() for word in ('regular', 'directory', 'link', 'could not read'))
-    elif contents == 'x' * 129:
-        assert any(word in diagnostic.lower() for word in ('128', 'larger', 'size', 'bytes'))
-    elif isinstance(contents, bytes):
-        assert any(word in diagnostic.lower() for word in ('utf', 'encoding', 'decode', 'exactly', '\\xff'))
-    else:
-        assert any(word in diagnostic.lower() for word in (
-            'exactly', 'line ending', 'line', 'format', 'whitespace', 'space', 'empty', 'bom'))
-    assert len(docker.identity_reads) == 1, 'host-side acceptance cannot prove a daemon bind'
-    assert all(snapshot == before for snapshot in docker.snapshots)
-    assert tree_bytes(tenant.agent) == before
-
-
-@pytest.mark.parametrize('contents', ['right', (fixture_uuid("tenant:another-tenant") + "\n"), None, 'directory'])
-def test_explicit_unsandboxed_lane_reads_the_accepted_path_before_message_zero(
-        scene, monkeypatch, contents):
-    """O3 opt-out: after acceptance, a host read of the same path proves the expected id."""
-    tenant, _, _ = scene
-    marker = tenant.agent / '.tenant-id'
-    marker.unlink()
-    if contents == 'right':
-        marker.write_bytes((tenant.id + '\r\n').encode())
-    elif contents == 'directory':
-        marker.mkdir()
-    elif contents is not None:
-        marker.write_text(contents, encoding='utf-8')
-    before = tree_bytes(tenant.agent)
-    monkeypatch.setenv('DEFENDER_ALLOW_UNSANDBOXED', '1')
-    docker = AgentReadDocker(tenant.agent, fail_create=True)
-    main = R.ReplayFn([R.Turn(text='done')])
-    if contents == 'right':
-        observed_env = []
-        _lifecycle(scene, docker, main, observed_env=observed_env)
-        assert main.calls == 1
-        ((seen, ident),) = observed_env
-        assert seen != '/wrong/inherited/agent', 'fallback subprocess inherited the wrong agent path'
-        assert Path(seen).name == 'agent', seen
-        assert seen != str(tenant.agent), seen
-        assert ident == (tenant.id + '\r\n').encode(), (
-            f'the agent half the fallback hands its programs does not hold the accepted '
-            f'identity: {ident!r}')
-    else:
-        with pytest.raises((BoxFault, SystemExit, run_py._tenant.TenantRefused)) as caught:
-            _lifecycle(scene, docker, main)
-        diagnostic = str(caught.value)
-        assert '.tenant-id' in diagnostic
-        if contents == (fixture_uuid("tenant:another-tenant") + "\n"):
-            assert fixture_uuid("tenant:another-tenant") in diagnostic
-            assert str(tenant.id) in diagnostic
-        elif contents is None:
-            assert any(word in diagnostic.lower() for word in ('missing', 'no such', 'could not read'))
-        else:
-            assert any(word in diagnostic.lower() for word in ('regular', 'directory', 'could not read'))
-        assert main.calls == 0
-    assert docker.identity_reads == [], 'an unboxed lane cannot prove identity through Docker'
-    assert tree_bytes(tenant.agent) == before
+    with B.run_tenant(tmp_path, data_root) as t:
+        (B.clone_dir(t) / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding='utf-8')
+        lifecycle = functools.partial(
+            run_py._run_investigation_lifecycle, investigate=investigate,
+            start_box=functools.partial(box_mod.start_box, docker=no_daemon))
+        out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit),
+                       lifecycle=lifecycle)
+        clone_agent = B.clone_dir(t) / 'agent'
+    assert out.reached, out.text()
+    assert out.rc == 0, out.text()
+    ((seen, lesson),) = observed
+    assert seen != '/wrong/inherited/agent', 'fallback subprocess inherited the wrong agent path'
+    assert seen != str(clone_agent), 'the opt-out lane was handed the tenant clone'
+    assert B.SEEDED_MARK.encode() in lesson, (
+        f'the agent half the fallback hands its programs is not the run copy: {lesson[-200:]!r}')
+    assert B.CLONE_ONLY_MARK.encode() not in lesson
 
 
 def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
@@ -228,21 +133,3 @@ def test_daemon_path_translation_preserves_the_run_process_agent_target(tmp_path
                                  tenant_agent=agent)
     expected = Path('/daemon/shared') / agent.relative_to(tmp_path)
     assert f'type=bind,source={expected},target=/agent,readonly' in create.argv
-
-
-def test_orient_host_shims_receive_the_run_tenants_agent_path(scene, monkeypatch):
-    """D1 env wiring: host-side ORIENT shims receive Tenant.agent, before content re-root P4."""
-    tenant, _, run_dir = scene
-    monkeypatch.setenv('DEFENDER_AGENT_DIR', '/wrong/inherited/agent')
-    calls = []
-
-    def shim(argv, env):
-        calls.append((list(argv), dict(env)))
-        return 'P2-ORIENT-SHIM-CONTROL' if argv[:2] == ['defender-lessons', '--tags'] else ''
-
-    main = R.ReplayFn([R.Turn(text='done')])
-    R.drive(run_dir, run_id='p2-orient-env', main=main, tenant=tenant, orient_shim=shim)
-    assert main.calls == 1
-    assert calls, 'the actual orientation never invoked its shim runner'
-    assert 'P2-ORIENT-SHIM-CONTROL' in main.seen[0], 'shim output never reached message zero'
-    assert all(env.get('DEFENDER_AGENT_DIR') == str(tenant.agent) for _, env in calls)

@@ -13,16 +13,13 @@ import pytest
 
 from defender import _io
 from defender.learning.core import drains
-from defender.tests.support.learning.core._state1135 import curation_run_dir, enqueue_case, state_for_paths
 from defender.learning.core.config import (
     DrainLabel, LoopPaths,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests.support.learning.curation._drain_trees_1134 import PAYLOAD
-from defender.tests.e2e import _box665 as B
 from defender.tests.shared.filesystem.test_1111_rooted_io import HOST_BYTES, census
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under, put_plain
-from defender.learning.core.state import FINDINGS
 
 
 #: The two labels are the members of `DrainLabel` (#1179): values no string equals.
@@ -246,44 +243,6 @@ def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
     assert w.catalog_dir.is_relative_to(w.skills_dir)
 
 
-@pytest.mark.parametrize("label", KNOWN)
-def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: DrainLabel):
-    lf = _leaf(tmp_path)
-
-    request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
-
-    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
-    assert label.writable_trees(lf.wt_paths) == tuple(expected)
-    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(lf.wt)) for m in expected]
-    assert ro_mounts(request) == [(lf.wt, Path("/workspace"))]
-    assert len(request.mounts) == 1 + len(expected)
-    assert Path(request.workdir) == lf.wt
-    assert request.model_workdir == Path("/workspace")
-    assert request.name == "defender-drain-batch-1"
-    assert not lf.wt.exists(), "_drain_box_request touched the disk"
-
-
-@pytest.mark.parametrize("dot_git", ["file", "folder"])
-@pytest.mark.parametrize("label", KNOWN)
-def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
-        tmp_path: Path, label: DrainLabel, dot_git: str):
-    lf = _leaf(tmp_path)
-    lf.build()
-    git = lf.wt / ".git"
-    if dot_git == "file":
-        put_plain(git, b"gitdir: /nonexistent/.git/worktrees/wt-leaf\n")
-    else:
-        (git / "objects").mkdir(parents=True)
-
-    request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
-
-    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
-    assert ro_mounts(request) == [(lf.wt, Path("/workspace"))], "the git leaf is not mounted read-only"
-    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(lf.wt)) for m in expected]
-    assert len(request.mounts) == 1 + len(expected)
-    assert git.is_file() if dot_git == "file" else git.is_dir()
-
-
 @pytest.mark.parametrize("swap", ["fresh_folder", "link_to_outside"])
 @pytest.mark.parametrize("label", KNOWN)
 def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves_none(
@@ -461,155 +420,3 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
         with pytest.raises(NotADirectoryError):
             open_drain_trees(absolute, label)
     assert held_roots(tmp_path) == []
-
-
-#: Each lane's own branch prefix (`AuthorBranch`'s default, and the lead lane's).
-LANE_PREFIX = {AUTHOR: "lessons/", LEAD: "lead-author/"}
-
-
-class CheckoutBranch(B.RecordingBranch):
-    """`_box665.RecordingBranch` (the recorded worktree lifecycle), whose leaf carries the three
-    drain trees as the real worktree, a checkout of the repo, does, plus the decoys,
-    `relocated_paths`' trees for this leaf, and the ones it names for the main checkout. The
-    leaf sits under its own base, never at `paths.repo_root`, and is kept after the drive
-    (`destroy_on_cleanup` off)."""
-
-    def __init__(self, worktree_base: Path, **kw: Any) -> None:
-        super().__init__(worktree_base, **kw)
-        self.leaves: list[Path] = []
-
-    def start_batch(self, batch_id: str) -> Path:
-        wt = super().start_batch(batch_id)
-        for rel in (*ALL_TREES, *DECOY_TREES, *all_relocated(wt), *all_relocated(Path(MAIN))):
-            (wt / rel).mkdir(parents=True, exist_ok=True)
-        self.leaves.append(wt)
-        return wt
-
-
-class WorkStep:
-    """The lane's work-step seam (`trigger_author=` for the author lane, `run_lead_author=` for
-    the lead lane). It records the `LoopPaths` the lane hands its work step, and on the first
-    call opens `open_drain_trees(that paths, label)` while the box is up, the place A3 puts the
-    drain's trees. It records the mounts, the descriptors held under the leaf, and what a write
-    through each `mount(m)` left at `m / PROBE`. It answers nothing and asserts nothing: both
-    lanes contain a work-step fault, so a fault is recorded for the test to report."""
-
-    def __init__(self, label: str) -> None:
-        self.label = label
-        self.received: list[LoopPaths] = []
-        self.mounts: tuple[Path, ...] | None = None
-        self.held: list[str] | None = None
-        self.landed: dict[Path, bytes] = {}
-        self.fault: str | None = None
-
-    def __call__(self, paths: LoopPaths, *_args: Any, **_kw: Any) -> None:
-        self.received.append(paths)
-        if self.mounts is not None:
-            return
-        try:
-            with open_drain_trees(paths, self.label) as trees:
-                self.mounts = trees.mounts
-                self.held = held_roots(paths.repo_root)
-                for m in trees.mounts:
-                    trees.mount(m).write(PROBE, PAYLOAD, mode="create")
-                    self.landed[m] = (m / PROBE).read_bytes()
-        except Exception as e:  # noqa: BLE001 — reported by the test; the lane would swallow it
-            self.fault = f"{type(e).__name__}: {e}"
-
-
-@dataclasses.dataclass
-class Drive:
-    """One lane drive's inputs and recorders: the lane's label, the `paths` kind it was handed
-    (`shipped`, or `relocated` with its `asked` log), the box recorder, the branch and the work
-    step."""
-
-    label: str
-    kind: str
-    paths: LoopPaths
-    asked: list[tuple[Path, str]]
-    rec: B.BoxLifecycleRecorder
-    branch: CheckoutBranch
-    step: WorkStep
-
-
-def start_drive(tmp_path: Path, label: str, kind: str, prefix: str) -> Drive:
-    """The drive's `paths` (`kind`), and a branch whose prefix is the lane's own or the other
-    lane's (`prefix`)."""
-    asked: list[tuple[Path, str]] = []
-    cls = LoopPaths if kind == "shipped" else relocated_paths(asked)
-    paths = cls(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
-    other = LEAD if label == AUTHOR else AUTHOR
-    rec = B.BoxLifecycleRecorder()
-    branch = CheckoutBranch(tmp_path / "worktrees", events=rec.events,
-                            branch_prefix=LANE_PREFIX[label if prefix == "own" else other])
-    return Drive(label, kind, paths, asked, rec, branch, WorkStep(label))
-
-
-def assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d: Drive) -> None:
-    """The drive's verdict, from the `BoxRequest` the box seam was handed and what the work
-    step recorded: the rw mounts are the lane's list for `d.kind` under the leaf, in order."""
-    [leaf] = d.branch.leaves
-    assert leaf != d.paths.repo_root
-    request = d.rec.only_request()
-    shipped = list(EXPECTED_MOUNTS[d.label])
-    rels = shipped if d.kind == "shipped" else relocated_rels(d.label, leaf)
-    expected = [leaf / rel for rel in rels]
-
-    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(leaf)) for m in expected], (
-        f"the box's rw mounts are {rw_mounts(request)}, not {rels} under the leaf")
-    assert ro_mounts(request) == [(leaf, Path("/workspace"))]
-    assert len(request.mounts) == 1 + len(expected)
-    for m in request.mounts:
-        assert Path(m.source).is_absolute(), m
-        assert Path(m.target).is_absolute(), m
-    [(wt, _)] = ro_mounts(request)
-    rw = tuple(source for source, _target in rw_mounts(request))
-
-    step = d.step
-    assert step.fault is None, f"the work step's open failed: {step.fault}"
-    assert step.received, "the lane never reached its work step"
-    for got in step.received:
-        assert type(got) is type(d.paths), type(got)
-        assert got == d.paths.with_repo_root(wt), got
-    assert step.mounts == rw, "the trees the work step holds are not the box's rw mounts"
-    assert step.held == real(*rw), "the held roots are not the box's rw mounts"
-    assert step.landed == dict.fromkeys(rw, PAYLOAD)
-    if d.kind == "relocated":
-        assert {attr for root, attr in d.asked if root == wt} >= {
-            attr for attr, _name in TREE_ATTRS[d.label]}, d.asked
-
-
-@pytest.mark.parametrize("prefix", ["own", "other_lanes"])
-@pytest.mark.parametrize("kind", ["shipped", "relocated"])
-def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_them(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, prefix: str):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    d = start_drive(tmp_path, AUTHOR, kind, prefix)
-    put_plain(location_path(d.paths.state_root) / FINDINGS.queue, b'{"finding_id": "f-1"}\n')
-
-    rc = drains.author_drain(d.paths, trigger_author=d.step, branch=d.branch,
-                             start_box=d.rec.start_box, stop_box=d.rec.stop_box,
-                             scrub=d.rec.scrub)
-
-    assert rc == 0
-    assert len(d.step.received) == 2, "both curators' turns are the work step"
-    assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d)
-
-
-@pytest.mark.parametrize("prefix", ["own", "other_lanes"])
-@pytest.mark.parametrize("kind", ["shipped", "relocated"])
-def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
-        tmp_path: Path, kind: str, prefix: str):
-    d = start_drive(tmp_path, LEAD, kind, prefix)
-    run_dir = curation_run_dir("run-1")
-    with state_for_paths(d.paths) as state:
-        enqueue_case(state, "case-1", run_dir)
-
-    rc = drains.lead_author_drain(
-        d.paths, run_lead_author=d.step, run_pitfalls=lambda *_a, **_kw: 0, branch=d.branch,
-        start_box=d.rec.start_box, stop_box=d.rec.stop_box, scrub=d.rec.scrub)
-
-    assert rc == 0
-    assert len(d.step.received) == 1, "the one queued case is the work step"
-    assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d)

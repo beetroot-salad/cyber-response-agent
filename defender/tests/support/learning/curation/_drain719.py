@@ -113,10 +113,11 @@ def make_repo(tmp_path: Path) -> Path:
 
 
 def _make_repo(tmp_path: Path) -> Path:
-    """A committed-clean git repo carrying all three corpora the four author channels
-    write, with the mutable learning state gitignored."""
+    """A committed-clean git repo carrying the live lesson corpora the author channels write
+    (#1108 P4 U5: `lessons-actor`/`lessons-environment` are deleted), with the mutable
+    learning state gitignored."""
     repo = tmp_path / "repo"
-    for corpus in ("lessons", "lessons-actor", "lessons-environment"):
+    for corpus in ("lessons", "lessons-questioner"):  # #1108 P4 U5: the retired corpora are deleted
         d = repo / "defender" / corpus
         d.mkdir(parents=True)
         (d / ".gitkeep").write_text("")

@@ -239,50 +239,68 @@ def _grant_of(call: tuple[tuple, dict]) -> Any:
 
 
 def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tenant(world, capsys):
+    """Rewritten for #1108 P4 (O-A/O-B/O2): each tenant is published for real (S0's helper) and
+    every run reads its own RUN COPY (`<T>/run-knowledge/<run_id>/`) — the box is handed that
+    copy's `agent/`, the driver and ticket writer that copy's `settings/` — never the tenant's
+    clone, the other tenant, or the checkout's committed copy. (P2/#1106 pinned the clone's
+    `agent/` as the box's `tenant_agent`, the retired `agent` mount.)"""
+    import contextlib
+
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+    from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+
     root = world["root"]
-    T.place_tenant(root, fixture_uuid("tenant:acme"), table=T.TABLE_A, marker="acme")
-    T.place_tenant(root, fixture_uuid("tenant:bravo"), table=T.TABLE_B, marker="bravo")
+    scratch = root.parent / "forge-1106"
     expected = {fixture_uuid("tenant:acme"): T.GATHER_PAIRS_A, fixture_uuid("tenant:bravo"): T.GATHER_PAIRS_B}
     run = _run()
+    with contextlib.ExitStack() as stack:
+        published = {
+            tenant_id: stack.enter_context(published_tenant(
+                scratch, root=root, tenant_id=tenant_id, repo_name=name,
+                files={**B.SEED_FILES, "settings/verb-grants.yaml": table}))
+            for tenant_id, table, name in ((fixture_uuid("tenant:acme"), T.TABLE_A, "acme"),
+                                           (fixture_uuid("tenant:bravo"), T.TABLE_B, "bravo"))}
+        for tenant_id, other in ((fixture_uuid("tenant:acme"), fixture_uuid("tenant:bravo")),
+                                 (fixture_uuid("tenant:bravo"), fixture_uuid("tenant:acme"))):
+            own = published[tenant_id]
+            _RegistryRecorder.built = []
+            driven: list[dict] = []
+            start = StartBoxRecorder(stop=False)
+            writer = TicketWriterRecorder()
+            investigate = functools.partial(
+                run._drive_investigation, registry_cls=_RegistryRecorder,
+                investigate=lambda driven=driven, **kw: (
+                    driven.append(kw) or {"output": "done", "requests": 0}))
+            rc = run.main(
+                [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"],
+                lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p, **kw: None,
+                preflight=lambda m: 0, ticket_writer=writer,
+                publish=lambda *a, own=own, **k: B.fresh(own.commit))
+            assert rc == 0, capsys.readouterr().err
+            assert len(driven) == 1
+            copy_root = B.run_copies(own) / Path(driven[0]["run"].run_dir).name
+            own_settings = copy_root / "settings"
 
-    for tenant_id, other in ((fixture_uuid("tenant:acme"), fixture_uuid("tenant:bravo")),
-                             (fixture_uuid("tenant:bravo"), fixture_uuid("tenant:acme"))):
-        world["runs_base"](tenant_id)
-        _RegistryRecorder.built = []
-        driven: list[dict] = []
-        start = StartBoxRecorder(stop=False)
-        writer = TicketWriterRecorder()
-        investigate = functools.partial(
-            run._drive_investigation, registry_cls=_RegistryRecorder,
-            investigate=lambda driven=driven, **kw: (
-                driven.append(kw) or {"output": "done", "requests": 0}))
-        rc = run.main(
-            [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"],
-            lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p, **kw: None,
-            preflight=lambda m: 0, ticket_writer=writer)
-        assert rc == 0, capsys.readouterr().err
-        own_settings = root / tenant_id / "knowledge" / "settings"
+            # O1/O-A — the box: this tenant's run copy's agent half, no settings, no clone, nothing
+            # of the other tenant.
+            assert len(start.calls) == 1, start.calls
+            assert T.reaches(start.calls, copy_root / "agent"), start.calls
+            assert not T.exposes(start.calls, own_settings), start.calls
+            assert not T.exposes(start.calls, B.clone_dir(own)), start.calls
+            assert not T.reaches(start.calls, root / other)
+            assert not T.exposes(start.calls, root / other), start.calls
 
-        # O1 — the box: this tenant's agent half, no settings path, nothing of the other tenant.
-        assert len(start.calls) == 1, start.calls
-        assert Path(start.calls[0][1]["tenant_agent"]) == \
-            (root / tenant_id / "knowledge" / "agent").resolve()
-        assert not T.reaches(start.calls, own_settings)
-        assert not T.reaches(start.calls, root / other)
-        assert not T.exposes(start.calls, own_settings), start.calls
-        assert not T.exposes(start.calls, root / other), start.calls
+            # O3 — the registry: exactly this tenant's gather pairs.
+            assert len(_RegistryRecorder.built) == 1, _RegistryRecorder.built
+            grant = _grant_of(_RegistryRecorder.built[0])
+            assert {(s, v) for s, v, _ in grant.entries} == set(expected[tenant_id]), tenant_id
 
-        # O3 — the registry: exactly this tenant's gather pairs.
-        assert len(_RegistryRecorder.built) == 1, _RegistryRecorder.built
-        grant = _grant_of(_RegistryRecorder.built[0])
-        assert {(s, v) for s, v, _ in grant.entries} == set(expected[tenant_id]), tenant_id
-
-        # O2 — the driver and the ticket writer are handed this tenant's settings folder, and
-        # neither the other tenant's nor the checkout's committed copy.
-        assert len(driven) == 1
-        for seam, payload in (("driver", driven[0]), ("ticket open", writer.opened),
-                              ("ticket record", writer.recorded)):
-            assert payload, seam
-            assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
-            assert not T.reaches(payload, root / other), f"{seam} was handed {other}'s folder"
-            assert not T.reaches(payload, T.FIXTURE_SETTINGS), f"{seam} got the checkout's"
+            # O2/O-B — the driver and the ticket writer are handed this run copy's settings, and
+            # neither the clone's, the other tenant's, nor the checkout's committed copy.
+            for seam, payload in (("driver", driven[0]), ("ticket open", writer.opened),
+                                  ("ticket record", writer.recorded)):
+                assert payload, seam
+                assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
+                assert not T.reaches(payload, B.clone_dir(own) / "settings"), f"{seam} got the clone's"
+                assert not T.reaches(payload, root / other), f"{seam} was handed {other}'s folder"
+                assert not T.reaches(payload, T.FIXTURE_SETTINGS), f"{seam} got the checkout's"

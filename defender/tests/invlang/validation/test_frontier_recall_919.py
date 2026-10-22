@@ -206,7 +206,7 @@ def _lessons_frontier():
 
 # `_write_lesson` and `_main_deps` live in `_lessons_corpus` so a second suite can use them
 # without importing this COLLECTED module (which would load it twice in one session).
-from defender.tests.support.learning.retrieval._lessons_corpus import _main_deps, _write_lesson  # noqa: E402
+from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
 
 
 def _corpus(parent: Path, name: str = "lessons") -> Path:
@@ -216,6 +216,31 @@ def _corpus(parent: Path, name: str = "lessons") -> Path:
     d = parent / name
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _run_copy_deps(tmp_path: Path):
+    """MAIN deps through the real `bind` seam (`_main_deps`'s), bound over this run's copy of
+    its tenant's knowledge — #1108 P4: the recall's corpus is the run copy's `lessons/`
+    (`<T>/run-knowledge/<run_id>/agent/lessons`, threaded as `RunScope(tenant_agent=...)`),
+    never `defender_dir/lessons` (O2, O4). Returns `(deps, run, agent_root, defender_dir)`; the
+    caller plants lessons under `agent_root` and, where it wants the stale reader caught, a
+    decoy under `defender_dir`."""
+    from dataclasses import replace
+
+    from defender.agents import MAIN_DEF
+    from defender.run_repository import Run
+    from defender.runtime.agent_definition import RunScope, bind
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    run = tmp_path / fixture_uuid("run")
+    run.mkdir()
+    dfn = tmp_path / "defender"
+    dfn.mkdir()
+    agent = tmp_path / "tenant" / "run-knowledge" / run.name / "agent"
+    agent.mkdir(parents=True)
+    deps = bind(MAIN_DEF, run, defender_dir=dfn, scope=RunScope(tenant_agent=agent))
+    return replace(deps, run=Run.under(fixture_runs_base(run.parent), run.name)), run, agent, dfn
 
 
 def _names(hits) -> list[str]:
@@ -412,12 +437,17 @@ def test_specificity_outranks_generality_and_top_k_bounds_the_list(tmp_path):
 
 def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(tmp_path):
     """CLAIM: `_tool_append_block` derives the recall over the pre- and post-append document and
-    appends the rendered section ONLY when the two differ."""
+    appends the rendered section ONLY when the two differ.
+
+    #1108 P4 (O2, O-TEXT): the recalled lesson is the RUN COPY's, shown by its model-view path
+    `/agent/lessons/<name>.md`; a lesson left in the checkout's `lessons/` (a decoy matching the
+    same open slot) is never recalled."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, run, dfn = _main_deps(tmp_path)
-    corpus = _corpus(dfn)
+    deps, run, agent, dfn = _run_copy_deps(tmp_path)
+    corpus = _corpus(agent)
     _write_lesson(corpus, "process-class-open", nodes=("type: process, slot: class",))
+    _write_lesson(_corpus(dfn), "checkout-decoy-class-open", nodes=("type: process, slot: class",))
 
     first = _tool_append_block(deps, PROLOGUE)
     assert "appended" in first
@@ -427,6 +457,12 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
     assert second.startswith("appended "), "the byte-count lead is still the first thing said"
     assert "process-class-open" in second, (
         "the append that opened `class=??` did not carry the lesson it unlocked"
+    )
+    assert "/agent/lessons/process-class-open.md" in second, (
+        "the pushed lesson is not named by the run copy's model-view path (O-TEXT)"
+    )
+    assert "checkout-decoy-class-open" not in second, (
+        "the recall read the checkout's lessons corpus, not the run copy's (O2)"
     )
 
     third = _tool_append_block(deps, PROSE_BLOCK)
@@ -462,8 +498,8 @@ def test_an_append_landing_a_half_written_block_still_leads_with_its_byte_count(
     """CLAIM: the recall never turns a write that LANDED into a failed tool call."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, run, dfn = _main_deps(tmp_path)
-    _write_lesson(_corpus(dfn), "process-class-open", nodes=("type: process, slot: class",))
+    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    _write_lesson(_corpus(agent), "process-class-open", nodes=("type: process, slot: class",))
     _tool_append_block(deps, PROLOGUE)
 
     result = _tool_append_block(deps, HALF_WRITTEN_BLOCK)
@@ -589,17 +625,18 @@ def test_the_recall_is_omitted_when_the_corpus_is_missing_or_malformed(tmp_path)
     """CLAIM: the recall never turns a landed write into a failed tool call."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, _run, dfn = _main_deps(tmp_path)
+    deps, _run, agent, dfn = _run_copy_deps(tmp_path)
     opening = PROLOGUE + OPEN_LOGINUID_BLOCK
 
-    # No corpus at all.
+    # No corpus at all (in the run copy, nor in the checkout).
+    assert not (agent / "lessons").exists()
     assert not (dfn / "lessons").exists()
     assert _tool_append_block(deps, opening).startswith("appended "), (
         "a missing lessons corpus turned a landed write into something other than an accept"
     )
 
     # A corpus whose lesson declares garbage where a selector sequence belongs.
-    corpus = _corpus(dfn)
+    corpus = _corpus(agent)
     _write_lesson(corpus, "malformed", raw_nodes="not-a-list")
     out = _tool_append_block(deps, PROLOGUE + OPEN_CLASS_BLOCK)
     assert out.startswith("appended "), (
@@ -636,8 +673,8 @@ def test_the_tool_pushes_only_the_lessons_that_matched(tmp_path):
     """CLAIM: `_tool_append_block` is wired to `match_lessons`, not to a directory listing."""
     from defender.runtime.tools import _tool_append_block
 
-    deps, _run, dfn = _main_deps(tmp_path)
-    corpus = _corpus(dfn)
+    deps, _run, agent, _dfn = _run_copy_deps(tmp_path)
+    corpus = _corpus(agent)
     _write_lesson(corpus, "matches-the-open-loginuid",
                   nodes=("type: process, slot: attrs.loginuid",))
     _write_lesson(corpus, "decoy-matches-nothing",
@@ -784,8 +821,8 @@ def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
     """CLAIM: the repair verb pushes lessons on the same terms `append_block` does."""
     from defender.runtime.tools import _tool_append_block, _tool_fix_row
 
-    deps, run, dfn = _main_deps(tmp_path)
-    corpus = _corpus(dfn)
+    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    corpus = _corpus(agent)
     _write_lesson(corpus, "tty-open", nodes=("type: process, slot: attrs.tty",))
 
     near_miss = "l-001|v-006|clas|nc"
@@ -805,10 +842,10 @@ def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
 
 def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
     from defender.runtime.tools import _tool_append_block, _tool_read_file
-    from defender.tests.support.runtime.state._1255_view import MODEL_DEFENDER
+    from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
-    deps, run, dfn = _main_deps(tmp_path)
-    corpus = _corpus(dfn)
+    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    corpus = _corpus(agent)
     _write_lesson(corpus, "readable-from-the-block", nodes=("type: process, slot: class",))
     lf = _lessons_frontier()
 
@@ -827,20 +864,22 @@ def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
     first = next(ln for ln in rendered.splitlines()
                  if ln.startswith("- ") and " — matched " in ln)
     quoted = first.removeprefix("- ").split(" — matched ")[0]
-    assert quoted ==f"{MODEL_DEFENDER}/lessons/readable-from-the-block.md", (
-        f"the block quotes {quoted!r}, not the lesson's model path under {MODEL_DEFENDER}")
+    # #1108 P4 (O2, O-TEXT): the lesson lives in the run copy, the model's `/agent` tree.
+    assert quoted == f"{MODEL_AGENT}/lessons/readable-from-the-block.md", (
+        f"the block quotes {quoted!r}, not the lesson's model path under {MODEL_AGENT}")
     body = _tool_read_file(deps, quoted)  # ModelRetry here IS the failure
     assert "lesson body" in body, f"the path the block quoted ({quoted!r}) did not read back"
 
 
 def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
-    """CLAIM: the recall lane writes `lessons_loaded.jsonl`, like `_gated_read` does."""
+    """CLAIM: the recall lane writes `lessons_loaded.jsonl`, like `_gated_read` does — #1108 P4
+    O5: for a lesson pushed from the RUN COPY's `lessons/` too."""
     import json
 
     from defender.runtime.tools import _tool_append_block
 
-    deps, run, dfn = _main_deps(tmp_path)
-    corpus = _corpus(dfn)
+    deps, run, agent, _dfn = _run_copy_deps(tmp_path)
+    corpus = _corpus(agent)
     _write_lesson(corpus, "recorded-on-push", nodes=("type: process, slot: class",))
 
     _tool_append_block(deps, PROLOGUE)

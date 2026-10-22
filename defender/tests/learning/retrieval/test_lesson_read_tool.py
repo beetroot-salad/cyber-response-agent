@@ -36,10 +36,10 @@ from defender.tests.support.learning.curation._curator_scene import (
 
 
 def _scene(tmp_path: Path):
-    """All THREE shipped corpora — this suite's subject is the curator's read confinement,
-    which is vacuous if two of the three roots do not exist."""
-    return curator_scene(
-        tmp_path, extra_corpora=("lessons-actor", "lessons-environment"))
+    """Both live corpora — this suite's subject is the curator's read confinement, which is
+    vacuous if the sibling root does not exist. (#1108 P4 U5: the retired `lessons-actor`/
+    `lessons-environment` are deleted; `lessons-questioner` is the sibling that remains.)"""
+    return curator_scene(tmp_path, extra_corpora=("lessons-questioner",))
 
 
 def _prompt(tmp_path: Path) -> Path:

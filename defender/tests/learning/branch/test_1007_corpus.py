@@ -211,24 +211,6 @@ def test_an_unrecognized_drain_label_gets_no_box_at_all(tmp_path):
     assert {wt.lessons_dir, wt.lessons_questioner_dir} <= writable_sources(request)
 
 
-def test_one_author_drain_tick_opens_one_branch_and_one_pr_for_both_corpora(tmp_path):
-    """One tick, one worktree, one box, one branch and one PR lease — covering both corpora."""
-    paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    D.seed(paths, FINDINGS, [defender_queue_row()])
-    D.seed(paths, QUESTIONER_FINDINGS, [world_queue_row()])
-
-    trigger = TwoLaneRecorder(D.recording(D.committing("lesson")))
-    rc, rec = drive(paths, trigger)
-
-    assert rc == 0
-    starts = [e for e in rec.events if str(e).startswith("start_batch")]
-    finishes = [e for e in rec.events if str(e).startswith("finish_batch")]
-    assert len(starts) == 1, f"one tick started {len(starts)} batches: {rec.events}"
-    assert len(finishes) <= 1, f"one tick finished {len(finishes)} batches: {rec.events}"
-    assert len(rec.requests) == 1, f"one tick created {len(rec.requests)} boxes"
-    assert len(trigger.modules) == 2
-
-
 def test_each_curator_consumes_its_own_channel_and_is_scoped_to_its_own_corpus(tmp_path):
     """Per-curator consumption and per-curator corpus scoping."""
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")

@@ -12,9 +12,9 @@ from defender.learning.author.curator_engine import CuratorDeps
 def curator_scene(tmp_path: Path, *, extra_corpora: Sequence[str] = ()) -> SimpleNamespace:
     """A worktree, a lessons corpus, a runs dir and an empty pending-findings file.
 
-    `extra_corpora` creates the sibling lesson corpora (`lessons-actor`,
-    `lessons-environment`) that only the read-confinement suite needs — it asserts the
-    curator can reach all three shipped corpora, which is vacuous if two do not exist.
+    `extra_corpora` creates sibling lesson corpora (`lessons-questioner`) that only the
+    read-confinement suite needs — its confinement checks are vacuous if the sibling does not
+    exist. (#1108 P4 U5: the retired `lessons-actor`/`lessons-environment` are deleted.)
     """
     repo = tmp_path / "wt"
     corpus = repo / "defender" / "lessons"

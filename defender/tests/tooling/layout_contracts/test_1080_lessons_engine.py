@@ -739,33 +739,48 @@ def plant_import(path: Path, stmt: str) -> None:
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def _first_real_lesson() -> Path:
-    names = sorted(p for p in S.LESSONS_CONTENT.glob("*.md") if not p.name.startswith("_"))
-    assert names, "the real corpus holds no lesson"
-    return names[0]
+def _run_copy_agent(tmp: Path) -> Path:
+    """A run copy's `agent/` (`<T>/run-knowledge/<run_id>/agent/`, r3 data model) holding the
+    committed fixture tenant's made-up agent content (decision 4) — never the product tree."""
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
+
+    agent = tmp / "data" / "tenant" / "run-knowledge" / "run" / "agent"
+    shutil.copytree(FIXTURE_AGENT, agent, symlinks=True)
+    return agent
 
 
 def test_lessons_show_names_a_file_outside_the_corpus_after_the_engine_moved(tmp_path):
+    """#1108 P4 O2/O4 (was: the shim over the product tree's real corpus). The checkout's
+    `defender-lessons` reads the corpus of the agent root `DEFENDER_AGENT_DIR` names — the run
+    copy's `agent/` — not a corpus inside the code tree: `--show` names the run copy's file,
+    the listing names exactly the fixture's lessons (a lab lesson from the product tree in the
+    listing is the violation), and a code copy holding no corpus answers `--tags` the same.
+    ASSUMED SEAM (S-G2): the engine resolves `$DEFENDER_AGENT_DIR/lessons` on every lane."""
     engine_home()
     assert observe_s021(tmp_path) == golden("s021")
 
+    agent = _run_copy_agent(tmp_path)
+    corpus = agent / "lessons"
+    expected = sorted(p.name for p in corpus.glob("*.md") if not p.name.startswith("_"))
+    assert expected, "the committed fixture tenant holds no lesson"
     real_shim = S.REPO_ROOT / SHIM_REL
-    env = bare_env(tmp_path)
-    lesson = _first_real_lesson()
-    shown = S.run([real_shim, "--show", f"defender/lessons/{lesson.name}"], cwd=tmp_path,
-                  env=env)
+    env = bare_env(tmp_path, DEFENDER_AGENT_DIR=str(agent))
+
+    lesson = corpus / expected[0]
+    shown = S.run([real_shim, "--show", str(lesson)], cwd=tmp_path, env=env)
     assert shown.returncode == 0, shown.stderr.decode()
     assert shown.stdout.decode().splitlines()[0] == f"--- {lesson.resolve()}"
 
     listing = S.run([real_shim], cwd=tmp_path, env=env)
     paths = [ln.split("\t", 1)[0] for ln in listing.stdout.decode().splitlines()]
     assert paths, listing.stderr.decode()
-    assert all(Path(p).parent == S.LESSONS_CONTENT.resolve() for p in paths), paths
+    assert all(Path(p).parent == corpus.resolve() for p in paths), paths
+    assert sorted(Path(p).name for p in paths) == expected, paths
 
-    copy = code_tree(tmp_path / "real-content")
-    shutil.copytree(S.LESSONS_CONTENT, copy / "defender" / "lessons", symlinks=True)
+    copy = code_tree(tmp_path / "no-corpus")
+    assert not (copy / "defender" / "lessons").exists()
     real_tags = S.run([real_shim, "--tags"], cwd=tmp_path, env=env)
-    copy_tags = shim(copy, ("--tags",), tmp=tmp_path)
+    copy_tags = shim(copy, ("--tags",), tmp=tmp_path, env=env)
     assert real_tags.returncode == 0, real_tags.stderr.decode()
     assert real_tags.stdout.strip()
     assert real_tags.stdout == copy_tags.stdout

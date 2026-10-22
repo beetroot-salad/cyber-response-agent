@@ -651,10 +651,12 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
     assert egress["connected"] is False
     assert accepted == []
 
+    # #1108 P4 (O1): the product tree holds no `lessons/` — the read-only probe targets the
+    # checkout's own root, which every box mounts and P4 keeps.
     poison = _probe(box, run_dir, "o4erofs", _WRITE_PATH,
-                    "/defender/lessons/o4.md")
+                    "/defender/o4.md")
     assert poison["errno"] == errno_mod.EROFS, poison
-    assert not (DEFENDER / "lessons" / "o4.md").exists()
+    assert not (DEFENDER / "o4.md").exists()
 
 
 def test_boxspec_carries_runtime_rootfs_and_lifecycle():
@@ -691,7 +693,7 @@ def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path
     with _box(run_dir, spec=BoxSpec.from_env({BoxSpec.ENV_VAR: runtime})) as b:
         absent = _probe(b, run_dir, f"floor-abs-{runtime}", _READ_PATH, str(outside))
         erofs = _probe(b, run_dir, f"floor-ro-{runtime}", _WRITE_PATH,
-                       "/defender/lessons/floor.md")
+                       "/defender/floor.md")  # #1108 P4 (O1): no `lessons/` in the product
         sibling = _probe(b, run_dir, f"floor-sib-{runtime}", _READ_PATH,
                          str(sibling_run / "gather_raw" / "l-001.lead.json"))
         with _echo_listener() as (host, port, accepted):

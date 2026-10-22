@@ -1,7 +1,8 @@
-"""Explicit host identities, package ownership and dormant tenant delivery."""
+"""Explicit host identities, package ownership and where tenant delivery is wired (#1108 P4)."""
 from __future__ import annotations
 
 import ast
+import importlib
 
 from ._support import DEFENDER, target
 
@@ -32,27 +33,121 @@ def test_delivery_has_no_disk_credential_location():
     assert list(_spellings("git-credentials")) == []
 
 
-def test_tenant_delivery_has_no_production_callers_until_p4():
+#: P3's delivery package. P4 wires it into host-side delivery processes (drains, `tenant.py`,
+#: the launch-time publish child); the run process never imports it (P-3).
+_DELIVERY = "defender.learning.author.version_control"
+_TENANT_DELIVERY = f"{_DELIVERY}.delivery.TenantDelivery"
+
+
+def _p4_census():
+    # The #1108 P4 census engine (symbol resolution and the static import closure); lazy, so
+    # this module collects whatever state that contract is in.
+    return importlib.import_module("defender.tests.tenancy.tenant_1108_p4.test_census")
+
+
+def _delivery_modules(closure):
+    return sorted(m for m in closure if m == _DELIVERY or m.startswith(_DELIVERY + "."))
+
+
+def test_the_run_process_never_imports_tenant_delivery():
+    """P-3 (#1108 P4, replacing P3's dormancy ban): the run process — `run.py` and
+    `run_common.py` and everything they import, at module level, inside a function, or by
+    an `import_module` string — never reaches the delivery package. The launch-time publish
+    is a separate child process; the run only receives its outcome."""
     target()
-    uses = []
-    for path, tree in production_trees():
-        if path.startswith(_OWNER):
-            continue
-        for node in non_docstring_nodes(tree):
-            names = []
-            if isinstance(node, ast.Name):
-                names.append(node.id)
-            elif isinstance(node, ast.Attribute):
-                names.append(node.attr)
-            elif isinstance(node, ast.alias):
-                names.extend((node.name, node.asname or ""))  # lint-ast-resolve: ok — dormant-symbol lexical ban includes aliases, not binding resolution
-            elif isinstance(node, ast.ImportFrom):
-                names.append(node.module or "")
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                names.append(node.value)
-            if any(name == "TenantDelivery" or "tenant_delivery" in name.split(".") for name in names):
-                uses.append(f"{path}:{node.lineno}")
-    assert uses == [], f"P3 delivery is dormant; production wiring belongs to P4: {uses}"
+    census = _p4_census()
+    closure = census.static_import_closure(census.RUN_ENTRIES)
+    assert len(closure) > 50, "the closure walk found almost nothing: it is blind, not clean"
+    reached = _delivery_modules(closure)
+    chains = []
+    for module in reached:
+        chain, at = [], module
+        while at is not None:
+            chain.append(at)
+            at = closure[at]
+        chains.append(" <- ".join(chain))
+    assert reached == [], "the run process imports tenant delivery:\n  " + "\n  ".join(chains)
+
+
+def test_the_run_closure_walk_sees_lazy_aliased_and_string_imports(tmp_path):
+    """P-3 positive control: on a planted tree, the same walk reaches the delivery package
+    through a function-local aliased from-import two modules away and through an
+    `import_module` string — the evasions a module-level-only walk would miss — while a
+    module only NAMED to spawn a child (`-m`, the separate publish process P-3 wants) is not
+    an import."""
+    census = _p4_census()
+    root = tmp_path / "defender"
+    for rel, text in {
+        "run.py": "def main():\n    from .helper import go\n    return go()\n",
+        "helper.py": ("import importlib\n"
+                      "def go():\n"
+                      "    from defender.learning.author import version_control as vc\n"
+                      "    return vc, importlib.import_module('defender.learning.author.version_control.delivery')\n"),
+        "quiet.py": ("import subprocess, sys\n"
+                     "def main():\n"
+                     "    return subprocess.run([sys.executable, '-m', "
+                     "'defender.learning.author.version_control.delivery'])\n"),
+        "learning/__init__.py": "", "learning/author/__init__.py": "",
+        "learning/author/version_control/__init__.py": "",
+        "learning/author/version_control/delivery.py": "class TenantDelivery: ...\n",
+    }.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    reached = _delivery_modules(census.static_import_closure(("defender.run",), root=root))
+    assert reached == [_DELIVERY, f"{_DELIVERY}.delivery"], reached
+    assert _delivery_modules(census.static_import_closure(("defender.quiet",), root=root)) == []
+
+
+def _references_tenant_delivery(path, tree, census) -> bool:
+    """Does the module at `path` (under `defender/`) reference `TenantDelivery`, resolved by
+    symbol — an import of it under any alias, through the package door, or an attribute
+    chain reaching it?"""
+    astlib = census._astlib
+    resolver = census.Census()
+    module, package = astlib.module_and_package(path)
+    env = astlib.module_env(tree, module=module, package=package)
+    for node in ast.walk(tree):
+        origins = []
+        if isinstance(node, ast.ImportFrom):
+            source = astlib.import_source(node, package)
+            origins = [f"{source}.{alias.name}" for alias in node.names]
+        elif isinstance(node, (ast.Name, ast.Attribute)):
+            origins = [astlib.origin(node, env) or ""]
+        for found in origins:
+            canonical = resolver.canonical(found) if found else ""
+            if canonical == _TENANT_DELIVERY or canonical.startswith(_TENANT_DELIVERY + "."):
+                return True
+    return False
+
+
+def test_the_caller_census_resolves_aliases_and_the_door():
+    """Positive/negative control for the caller census: an aliased import through the
+    package door and a module-alias attribute chain are references; a same-named local
+    class is not."""
+    census = _p4_census()
+    door = ast.parse("from defender.learning.author.version_control import TenantDelivery as TD\n"
+                     "def f(t):\n    return TD.open(t)\n")
+    chain = ast.parse("import defender.learning.author.version_control as vc\n"
+                      "def f(t):\n    return vc.TenantDelivery.open(t)\n")
+    local = ast.parse("class TenantDelivery: ...\ndef f(t):\n    return TenantDelivery()\n")
+    assert _references_tenant_delivery("learning/core/planted.py", door, census)
+    assert _references_tenant_delivery("learning/core/planted.py", chain, census)
+    assert not _references_tenant_delivery("learning/core/planted.py", local, census)
+
+
+def test_tenant_delivery_has_production_callers_outside_the_run_process():
+    """#1108 P4 wires P3's delivery (replacing the dormancy ban): `TenantDelivery` is
+    referenced by at least one production module outside its package — a host-side delivery
+    process (drains, revert, `tenant.py`, the publish child) — and none of them is in the run
+    process's import closure."""
+    target()
+    census = _p4_census()
+    module_of = census._astlib.module_and_package
+    callers = {module_of(path)[0] for path, tree in production_trees()
+               if not path.startswith(_OWNER) and _references_tenant_delivery(path, tree, census)}
+    assert callers, "TenantDelivery has no production caller: P4 wires none"
+    in_run = sorted(callers & set(census.static_import_closure(census.RUN_ENTRIES)))
+    assert in_run == [], f"TenantDelivery callers inside the run process: {in_run}"
 
 
 #: Prose a model may be handed: every text file of these kinds under `defender/` except the
