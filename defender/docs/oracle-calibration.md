@@ -582,7 +582,7 @@ egress IP to the firewall's SSH allow-list, and remove it afterwards.
 `defender/run.py` boxes its bash lane in a container, and under
 docker-outside-of-Docker the run dir's in-container path is not the host path the
 bind mount resolves, so the box cannot start. `DEFENDER_ALLOW_UNSANDBOXED=1` is
-the documented local escape hatch (`runtime-sandbox-design.md`); the permission
+the documented local escape hatch ([archived runtime sandbox design](archive/runtime-sandbox-design.md)); the permission
 gate still applies, only the container boundary is dropped.
 
 ## What the 2026-07-26 pilot campaign measured

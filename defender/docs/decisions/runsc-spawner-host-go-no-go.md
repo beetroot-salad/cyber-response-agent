@@ -8,7 +8,7 @@ groups: defender, runtime, sandbox, security
 gVisor-isolate design needs — a read-only bind, a read-write bind, a
 bind-mounted host unix socket (`--host-uds=open`), and `--network=none` with a
 loopback-only netstack. This clears the one *existential* unknown in
-[`defender/docs/runtime-sandbox-design.md`](../runtime-sandbox-design.md):
+[`defender/docs/runtime-sandbox-design.md`](../archive/runtime-sandbox-design.md):
 the isolate is deployable on the intended v1 host, so #549 (Agent Vault) and the
 Phase-1 build (#550) can proceed on top of it.
 

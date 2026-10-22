@@ -6,7 +6,7 @@ groups: defender, runtime, security, threat-model
 
 **Decision.** This is the risk register the isolation work argues *from*. It exists
 because the sandbox rollout ([`runtime-isolation-executor-model.md`](runtime-isolation-executor-model.md),
-[`runtime-sandbox-design.md`](../runtime-sandbox-design.md)) was
+[`runtime-sandbox-design.md`](../archive/runtime-sandbox-design.md)) was
 scoped mechanism-first — gVisor vs. microVM, broker vs. no broker — without a
 written statement of what we are defending, against whom, and which classes the
 mechanism does not touch. Every honest limit in those docs is a line item here
