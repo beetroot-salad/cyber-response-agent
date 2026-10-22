@@ -1,6 +1,10 @@
 # Independent contract review
 
-Read when reviewing a candidate contract. You did not author these tests. Receive the current design and decisions, grounding evidence/base, tests, map and project conventions; do not request the author's conversation or defence. Inspect and run focused checks, but return findings rather than modifying the reviewed artifact. Derive the required behavior from the design before trusting the author's coverage map.
+Read when reviewing a candidate contract. You did not author these tests. Read the design once, whole; outline tests and source with `py-outline` before reading line ranges, rather than dumping whole files. Receive the current design and decisions, grounding evidence/base, tests, map and project conventions; do not request the author's conversation or defence. Inspect and run focused checks, but return findings rather than modifying the reviewed artifact. Derive the required behavior from the design before trusting the author's coverage map.
+
+## Design check
+
+When charged with the design check, you read the design and a thin sketch, not a finished suite. Answer one question: does the design, made concrete by these cases, specify the right behavior completely enough to write a thorough contract against? Look for contradictions between promises, choices the sketch had to make that the design does not, promises no sketch case could express at an observable boundary, and missing flows the design implies. Do not assess discrimination, variant coverage or test mechanics; the sketch is deliberately thin. Return design-level findings grouped by underlying decision, each with a proposed dissolution and trade-offs, using the fidelity guidance below. A clean check means the design is ready for thorough authoring, not that the contract is.
 
 ## Fidelity and conservation
 
@@ -48,4 +52,4 @@ Each finding has an ID, evidence or reproducer, affected design promise and test
 
 Return the input design and test revisions, checks actually run with outcomes, material findings first, and remaining verification obligations. A clean review means no findings within the stated review scope. Recheck affected revisions and shared consequences after repairs; do not let an old clean verdict certify changed assertions.
 
-The initial review panel consists of one whole-contract Opus reviewer at high effort and two or three Sonnet reviewers at high effort with distinct, design-relevant lenses. Specify each lens's question and reconcile every reviewer's output before calling review complete. Repairs need targeted rechecks by the affected reviewers, not a fresh full panel unless material revisions invalidate its scope. A tests-only blind reader remains optional.
+The design check is one Opus reader at high effort. The review panel after thorough authoring consists of one whole-contract Opus reviewer at high effort and two or three Sonnet reviewers at high effort with distinct, design-relevant lenses. Specify each lens's question and reconcile every reviewer's output before calling review complete. Repairs need targeted rechecks of the affected assertions, not a fresh full panel unless material revisions invalidate its scope. Run each recheck as a fresh reviewer briefed with the findings, the repair diff and the affected tests; do not resume an idle earlier reviewer. A tests-only blind reader remains optional.

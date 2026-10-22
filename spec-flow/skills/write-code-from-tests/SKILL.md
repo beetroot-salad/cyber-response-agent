@@ -9,7 +9,7 @@ effort: medium
 
 Implement the design against its committed executable contract. Dispatch two groups: **honest implementers** make the tests pass with real code; **contract adversaries** make the same tests pass with deliberately incorrect code. Their outputs are independent and both are needed before readiness. A green suite alone is not a correctness verdict.
 
-Inputs are the current design/decisions, immutable contract ref and base, suite paths, write-tests' durable coverage/review handoff, and project profile (`.claude/spec-flow.json`). Read the profile; derive missing gate/harness facts from the repo or use init rather than guess.
+Inputs are the current design/decisions, immutable contract ref and base, suite paths, write-tests' durable coverage/review handoff, the code map, and project profile (`.claude/spec-flow.json`). Read the profile; derive missing gate/harness facts from the repo or use init rather than guess.
 
 **Make code satisfy the contract; do not change the contract to fit code.** The design and tests must agree. A conflict is a finding to resolve, not permission to pick whichever is easier. Data models, flows and chosen architecture remain binding even where tests cannot observe them fully.
 
@@ -33,8 +33,8 @@ Do not silently substitute a chosen architectural mechanism because another make
 
 For a new run, start both groups from the **same immutable contract revision** before honest implementation is written. On resume, honest workers continue from implementation HEAD; reuse completed attack evidence when its recorded design, contract, environment and scope are unchanged, and dispatch missing/stale work against the immutable contract ref. Do not restart implementation merely to satisfy initial ordering. Select explicit model/effort for both groups, using stronger reasoning for coupled implementation or inventive attacks and cheaper work for deterministic checks:
 
-- **Honest group:** the implementation worktree, design/decisions, contract and coverage record, profile, owned files, and §3's charge. Use a capable model at effort appropriate to the coupled logic; select explicitly rather than inherit a low orchestration budget.
-- **Adversarial group:** `references/adversary.md`, design, contract ref/map, profile, and attack deck (`.claude/spec-flow-attacks.md`). Each gets a detached worktree at that contract ref. It never sees honest implementation or its diff. Return reproducible attacks and the attempts ledger, not changes to merge.
+- **Honest group:** the implementation worktree, design/decisions, contract and coverage record, code map, profile, owned files, and §3's charge. Workers start from the code map and open raw files to check an entry they rely on or to read what they change; a wrong or missing entry is reported and fixed in the map. Use a capable model at effort appropriate to the coupled logic; select explicitly rather than inherit a low orchestration budget.
+- **Adversarial group:** `references/adversary.md`, design, contract ref/map, code map, profile, and attack deck (`.claude/spec-flow-attacks.md`). Each gets a detached worktree at that contract ref. It never sees honest implementation or its diff. Return reproducible attacks and the attempts ledger, not changes to merge.
 
 Collect findings while the honest group works. Group them by cause and consider whether a model/flow change dissolves several; local bugs can still deserve local fixes. Route:
 

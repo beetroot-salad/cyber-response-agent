@@ -2,6 +2,10 @@
 
 Read when authoring or repairing tests. Inputs: the current design and decisions, grounding evidence and base, test profile/conventions, assigned obligations and files, existing shared machinery, and relevant findings. Work only in the designated worktree and owned files. Return changed paths, obligation/test mapping, checks and observations, remaining assertion reachability gaps, and findings. Do not implement production behavior or edit another writer's files.
 
+## Sketch
+
+When charged with the sketch, write the thinnest suite that makes the design concrete: one representative case per important promise and per main flow, through real entry points, with explicit expected results. Skip variants, partitions, interaction depth and discrimination checks; the thorough pass owns those. Every place where writing a setup or an expected value forces a choice the design does not make is the sketch's main output: report it as a finding with the case that exposed it, rather than picking an answer. Keep cases well-formed so they can carry into the thorough pass. Return the cases, the promise each one covers, and the gaps.
+
 ## Translate promises into executable cases
 
 Independently understand the intended behavior before copying any existing test expectation. Start with a real entry point and an observable result for each important promise. Use unit tests for narrow rules and integration/end-to-end tests for wiring and flows. An isolated unit test does not establish that production uses the rule.
@@ -11,6 +15,16 @@ For each scenario, identify the condition, action, expected result, observation 
 Use the design properties to generate relevant variants and interactions: identity/replay, partial progress/recovery, shared-state ordering, removed-reader survival, alternate access paths, or guard partitions where applicable. Do not multiply the full Cartesian product of cases or write one test per imagined exception. Prefer a few cases that distinguish materially different outcomes, plus property-based checks where the invariant and oracle are clear.
 
 Keep design commitments distinct from convenient signatures. Choose local seams and test machinery under existing conventions; surface choices that impose a new architecture, state owner, or lifecycle. A missing target import can be expected before implementation; it is not a reason to commit a production skeleton.
+
+## Read narrowly, write tersely
+
+Everything you read or write stays in your context and is re-sent on every later step; tests you write are read again by every reviewer, adversary and implementer.
+
+- Read the design once, whole; it is the shared truth and language. Do not re-read it.
+- Start from the code map for where things are. Open raw files to check an entry you rely on or to read what you change; report a wrong or missing entry instead of working around it.
+- For existing tests, helpers and source, run `py-outline <file-or-dir>` first (`--tests` for test names and fixtures only). Choose from the outline, then read only the line ranges you need: the tests you are changing, and one or two neighbours whose conventions you will follow. Do not dump whole files through the shell.
+- After an edit, check the diff instead of re-reading the file.
+- A docstring is at most two lines: the promised outcome and the obligation ID it enforces. Do not restate setup, rationale or the design; the test body carries the detail and the contract map carries the reasoning. Comments only where the test body cannot speak for itself, such as why a fixture reaches the stated fault. Match the density of neighbouring tests in the suite, not above it.
 
 ## Use real observations
 

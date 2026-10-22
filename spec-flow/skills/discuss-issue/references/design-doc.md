@@ -50,6 +50,10 @@ claims:
     verdict: holds
 ```
 
+### Code map
+
+Grounding already reads the code the design touches. Keep what it learned as a **code map** so later workers start from it instead of re-reading the same files. It records where things are, not what should happen: entry points and their callers, injection seams, the data owners and stores involved, the test harness and shared fixtures a contract would use, and conventions the suite follows. Every entry cites `path:start-end` at the recorded base, so a reader can check any line cheaply. Keep it compact, on the order of a few thousand tokens; it is an index into the code, not a copy of it. Facts that support a design decision still belong in `claims:` with their probes; the map may point to them by ID.
+
 Include the actual claims block in the issue/document handoff or a durably linked companion that the next worker can access cold. The current write-tests ledger must inherit the block verbatim; local scratch paths alone are not a durable handoff. Avoid making the human read the ledger to understand the design.
 
 ## Readiness and amendments

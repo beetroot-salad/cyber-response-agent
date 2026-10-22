@@ -1,6 +1,6 @@
 # Decomposing a large contract
 
-Read only when the suite or its review cannot fit in one focused context. Decompose work by coherent obligations and stable ownership boundaries; a fixed number of tests or files is not a sound cut.
+Read only when the suite or its review cannot fit in one focused context. The sketch and design check are never decomposed; split only the thorough pass, after the design check has settled what the slices share. Decompose work by coherent obligations and stable ownership boundaries; a fixed number of tests or files is not a sound cut.
 
 Before dispatch, each slice needs a closed dossier: current design and decisions, owned obligations/files, relevant facts and interfaces, shared test machinery, and acceptance that can be checked without waiting for another writer to invent its semantics. A proposed interface wrapping an external system needs grounding in the real system's behavior, including relevant failures; a written signature alone does not establish that behavior.
 
