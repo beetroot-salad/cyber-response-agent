@@ -136,8 +136,8 @@ def test_a_schema_rejected_call_on_a_real_system_still_records_it(tmp_path):
 
     handoffs = _build_pitfalls_handoffs(_queued(rows), systems=frozenset({"elastic"}))
     paths = [h["path"] for h in handoffs]
-    assert len(paths) == 1 and paths[0].endswith("skills/elastic/execution.md"), (
-        f"the rejection no longer reaches the pitfalls curator at all: {paths}")
+    assert len(paths) == 1, f"the rejection no longer reaches the pitfalls curator at all: {paths}"
+    assert paths[0].endswith("skills/elastic/execution.md"), paths
     # #1108 P4 (O1, O4, O7): the system skill the curator is pointed at is the TENANT's (its
     # draft's `agent/skills/<system>/`, spelled from `KnowledgePaths`), never the product tree's.
     assert not paths[0].startswith("defender/"), (

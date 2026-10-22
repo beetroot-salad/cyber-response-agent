@@ -91,7 +91,7 @@ def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, t
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     target = elsewhere / "secret.txt"
-    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")
+    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     before = snapshot_outside(elsewhere)
 
     plant_symlink(run / writer.artifact, target)
@@ -454,7 +454,7 @@ def test_the_drain_worktree_writers_meet_a_planted_alias_the_same_way(tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     target = elsewhere / "secret.txt"
-    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")
+    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     before = snapshot_outside(elsewhere)
 
     # 1. the lane's OWN production writer — the fault-path corpus restore

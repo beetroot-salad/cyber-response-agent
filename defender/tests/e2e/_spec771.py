@@ -388,7 +388,7 @@ def worktree_tree(at: Path) -> Path:
     return at
 
 
-def outside(tmp_path: Path, name: str = "secret.txt", text: str = "ORIGINAL OUTSIDE\n") -> Path:
+def outside(tmp_path: Path, name: str = "secret.txt", text: str = "ORIGINAL OUTSIDE\n") -> Path:  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     """A file OUTSIDE every shared tree — the redirect target an alias aims a write at.
 
     Sited as a sibling of the run dir rather than under it, because `run_dir.parent` is where

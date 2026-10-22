@@ -53,22 +53,6 @@ def _isolated_roots(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
 
 
-class RepoBranch(B.RecordingBranch):
-    """`AuthorBranch`'s seam over a REAL git repo rather than a bare temp leaf.
-
-    Legacy (#1108 P4 deletes `branch=`): kept only for the importers not yet re-spelled onto the
-    tenant path (`test_1134_curator_label`, `test_1195_lessons_run_windows`, `test_1178_run_gate`);
-    delete with the last of them. This file's own cases drive `drive_tenant_author_drain`."""
-
-    def __init__(self, repo: Path, **kw) -> None:
-        super().__init__(repo.parent, **kw)
-        self._repo = repo
-
-    def start_batch(self, batch_id: str) -> Path:
-        self.events.append(f"start_batch:{batch_id}")
-        return self._repo
-
-
 class TriggerRecorder:
     """The `trigger_author=` seam: records the inbound payload of every curator trigger, and
     runs the REAL findings curator for the findings one."""
@@ -111,19 +95,6 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
                 family_default=J.as_reply_text(J.family_reply())),
             draws=1, state=state)
     return ep, J.judge_record(ep)
-
-
-def drive_author_drain(paths, trigger, *, rec=None):
-    """The REAL `author_drain` entry point over its five injection seams.
-
-    Legacy (`branch=`/`scrub=`, deleted by #1108 P4): kept only for
-    `test_1135_regression_wrappers` until it is re-spelled; this file uses
-    `drive_tenant_author_drain`."""
-    rec = rec or B.BoxLifecycleRecorder()
-    rc = drains.author_drain(
-        paths, trigger_author=trigger, branch=RepoBranch(paths.repo_root, events=rec.events),
-        start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub)
-    return rc, rec
 
 
 @pytest.fixture

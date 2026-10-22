@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import shutil
 
-import pytest
 
 from defender._git import GitError
 from defender.tests.support.learning.curation import _curator1134 as C
@@ -22,7 +21,8 @@ def test_the_draft_lane_observation_channel_sees_a_commit_and_a_reset(tmp_path):
     from defender.learning.author.version_control import ChangeSet
 
     lane = C.draft_lane(tmp_path)
-    assert lane.landed() == [] and lane.commits() == []
+    assert lane.landed() == []
+    assert lane.commits() == []
     (lane.lessons_dir / "x.md").write_text("x\n", encoding="utf-8")
     (lane.lessons_dir / "stray.md").write_text("never committed\n", encoding="utf-8")
     change = [c for c in lane.batch.change_set() if c.path == "agent/lessons/x.md"]

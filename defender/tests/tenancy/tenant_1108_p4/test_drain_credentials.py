@@ -50,14 +50,19 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     LESSON_NAME,
     BoxSpy,
     CuratorTrigger,
+    LeadStep,
     author_drain,
     critical_text,
     drain_paths,
+    executed_lead,
+    lead_author_drain,
     product_repo,
     queue,
+    queued_run,
     remote_branches,
     under,
 )
+from defender.tests.support.shared._locations_1210 import location_path
 
 def _login(t: Any, config: Path, vault: AppRoleVault) -> Any:
     return vc().issuer_login(t.tenant, issuer_config=config, transport=vault.transport)
@@ -213,6 +218,70 @@ def test_o9_a_drain_with_no_issuer_config_refuses_before_any_model_call(
     assert trigger.calls == []
     assert box.requests == []
     assert remote_branches(t.remote) == {}
+
+
+@pytest.mark.parametrize("missing", ["config", "binding"])
+def test_o9_a_lead_tick_that_cannot_log_in_is_the_stages_one_line_refusal_and_serves_nothing(
+        p4_tenant, tmp_path, monkeypatch, caplog, missing):
+    """O9 on the lead lane's P4 path (restores the refusal shape `test_1105_pr2_review_fixes_2`'s
+    deleted no-data-root case pinned, over a refusal P4 keeps: no issuer client config file, or
+    no forge binding in the tenant row). The stage runner turns it into exit 2 with ONE critical
+    line naming the cause and no traceback; no box starts, the lane's steps are handed nothing,
+    and the queued curation row stays at the top of the queue, not in flight. Positive control:
+    the same tick with the config and the binding in place logs in and serves the row."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    t = p4_tenant
+    vault = AppRoleVault(t.tenant_id)
+    t.server.token = vault.minted()
+    config = write_issuer_config(tmp_path / "playground-issuer" / "client")
+    if missing == "config":
+        bind_forge(t)
+        config.unlink()
+    else:
+        unbind_forge(t)
+    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+    run = queued_run(t, paths, "p4-lead-refused").name
+    case = "case-p4-lead-refused"
+    queue_dir = Path(location_path(paths.state_root)) / "author-queue"
+    assert (queue_dir / f"{case}.json").is_file(), "control: the row is read where it was queued"
+    step = LeadStep(executed={run: [executed_lead("cmdb.owner-by-tag")]}, edits={})
+    pitfalls_calls: list[Any] = []
+    box = BoxSpy()
+
+    def pitfalls(*a: Any, **k: Any) -> int:
+        pitfalls_calls.append((a, k))
+        return 0
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        rc = lead_author_drain(t, paths, box=box, run_lead_author=step, run_pitfalls=pitfalls,
+                               issuer_config=config, issuer_transport=vault.transport)
+
+    assert rc == 2, critical_text(caplog)
+    critical = [r.getMessage() for r in caplog.records if r.levelno >= logging.CRITICAL]
+    assert len(critical) == 1, critical
+    said = critical[0].lower()
+    assert ("issuer" in said and "config" in said) if missing == "config" else "forge" in said, said
+    assert "\n" not in critical[0], critical[0]
+    assert [r.getMessage() for r in caplog.records if r.exc_info] == [], "a traceback was logged"
+    assert vault.calls == []
+    assert box.requests == [], "a box was started for a tick that could not log in"
+    assert step.served == []
+    assert pitfalls_calls == []
+    assert (queue_dir / f"{case}.json").is_file(), "the row left the top of the queue"
+    assert not (queue_dir / "inflight" / f"{case}.json").is_file(), "the row was left in flight"
+    assert remote_branches(t.remote, "lead-author/") == {}
+
+    # Control: config and binding in place, the same tick logs in and serves the row.
+    write_issuer_config(tmp_path / "playground-issuer" / "client")
+    bind_forge(t)
+    caplog.clear()
+    rc = lead_author_drain(t, paths, box=box, run_lead_author=step, run_pitfalls=pitfalls,
+                           issuer_config=config, issuer_transport=vault.transport)
+    assert rc == 0, critical_text(caplog)
+    assert vault.logins() == [{"role_id": ROLE_ID, "secret_id": SECRET_ID}]
+    assert step.served == [run]
 
 
 def test_o8_the_dev_issuer_client_config_lies_under_no_drain_box_mount_source(p4_tenant):

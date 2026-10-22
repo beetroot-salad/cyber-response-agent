@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
-import logging
 import os
 import re
 from pathlib import Path
@@ -44,43 +43,22 @@ def _pitfall_at_threshold(paths: Any, monkeypatch: Any) -> None:
                             state=state_for_paths(paths))
 
 
-def test_1_a_tick_with_rows_and_no_data_root_is_the_stages_configuration_refusal(
-        tmp_path, monkeypatch, caplog):
-    from defender.learning.core.cli import _run_stage
-    from defender.learning.core.config import FatalConfigError
+@pytest.fixture
+def published(tmp_path, data_root):
+    """`test_1105_pr2_review_fixes.published`: the fixture tenant published for real, its forge
+    bound — #1108 P4's lead-author drain is tenant-selected, so its ticks run over it."""
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
-    t = R1._good(tmp_path, R1.RID_R1)
-    root = os.environ[P.DATA_ROOT_ENV]
-    paths = P.loop_paths(tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": R1.RID_R1})
-    monkeypatch.delenv(P.DATA_ROOT_ENV)
-    box = R1._Box()
-    lane = P.Lane()
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        yield t
 
-    err = H.raised(R1._tick, paths, lane=lane, pitfalls=[], box=box)
-    assert isinstance(err, FatalConfigError), f"the tick's refusal: {err!r}"
-    assert isinstance(err.__cause__, _tenant.TenantRefused), err.__cause__
 
-    caplog.clear()
-    with caplog.at_level(logging.CRITICAL):
-        got = H.raised(lambda: _run_stage(
-            lambda: R1._tick(paths, lane=lane, pitfalls=[], box=box)))
-        assert got is None, f"the stage let the refusal out: {got!r}"
-        rc = _run_stage(lambda: R1._tick(paths, lane=lane, pitfalls=[], box=box))
-    assert rc == 2
-    critical = [r for r in caplog.records if r.levelno >= logging.CRITICAL]
-    assert critical, "the refusal was not logged"
-    assert P.DATA_ROOT_ENV in critical[0].getMessage(), critical[0].getMessage()
-    assert "\n" not in critical[0].getMessage()
-    assert all(r.exc_info is None for r in caplog.records), "a traceback was logged"
-    assert box.started == [], "a box was started for a tick that could not serve its rows"
-    assert _queued_top(paths, "case-t")
-    assert not _inflight(paths, "case-t")
-    assert lane.handed == []
-
-    monkeypatch.setenv(P.DATA_ROOT_ENV, root)
-    assert _run_stage(lambda: R1._tick(paths, lane=lane, pitfalls=[], box=box)) == 0
-    assert lane.run_dirs == [Path(location_path(t.runs)) / R1.RID_R1], "control: the row was not served"
+# #1105 PR 2 finding 1's first case — a tick with rows and no configured data root is the
+# stage's configuration refusal — is retired by #1108 P4 (OD12 class i): every drain is
+# tenant-selected and rehydrates its rows under the SELECTED tenant's own root, so the scratch
+# path it pinned cannot arise. Covered by
+# `test_1105_pr2_review_fixes.py::test_c_a_tenant_tick_serves_its_rows_from_its_own_root_without_the_env`.
 
 
 class _EnqueueingBox(R1._Box):
@@ -97,19 +75,22 @@ class _EnqueueingBox(R1._Box):
 
 
 @pytest.mark.parametrize("root_set", [True, False], ids=["root-set", "root-unset"])
-def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(tmp_path, monkeypatch, root_set):
-    t = R1._good(tmp_path, R1.RID_R1)
+def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(published, tmp_path, monkeypatch,
+                                                         root_set):
+    """#1108 P4: over the published tenant's drain paths, the REAL tenant-selected tick."""
+    t = published
+    H.make_run(H.runs_folder(t.tenant), R1.RID_R1)
     root = os.environ[P.DATA_ROOT_ENV]
-    paths = P.loop_paths(tmp_path)
+    paths = R1._tenant_paths(t, tmp_path)
     _pitfall_at_threshold(paths, monkeypatch)
     if not root_set:
         monkeypatch.delenv(P.DATA_ROOT_ENV)
-    row = {"case_id": "late", "tenant_id": H.T_ID, "run_id": R1.RID_R1}
+    row = {"case_id": "late", "tenant_id": t.tenant_id, "run_id": R1.RID_R1}
     box = _EnqueueingBox(paths, row)
     lane = P.Lane()
     pitfalls: list[str] = []
 
-    rc = R1._tick(paths, lane=lane, pitfalls=pitfalls, box=box)
+    rc = R1._tick(t, paths, lane=lane, pitfalls=pitfalls, box=box)
     assert rc == 0
     assert box.started, "the tick never started its box"
     assert pitfalls == ["pitfalls"], "the pitfalls step did not run"
@@ -118,8 +99,9 @@ def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(tmp_path, monkeypatch,
     assert not _inflight(paths, "late"), "the late row was claimed"
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
-    assert R1._tick(paths, lane=lane, pitfalls=[], box=R1._Box()) == 0
-    assert lane.run_dirs == [Path(location_path(t.runs)) / R1.RID_R1], "control: the next tick did not serve it"
+    assert R1._tick(t, paths, lane=lane, pitfalls=[], box=R1._Box()) == 0
+    assert lane.run_dirs == [Path(location_path(t.tenant.runs)) / R1.RID_R1], (
+        "control: the next tick did not serve it")
 
 
 def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d9_tenant):
@@ -167,16 +149,19 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     assert got.out == ""
 
 
-def test_4_a_quarantined_curation_row_shows_its_address(tmp_path):
+def test_4_a_quarantined_curation_row_shows_its_address(published, tmp_path):
+    """#1108 P4: the row is quarantined by the REAL tenant-selected tick over the published
+    tenant's drain paths."""
     from defender.learning.frontend import serialize_queues
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.learning.core._state1135 import state_for_paths
 
-    R1._good(tmp_path)
-    paths = P.loop_paths(tmp_path)
+    t = published
+    H.runs_folder(t.tenant)
+    paths = R1._tenant_paths(t, tmp_path)
     gone_run = fixture_uuid("nope")  # #1187: a well-formed run id (a uuid4) naming no run
-    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": H.T_ID, "run_id": gone_run})
-    assert R1._tick(paths, lane=P.Lane(), pitfalls=[], box=R1._Box()) == 0
+    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": t.tenant_id, "run_id": gone_run})
+    assert R1._tick(t, paths, lane=P.Lane(), pitfalls=[], box=R1._Box()) == 0
     assert P.dead_letter(paths, "gone") is not None, "control: the row was not quarantined"
 
     view = serialize_queues.build_view(paths, state_for_paths(paths))
@@ -184,7 +169,7 @@ def test_4_a_quarantined_curation_row_shows_its_address(tmp_path):
     assert len(rows) == 1, view["quarantine"]["markers"]
     row = rows[0]
     assert row["failed"] == "artifact-missing"
-    assert (row.get("tenant_id"), row.get("run_id")) == (H.T_ID, gone_run), row
+    assert (row.get("tenant_id"), row.get("run_id")) == (t.tenant_id, gone_run), row
     assert "run_dir" not in row, row
 
 

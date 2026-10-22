@@ -64,7 +64,7 @@ def test_non_contradicting_draft_stays_silenced_below_threshold(
 
 
 def test_draft_with_no_contradicts_field_stays_silenced(run_dir: Path, monkeypatch, tmp_path):
-    """A draft written before this field existed (no `contradicts_skill:` key at all) takes the ORIGINAL..."""
+    """A draft written before this field existed (no `contradicts_skill:` key at all) takes the original..."""
     draft = _one_draft(tmp_path)  # no contradicts_skill key at all
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
     deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])

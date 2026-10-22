@@ -30,13 +30,19 @@
 # injects one changes with the seam (O5), as a harness edit. A test that injects the seam
 # as a lambda naming any positional parameter is in `tests` itself
 # (`trigger_author (lambda implementor)`); `lambda *a, **k: ...` binds no shape.
+#
+# PRUNED by #1108 P4 (hand edit, not a regenerate — a regenerate scans today's tree and wipes
+# this record): the rows of the tests and helpers P4 deleted (test_1134_curator_git_bounds.py,
+# test_1134_curator_git_compare.py, test_1134_curator_v3_holes.py, and the retired lead-author
+# drain / fault-path / 773 / 952 tests) are gone, and the counts below are recounted
+# (were tests 153, asserts 591, via_shared_helpers_only 299, helpers 37).
 summary:
   base: "d9128afa"
-  tests: 153
+  tests: 149
   files: 27
-  asserts: 591
-  via_shared_helpers_only: 299
-  helpers: 37
+  asserts: 566
+  via_shared_helpers_only: 257
+  helpers: 27
   seam_implementors: 2
   removed_names:
     "claim_markers": "O3 rewritten-tier helper"
@@ -49,7 +55,7 @@ summary:
     "graveyard_file": "O3 rewritten-tier helper"
     "stuck_report_file": "O3 rewritten-tier helper"
     "rotate_queue_locked": "O3 rewritten-tier helper"
-    "_pending_deliveries": "O3 rewritten-tier helper"
+    "_pending_deliveries": "O3 rewritten-tier helper"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
     "learning_state_root": "O4/D5 removal"
     "_queue_trust_root": "O4/D5 removal"
     "PENDING_DIR": "O4/D5 removal"
@@ -139,7 +145,7 @@ tests:
         new: same
       - old: "assert {r['finding_id'] for r in D.pending(channel)} == set(queued), \"the committed rows left the queue before the batch's PR — `hold_committed=True` is what keeps them there for the next tick to retire\""
         new: same
-      - old: "assert drive_author_drain(paths, TriggerRecorder(second))[0] == 0"
+      - old: "assert drive_author_drain(paths, TriggerRecorder(second))[0] == 0"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
       - old: "assert second.calls == [], 'the second tick authored the same findings again — the corpus attribution the first tick wrote is not being read back'"
         new: same
@@ -275,20 +281,6 @@ tests:
       - old: "assert drains._has_lead_author_work(paths) is False, 'the queue still reports work on a request nothing can ever serve'"
         new: "assert drains._has_lead_author_work(state_for_paths(paths)) is False, 'the queue still reports work on a request nothing can ever serve'"
   - file: "defender/tests/learning/test_loop.py"
-    test: "test_lead_author_drain_skips_when_lease_held"
-    fixture-only: true
-    reaches:
-      - "enqueue_for_authoring"
-    asserts:
-      - old: "assert rc == 0"
-        new: same
-      - old: "assert seen == []"
-        new: same
-      - old: "assert 'start' not in branch.events"
-        new: same
-      - old: "assert (paths.author_queue_dir / 'case-lease.json').exists()"
-        new: same
-  - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_singleton_lock_distinct_from_lessons"
     fixture-only: true
     reaches:
@@ -335,66 +327,6 @@ tests:
       - old: "assert json.loads(marker.read_text())['attempts'] == expected"
         new: same
       - old: "assert not failed.exists()"
-        new: same
-  - file: "defender/tests/learning/test_loop.py"
-    test: "test_lead_author_drain_opens_distinct_lead_author_pr"
-    fixture-only: true
-    reaches:
-      - "enqueue_for_authoring"
-    asserts:
-      - old: "assert rc == 0"
-        new: same
-      - old: "assert forge.open_calls[0]['head'].startswith('lead-author/')"
-        new: same
-      - old: "assert not forge.open_calls[0]['head'].startswith('lessons/')"
-        new: same
-      - old: "assert forge.list_calls == ['lead-author/']"
-        new: same
-  - file: "defender/tests/learning/test_loop.py"
-    test: "test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick"
-    fixture-only: true
-    reaches:
-      - "enqueue_for_authoring"
-    asserts:
-      - old: "assert drains.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub) == 0"
-        new: same
-      - old: "assert len(forge.open_calls) == 1"
-        new: same
-      - old: "assert [json.loads(r.read_text())['branch'] for r in records] == [head]"
-        new: same
-      - old: "assert not (paths.author_queue_dir / 'case-pr.json').exists(), 'the served run was re-queued'"
-        new: same
-      - old: "assert _real(work, 'rev-parse', '--verify', f'refs/heads/{head}').returncode == 0"
-        new: same
-      - old: "assert drains.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub) == 0"
-        new: same
-      - old: "assert len(served) == 1, \"the retained batch's run was served again\""
-        new: same
-      - old: "assert [c['head'] for c in forge.open_calls] == [head, head]"
-        new: same
-      - old: "assert forge.head_calls == [head], 'delivery must look for an open PR before opening one'"
-        new: same
-      - old: "assert list(paths.pending_delivery_dir.glob('*.json')) == []"
-        new: same
-      - old: "assert head in remote, 'the retained branch never reached origin'"
-        new: same
-      - old: "assert f'delivered retained branch {head}: opened PR https://github.com/o/r/pull/78' in err"
-        new: same
-  - file: "defender/tests/learning/test_loop.py"
-    test: "test_lead_author_drain_resets_worktree_between_markers"
-    fixture-only: true
-    reaches:
-      - "enqueue_for_authoring"
-    asserts:
-      - old: "assert clean_at_entry['case-a-poison'] is True"
-        new: same
-      - old: "assert clean_at_entry['case-b-good'] is True"
-        new: same
-      - old: "assert end.stdout.strip() == ''"
-        new: same
-      - old: "assert (paths.author_queue_dir / 'failed' / 'case-a-poison.json').exists()"
-        new: same
-      - old: "assert not (paths.author_queue_dir / 'case-b-good.json').exists()"
         new: same
   - file: "defender/tests/learning/branch/test_1007_corpus.py"
     test: "test_nothing_lands_outside_the_declared_write_set"
@@ -2017,7 +1949,7 @@ tests:
         new: same
       - old: "assert branch.events == ['lease-check', 'start', 'finish', 'cleanup']"
         new: same
-      - old: "assert [r['branch'] for r in _pending_deliveries(paths)] == [f'lessons/{branch.batch_id}']"
+      - old: "assert [r['branch'] for r in _pending_deliveries(paths)] == [f'lessons/{branch.batch_id}']"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
       - old: "assert any((line.endswith(expected) for line in err.splitlines())), f\"the lessons lane's line must be the lane-neutral sentence ALONE:\\n{err}\""
         new: same
@@ -2366,51 +2298,14 @@ via_shared_helpers_only:   # reach a removed name ONLY through a shared test mod
   # changes, and then it moves to `tests` with its asserts (JF11).
   - {file: "defender/tests/learning/branch/test_1007_corpus.py", test: "test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact", reaches: ["stuck_report_file via _drain719.stuck_records"]}
   - {file: "defender/tests/integrations/test_1035_one_roster_read.py", test: "test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_tree", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_link_lesson_citing_the_batch_is_unattributable_and_left_for_the_scrub", reaches: ["graveyard_file via _spec773.build_questioner_scene", "graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_control_the_same_bytes_as_a_plain_lesson_are_attributed_and_committed", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_control_an_unattributable_plain_lesson_is_swept_by_the_fault_restore", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_non_md_link_stray_in_the_corpus_is_refused_and_the_tick_is_stuck", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_control_a_non_md_plain_stray_is_reverted_and_the_tick_commits", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_stray_in_the_sibling_corpus_goes_through_the_sibling_mount", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_link_left_by_the_repair_at_an_unapproved_name_is_refused_and_propagates", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_control_a_plain_file_left_by_the_repair_at_an_unapproved_name_is_removed", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_snapshot_name", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_o5_3_control_with_nothing_planted_the_snapshot_file_is_restored", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_fifo_at_a_new_name_is_left_and_the_fault_still_retires", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_linked_folder_holding_a_snapshot_name_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_corpus_mount_the_agent_removed_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_non_folder_at_a_holding_folders_name_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_failing_disk_on_the_fault_restore_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_before_state_git_cannot_read_raises_out_of_run_batch_before_the_agent", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_corpus_the_held_mount_cannot_read_still_has_its_before_state", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_nested_lesson_the_agent_rewrote_is_restored_on_the_fault_path", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_a_gitignored_name_the_agent_made_survives_a_faulted_tick", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_the_snapshot_attribution_and_fault_restore_use_cfg_corpus", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_attribution_asks_cfg_corpus_and_a_refused_read_cites_nothing", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_drain.py", test: "test_the_verifier_judges_the_text_cfg_corpus_reads", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_gitignore_fifo_the_agent_leaves_is_a_stuck_git_probe_not_a_hung_tick", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitignore_is_a_stray_and_the_tick_commits", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_gitattributes_fifo_the_agent_leaves_is_never_opened_and_the_tick_commits", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitattributes_is_a_stray_reverted_before_the_commit", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_gitattributes_fifo_on_the_fault_path_is_never_opened_and_the_fault_retires", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitattributes_on_the_fault_path_is_swept_and_the_fault_retires", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_comparison_that_does_not_answer_is_the_ticks_probe_and_the_undo_writes_back", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_every_git_call_the_tick_makes_before_its_commit_is_bounded", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_every_git_call_the_fault_undo_makes_is_bounded_and_the_fault_keeps_its_routing", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_fault_undo_whose_rev_parse_does_not_answer_keeps_the_fault_and_deletes_nothing", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_fault_undo_whose_reset_does_not_answer_keeps_the_fault_and_still_restores", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_fault_undo_whose_status_does_not_answer_sweeps_what_git_ls_files_names", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_control_a_fault_undo_whose_git_answers_sweeps_and_restores_without_a_fallback", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_gitattributes_fifo_beside_a_rewritten_gitkeep_is_never_opened_by_its_checkout", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitattributes_beside_a_rewritten_gitkeep_is_reverted_with_it", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_a_read_slower_than_a_short_git_timeout_is_a_probe_error_naming_it", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_control_the_same_slow_read_answers_under_a_long_git_timeout", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py", test: "test_the_commit_is_not_bounded_a_pre_commit_hook_slower_than_git_timeout_still_commits", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_compare.py", test: "test_a_git_failure_in_the_settle_comparison_is_the_ticks_stuck_git_probe", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_git_compare.py", test: "test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
   - {file: "defender/tests/learning/curation/test_1134_curator_label.py", test: "test_author_drains_real_default_seam_carries_the_label_to_the_open", reaches: ["stuck_report_file via _drain719.stuck_records"]}
-  - {file: "defender/tests/learning/curation/test_1134_curator_label.py", test: "test_a_missing_corpus_mount_is_a_hold_fault_each_curator_records_stuck", reaches: ["stuck_report_file via _drain719.stuck_records"]}
   - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_commit_fn_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_approved_list_and_deletions_list_are_both_empty_773", reaches: ["graveyard_file via _spec773.build_scene"]}
@@ -2433,9 +2328,6 @@ via_shared_helpers_only:   # reach a removed name ONLY through a shared test mod
   - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_git_status_reports_an_untracked_file_under_the_corpus_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_git_status_reports_a_rename_pair_or_a_mode_or_name_only_change_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_a_mode_only_change_with_identical_bytes_is_treated_as_unchanged_773", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_git_status_reports_an_unexpected_two_letter_status_code_773", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_git_status_call_the_check_steps_paths_are_derived_from_fails_773", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_a_git_read_inside_the_new_check_step_that_loses_the_index_lock_race_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_773_commit_list.py", test: "test_verify_agent_state_after_repair_spawn_depends_on_a_failing_git_read_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_773_deferral.py", test: "test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceiling_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/learning/curation/test_773_deferral.py", test: "test_every_deferred_finding_is_named_in_the_held_reports_deferred_group_773", reaches: ["graveyard_file via _spec773.build_scene"]}
@@ -2631,8 +2523,6 @@ via_shared_helpers_only:   # reach a removed name ONLY through a shared test mod
   - {file: "defender/tests/learning/core/test_881_loop_plumbing.py", test: "test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_list", reaches: ["acquire_flock via _drain719.Holder.__enter__", "stuck_report_file via _drain719.stuck_records"]}
   - {file: "defender/tests/learning/judge/test_921_enqueue_gate.py", test: "test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate", reaches: ["stuck_report_file via _drain719.stuck_records"]}
   - {file: "defender/tests/learning/core/test_952_consumption_follows_durability.py", test: "test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
-  - {file: "defender/tests/learning/core/test_952_consumption_follows_durability.py", test: "test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_failure", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
-  - {file: "defender/tests/learning/core/test_952_consumption_follows_durability.py", test: "test_952_o1_a_git_fault_from_finish_batch_propagates_after_the_consumption", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
   - {file: "defender/tests/learning/core/test_952_consumption_follows_durability.py", test: "test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_nothing_committed", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
   - {file: "defender/tests/learning/core/test_952_consumption_follows_durability.py", test: "test_952_o5_run_pitfalls_default_consumes_exactly_as_today", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
   - {file: "defender/tests/learning/core/test_952_consumption_follows_durability.py", test: "test_952_g_a_held_only_deferred_tick_defers_the_decline_bump", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
@@ -2731,56 +2621,6 @@ helpers:
     function: "_scene"
     reaches:
       - "graveyard_file via _spec773.build_scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_gitignore_scene"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_gitattributes_scene"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_fault_scene"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_census_scene"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_census_run"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_stalled_calls"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 3
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_undo_scene"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_undo_run"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_gitkeep_scene"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
-    asserts: 0
-  - file: "defender/tests/learning/curation/test_1134_curator_git_bounds.py"
-    function: "_slow_head_run"
-    reaches:
-      - "graveyard_file via test_1134_curator_drain._scene"
     asserts: 0
   - file: "defender/tests/learning/curation/test_773_deferral.py"
     function: "_orphan_tick"

@@ -24,23 +24,24 @@ from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, 
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
     Spawn,
-    commit_all,
     reducer_surface_text,
-    seed_tree,
+    seed_agent_files,
+    seed_product,
     shim_row,
-    write_reducer_surface,
 )
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._lead_author_1134 import (
     OUT_MARK,
     Scene,
     clear,
+    draft_lead_deps,
+    draft_scene_over,
     lead_trees,
     logged,
     outcome,
     place,
     plant_state,
     raised,
-    scene_over,
     write,
 )
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
@@ -57,7 +58,6 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
     SKILL_MD_NAME,
     TEMPLATE_NAME,
     WAZUH_LEAD,
-    _deps,
     _lead,
     _refusing_trees,
     _run_dir,
@@ -73,11 +73,11 @@ from defender.learning.core.state import PITFALLS
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
 
-def _head_mode(repo: Path, rel: str) -> str:
-    """The git mode `rel` is committed with at HEAD (`100644` a file, `120000` a link)."""
+def _head_mode(repo: Path, rel: str, rev: str = "HEAD") -> str:
+    """The git mode `rel` is committed with at `rev` (`100644` a file, `120000` a link)."""
     # The code under test (the pitfalls / lead commit) runs no `ls-tree`: the query shape this
     # shares is tenant.py's committed-id read (#1120), which no test here exercises.
-    return _git.git(["ls-tree", "HEAD", "--", rel], cwd=repo).split(" ", 1)[0]  # lint-oracle: ok — not the code under test's query
+    return _git.git(["ls-tree", rev, "--", rel], cwd=repo).split(" ", 1)[0]  # lint-oracle: ok — not the code under test's query
 
 
 #: The curator's edit: one pitfall appended under the reducer's `## Common pitfalls`, a
@@ -86,25 +86,29 @@ EDITED_REDUCER = reducer_surface_text(bullets=(OUT_MARK,))
 REDUCER_REFUSALS = {"link": "unreadable as a file", "hardlink": "unreadable as UTF-8 text"}
 
 
-def _pitfalls_tree(tmp_path: Path) -> LoopPaths:
-    """A committed tree carrying the reducer surface, and three queued reducer rows (a
-    `defender-sql` mistake each), so the tick offers the reducer surface to its curator."""
-    repo = seed_tree(tmp_path, adapters=("elastic", "cmdb"), markers=("elastic",),
-                     skills=("elastic",), catalog=(), non_systems=("gather",))
-    write_reducer_surface(repo)
-    commit_all(repo, "seed the reducer surface")
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
-    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], state=_state1135.state_for_paths(paths))
-    return paths
+def _pitfalls_lane(tmp_path: Path) -> C.DraftLane:
+    """#1108 P4 (O7, OD6, OD12 class ii): a started batch whose draft carries the reducer add-on
+    (`REDUCER_REL`, in the batch base) and the `elastic` marker and skill, the product checkout
+    holding the `elastic` and `cmdb` adapters, and three queued reducer rows (a `defender-sql`
+    mistake each), so the tick offers the reducer surface to its curator."""
+    product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
+    files = {**seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
+                                non_systems=("gather",)),
+             REDUCER_REL.removeprefix("agent/"): reducer_surface_text()}
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=files, product=product)
+    location_path(lane.paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)],
+                            state=_state1135.state_for_paths(lane.paths))
+    return lane
 
 
 @pytest.mark.parametrize("left", ["plain", "link", "hardlink"])
 def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
         tmp_path: Path, monkeypatch, left: str):
+    """Over a batch draft (ASSUMED SEAM `run_pitfalls(..., batch=)`); what landed is read from
+    the batch branch, whose tip stands where HEAD stood."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    paths = _pitfalls_tree(tmp_path)
-    repo = paths.repo_root
+    lane = _pitfalls_lane(tmp_path)
     target = write(tmp_path / "outside" / "reducer.md", EDITED_REDUCER)
 
     def curate(root: Path) -> None:
@@ -117,22 +121,36 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
         else:
             os.link(target, at)
 
-    head = _git.git_head_sha(repo)
+    head = lane.base
     watch = {"opens": [target]} if left == "link" else {"reads": [target]}
-    with lead_trees(paths) as trees, kernel_watch(**watch) as events:
+    with C.draft_trees(lane) as trees, kernel_watch(**watch) as events:
         got = outcome(lambda: pitfalls_curator.run_pitfalls(
-            paths=paths, trees=trees, invoke=Spawn(curate)))
+            paths=lane.paths, trees=trees, batch=lane.batch,
+            invoke=Spawn(curate, root=Path(lane.batch.draft_root))))
         seen = events()
 
     assert seen == [], f"the gate opened or read the outside file: {seen}"
-    assert _head_mode(repo, REDUCER_REL) == "100644"
+    assert _head_mode(lane.clone, REDUCER_REL, lane.tip()) == "100644"
     if left == "plain":
         assert got == ("returned", 0), got
-        assert _git.git_head_sha(repo) != head, "the control's edit was not committed"
-        assert _git.git_show_file(repo, "HEAD", REDUCER_REL) == EDITED_REDUCER
+        assert lane.tip() != head, "the control's edit was not committed"
+        assert lane.text_at_tip(REDUCER_REL) == EDITED_REDUCER
         return
     assert raised(got, "LeadAuthorError", REDUCER_REFUSALS[left]), got
-    assert _git.git_head_sha(repo) == head, "a link or a hard link was committed"
+    assert lane.tip() == head, "a link or a hard link was committed"
+
+
+def _lead_lane(tmp_path: Path) -> C.DraftLane:
+    """#1108 P4 (O7, OD6, OD12 class ii): `_worktree`'s tree as a started batch's draft (the
+    `elastic` and `wazuh` markers and catalogs, the `elastic` skill, the catalog schema, in the
+    batch base), its `elastic` and `wazuh` adapters in the product checkout."""
+    product = seed_product(tmp_path, adapters=("elastic", "wazuh"))
+    files = {**seed_agent_files(markers=("elastic", "wazuh"), skills=("elastic",),
+                                catalog=("elastic", "wazuh")),
+             "skills/gather/queries/SCHEMA.md": "# template schema\n"}
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=files, product=product)
+    location_path(lane.paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    return lane
 
 
 @dataclasses.dataclass(frozen=True)
@@ -165,12 +183,18 @@ LEFTS = [
 @pytest.mark.parametrize("what", LEFTS, ids=lambda w: w.id)
 def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
         tmp_path: Path, what: Left, left: str, caplog):
-    repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    """#1108 P4 (O7, OD6, OD12 class ii): over a batch draft (`_worktree`'s tree as the tenant's
+    `agent/skills`, its adapters in the product checkout), the lane's deps built on the batch
+    (ASSUMED SEAM `build_lead_author_deps(..., batch=)`, `draft_lead_deps`); what landed is read
+    from the batch branch, whose tip stands where HEAD stood."""
+    product = seed_product(tmp_path, adapters=("elastic", "wazuh"))
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=seed_agent_files(
+        markers=("elastic", "wazuh"), skills=("elastic",), catalog=("elastic", "wazuh")))
+    paths = lane.paths
     location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir()
     target = write(tmp_path / "outside" / Path(what.name).name, what.text)
-    at = paths.skills_dir / what.name
+    at = lane.skills_dir / what.name
 
     def leave(_run_dir: Path) -> None:
         at.unlink(missing_ok=True)
@@ -182,22 +206,22 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
             os.link(target, at)
 
     spawn = LeadAuthorSpawn(leave)
-    head = _git.git_head_sha(repo)
+    head = lane.base
     watch = {"opens": [target]} if left == "link" else {"reads": [target]}
-    with lead_trees(paths) as trees, kernel_watch(**watch) as events:
-        got = outcome(lambda: lead_author.run(
-            run_of(run_dir), label=LEAD, paths=paths, deps=_deps(paths, trees, spawn, [ELASTIC_LEAD])))
+    deps = draft_lead_deps(lane, invoke_agent=spawn, extract=lambda _rd: ([], [ELASTIC_LEAD]))
+    with kernel_watch(**watch) as events:
+        got = outcome(lambda: lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps))
         seen = events()
 
     assert spawn.calls, "the agent was never reached, so the gate never ran"
     assert seen == [], f"the commit gate opened or read the outside file: {seen}"
-    rel = at.relative_to(repo).as_posix()
+    rel = at.relative_to(lane.batch.draft_root).as_posix()
     if left == "plain" and what.plain_refusal is None:
         assert got == ("returned", 0), got
-        assert _git.git_show_file(repo, "HEAD", rel) == what.text, "the control was not committed"
-        assert _head_mode(repo, rel) == "100644"
+        assert lane.text_at_tip(rel) == what.text, "the control was not committed"
+        assert _head_mode(lane.clone, rel, lane.tip()) == "100644"
         return
-    assert _git.git_head_sha(repo) == head, "something was committed"
+    assert lane.tip() == head, "something was committed"
     if left == "plain":
         assert raised(got, "LeadAuthorError", what.plain_refusal), got
         assert OUT_MARK in got[2], "the control's file was not read"
@@ -285,22 +309,26 @@ def test_the_draft_is_created_through_the_held_mount(tmp_path: Path, full: bool,
 
 def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
         tmp_path: Path, monkeypatch, caplog):
+    """#1108 P4 (O7, OD12 class ii): two claims over one batch draft (ASSUMED SEAM
+    `_invoke_lead_author(..., batch=)`). Each claim's minted draft is observed after its own
+    serve: the draft is re-synced per claim (OD15), so a later claim may not see an earlier's."""
     caplog.set_level(logging.DEBUG)
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
-    repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    lane = _lead_lane(tmp_path)
+    paths = lane.paths
     reached: list[str] = []
+    minted: dict[str, bool] = {}
     for i, lead in enumerate((WAZUH_LEAD, ELASTIC_LEAD)):
         run_dir = _run_dir((lead.query_id, lead.system, lead.verb), run_id=f"claim-{i}")
         try:
-            drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_of(run_dir), label=LEAD, on_done=lambda _sha: None)
+            drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_of(run_dir),
+                                       label=LEAD, batch=lane.batch, on_done=lambda _sha: None)
         except FatalConfigError:
             reached.append(lead.query_id)
+        minted[lead.query_id] = (lane.skills_dir / draft_of(lead)[0]).is_file()
 
     for lead in (WAZUH_LEAD, ELASTIC_LEAD):
-        name, _ = draft_of(lead)
-        assert (paths.skills_dir / name).is_file(), f"{lead.query_id}'s claim minted no draft"
+        assert minted[lead.query_id], f"{lead.query_id}'s claim minted no draft"
     bad = [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
     assert bad == [], bad
     assert reached == [WAZUH_LEAD.query_id, ELASTIC_LEAD.query_id]
@@ -313,29 +341,31 @@ CONTRADICTING = (f"---\nid: elastic.contradicts\nstatus: draft\ncontradicts_skil
 @pytest.mark.parametrize("left", ["plain", "hardlink"])
 def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
         tmp_path: Path, monkeypatch, left: str):
+    """#1108 P4 (O7, OD6, OD12 class ii): over a batch draft, the deps built on the batch
+    (ASSUMED SEAM `build_lead_author_deps(..., batch=)`); the pending draft is named
+    repo-relative in the tenant repo (`agent/skills/...`)."""
     monkeypatch.delenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", raising=False)
-    repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    lane = _lead_lane(tmp_path)
+    paths = lane.paths
     run_dir = _run_dir()
     target = write(tmp_path / "outside" / "contradicts.md", CONTRADICTING)
-    at = paths.skills_dir / "elastic/_draft/contradicts.md"
+    at = lane.skills_dir / "elastic/_draft/contradicts.md"
     if left == "plain":
         write(at, CONTRADICTING)
     else:
         at.parent.mkdir(parents=True, exist_ok=True)
         os.link(target, at)
     spawn = LeadAuthorSpawn()
+    deps = draft_lead_deps(lane, invoke_agent=spawn, extract=lambda _run_dir: ([], []))
 
-    with lead_trees(paths) as trees, kernel_watch(reads=[target]) as events:
-        got = outcome(lambda: lead_author.run(
-            run_of(run_dir), label=LEAD, paths=paths, deps=_deps(paths, trees, spawn, [])))
+    with kernel_watch(reads=[target]) as events:
+        got = outcome(lambda: lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps))
         seen = events()
 
     assert seen == [], f"the hard link's outside file was read: {seen}"
     if left == "plain":
         assert [[d["draft_path"] for d in c["pending_drafts"]] for c in spawn.calls] == [
-            [at.relative_to(repo).as_posix()]], "the control's draft did not bypass"
+            [at.relative_to(lane.batch.draft_root).as_posix()]], "the control's draft did not bypass"
         return
     assert got == ("returned", 0), got
     assert spawn.calls == [], "a hard link's outside bytes bypassed the lift threshold"
@@ -343,19 +373,23 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
 
 @pytest.mark.parametrize("refused", [False, True], ids=["control", "EIO"])
 def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, refused: bool):
-    repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    """#1108 P4 (O7, OD6, OD12 class ii): over a batch draft, the deps built on the batch
+    (ASSUMED SEAM `build_lead_author_deps(..., batch=)`) under trees holding its skills."""
+    lane = _lead_lane(tmp_path)
+    paths = lane.paths
     run_dir = _run_dir()
-    write(paths.skills_dir / TEMPLATE_NAME, marked_template("wazuh.probe"))
+    write(lane.skills_dir / TEMPLATE_NAME, marked_template("wazuh.probe"))
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
     spawn = LeadAuthorSpawn(rc=1)
-    refuser = RefusesFolder(paths.skills_dir / "gather/queries", "reopen", errno.EIO)
+    refuser = RefusesFolder(lane.skills_dir / "gather/queries", "reopen", errno.EIO)
     seam = {"os_": refuser} if refused else {}
 
-    with DrainTrees.open((paths.skills_dir,), **seam) as trees:
-        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths,
-                             deps=_deps(paths, trees, spawn, [lead]))
+    with DrainTrees.open((lane.skills_dir,), **seam) as trees:
+        deps = dataclasses.replace(
+            lead_author.build_lead_author_deps(paths, state=_state1135.state_for_paths(paths),
+                                               trees=trees, batch=lane.batch),
+            invoke_agent=spawn, extract=lambda _run_dir: ([], [lead]))
+        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps)
 
     if not refused:
         assert rc == 2
@@ -368,7 +402,10 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
 
 @pytest.fixture
 def scene(tmp_path: Path):
-    with scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
+    """#1108 P4 (O7, OD6, OD12 class ii): the skills tree as a tenant-shaped root
+    (`draft_scene_over`: the mount `<root>/agent/skills`, names `agent/skills/...`, committed as
+    the batch base); the adapters stay in the product checkout."""
+    with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
 

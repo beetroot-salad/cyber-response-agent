@@ -22,6 +22,7 @@ import json
 import logging
 import shutil
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -212,6 +213,15 @@ def critical_text(caplog) -> str:
     return "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR)
 
 
+def _p4_caught(fn: Callable[[], Any]) -> BaseException | None:
+    """`_box1195.caught`, but a drain refusing the P4 seams (`client=`/`identity=`) fails here,
+    named, rather than as a downstream observation of a drain that never ran."""
+    from defender.tests.support.sandbox._box1195 import caught
+
+    got = caught(fn)
+    assert not (isinstance(got, TypeError) and "unexpected keyword" in str(got)), (
+        f"the drain does not take the P4 seams yet: {got}")
+    return got
 
 
 #: OpenBao's address as the issuer fake serves it (its identity endpoint is `ISSUER`).

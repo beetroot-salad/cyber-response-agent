@@ -144,11 +144,11 @@ def _tick(t, paths: LoopPaths, *, run_lead_author, run_pitfalls, box: BoxSpy | N
     """One lead-author tick through the P4 drain seams (`client=`/`identity=` over the tenant's
     forge and issuer fakes, the batch's box via `BoxSpy`): the `branch=`/`scrub=` seams are
     gone with the product-repo delivery."""
-    box = box if box is not None else BoxSpy()
+    spy = box if box is not None else BoxSpy()
     return drains.lead_author_drain(
         paths, run_lead_author=run_lead_author, run_pitfalls=run_pitfalls,
-        client=t.forge.client, identity=t.vault.identity(), start_box=box.start,
-        stop_box=box.stop,
+        client=t.forge.client, identity=t.vault.identity(), start_box=spy.start,
+        stop_box=spy.stop,
     )
 
 

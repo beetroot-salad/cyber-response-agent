@@ -2,7 +2,6 @@
 keeps pytest from collecting it). Imported by the `test_665_*` files."""
 from __future__ import annotations
 
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,9 +9,7 @@ from typing import Any
 
 import pytest
 
-from defender.learning.core.config import AUTHOR_DRAIN_LABEL
 from defender import box as box_mod
-from defender.box._scrub import verdict_path
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.e2e._local_box_command import run_box_python_command
@@ -379,61 +376,6 @@ class BoxLifecycleRecorder:
         return self.requests[0]
 
 
-class RecordingBranch:
-    """Fake `AuthorBranch` recording the worktree lifecycle order relative to box teardown.
-    `start_batch` mints a real temp leaf dir; `finish_batch` is the supply-chain step
-    (commit+push+PR) whose ordering vs box teardown S7 pins."""
-
-    #: What the real `AuthorBranch` cuts a batch from (its default); a box-start fault names it.
-    branch_base = "origin/main"
-
-    def __init__(self, worktree_base: Path, *, branch_prefix: str = "lessons/",
-                 events: list | None = None, destroy_on_cleanup: bool = False):
-        self.branch_prefix = branch_prefix
-        self._base = worktree_base
-        self.events: list[str] = events if events is not None else []
-        self.finished: list[str] = []
-        # #747: the real `cleanup` runs `git worktree remove --force` and the tree is GONE.
-        # Off by default so the ordering tests keep observing a cheap event; on for the
-        # quarantine tests, where "the archive outlived the tree" is the whole demand and a
-        # non-destroying fake would let a broken preserve step pass.
-        self.destroy_on_cleanup = destroy_on_cleanup
-
-    @property
-    def quarantine_dir(self) -> Path:
-        return self._base / "quarantine"
-
-    def branch_name(self, batch_id: str) -> str:
-        return f"{self.branch_prefix}{batch_id}"
-
-    def open_pr_exists(self) -> bool:
-        self.events.append("open_pr_exists")
-        return False
-
-    def start_batch(self, batch_id: str) -> Path:
-        wt = self._base / f"{self.branch_prefix.rstrip('/').replace('/', '-')}-{batch_id}"
-        wt.mkdir(parents=True, exist_ok=True)
-        self.events.append(f"start_batch:{batch_id}")
-        return wt
-
-    def finish_batch(self, batch_id: str, wt: Path) -> str | None:
-        self.events.append(f"finish_batch:{batch_id}")
-        self.finished.append(batch_id)
-        return f"https://example/pr/{batch_id}"
-
-    def cleanup(self, wt: Path) -> None:
-        self.events.append("cleanup")
-        if self.destroy_on_cleanup:
-            shutil.rmtree(wt, ignore_errors=True)
-        # OUTSIDE the destroy_on_cleanup arm, because the real `AuthorBranch.cleanup` unlinks
-        # unconditionally: the verdict sidecar sits BESIDE `wt` (#771 §7 D8), outside the tree
-        # the rmtree destroys, so removing it is not part of destroying the tree and does not
-        # belong under the flag that controls whether the tree is destroyed. Gated, this double
-        # left a sidecar behind that production removes — so a suite asserting the post-cleanup
-        # state of the worktree base saw a file the real lane does not leave.
-        verdict_path(wt).unlink(missing_ok=True)
-
-
 # run_dir / learning setup for driving the run cycle.
 def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
                  gather_raw: bool = True) -> Path:
@@ -462,22 +404,6 @@ def loop_paths(tmp_path: Path):
     (repo / "defender").mkdir(parents=True, exist_ok=True)
     (tmp_path / "state").mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-
-
-def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
-                         label=AUTHOR_DRAIN_LABEL, **kw):
-    """Drive the REAL _run_worktree_batch with the future injectable box seams."""
-    from defender.learning.core.drains import _run_worktree_batch
-
-    paths = loop_paths(tmp_path)
-    branch = branch or RecordingBranch(tmp_path / "wt", events=rec.events)
-    from defender.learning.core.state import LearningState
-
-    with LearningState.open(paths) as state:
-        return _run_worktree_batch(
-            paths, state, branch, label=label, has_work=has_work or (lambda p: True),
-            do_work=do_work, start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub, **kw,
-        )
 
 
 def _path_matches(value, needle: str) -> bool:

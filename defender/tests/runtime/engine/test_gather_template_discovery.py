@@ -190,8 +190,8 @@ def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
 
     assert "elastic.sshd-auth-history" in prompt
     assert "/agent/skills/gather/queries/elastic/sshd-auth-history.md" in prompt
-    assert _DECOY_ID not in prompt and "falco-alerts.md" not in prompt, \
-        "the index walked the checkout's catalog, not the run's agent root"
+    assert _DECOY_ID not in prompt, "the index walked the checkout's catalog, not the run's agent root"
+    assert "falco-alerts.md" not in prompt, "the index walked the checkout's catalog, not the run's agent root"
     assert "Failed password" in prompt
     assert "FROM elastic | LIMIT 1" not in prompt
     assert "status: established" not in prompt

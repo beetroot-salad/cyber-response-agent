@@ -42,6 +42,7 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
     Scene,
     ancestors,
     clear,
+    draft_scene_over,
     errors,
     lead_trees,
     logged,
@@ -54,6 +55,7 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
     write,
 )
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
+from defender.tests.support.learning.core._declared870 import REDUCER_REL as ADDON_REL
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of, state_for_paths
 from defender.tests.support.learning.curation._shared_readers_1134 import RefusesFolder, kernel_watch
 from defender.tests.support.sandbox._spec791 import author_markers
@@ -71,7 +73,9 @@ DRAFT_NAME = "gather/queries/wazuh/_draft/probe.md"
 MINTED_NAME = "gather/queries/wazuh/_draft/0a1b2c3d4e5f.md"
 SKILL_DRAFT_NAME = "elastic/_draft/probe.md"
 SKILL_MD_NAME = "elastic/SKILL.md"
-REDUCER_NAME = "gather/defender-sql.md"
+#: #1108 P4 (O7, OD6): the reducer surface is the tenant's pitfalls add-on (`_declared870.
+#: REDUCER_REL`, the test's own oracle, not the production constant), as a name under the mount.
+REDUCER_NAME = ADDON_REL.removeprefix("agent/skills/")
 TWIN_NAME = DRAFT_NAME
 
 #: A `## Query` whose rendered body carries the mark, so `render_query` and the handoff show it.
@@ -87,13 +91,19 @@ def marked_template(tid: str, status: str = "established", *, covers=()) -> str:
 def scene(tmp_path: Path):
     """`seed_skills_repo` (a wazuh adapter with real verbs, a catalog with an established
     template and a draft, an `elastic` SKILL.md with a pending skill draft; committed), a folder
-    outside it, and the lead drain's trees over it, open for the test."""
-    with scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
+    outside it, and the lead drain's trees over it, open for the test.
+
+    #1108 P4 (O7, OD6, OD12 class ii): the skills tree is a tenant-shaped root
+    (`draft_scene_over`: the mount `<root>/agent/skills`, names `agent/skills/...`, committed as
+    the batch base the rules compare against); the adapters stay in the product checkout."""
+    with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
 
 def resolver(s: Scene) -> _scaffold_rules.VerbResolver:
-    return _scaffold_rules.VerbResolver(s.repo / "defender")
+    """The adapters' verbs, read from the product checkout (#1172), never the tenant root."""
+    product = getattr(s, "product", None)
+    return _scaffold_rules.VerbResolver((product if product is not None else s.repo) / "defender")
 
 
 def _lead(query_id: str, *, system: str, verb: str, params: dict | None = None,
@@ -131,9 +141,9 @@ REDUCER_TEXT = (
 
 
 def _commit_reducer(s: Scene) -> None:
-    """The reducer surface committed at HEAD with `REDUCER_TEXT`, so a working copy holding the
-    same bytes is an unchanged document."""
-    assert s.rel(REDUCER_NAME) == pitfalls_curator.REDUCER_REL
+    """The add-on committed at the base with `REDUCER_TEXT`, so a draft holding the same bytes is
+    an unchanged document."""
+    assert s.rel(REDUCER_NAME) == ADDON_REL
     write(s.at(REDUCER_NAME), REDUCER_TEXT)
     _git.git(["add", "-A"], cwd=s.repo)
     _git.git(["commit", "-q", "-m", "reducer surface"], cwd=s.repo)
@@ -251,14 +261,14 @@ ROWS = [
                                 and [r["query_id"] for r in got[1]] == ["wazuh.search"])),
     Row("readable_pair", REDUCER_NAME, REDUCER_TEXT,
         lambda s: pitfalls_curator._readable_pair(
-            s.repo, pitfalls_curator.REDUCER_REL, tree_for=s.tree_for),
+            s.repo, s.rel(REDUCER_NAME), tree_for=s.tree_for),
         took=lambda s, got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
         refused=lambda s, got: raised(got, "LeadAuthorError", "unreadable as a file"),
         hard=lambda s, got: raised(got, "LeadAuthorError", "unreadable as UTF-8 text"),
         prepare=_commit_reducer),
     Row("pitfalls_content_rule", REDUCER_NAME, REDUCER_TEXT,
         lambda s: pitfalls_curator._pitfalls_content_rule(
-            s.repo, " M", pitfalls_curator.REDUCER_REL, tree_for=s.tree_for),
+            s.repo, " M", s.rel(REDUCER_NAME), tree_for=s.tree_for),
         took=lambda s, got: got == ("returned", None),
         refused=lambda s, got: raised(got, "LeadAuthorError", "unreadable as a file"),
         hard=lambda s, got: raised(got, "LeadAuthorError", "unreadable as UTF-8 text"),

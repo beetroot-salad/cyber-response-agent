@@ -315,7 +315,8 @@ class DraftScene(Scene):
         return sorted(rel for rel in tip.keys() | draft.keys() if tip.get(rel) != draft.get(rel))
 
 
-def _draft_scene(tmp_path: Path, *, corpus_name: str, rows: list[dict], channel: Channel,
+def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded rather than global
+        tmp_path: Path, *, corpus_name: str, rows: list[dict], channel: Channel,
                  curator: FakeCurator | None, seed_corpus: dict[str, str] | None,
                  state_dir: Path | None, build: Callable[..., Any], runner: Callable[..., int],
                  cfg_overrides: dict[str, Any]) -> DraftScene:
@@ -324,15 +325,17 @@ def _draft_scene(tmp_path: Path, *, corpus_name: str, rows: list[dict], channel:
     files = {f"{corpus_name}/{rel}": text for rel, text in (seed_corpus or {}).items()}
     lane = C.draft_lane(tmp_path, files=files, state_dir=state_dir)
     seed(lane.paths, channel, rows)
-    curator = curator if curator is not None else FakeCurator()
-    curator.outside_root = Path(lane.batch.draft_root)
+    # The draft builders' one funnel resolves the fake here; a fresh one per scene (it is
+    # mutated below), so it cannot be a signature default.
+    fake = curator if curator is not None else FakeCurator()
+    fake.outside_root = Path(lane.batch.draft_root)
     base = build(lane, state=LearningState.open(lane.paths))
-    wiring: dict[str, Any] = {"invoke_agent": curator}
+    wiring: dict[str, Any] = {"invoke_agent": fake}
     wiring.update(cfg_overrides)
     cfg = dataclasses.replace(base, **wiring)
     return DraftScene(
         paths=lane.paths, cfg=cfg, channel=channel, repo=lane.clone,
-        corpus=lane.agent / corpus_name, rows=rows, curator=curator, runner=runner,
+        corpus=lane.agent / corpus_name, rows=rows, curator=fake, runner=runner,
         base_sha=lane.base, lane=lane,
     )
 

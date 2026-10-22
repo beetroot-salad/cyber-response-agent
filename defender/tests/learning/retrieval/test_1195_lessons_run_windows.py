@@ -854,6 +854,7 @@ import importlib  # noqa: E402
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL  # noqa: E402
 from defender.learning.core.lane_trees import open_drain_trees  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
+    _p4_caught,
     drain_paths,
     product_repo,
     remote_branches,
@@ -960,15 +961,6 @@ def _nothing_delivered(tt: TenantTick) -> None:
     assert _delivered(tt) == {}, f"a branch reached the tenant origin: {_delivered(tt)}"
     assert tt.t.forge.creates == [], f"a PR was opened: {tt.t.forge.creates}"
     assert _git.git_head_sha(tt.product) == tt.head, "the product checkout moved"
-
-
-def _p4_caught(fn: Callable[[], Any]) -> BaseException | None:
-    """`X.caught`, but a drain refusing the P4 seams (`client=`/`identity=`) fails here, named,
-    rather than as a downstream observation of a drain that never ran."""
-    got = X.caught(fn)
-    assert not (isinstance(got, TypeError) and "unexpected keyword" in str(got)), (
-        f"the drain does not take the P4 seams yet: {got}")
-    return got
 
 
 LESSON_REL = "agent/lessons/a.md"

@@ -24,7 +24,7 @@ BASE = "d9128afa"
 O3_HELPERS = (
     "claim_markers", "requeue_marker", "quarantine_marker", "queue_lock", "acquire_flock",
     "acquire_flock_within", "flock_or_skip", "graveyard_file", "stuck_report_file",
-    "rotate_queue_locked", "_pending_deliveries",
+    "rotate_queue_locked", "_pending_deliveries",  # lint-stale-ref: ok — frozen #1135 census input (a name it searches for), not a call
 )
 #: O4's and D5's removals (design O4 observable; D4 "Removed"; D5).
 O4_D5_REMOVALS = (
