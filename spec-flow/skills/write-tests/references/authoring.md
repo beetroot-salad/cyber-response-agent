@@ -6,6 +6,20 @@ Read when authoring or repairing tests. Inputs: the current design and decisions
 
 When charged with the sketch, write the thinnest suite that makes the design concrete: one representative case per important promise and per main flow, through real entry points, with explicit expected results. Skip variants, partitions, interaction depth and discrimination checks; the thorough pass owns those. Every place where writing a setup or an expected value forces a choice the design does not make is the sketch's main output: report it as a finding with the case that exposed it, rather than picking an answer. Keep cases well-formed so they can carry into the thorough pass. Return the cases, the promise each one covers, and the gaps.
 
+## Spike
+
+When charged with the spike, write a throwaway implementation of the core flows in your own detached worktree, against the design and the sketch. Its purpose is to find where the design meets friction in the real code, not to produce code anyone keeps. Start from the code map. Take the path a competent implementer would naturally take; do not polish, and do not invent workarounds to make the design look easy. Run the sketch tests against it, and do not edit them.
+
+Keep a **friction log** as you go, one entry per point where you:
+
+- had to guess because the design does not say;
+- found two places that would each need to compute or own the same fact;
+- hit an existing constraint — a signature many callers use, a guard, a lint or census, an import boundary — that the design's mechanism collides with;
+- used a different mechanism from the one the design names, or threaded a value through layers that should not know it;
+- special-cased something to make a sketch test pass.
+
+Each entry cites the code (`path:line`), the design element involved, and what you did instead. Return the log and the diff. Do not commit, and do not touch any other worktree.
+
 ## Translate promises into executable cases
 
 Independently understand the intended behavior before copying any existing test expectation. Start with a real entry point and an observable result for each important promise. Use unit tests for narrow rules and integration/end-to-end tests for wiring and flows. An isolated unit test does not establish that production uses the rule.

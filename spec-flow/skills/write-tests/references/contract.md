@@ -17,7 +17,7 @@ Record inherited `claims:` entries and new load-bearing observations with their 
 
 ## Resume and invalidation
 
-Persist meaningful boundaries: sketch checked (or skipped, with the reason), candidate authored, reviewed, amended/repaired, and ready or blocked. A worker that hands back mid-slice records its progress and remaining work here so a fresh worker can continue without its history. A resumed worker compares recorded identities with current inputs before reusing work. Missing/stale review evidence means not yet reviewed. A changed design, shared fixture, target/base, profile or relevant environment triggers an impact check; invalidate affected tests/evidence/review and cross-boundary consequences, keeping unaffected facts.
+Persist meaningful boundaries: sketch and spike checked (or skipped, with the reason; the spike's findings, never its code), candidate authored, reviewed, amended/repaired, and ready or blocked. A worker that hands back mid-slice records its progress and remaining work here so a fresh worker can continue without its history. A resumed worker compares recorded identities with current inputs before reusing work. Missing/stale review evidence means not yet reviewed. A changed design, shared fixture, target/base, profile or relevant environment triggers an impact check; invalidate affected tests/evidence/review and cross-boundary consequences, keeping unaffected facts.
 
 Mtimes or a `complete` label alone do not establish freshness. For an old numbered run, migrate the relevant validated evidence and decisions into this compact record, explicitly invalidating affected work. Do not regenerate historical scaffolding or confuse its completion labels with current semantic readiness.
 

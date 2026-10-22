@@ -10,7 +10,7 @@ effort: medium
 
 Own the **executable contract between design and code**. The design states intended behavior, models, flows, architecture, and reasons; the tests enforce its observable commitments. Coverage records are agent scaffolding, not another design for the human to approve. Tests green is evidence about what those assertions enforce, never proof of complete intent or correct code.
 
-The working loop is **sketch → design check → dissolve → author thoroughly → independently review → patch → recheck**. Construct executable cases early: writing them is a way to discover design holes, not the last assembly step after exhaustive premise enumeration. A thin sketch finds those holes before the expensive thorough pass is written against a design that then changes. Implementation and exploit-based testing of the contract belong to the code stage; this skill prepares and repairs the contract they work against.
+The working loop is **sketch and spike → design check → dissolve → author thoroughly → independently review → patch → recheck**. Construct executable cases early: writing them is a way to discover design holes, not the last assembly step after exhaustive premise enumeration. A thin sketch and a throwaway spike find those holes before the expensive thorough pass is written against a design that then changes. Implementation and exploit-based testing of the contract belong to the code stage; this skill prepares and repairs the contract they work against.
 
 ## 0. Keep agent work cheap
 
@@ -32,15 +32,19 @@ Use a dedicated git worktree, adopting an appropriate existing one or creating a
 
 Read **references/contract.md** for the compact coverage record, checkpoints, and handoff. Initialize working state under `.spec-flow/` and exclude scratch state through the worktree's git exclude mechanism. Use stable design obligation and finding IDs. The design and executable tests are the contract; do not produce a separate formal spec or require numbered frontier files.
 
-## 2. Sketch and check the design
+## 2. Sketch, spike and check the design
 
-Before thorough authoring, settle the design the tests will enforce. **One author (Opus at medium effort)** writes a thin executable sketch: one representative case per important promise and per main flow, through real entry points, using existing machinery. The sketch is not decomposed and does not chase variants, partitions, or discrimination; its job is to force every load-bearing choice into concrete setup and expected results, where gaps show. Follow **references/authoring.md** under "Sketch".
+Before thorough authoring, settle the design the tests will enforce. Tests surface unclear behavior and missing cases; writing code surfaces where the design does not fit the existing system and where the easy path breaks its ownership rules. Past runs found the second kind only at implementation or code review, after the full contract was built. This step looks for both while they are cheap to change.
 
-Then dispatch **one fresh Opus reader at high effort** for a design check, using **references/review.md** under "Design check". It receives the design, decisions, grounding evidence and sketch, not the author's discussion, and answers only: is this the right behavior, and what does the design leave unsettled or contradictory? Not the full review panel — that comes after thorough authoring.
+**Sketch.** **One author (Opus at medium effort)** writes a thin executable sketch: one representative case per important promise and per main flow, through real entry points, using existing machinery. The sketch is not decomposed and does not chase variants, partitions, or discrimination; its job is to force every load-bearing choice into concrete setup and expected results, where gaps show. Follow **references/authoring.md** under "Sketch".
 
-Reconcile its findings and the author's reported gaps through §5: probe factual questions, and dissolve design defects through discuss-issue's amendment protocol before thorough authoring starts. Sketch cases carry into the thorough pass when the design they rest on survives; discard the rest.
+**Spike.** For the core flows, **one implementer (Sonnet at medium effort)** writes a throwaway implementation in a separate detached worktree, against the design and the sketch, following **references/authoring.md** under "Spike". It takes the natural path through the existing code and keeps a friction log: every place it guessed, worked around existing code, or departed from the design's named mechanism. The spike is never committed, merged, or shown to test authors, reviewers, the honest implementer or the adversary; only its findings travel. Delete its worktree once the check has read it.
 
-**Skip the sketch** when the change is small and the design leaves no consequential choice open — a single obligation, a settled flow, an existing harness. Record the skip and go straight to §3. A skip does not shrink the §4 review.
+**Design check.** Dispatch **one fresh Opus reader at high effort**, using **references/review.md** under "Design check". It receives the design, decisions, grounding evidence, sketch, spike diff and friction log — not the author's or implementer's discussion — and answers only: is this the right behavior, and where does the design leave choices unsettled, contradict itself, or not fit the code it lands in? Not the full review panel — that comes after thorough authoring.
+
+Reconcile its findings and the author's reported gaps through §5: probe factual questions, and dissolve design defects through discuss-issue's amendment protocol before thorough authoring starts. A spike finding counts only when it names the design choice it conflicts with; mess that comes from the spike's own shortcuts is dropped. Mechanism changes that the design check accepts become declared in the design, not left for the implementer to rediscover. Sketch cases carry into the thorough pass when the design they rest on survives; discard the rest.
+
+**Skip the sketch and spike** when the change is small and the design leaves no consequential choice open — a single obligation, a settled flow, an existing harness. Skip only the spike when the change adds behavior without touching existing owners, flows or shared mechanisms. Record each skip and its reason. A skip does not shrink the §4 review.
 
 ## 3. Author the contract thoroughly
 

@@ -4,7 +4,11 @@ Read when reviewing a candidate contract. You did not author these tests. Read t
 
 ## Design check
 
-When charged with the design check, you read the design and a thin sketch, not a finished suite. Answer one question: does the design, made concrete by these cases, specify the right behavior completely enough to write a thorough contract against? Look for contradictions between promises, choices the sketch had to make that the design does not, promises no sketch case could express at an observable boundary, and missing flows the design implies. Do not assess discrimination, variant coverage or test mechanics; the sketch is deliberately thin. Return design-level findings grouped by underlying decision, each with a proposed dissolution and trade-offs, using the fidelity guidance below. A clean check means the design is ready for thorough authoring, not that the contract is.
+When charged with the design check, you read the design and a thin sketch, not a finished suite. Answer one question: does the design, made concrete by these cases, specify the right behavior completely enough to write a thorough contract against? Look for contradictions between promises, choices the sketch had to make that the design does not, promises no sketch case could express at an observable boundary, and missing flows the design implies. Do not assess discrimination, variant coverage or test mechanics; the sketch is deliberately thin.
+
+When a spike ran, also read its diff and friction log for where the design does not fit the code it lands in. The implementer does not stop at friction the way a person does; it writes the workaround, so read the code for it, not only the log. Look for: two places computing or owning the same fact; a special case keyed to a test fixture; a value threaded through layers that should not know it; an existing guard, lint or census bypassed; a signature change that ripples to many callers; errors swallowed; a mechanism other than the one the design names. Keep a finding only when you can name the design choice it conflicts with; drop mess that comes from the spike's own shortcuts. The spike is evidence about the design, not code to review for quality.
+
+Return design-level findings grouped by underlying decision, each with a proposed dissolution and trade-offs, using the fidelity guidance below. A clean check means the design is ready for thorough authoring, not that the contract is.
 
 ## Fidelity and conservation
 
