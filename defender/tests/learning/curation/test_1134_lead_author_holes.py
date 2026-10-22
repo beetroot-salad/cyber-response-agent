@@ -33,6 +33,7 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
     plant_folder,
     plant_state,
     raised,
+    draft_scene_over,
     scene_over,
     write,
 )
@@ -69,12 +70,38 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
+# #1108 P4 (O7, OD6): the held-read cases run over a tenant-shaped root (`draft_scene_over`: the
+# lane's `skills/` mount at `<root>/agent/skills`, names `agent/skills/...`, adapters in the product
+# checkout), and the reducer surface is the tenant's pitfalls add-on (`_declared870.REDUCER_REL`, the
+# test's own oracle — not the production constant, which still names the product page). These
+# shadow the handle file's product spellings (S-D's file, imported above, not edited here).
+from defender.knowledge import _scaffold_rules  # noqa: E402
+from defender import _git  # noqa: E402
+from defender.tests.support.learning.core._declared870 import REDUCER_REL as ADDON_REL  # noqa: E402
+
+REDUCER_NAME = ADDON_REL.removeprefix("agent/skills/")  # noqa: F811
+
+
+def resolver(s: Scene) -> _scaffold_rules.VerbResolver:  # noqa: F811
+    """The adapters' verbs, read from the product checkout (#1172), never the tenant root."""
+    product = getattr(s, "product", None)
+    return _scaffold_rules.VerbResolver((product if product is not None else s.repo) / "defender")
+
+
+def _commit_reducer(s: Scene) -> None:  # noqa: F811
+    """The add-on committed at the base with `REDUCER_TEXT`, so a draft holding the same bytes is
+    an unchanged document."""
+    assert s.rel(REDUCER_NAME) == ADDON_REL
+    write(s.at(REDUCER_NAME), REDUCER_TEXT)
+    _git.git(["add", "-A"], cwd=s.repo)
+    _git.git(["commit", "-q", "-m", "reducer surface"], cwd=s.repo)
+
 
 @pytest.fixture
 def scene(tmp_path: Path):
     """The handle file's scene: `seed_skills_repo`, committed, a folder outside it, the lead
     drain's trees over it, open for the test."""
-    with scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
+    with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
 
@@ -161,7 +188,7 @@ RACES = [
          refused=lambda got: got[0] == "returned" and got[1][0] is None),
     Race("readable_pair", REDUCER_NAME, REDUCER_TEXT, REDUCER_TEXT,
          lambda s, t: pitfalls_curator._readable_pair(
-             s.repo, pitfalls_curator.REDUCER_REL, tree_for=t.tree_for),
+             s.repo, ADDON_REL, tree_for=t.tree_for),
          read_plain=lambda got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
          refused=lambda got: raised(got, "LeadAuthorError", "unreadable"),
          prepare=_commit_reducer),
@@ -284,7 +311,7 @@ def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, cap
 
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_the_writer_loads_no_catalog_through_a_linked_folder(tmp_path: Path, site, caplog):
-    with scene_over(tmp_path, bare_skills(tmp_path)) as s:
+    with draft_scene_over(tmp_path, bare_skills(tmp_path)) as s:
         answering = "gather/queries/wazuh/hunt-creds.md"
         write(s.at(answering), query_template(WAZUH_LEAD.query_id, "established"))
         template = s.at(answering)
@@ -452,7 +479,7 @@ def test_a_planted_folder_gives_one_verdict_whatever_it_points_at(
 ):
     verdicts: dict[str, str] = {}
     for plant in PLANTS:
-        with scene_over(tmp_path / plant, seed_skills_repo(tmp_path / plant / "repo")) as s:
+        with draft_scene_over(tmp_path / plant, seed_skills_repo(tmp_path / plant / "repo")) as s:
             gate.seed(s, plant)
             moved = _plant(s, gate.site, plant)
             before = plant_state(s.at(gate.site))
@@ -571,7 +598,7 @@ FOLLOWS = [
            _commit_reducer,
            _rewrite_reducer_frontmatter,
            lambda s, tf: pitfalls_curator._readable_pair(
-               s.repo, pitfalls_curator.REDUCER_REL, tree_for=tf),
+               s.repo, ADDON_REL, tree_for=tf),
            lane=lambda got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
     # The per-path composite gates: each must hand its parts the `tree_for` it was given
@@ -592,7 +619,7 @@ FOLLOWS = [
            _seed_reducer_edit,
            _rewrite_reducer_frontmatter,
            lambda s, tf: pitfalls_curator._pitfalls_rule(
-               s.repo, " M", pitfalls_curator.REDUCER_REL, systems=DECLARED,
+               s.repo, " M", ADDON_REL, systems=DECLARED,
                reducer_offered=True, tree_for=tf),
            lane=lambda got: got == ("returned", None),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),

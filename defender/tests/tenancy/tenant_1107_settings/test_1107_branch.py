@@ -47,7 +47,7 @@ def _layout(tmp_path: Path, data_root: Path, monkeypatch, *,
         monkeypatch.delenv(name, raising=False)
     episodes = data_root / TID / "episodes"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
-    _base, src = H.tenant_source(data_root, TID)
+    _base, src = H.tenant_source(data_root, TID, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     folder = S.plant(data_root, TID, marker=marker)
     return src, data_root, folder, episodes
 

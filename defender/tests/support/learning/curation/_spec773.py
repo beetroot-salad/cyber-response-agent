@@ -246,7 +246,8 @@ def build_questioner_scene(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
     git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "questioner corpus")
+    if git(repo, "status", "--porcelain").stdout.strip():  # make_repo may already carry it
+        git(repo, "commit", "-q", "-m", "questioner corpus")
 
     rows = list(rows if rows is not None else [world_row("w1")])
     channel = QUESTIONER_FINDINGS

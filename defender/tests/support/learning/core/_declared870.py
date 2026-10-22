@@ -11,9 +11,16 @@ from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests.support.runtime.engine._declared869 import (  # noqa: F401 — re-exported substrate
     ADAPTERS_REL,
+    AGENT_CATALOG_REL,
+    AGENT_NESTED_MARKER_RELS,
+    AGENT_SKILLS_REL,
     CATALOG_REL,
     SKILLS_REL,
     Spawn,
+    agent_marker_file,
+    seed_agent_files,
+    seed_product,
+    write_agent_marker,
     commit_all,
     git,
     head_files,
@@ -36,12 +43,18 @@ from defender.tests.support.runtime.engine._declared869 import (  # noqa: F401 �
 # committed file still matches them — so a drift in production is a red test, not a silently
 # agreeing one.
 
-#: The reducer surface — `defender/skills/gather/defender-sql.md`, repo-relative, the exact
-#: spelling `_pitfalls_path_rule` compares and `commit_corpus` stages.
-REDUCER_REL = "defender/skills/gather/defender-sql.md"
+#: The reducer surface the pitfalls lane writes — #1108 P4: the tenant's add-on
+#: `agent/skills/gather/defender-sql.pitfalls.md` (carried decision 2026-10-08, A1), repo-relative
+#: in the tenant repo (OD6), the exact spelling `_pitfalls_path_rule` compares and the batch's
+#: change set carries. Before P4 it was the product page below.
+REDUCER_REL = "agent/skills/gather/defender-sql.pitfalls.md"
 
-#: The three `##` sections the committed file carries at this base (FF-12), verbatim. FK-2's
-#: content rule keeps all three across a curator edit.
+#: The product reducer page (O1: it stays in the product tree). No tenant write touches it
+#: after P4 (O7): the lane's path rule refuses it, and it carries no `## Common pitfalls`.
+PRODUCT_REDUCER_REL = "defender/skills/gather/defender-sql.md"
+
+#: Three `##` sections a human wrote in the add-on, verbatim (the planted fixture's; FF-12's
+#: shape, moved from the product page). FK-2's content rule keeps all three across an edit.
 REDUCER_HEADINGS: tuple[str, ...] = (
     "## The payload becomes the table",
     "## The binding each shape needs",
@@ -119,6 +132,18 @@ def curate_execution_md(system: str, bullet: str = "use the key, not the id"):
 
     def _edit(root: Path) -> None:
         write_marker(
+            root, system,
+            body=f"# {system}\n\n{PITFALLS_SECTION}\n\n- {bullet}\n",
+        )
+
+    return _edit
+
+
+def curate_agent_execution_md(system: str, bullet: str = "use the key, not the id"):
+    """`curate_execution_md` in a tenant repo or draft: `agent/skills/<system>/execution.md`."""
+
+    def _edit(root: Path) -> None:
+        write_agent_marker(
             root, system,
             body=f"# {system}\n\n{PITFALLS_SECTION}\n\n- {bullet}\n",
         )

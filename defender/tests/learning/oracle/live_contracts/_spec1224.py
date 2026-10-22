@@ -425,7 +425,8 @@ class Estate:
     def roster(self) -> Any:
         return sym(VERBS, "read_roster")(self.adapters)
 
-    def place(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT) -> Any:
+    def place(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT,
+              configs: Mapping[str, str] | None = None) -> Any:
         """Set the tenant up under the data root (`DEFENDER_DATA_ROOT` by default) and return
         it accepted (`Tenant`).
 
@@ -434,13 +435,15 @@ class Estate:
         S0's one helper (`tenant_1108_p4._support.published_tenant`) — so a branch launch has a
         knowledge commit to materialise and pin (flow 7). Publishing costs ~0.4 s, so each
         `(tenant id, grant table)` is published once per process (`_published_template`) and
-        its tenant folder (row, clone, exports) copied in; nothing in it names its root."""
+        its tenant folder (row, clone, exports) copied in; nothing in it names its root.
+        `configs` (`{system: config.env text}`) is written into the published settings, as
+        `T6.place_tenant(configs=)` writes it."""
         root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
         if not (root / tenant_id / "tenant.json").is_file():
             import shutil
 
-            shutil.copytree(_published_template(tenant_id, self.table()), root / tenant_id,
-                            symlinks=True)
+            shutil.copytree(_published_template(tenant_id, self.table(), dict(configs or {})),
+                            root / tenant_id, symlinks=True)
         return T6.accept(root, tenant_id)
 
     def run_tenant(self, data_root: Path | None = None,
@@ -473,16 +476,17 @@ def estate(tmp_path: Path, **kw: Any) -> Estate:
 # #1108 P4 (OD5): the estate's tenant is published for real, and the stamps name its commit.
 # --------------------------------------------------------------------------------------
 
-_TEMPLATES: dict[tuple[str, str], Path] = {}
+_TEMPLATES: dict[tuple[Any, ...], Path] = {}
 _TEMPLATE_HOME: list[Any] = []
 
 
-def _published_template(tenant_id: str, table: str) -> Path:
+def _published_template(tenant_id: str, table: str, configs: dict[str, str] | None = None) -> Path:
     """`<process scratch>/<n>/root/<tenant_id>`: the tenant `tenant_id` with grant table
     `table`, set up and published ONCE per process through S0's `published_tenant` (the P4
     fixture's `agent/`, the estate's settings in place of the fixture's), its origin server
     closed after — a published tenant needs no network to be read or materialised."""
-    key = (tenant_id, table)
+    configs = dict(configs or {})
+    key = (tenant_id, table, tuple(sorted(configs.items())))
     if key in _TEMPLATES:
         return _TEMPLATES[key]
     import tempfile
@@ -496,7 +500,7 @@ def _published_template(tenant_id: str, table: str) -> Path:
     if not _TEMPLATE_HOME:
         _TEMPLATE_HOME.append(tempfile.TemporaryDirectory(prefix="spec1224-tenants-"))
     home = Path(_TEMPLATE_HOME[0].name) / str(len(_TEMPLATES))
-    planted = T6.place_tenant(home / "settings-source", tenant_id, table=table, configs={})
+    planted = T6.place_tenant(home / "settings-source", tenant_id, table=table, configs=configs)
     wanted = {f"settings/{rel}": data for rel, data in files_under(planted / "settings").items()}
     stale = {f"settings/{rel}": None for rel in files_under(FIXTURE_SETTINGS)
              if f"settings/{rel}" not in wanted}

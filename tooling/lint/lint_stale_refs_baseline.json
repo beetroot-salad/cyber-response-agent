@@ -355,7 +355,6 @@
     "defender/tests/learning/state_contracts/rewritten_tier_map.yaml:test_zero_ceiling_retires_on_first_failure": "generated tier map naming tests removed by the suite consolidation; drops with the map when it is deleted",
     "defender/tests/tooling/layout_contracts/goldens/lints.json:test_meta_json_retirement_647": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
     "defender/tests/tenancy/tenant_1107_settings/_census_1107.py:comprehension": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
-    "defender/tests/learning/curation/test_1175_leads_git_liveness.py:COMMITTED": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
     "tooling/lint/lint_half_read_table.py:comprehension": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
     "tooling/lint/lint_list_as_key_set.py:comprehension": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
     "tooling/lint/lint_run_layout_imports.py:comprehension": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",

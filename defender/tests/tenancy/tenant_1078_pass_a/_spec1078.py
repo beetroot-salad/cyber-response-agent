@@ -228,13 +228,21 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
 
 
 def tenant_source(root: Path, tenant_id: str = VALID_ID, *, row: bool = True,
-                  run_id: str = T.SOURCE_RUN_ID) -> tuple[Path, Path]:
+                  run_id: str = T.SOURCE_RUN_ID, published: bool = False) -> tuple[Path, Path]:
     """A source run AT A TENANT LOCATION: `<root>/<T>/runs/<run_id>`, returns (base, src) —
     stamped with T (`source_run`). #1187 (R1): the runs folder holds no `_tenant.json`. `row`
     creates T through the real `create_tenant` first (the data root must be empty for that, so
-    it runs before anything else is written under `root`)."""
+    it runs before anything else is written under `root`). `published=True` (#1108 P4, for
+    scenes that launch a branch over the source): T is instead set up as a REAL published
+    tenant (`set_up_tenant(published=True)`), so the source's knowledge stamp names a commit
+    its clone holds — what flow 7 materialises and pins."""
     root = Path(root)
-    if row:
+    if row and published:
+        from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+        location_path(set_up_tenant(root, tenant_id, published=True).learning).mkdir(
+            exist_ok=True)
+    elif row:
         make_tenant(root, tenant_id)
         location_path(accept(root, tenant_id).learning).mkdir(exist_ok=True)
     base = runs_dir(root, tenant_id)

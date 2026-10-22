@@ -569,8 +569,14 @@ def tenant_episodes(data_root: Path) -> Path:
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
               tenant_id: str | None = None, recorded: bool | None = None,
               pre_snapshot: bool = False,
-              land_calls: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
-    """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir)."""
+              land_calls: Callable[[Path], None] | None = None,
+              published: bool = False) -> tuple[Path, Path]:
+    """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    `published=True` (#1108 P4): the tenant is set up as a real published tenant
+    (`set_up_tenant(published=True)`), so the source's default knowledge stamp
+    (`scene_knowledge`) names a commit its clone holds — what a branch launch materialises and
+    pins (flow 7). For scenes that launch a branch over this source."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
@@ -578,7 +584,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         existing = sorted(p.name for p in root.iterdir()
                           if (p / "tenant.json").is_file()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
-    tenant = set_up_tenant(root, tenant_id)
+    tenant = set_up_tenant(root, tenant_id, published=published)
     location_path(tenant.learning).mkdir(exist_ok=True)  # setup provisions the real launcher queue root
     base = location_path(tenant.runs)
     base.mkdir(parents=True, exist_ok=True)

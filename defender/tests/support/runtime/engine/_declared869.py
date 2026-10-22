@@ -63,6 +63,16 @@ NESTED_MARKER_RELS = (
     "defender/skills/gather/queries/elastic/mcpsys/execution.md",
 )
 
+#: #1108 P4 (OD6): the same addresses as a tenant repo spells them. After P4 the lane's root is
+#: a batch draft (`<T>/drafts/<id>/`, holding `agent/`); adapters stay in the product checkout
+#: (`ADAPTERS_REL`, #1172). The `defender/` spellings above stay for the suites not yet moved.
+AGENT_SKILLS_REL = "agent/skills/"
+AGENT_CATALOG_REL = "agent/skills/gather/queries/"
+AGENT_NESTED_MARKER_RELS = (
+    "agent/skills/elastic/_draft/mcpsys/execution.md",
+    "agent/skills/gather/queries/elastic/mcpsys/execution.md",
+)
+
 #: The directory name a recursive, basename-filtered marker read would declare from either
 #: path above — the obvious implementation's answer, and the one the depth rule refuses.
 NESTED_MARKER_PARENT = "mcpsys"
@@ -112,6 +122,15 @@ def skill_md(repo: Path, system: str) -> Path:
     return repo / SKILLS_REL / system / "SKILL.md"
 
 
+def agent_marker_file(root: Path, system: str) -> Path:
+    """`marker_file` in a tenant repo (or draft) rooted at `root`: `agent/skills/<system>/execution.md`."""
+    return root / AGENT_SKILLS_REL / system / "execution.md"
+
+
+def agent_skill_md(root: Path, system: str) -> Path:
+    return root / AGENT_SKILLS_REL / system / "SKILL.md"
+
+
 def write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -145,6 +164,67 @@ def write_template(
         parent / f"{stem}.md",
         f"---\nid: {ident}\nstatus: {status}\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n",
     )
+
+
+def write_agent_marker(root: Path, system: str, *, body: str = "# execution\n") -> Path:
+    return write(agent_marker_file(root, system), body)
+
+
+def write_agent_skill_md(root: Path, system: str, *, name: str | None = None) -> Path:
+    front = f"---\nname: defender-{system if name is None else name}\n---\n"
+    return write(agent_skill_md(root, system), f"{front}# {system}\n")
+
+
+def write_agent_template(
+    root: Path, system: str, stem: str, *, tid: str | None = None,
+    status: str = "established", draft: bool = False,
+) -> Path:
+    """`write_template` under `agent/skills/gather/queries/<system>/` of `root`."""
+    parent = root / AGENT_CATALOG_REL / system / ("_draft" if draft else "")
+    ident = f"{system}.{stem}" if tid is None else tid
+    return write(
+        parent / f"{stem}.md",
+        f"---\nid: {ident}\nstatus: {status}\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n",
+    )
+
+
+def seed_agent_files(
+    *,
+    markers: tuple[str, ...] = ("elastic",),
+    skills: tuple[str, ...] = ("elastic",),
+    catalog: tuple[str, ...] = ("elastic",),
+    non_systems: tuple[str, ...] = (),
+) -> dict[str, str]:
+    """`seed_tree`'s tenant half as agent-relative files (`skills/...`), for
+    `_curator1134.draft_lane(files=...)`: markers, system skills and catalog templates. The
+    adapters are the product half (`seed_product`)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for system in markers:
+            write_agent_marker(root, system)
+        for system in (*skills, *non_systems):
+            write_agent_skill_md(root, system)
+        for system in catalog:
+            write_agent_template(root, system, "auth-events")
+        agent = root / "agent"
+        return {str(p.relative_to(agent)): p.read_text(encoding="utf-8")
+                for p in sorted(agent.rglob("*")) if p.is_file()}
+
+
+def seed_product(tmp_path: Path, *, adapters: tuple[str, ...] = ("elastic",),
+                 name: str = "product") -> Path:
+    """`seed_tree`'s product half: a committed checkout holding only `defender/integrations/`
+    adapters (they stay in the product repo, #1172) — no corpus, no skills."""
+    repo = tmp_path / name
+    init_git(repo)
+    (repo / ADAPTERS_REL).mkdir(parents=True, exist_ok=True)
+    for system in adapters:
+        write_adapter(repo, system)
+    write(repo / ".gitignore", GIT_IGNORE)
+    commit_all(repo, "seed product")
+    return repo
 
 
 def init_git(repo: Path) -> Path:
@@ -286,9 +366,12 @@ class Spawn:
     the agent ran would have to disagree with it. The fake decides nothing — it does not
     filter, does not classify, and returns whatever `rc` it was built with."""
 
-    def __init__(self, edit=None, *, rc: int = 0):
+    def __init__(self, edit=None, *, rc: int = 0, root: Path | None = None):
         self.edit = edit
         self.rc = rc
+        #: Where `edit` runs when set (#1108 P4: a batch draft's root, which holds `agent/`),
+        #: instead of the `repo_root` (pitfalls) or `run_dir` (lead author) the seam hands in.
+        self.root = root
         self.calls: list[dict] = []
 
     @property
@@ -307,8 +390,8 @@ class Spawn:
             {"handoffs": list(handoffs or []), "args": args, "repo_root": repo_root,
              "kwargs": kwargs}
         )
-        if self.edit is not None and repo_root is not None:
-            self.edit(Path(repo_root))
+        if self.edit is not None and (self.root is not None or repo_root is not None):
+            self.edit(Path(self.root if self.root is not None else repo_root))
         return self.rc
 
 
@@ -322,7 +405,7 @@ class LeadAuthorSpawn(Spawn):
              "run_dir": run_dir, "repo_root": None, "args": (), "kwargs": kwargs}
         )
         if self.edit is not None:
-            self.edit(Path(run_dir))
+            self.edit(Path(self.root if self.root is not None else run_dir))
         return self.rc
 
 

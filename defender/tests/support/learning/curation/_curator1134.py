@@ -461,7 +461,8 @@ def world(tmp_path: Path) -> World:
     sibling.mkdir(parents=True, exist_ok=True)
     (sibling / ".gitkeep").write_text("")
     git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "sibling corpus")
+    if git(repo, "status", "--porcelain").stdout.strip():  # make_repo may already carry it
+        git(repo, "commit", "-q", "-m", "sibling corpus")
     outside = tmp_path / "outside"
     outside.mkdir()
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")

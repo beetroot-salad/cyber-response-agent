@@ -1139,7 +1139,7 @@ def test_a_swallowed_stop_fault_makes_the_next_curators_run_refuse(
 BATCH_START_FAULTS = [
     pytest.param("refuse_create", BoxFault, id="create"),
     pytest.param("refuse_sentinel", BoxFault, id="sentinel"),
-    pytest.param("allow_an_alias", __import__("defender.box", fromlist=["x"]).AliasBanNotInForce,
+    pytest.param("allow_an_alias", box_mod.AliasBanNotInForce,
                  id="link-ban"),
 ]
 
