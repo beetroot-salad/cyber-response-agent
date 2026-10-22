@@ -151,3 +151,6 @@ experiments/*/sessions/
 # Local Lean toolchain + mathlib4 checkout (elan install, .olean build output): an
 # 8GB local dependency tree, not source.
 /seam-harness/lean-tooling/
+
+# Local discussion notes and evidence
+/.discussion/
