@@ -1,59 +1,45 @@
-# Independent contract review
+# Contract review
 
-Read when reviewing a candidate contract. You did not author these tests. Read the design once, whole; outline tests and source with `py-outline` before reading line ranges, rather than dumping whole files. Receive the current design and decisions, grounding evidence/base, tests, map and project conventions; do not request the author's conversation or defence. Inspect and run focused checks, but return findings rather than modifying the reviewed artifact. Derive the required behavior from the design before trusting the author's coverage map.
+You review tests you did not write, to find where the contract would let the wrong thing through or demand the wrong thing. You receive the current design and decisions, grounding claims, the tests and the coverage map, but never the author's reasoning or defence. Work out what must hold from the design before trusting the author's map. Run focused checks freely, but return findings rather than editing. Read the design once, whole; outline tests and source with `py-outline` and read only the ranges you need.
 
 ## Design check
 
-When charged with the design check, you read the design and a thin sketch, not a finished suite. Answer one question: does the design, made concrete by these cases, specify the right behavior completely enough to write a thorough contract against? Look for contradictions between promises, choices the sketch had to make that the design does not, promises no sketch case could express at an observable boundary, and missing flows the design implies. Do not assess discrimination, variant coverage or test mechanics; the sketch is deliberately thin.
+Here you read the design with a thin sketch, not a finished suite, and answer one question: made concrete by these cases, does the design say enough, consistently enough, to write a thorough contract against? Look for promises that contradict each other, choices the sketch was forced to make, promises no case could observe at a real boundary, and flows the design implies but never states. Ignore coverage depth and test mechanics; the sketch is thin on purpose.
 
-When a spike ran, also read its diff and friction log for where the design does not fit the code it lands in. The implementer does not stop at friction the way a person does; it writes the workaround, so read the code for it, not only the log. Look for: two places computing or owning the same fact; a special case keyed to a test fixture; a value threaded through layers that should not know it; an existing guard, lint or census bypassed; a signature change that ripples to many callers; errors swallowed; a mechanism other than the one the design names. Keep a finding only when you can name the design choice it conflicts with; drop mess that comes from the spike's own shortcuts. The spike is evidence about the design, not code to review for quality.
+When a spike ran, read its diff and friction log for where the design doesn't fit the code it lands in. An implementer doesn't stop at friction the way a person does; it writes the workaround. So read the code, not only the log, for: two places owning one fact, a special case keyed to a fixture, a value threaded through layers that shouldn't know it, a bypassed guard or census, a signature change that ripples to many callers, swallowed errors, a mechanism other than the design's. Keep a finding only if you can name the design choice it conflicts with; mess from the spike's own shortcuts is noise.
 
-Return design-level findings grouped by underlying decision, each with a proposed dissolution and trade-offs, using the fidelity guidance below. A clean check means the design is ready for thorough authoring, not that the contract is.
+Return design-level findings grouped by the underlying decision, each with a proposed dissolution and its trade-offs. A clean check means the design is ready for thorough authoring, not that the contract is.
 
-## Fidelity and conservation
+## Whole-contract fidelity
 
-Compare in both directions:
+On the panel after thorough authoring, you are the seat the attackers can't replace. They show where wrong code passes; only a reader catches a test that demands the wrong thing. You work without the code map, so read callers and construction paths yourself; that independence is the point of the seat.
 
-- Every promised outcome has an enforcing assertion at the appropriate observable boundary, including important interactions. A map entry, a probe, or a passing unit helper is not sufficient.
-- Every asserted requirement follows from the design, an adopted property, or a justified contract detail. Flag invented scope and silently selected consequential interpretations.
-- Test expectations implement human decisions at their actual scope. Broad rulings must not narrow to the one fixture or path someone happened to write.
-- Grounding corrections and review findings with behavioral consequences become tests, explicit design changes/exclusions, or justified dismissals. Follow items by ID and evidence; matching counts cannot establish conservation.
-- Verify source assumptions where the tests rely on them. Read actual callers and real construction paths where injection might hide production behavior. Probe runtime claims that materially determine outcomes.
+Check both directions:
 
-If a property cannot be expressed without choosing a data model, flow, or failure policy the design has not settled, identify the underlying decision. Group symptoms and propose a change that dissolves them, with alternatives and trade-offs. Do not send the human a list of fixture or implementation questions.
+- Every promise has an enforcing assertion at the right observable boundary, interactions included. A map entry, a probe or a passing unit helper is not enforcement.
+- Every assertion follows from the design, an adopted property, or a justified detail. Flag invented scope and consequential interpretations chosen silently.
+- Human rulings are implemented at their actual scope, not narrowed to the one fixture someone wrote.
+- Grounding corrections and earlier findings with behavioral consequences became tests, explicit exclusions or justified dismissals. Follow them by ID; matching counts proves nothing.
+- Source assumptions the tests rely on hold in the real code, particularly where injection might hide production behavior.
 
-## Discrimination
+Also read for discrimination where it's cheap to see: vacuous negatives, missing positive controls, canned responses, self-computed expectations, fakes that implement the policy, fixtures that can't reach the stated fault, tests that only exercise injected state. The attackers will run what you only suspect.
 
-For each important assertion or coherent assertion group, ask what plausible incorrect behavior would still pass. Check:
+When a property can't be expressed without a model, flow or failure policy the design hasn't settled, name the underlying decision and propose a change that dissolves its symptoms. Don't send the human a list of fixture questions.
 
-- Vacuous negatives, absent positive controls, canned responses, self-computed expectations, inert defaults, and assertions on type/shape where the promise is about content or wiring.
-- Fakes that implement the decision being tested, fixtures that cannot reach the stated fault, and helpers whose early assertion substitutes for all callers' distinct assertions.
-- Tests that exercise only injected state while real entry points resolve their own state or dependencies.
-- Interacting guarantees: individually correct checks may permit incorrect identity, ordering, partial progress, or cross-surface behavior in combination.
-- Input partitions relevant to the invariant, rather than only branches or example values in current code.
+## Read execution evidence honestly
 
-Use focused test-only counterexamples, mutations, or null stubs where useful. The adversarial implementers on the panel attack discrimination by running wrong code; this reading pass covers what they cannot, such as a test that demands the wrong behavior. Neither proves exhaustive correctness.
+`spec-graph calls <suite-dir> [--target <module>]` checks that tests reach their targets, and `spec-graph nullstub <suite-dir> --python <interpreter>` runs them against a do-nothing target (Python; use equivalents elsewhere). Classify what you see per test or assertion group:
 
-## Interpret execution evidence honestly
+- **Own assertion reached and failed** under a controlled violation: real discrimination evidence, for that violation.
+- **Expected red** because the target doesn't exist yet: fine before implementation, but it validates nothing past that point.
+- **Stopped early** by machinery or another assertion: investigate; it is not this case's evidence.
+- **Passes against an inert target:** presumed vacuous until a control or regression purpose explains it.
+- **Broken:** collection, fixture or setup is wrong regardless of implementation. Must be fixed before hand-off.
 
-For Python projects, `spec-graph calls <suite-dir> [--target <module>]` checks static target reachability and `spec-graph nullstub <suite-dir> --python <interpreter>` runs tests against a temporary do-nothing target. Both consume the suite directly; use equivalent checks for other stacks. Follow project interpreter and injection conventions.
+Many failures at one line usually mean one shared helper, not many discriminating tests. Regression and control tests needn't fail today; new requirements should.
 
-Classify results per test or meaningful assertion group:
+Deferring verification is allowed only for a well-formed test whose claim can't run yet: name the assertions, the missing prerequisite, the later check and its owner. A test proven not to discriminate is a blocker, never a deferral, and an unavailable environment stays visible rather than being replaced by a mock.
 
-- **Own assertion exercised:** a controlled violation reaches and fails the promised assertion. Useful discrimination evidence, not proof of all violations.
-- **Expected pre-implementation red:** a missing target or behavior prevents completion. Legitimate before code exists, but does not validate later assertions.
-- **Non-assertion / shared early failure:** machinery or another assertion stopped the test. Investigate; do not count it as that case's discrimination.
-- **Pass against an inert target:** presumed vacuous until a justified regression/control purpose or stronger assertion explains it.
-- **Broken test:** collection, fixture, signature, or setup is wrong independently of missing implementation. Repair before handoff.
+## Return
 
-Inspect clusters of failures at the same line. A nominal assertion failure in one shared helper does not establish discrimination for every scenario. A temporary stub validates only the paths it actually exercises. Do not demand that every regression/control test fail against today's code; distinguish their purpose from newly required behavior.
-
-Deferred assertion verification is allowed only for a well-formed test whose claim cannot yet be exercised. Name the assertions, missing prerequisite, required later check, and code-stage owner. A proven non-discriminating test is a blocker, not a deferred item. An unavailable environment must remain visible; do not replace a required real integration result with a mock and call it verified.
-
-## Return actionable findings
-
-Each finding has an ID, evidence or reproducer, affected design promise and tests, root cause, consequence, recommended patch/dissolution and trade-offs, and route: probe, contract repair, design amendment, or implementation repair. Distinguish confirmed defects from plausible gaps and speculative concerns.
-
-Return the input design and test revisions, checks actually run with outcomes, material findings first, and remaining verification obligations. A clean review means no findings within the stated review scope. Recheck affected revisions and shared consequences after repairs; do not let an old clean verdict certify changed assertions.
-
-The design check is one Opus reader at high effort. The panel after thorough authoring is this whole-contract Opus reviewer plus two or three Sonnet adversarial implementers with distinct lenses (**references/adversary.md**). Reconcile every seat's output before calling review complete. Repairs need targeted rechecks of the affected assertions, not a fresh full panel unless material revisions invalidate its scope. Run each recheck as a fresh reviewer briefed with the findings, the repair diff and the affected tests; do not resume an idle earlier reviewer. A tests-only blind reader remains optional.
+Findings first, material ones on top. Each has an ID, evidence or a reproducer, the promise and tests affected, the cause, the consequence, a recommended fix or dissolution with trade-offs, and a route (probe, contract repair, design amendment, implementation repair). Mark confirmed defects apart from plausible gaps and speculation. Include the design and test revisions you reviewed and the checks you ran. A clean review means clean within its stated scope, and it certifies only the revision it read.

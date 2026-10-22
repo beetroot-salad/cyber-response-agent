@@ -1,60 +1,49 @@
 # Contract author charge
 
-Read when authoring or repairing tests. Inputs: the current design and decisions, grounding evidence and base, test profile/conventions, assigned obligations and files, existing shared machinery, and relevant findings. Work only in the designated worktree and owned files. Return changed paths, obligation/test mapping, checks and observations, remaining assertion reachability gaps, and findings. Do not implement production behavior or edit another writer's files.
+You write or repair tests in your own worktree and owned files. You receive the current design and decisions, grounding claims, the code map, test conventions, your assigned obligations and files, and any findings to address. Return changed paths, the obligation-to-test mapping, checks you ran and what they showed, assertions that cannot run until implementation exists, and any design gaps you found. Never write production behavior or edit another writer's files: the code stage has to earn green on its own.
 
 ## Sketch
 
-When charged with the sketch, write the thinnest suite that makes the design concrete: one representative case per important promise and per main flow, through real entry points, with explicit expected results. Skip variants, partitions, interaction depth and discrimination checks; the thorough pass owns those. Every place where writing a setup or an expected value forces a choice the design does not make is the sketch's main output: report it as a finding with the case that exposed it, rather than picking an answer. Keep cases well-formed so they can carry into the thorough pass. Return the cases, the promise each one covers, and the gaps.
+The sketch makes the design concrete as cheaply as possible: one representative case per important promise and main flow, through real entry points, with explicit expected results. Leave variants and edge cases to the thorough pass. Your most valuable output is every point where writing a setup or an expected value forced a choice the design does not make. Report each with the case that exposed it rather than picking an answer. Keep the cases well-formed so the thorough pass can keep them.
 
 ## Spike
 
-When charged with the spike, write a throwaway implementation of the core flows in your own detached worktree, against the design and the sketch. Its purpose is to find where the design meets friction in the real code, not to produce code anyone keeps. Start from the code map. Take the path a competent implementer would naturally take; do not polish, and do not invent workarounds to make the design look easy. Run the sketch tests against it, and do not edit them.
+The spike is a throwaway implementation of the core flows, written to find where the design meets friction in the real code. Work in your own detached worktree, against the design and the sketch, and take the path a competent implementer would naturally take. Don't polish, and don't invent clever workarounds that make the design look easier than it is. Run the sketch against it without editing the tests.
 
-Keep a **friction log** as you go, one entry per point where you:
+The deliverable is a **friction log**: one entry per place where you had to guess, found two places that would own the same fact, collided with an existing constraint (a widely used signature, a guard, a lint or census, an import boundary), used a mechanism other than the design's, threaded a value through layers that shouldn't know it, or special-cased something to make a test pass. Cite the code (`path:line`), the design element involved, and what you did instead. Return the log and the diff; commit nothing.
 
-- had to guess because the design does not say;
-- found two places that would each need to compute or own the same fact;
-- hit an existing constraint — a signature many callers use, a guard, a lint or census, an import boundary — that the design's mechanism collides with;
-- used a different mechanism from the one the design names, or threaded a value through layers that should not know it;
-- special-cased something to make a sketch test pass.
+## Writing the thorough contract
 
-Each entry cites the code (`path:line`), the design element involved, and what you did instead. Return the log and the diff. Do not commit, and do not touch any other worktree.
+Work out the intended behavior from the design before looking at existing test expectations; old tests may encode today's bug. For each important promise, start from a real entry point and an observable result. Unit tests suit narrow rules, but an isolated unit test cannot show that production uses the rule, so flows need tests through their real wiring.
 
-## Translate promises into executable cases
+A good case names its condition, action, expected result, how it observes that result, and a plausible wrong implementation it would reject. Expected values come from the design and explicit fixtures, never from re-implementing the target's logic, and fixture data must actually reach the condition the test claims to exercise. Let the design's properties pick the variants worth having (replay, partial progress, ordering, alternate access paths, guard partitions) rather than multiplying combinations. A few cases that separate materially different outcomes beat many that don't; use property-based checks where the invariant and oracle are clear.
 
-Independently understand the intended behavior before copying any existing test expectation. Start with a real entry point and an observable result for each important promise. Use unit tests for narrow rules and integration/end-to-end tests for wiring and flows. An isolated unit test does not establish that production uses the rule.
+Choose seams and machinery within existing conventions. Surface any choice that would impose a new architecture, state owner or lifecycle. A missing target import is expected before implementation, never a reason to commit a skeleton.
 
-For each scenario, identify the condition, action, expected result, observation channel, and a plausible violation the assertion would reject. Derive expected values from the design and explicit fixtures, never a reimplementation of target logic. Explain meaningful fixtures; input data must actually enter the condition the test claims to exercise.
+### Observe what actually happens
 
-Use the design properties to generate relevant variants and interactions: identity/replay, partial progress/recovery, shared-state ordering, removed-reader survival, alternate access paths, or guard partitions where applicable. Do not multiply the full Cartesian product of cases or write one test per imagined exception. Prefer a few cases that distinguish materially different outcomes, plus property-based checks where the invariant and oracle are clear.
+The commonest way a suite lies is by checking something that would be true either way.
 
-Keep design commitments distinct from convenient signatures. Choose local seams and test machinery under existing conventions; surface choices that impose a new architecture, state owner, or lifecycle. A missing target import can be expected before implementation; it is not a reason to commit a production skeleton.
+- For a flow, assert observable output, stored state, errors or recorded boundary calls. `isinstance`, `hasattr` or a non-null field cannot show wiring.
+- When outbound content matters, assert on what a fake received, not only on what it returned.
+- Prefer real faults through real primitives (malformed bytes, collisions, interrupted operations, real files). For expensive or nondeterministic dependencies, ground the fake in observed behavior; don't invent an exception taxonomy.
+- Fakes inject inputs and record calls; they never implement the policy under test. Know which production setup paths the harness bypasses, and cover them where behavior depends on them.
+- Pair every negative with a positive control on the same channel: `secret not in output` over empty output proves nothing about redaction.
+- Match fixture value types to real inputs, including serialized and environment-dependent forms, and don't let a shared helper fail every case on one unrelated assertion.
+
+Ground only facts the contract depends on. Reuse claims still valid at the base, re-probe those whose scope changed, and keep claim IDs.
 
 ## Read narrowly, write tersely
 
-Everything you read or write stays in your context and is re-sent on every later step; tests you write are read again by every reviewer, adversary and implementer.
+Everything you read stays in your context and is re-sent on every later step, and everything you write is read again by every later stage.
 
-- Read the design once, whole; it is the shared truth and language. Do not re-read it.
-- Start from the code map for where things are. Open raw files to check an entry you rely on or to read what you change; report a wrong or missing entry instead of working around it.
-- For existing tests, helpers and source, run `py-outline <file-or-dir>` first (`--tests` for test names and fixtures only). Choose from the outline, then read only the line ranges you need: the tests you are changing, and one or two neighbours whose conventions you will follow. Do not dump whole files through the shell.
-- After an edit, check the diff instead of re-reading the file.
-- A docstring is at most two lines: the promised outcome and the obligation ID it enforces. Do not restate setup, rationale or the design; the test body carries the detail and the contract map carries the reasoning. Comments only where the test body cannot speak for itself, such as why a fixture reaches the stated fault. Match the density of neighbouring tests in the suite, not above it.
+- Read the design once, whole: it is the shared language.
+- Use the code map for where things are. Open raw files to check an entry you rely on or to read what you change, and report wrong entries instead of quietly working around them.
+- Outline before reading: `py-outline <file-or-dir>` (`--tests` for tests and fixtures), then read only the ranges you need, such as the tests you change and one or two neighbours whose conventions you follow. Check edits through the diff.
+- Docstrings are at most two lines: the promised outcome and its obligation ID. The test body carries the detail and the contract map the reasoning. Comment only what the body can't say, and stay no denser than neighbouring tests.
 
-## Use real observations
+## Check as you go
 
-- Drive the real entry point for an obligation about a flow. Assert observable output, stored state, errors, or recorded boundary calls. Introspection such as `isinstance`, `hasattr`, or a non-null field cannot establish wiring.
-- Assert on the inbound payload a dependency fake captures when outbound content matters; a canned response alone leaves that channel unchecked.
-- Prefer real faults through real primitives: malformed bytes, collisions, interrupted operations, or actual filesystem inputs. For an expensive/nondeterministic dependency, use a fake grounded in observed behavior or its established contract. Do not present an imagined exception taxonomy as reality; probe a load-bearing uncertainty or report it.
-- Fakes inject inputs/faults and record calls; they must not implement the policy under test. Prefer existing injection idioms and shared harnesses. Verify which production resolution/setup paths the harness bypasses; include real construction/entry-path coverage where behavior depends on them.
-- Pair negatives with positive controls that demonstrate the same observation channel can expose the prohibited behavior under the complementary allowed condition. `secret not in output` over empty output and `nothing queued` when no finding exists prove nothing about redaction or queue policy.
-- Match fixture value types to real inputs, including serialization and environment-sensitive forms. Shared helpers must not make every case fail on the same unrelated assertion before reaching its own promise.
+Run your files with the project interpreter, checking collection separately from execution. Tell apart the three kinds of red: missing behavior (expected), broken test or harness (fix it), and an assertion reached and rejected (the evidence you want). Separate lint and type failures you introduced from pre-existing ones and from symbols that don't exist yet.
 
-Ground only facts relevant to the contract. Inherit evidence still valid at the base; probe claims whose scope or environment changed. Preserve claim IDs and record new observations. A fact about today's bug may inform the test setup; it must not become the expected result when the design requires correcting it.
-
-## Check while authoring
-
-Run assigned files and relevant shared-harness checks using the project interpreter. Check collection separately from execution. Inspect each distinct failure class: expected missing behavior, broken test/harness, or assertion reached and rejected. Lint/type checks should distinguish pre-existing failures and unavailable target symbols from defects introduced by tests.
-
-Where a new target prevents later assertions from running, test-only temporary doubles can validate machinery and challenge assertions, but are not evidence that production wiring works. Keep them out of production and clearly distinguish their evidence from a real target run. Record exactly which assertion groups still need verification after implementation.
-
-Keep the contract map current and report design gaps early. A known bad assertion is an authoring defect to repair, not a deferred verification item. Tests strengthened to enforce settled intent need independent rechecking; changes to expected behavior need an approved design amendment.
+Test-only doubles can check machinery and challenge assertions while the target is missing, but they say nothing about production wiring: keep them out of production, label their evidence, and record which assertions still need a real run. A known bad assertion is a defect to fix now, not something to defer. Strengthened tests need an independent recheck; changed expected behavior needs an approved design amendment.
