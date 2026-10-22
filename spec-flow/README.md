@@ -4,8 +4,8 @@ A design-and-tests pipeline from GitHub issue to merged PR, as a Claude Code plu
 
 The design records intended behavior, scope, data models, flows, architecture and trade-offs.
 **The tests are the executable contract between that design and code.** Write them before
-implementation, independently review their fidelity and discrimination, then implement against
-them while an adversary looks for intent violations the tests permit. Findings can improve the
+implementation, review their fidelity and let adversarial implementers look for intent
+violations the tests permit, then implement against them. Findings can improve the
 design, the contract or the code; group them by cause before patching or choosing a dissolving change.
 
 Coverage records are agent scaffolding. `write-tests` starts with a compact map and scales
@@ -19,8 +19,7 @@ issue → discuss-issue → write-tests → write-code-from-tests → code revie
              └──────────────┴── findings ───────┘
 ```
 
-The implementation stage dispatches honest workers and contract adversaries against the same
-immutable tests ref. `finalize` remains the plugin's existing post-implementation review stage.
+The implementation stage works against an immutable tests ref that has already been attacked. `finalize` remains the plugin's existing post-implementation review stage.
 `write-code-with-no-spec` is retained for old runs.
 Small changes use the same pipeline with fewer workers and targeted review.
 
@@ -35,8 +34,8 @@ every edge case. The merge remains human-approved.
 | Skill | What it does |
 |---|---|
 | `/spec-flow:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows, and architecture. Groups findings into fixes or dissolving design choices; hands off a human-facing intent+design doc with supporting probed claims. Also handles design amendments discovered by tests or code. |
-| `/spec-flow:write-tests` | Authors contract tests with Opus at medium effort, reviews fidelity and discrimination with Opus at high effort plus two or three lensed Sonnet reviewers at high effort, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record. Known blockers prevent a ready handoff. |
-| `/spec-flow:write-code-from-tests` | Dispatches honest implementers and test-breaking adversaries from the same committed contract. Reconciles findings, completes deferred verification, ships and repairs CI. |
+| `/spec-flow:write-tests` | Sketches the contract and spikes a throwaway implementation to settle the design, authors thorough tests with Sonnet, reviews fidelity with Opus and attacks discrimination with two or three lensed Sonnet adversarial implementers, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record. Known blockers prevent a ready handoff. |
+| `/spec-flow:write-code-from-tests` | Implements against the committed, already-attacked contract. Reconciles findings, completes deferred verification, ships and repairs CI. |
 | `/spec-flow:write-code-with-no-spec` | Legacy combined lane for existing runs; new small changes use write-tests then write-code-from-tests. |
 | `/spec-flow:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |

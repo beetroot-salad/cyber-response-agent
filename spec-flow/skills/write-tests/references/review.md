@@ -32,7 +32,7 @@ For each important assertion or coherent assertion group, ask what plausible inc
 - Interacting guarantees: individually correct checks may permit incorrect identity, ordering, partial progress, or cross-surface behavior in combination.
 - Input partitions relevant to the invariant, rather than only branches or example values in current code.
 
-Use focused test-only counterexamples, mutations, or null stubs where useful. This pass is not a full adversarial implementation; the code stage separately tries to pass the committed tests while violating stated intent. Neither pass proves exhaustive correctness.
+Use focused test-only counterexamples, mutations, or null stubs where useful. The adversarial implementers on the panel attack discrimination by running wrong code; this reading pass covers what they cannot, such as a test that demands the wrong behavior. Neither proves exhaustive correctness.
 
 ## Interpret execution evidence honestly
 
@@ -56,4 +56,4 @@ Each finding has an ID, evidence or reproducer, affected design promise and test
 
 Return the input design and test revisions, checks actually run with outcomes, material findings first, and remaining verification obligations. A clean review means no findings within the stated review scope. Recheck affected revisions and shared consequences after repairs; do not let an old clean verdict certify changed assertions.
 
-The design check is one Opus reader at high effort. The review panel after thorough authoring consists of one whole-contract Opus reviewer at high effort and two or three Sonnet reviewers at high effort with distinct, design-relevant lenses. Specify each lens's question and reconcile every reviewer's output before calling review complete. Repairs need targeted rechecks of the affected assertions, not a fresh full panel unless material revisions invalidate its scope. Run each recheck as a fresh reviewer briefed with the findings, the repair diff and the affected tests; do not resume an idle earlier reviewer. A tests-only blind reader remains optional.
+The design check is one Opus reader at high effort. The panel after thorough authoring is this whole-contract Opus reviewer plus two or three Sonnet adversarial implementers with distinct lenses (**references/adversary.md**). Reconcile every seat's output before calling review complete. Repairs need targeted rechecks of the affected assertions, not a fresh full panel unless material revisions invalidate its scope. Run each recheck as a fresh reviewer briefed with the findings, the repair diff and the affected tests; do not resume an idle earlier reviewer. A tests-only blind reader remains optional.

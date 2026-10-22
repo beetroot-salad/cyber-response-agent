@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: "Turn a candidate design into a committed executable contract before implementation. Write tests to expose design holes, independently review their fidelity and discrimination, and iterate through patches or dissolving design amendments. Use after discuss-issue, or to repair a contract exposed by implementation or adversarial review."
+description: "Turn a candidate design into a committed executable contract before implementation. Write tests to expose design holes, review their fidelity and attack them with deliberately wrong implementations, and iterate through patches or dissolving design amendments. Use after discuss-issue, or to repair a contract exposed by implementation or adversarial review."
 argument-hint: "[design doc path or issue #; optionally contract repair findings]"
 model: opus
 effort: medium
@@ -56,11 +56,14 @@ Authors may probe relevant reality and report design gaps as they arise. Do not 
 
 Scale by **interpretive uncertainty, behavioral coupling, and consequence of failure**, not file counts or entry-point counts. Add scenario depth and focused probes where those dimensions demand it. For work too large for one context, read **references/decomposition.md**: partition by coherent obligations and ownership, assign shared fixtures to one owner, and retain integration scenarios for spanning properties. The orchestrator dispatches workers directly; avoid nested polling coordinators. Do not invent separate survey/integrator agents for a single small file.
 
-## 4. Independently review the contract
+## 4. Independently review and attack the contract
 
-Dispatch a fresh **Opus reviewer at high effort**, plus **two or three independent Sonnet reviewers at high effort with distinct lenses**, using **references/review.md**. Set each reviewer's model and effort explicitly. Each reviewer receives the design, decisions, grounding evidence, tests, and contract map, but not the author's discussion or defence. Each independently derives what must hold before comparing coverage and checks both **design fidelity** (the right behavior is specified) and **discrimination** (the assertions could detect violations). When a design check ran, the design itself is settled: weight this review toward discrimination and toward fidelity of what the thorough pass added, and raise a design-level finding only with evidence the check could not have seen. This review is mandatory even for a small contract; it is independent of the later adversarial implementer.
+Commit the candidate suite to the contract branch as a **candidate ref**; attackers work against that commit. The panel has two kinds of seat, all fresh, none given the author's discussion or defence or each other's findings:
 
-The Opus reviewer owns the whole-contract reading; it is the only Opus seat on the panel. It does not receive the code map and reads the code itself, so map errors and blind spots have one reader they cannot reach. Lens reviewers start from the map. Lens reviewers run on **Sonnet** — an all-Opus panel multiplies cost without adding an independent reading. Start with two Sonnet lenses selected for the actual design, such as lifecycle/recovery, boundary and input behavior, compatibility, or cross-surface interactions; add a third for a distinct consequential risk. Give each lens a focused question and the relevant design, evidence and tests, without the author's defence or other reviewers' findings. Each returns concrete gaps or design tensions, not an unbounded list of hypotheticals. Consolidate all reviewer findings before patching; unread review output adds no protection. A tests-only blind reader is optional when the inferred contract is itself in doubt.
+- **One whole-contract reviewer (Opus at high effort)**, using **references/review.md**. It owns **design fidelity**: does the suite specify the right behavior, with nothing invented and nothing narrowed? An attacker cannot find a test that demands the wrong thing; this seat can. It does not receive the code map and reads the code itself, so map errors and blind spots have one reader they cannot reach. When a design check ran, raise a design-level finding only with evidence the check could not have seen.
+- **Two or three adversarial implementers (Sonnet at high effort)**, using **references/adversary.md**. They own **discrimination**, by demonstration rather than argument: each tries to make the suite pass with deliberately wrong code, in its own detached worktree at the candidate ref, starting from the code map. Give each a distinct lens chosen for the actual design — lifecycle/recovery, boundary and input behavior, compatibility, cross-surface interactions — with the design, tests and coverage map. Past runs found 5–19 passing wrong implementations in suites a reading review had already cleared; reasoning about what could slip through misses what running it shows.
+
+This review is mandatory even for a small contract. Consolidate every seat's output before patching; unread findings add no protection. Each exploit is kept as a reproducible patch: a repaired test must fail against the exploit that exposed it, and that is the core of its recheck. An attacker blocked before executing any sample — including by a platform refusal — leaves its lens **incomplete**, never clean; report it rather than relabel it.
 
 Run relevant deterministic checks directly; they need no dedicated agent. Use the project's targeted test command, collection and applicable lint/type checks. For supported Python suites, `spec-graph calls <suite-dir> [--target <module>]` and `spec-graph nullstub <suite-dir> --python <project-interpreter>` can expose missing calls and vacuity directly from the suite; these commands do not create or require a separate spec artifact. Read the results, not just exit codes: expected red, test breakage, and demand-specific assertion failure are different evidence. Detailed triage is in **references/review.md**. Record unavailable checks and their consequences.
 
@@ -69,7 +72,7 @@ Run relevant deterministic checks directly; they need no dedicated agent. Use th
 Consolidate findings by cause before patching or contacting the human. Every finding has evidence/scenario, affected promise, cause, proposed resolution and consequences. Distinguish:
 
 - **Lookup/probe:** a factual uncertainty. Investigate it; do not ask the human to perform a lookup or pick reality.
-- **Contract defect:** tests omit, misstate, or fail to enforce settled behavior. Have an author repair them, preserving intent. A fresh independent reviewer rechecks the affected assertions and interactions.
+- **Contract defect:** tests omit, misstate, or fail to enforce settled behavior. Have an author repair them, preserving intent. Recheck with fresh workers: repaired tests must fail against each recorded exploit, the affected adversarial lens reruns against the new candidate ref, and the whole-contract reviewer rechecks fidelity of changed assertions.
 - **Design defect or unresolved choice:** the product behavior, scope, data model, flow, architectural commitment, or trade-off needs to change or be settled. Propose a patch or a design change that dissolves the family of findings, using discuss-issue's amendment protocol.
 - **Implementation defect on a repair run:** adequate tests and design already reject the behavior. Return the bug to the code stage; do not amend the design to accommodate it.
 
@@ -81,13 +84,13 @@ On amendment, update the current design and decision record through discuss-issu
 
 ## 6. Iterate to readiness, not a round count
 
-Set a review budget proportional to the named risks and any user limit. Start with authorship and the Opus plus two or three lensed Sonnet review panel. **Two repair rounds after the §4 review is a hard limit.** If blockers remain after the second, stop and report them as blocked/incomplete with the next action; do not dispatch a third round on your own judgment, and do not silently extend a user budget. Only the human extends it. Within that limit, repeat for material findings and consequential revisions; additional lenses or full passes need a specific remaining risk. A design amendment discovered after thorough authoring means the design check missed something: record what, so the sketch and check can improve. Repeated findings of the same class are a signal to revisit the model or test approach. Minor locally determined corrections need targeted rechecks, not another whole pipeline.
+Set a review budget proportional to the named risks and any user limit. Start with authorship and the §4 panel. **Two repair rounds after the §4 review is a hard limit.** If blockers remain after the second, stop and report them as blocked/incomplete with the next action; do not dispatch a third round on your own judgment, and do not silently extend a user budget. Only the human extends it. Within that limit, repeat for material findings and consequential revisions; additional lenses or full passes need a specific remaining risk. A design amendment discovered after thorough authoring means the design check missed something: record what, so the sketch and check can improve. Repeated findings of the same class are a signal to revisit the model or test approach. Minor locally determined corrections need targeted rechecks, not another whole pipeline.
 
 Readiness requires:
 
 - Every in-scope promise and adopted amendment has enforcing assertions, or an explicit design-level exclusion; no unsupported coverage claim substitutes for a test.
 - No known blocking contract defect, vacuous assertion presented as coverage, or unresolved consequential design choice remains.
-- The independent review covers the current material revision, and its findings have evidence-backed dispositions.
+- The fidelity review and every adversarial lens cover the current material revision, and their findings have evidence-backed dispositions. A lens left incomplete is a blocker unless you accept it explicitly.
 - Expected failures are distinguished from broken machinery. Assertions not yet exercised are individually identified with implementation-stage verification obligations.
 - The design, tests, map, evidence and handoff agree at the recorded base and revisions.
 
@@ -95,6 +98,6 @@ An exhausted budget with a known blocker means **blocked/incomplete**, with the 
 
 ## 7. Commit and hand off
 
-Follow **references/contract.md**. Commit the executable contract separately before implementation; preserve an immutable tests ref for both honest and adversarial implementers. Communicate coverage, uncertainty, design amendments, and required implementation-stage checks. Do not start coding or ship a PR from this skill.
+Follow **references/contract.md**. Commit the executable contract separately before implementation; preserve an immutable tests ref for the implementer; record the adversarial ledgers in the durable coverage/review record. Communicate coverage, uncertainty, design amendments, and required implementation-stage checks. Do not start coding or ship a PR from this skill.
 
 **Handoff:** give `write-code-from-tests` the committed suite and compact coverage/review record linked to the current design. State the immutable contract ref and next action. Do not generate or maintain `spec_graph_*.yaml`; requirements belong in the design and enforcing tests, not a parallel spec.

@@ -1,13 +1,13 @@
 ---
 name: write-code-from-tests
-description: "Implement a committed tests-first contract while independent adversaries try to pass those tests and violate the design. Reconcile findings into code repairs, independently reviewed test repairs, or design amendments; verify locally, ship, and repair CI within a bounded loop. Use after write-tests, including contract-repair resumes."
+description: "Implement a committed, already-attacked tests-first contract. Reconcile findings into code repairs, independently reviewed test repairs, or design amendments; verify locally, ship, and repair CI within a bounded loop. Use after write-tests, including contract-repair resumes."
 argument-hint: "[issue # or design doc; committed contract ref and handoff]"
 effort: medium
 ---
 
 # Write code from tests
 
-Implement the design against its committed executable contract. Dispatch two groups: **honest implementers** make the tests pass with real code; **contract adversaries** make the same tests pass with deliberately incorrect code. Their outputs are independent and both are needed before readiness. A green suite alone is not a correctness verdict.
+Implement the design against its committed executable contract. The contract arrives already attacked: write-tests' adversarial reviewers tried to pass it with deliberately wrong code and its holes were closed before commit. This stage writes real code that makes it pass. A green suite alone is still not a correctness verdict.
 
 Inputs are the current design/decisions, immutable contract ref and base, suite paths, write-tests' durable coverage/review handoff, the code map, and project profile (`.claude/spec-flow.json`). Read the profile; derive missing gate/harness facts from the repo or use init rather than guess.
 
@@ -17,7 +17,7 @@ Inputs are the current design/decisions, immutable contract ref and base, suite 
 
 Adopt the branch/worktree containing the committed tests, or create an implementation branch from that contract ref. Never implement in the main checkout. Confirm interpreter/import resolution into this worktree. Keep the original base, contract ref, design revision and verification record available for resume. Implementation HEAD is not the contract ref.
 
-Use separate worktrees for adversaries; never copy their cheating implementation into honest code. For multiple honest workers, assign disjoint source files and a shared-code owner; use isolated worktrees when changes cannot be safely partitioned. The orchestrator owns integration and dispatches workers directly. One honest worker and one adversary are sufficient by default; additional workers/lenses need coherent work or a named risk. Preserve worktrees and branch/PR on failure for resume.
+For multiple workers, assign disjoint source files and a shared-code owner; use isolated worktrees when changes cannot be safely partitioned. The orchestrator owns integration and dispatches workers directly. One worker is sufficient by default; additional workers need coherent work or a named risk. Preserve worktrees and branch/PR on failure for resume.
 
 ## 1. Gate and understand the contract
 
@@ -31,26 +31,24 @@ Do not silently substitute a chosen architectural mechanism because another make
 
 ## 2. Dispatch, reconcile and repair
 
-For a new run, start both groups from the **same immutable contract revision** before honest implementation is written. On resume, honest workers continue from implementation HEAD; reuse completed attack evidence when its recorded design, contract, environment and scope are unchanged, and dispatch missing/stale work against the immutable contract ref. Do not restart implementation merely to satisfy initial ordering. Select explicit model/effort for both groups, using stronger reasoning for coupled implementation or inventive attacks and cheaper work for deterministic checks:
+For a new run, start from the immutable contract revision; on resume, continue from implementation HEAD. Select explicit model/effort, using stronger reasoning for coupled implementation and cheaper work for deterministic checks. Give workers:
 
-- **Honest group:** the implementation worktree, design/decisions, contract and coverage record, code map, profile, owned files, and §3's charge. Workers start from the code map and open raw files to check an entry they rely on or to read what they change; a wrong or missing entry is reported and fixed in the map. Use a capable model at effort appropriate to the coupled logic; select explicitly rather than inherit a low orchestration budget.
-- **Adversarial group:** `references/adversary.md`, design, contract ref/map, code map, profile, and attack deck (`.claude/spec-flow-attacks.md`). Each gets a detached worktree at that contract ref. It never sees honest implementation or its diff. Return reproducible attacks and the attempts ledger, not changes to merge.
+- the implementation worktree, design/decisions, contract and coverage record, code map, profile, owned files, and §3's charge. Workers start from the code map and open raw files to check an entry they rely on or to read what they change; a wrong or missing entry is reported and fixed in the map. Use a capable model at effort appropriate to the coupled logic; select explicitly rather than inherit a low orchestration budget.
+Collect findings from implementation, local checks and CI. Group them by cause and consider whether a model/flow change dissolves several; local bugs can still deserve local fixes. Route:
 
-Collect findings while the honest group works. Group them by cause and consider whether a model/flow change dissolves several; local bugs can still deserve local fixes. Route:
-
-- **Code defect:** honest workers repair it under the settled design.
-- **Contract defect:** dispatch the write-tests author/reviewer roles to strengthen or correct the contract, with independent review. An exploit is still a contract defect when the honest implementation already resists it. Do not ask the human to ratify each technical assertion repair.
+- **Code defect:** workers repair it under the settled design.
+- **Contract defect:** a test that is wrong, or a hole real code exposes. Dispatch write-tests' repair author and an adversarial recheck (write-tests §4) against the revised contract ref. Do not ask the human to ratify each technical assertion repair.
 - **Design defect/choice:** use discuss-issue's amendment protocol. Frame demonstrated bugs and their fix trade-offs; consolidate decisions about behavior, scope, data models, flows or architecture. Keep unaffected work; block what depends on the unresolved choice.
 - **Factual uncertainty:** probe it. A human does not choose what existing code actually does.
 
-**Contract revision:** record original and revised refs, input design revision, affected tests/flows and review. Produce repair commits on the contract-only lineage, preserving the original base and excluding honest implementation; disclose when repair authors saw implementation. Incorporate only the reviewed contract changes into the honest branch without replacing source. Run strengthened tests against honest code and rerun affected attacks on the revised contract ref; an old clean attack verdict does not certify changed tests or design. Changes affecting cross-obligation assumptions require wider rechecking. If no separate contract lineage exists, resolve the input/history defect rather than fabricate a pre-implementation run.
+**Contract revision:** record original and revised refs, input design revision, affected tests/flows and review. Produce repair commits on the contract-only lineage, preserving the original base and excluding implementation; disclose when repair authors saw implementation. Incorporate only the reviewed contract changes into the implementation branch without replacing source. Run strengthened tests against the implementation and rerun the affected adversarial lenses on the revised contract ref; an old clean attack verdict does not certify changed tests or design. Changes affecting cross-obligation assumptions require wider rechecking. If no separate contract lineage exists, resolve the input/history defect rather than fabricate a pre-implementation run.
 
-Set a risk-appropriate budget within user limits. Stop if two repair rounds make no material progress or the budget expires with blockers. Preserve evidence and state; report the concrete next action. Mandatory adversarial work must finish with findings dispositioned before a ready handoff. An optional draft PR may expose blocked work, but an incomplete pass or known contract hole cannot accompany a success verdict.
+Set a risk-appropriate budget within user limits. Stop if two repair rounds make no material progress or the budget expires with blockers. Preserve evidence and state; report the concrete next action. An optional draft PR may expose blocked work, but a known contract hole cannot accompany a success verdict.
 
 ## 3. Implement to green — locally, against the whole gate
 
 
-This is the honest implementer's charge. Work only in assigned source files; return changed paths, actual check results, deferred verification evidence, and findings to the orchestrator. Do not alter the committed contract, shared files owned by another worker, or the adversary's worktree.
+This is the implementer's charge. Work only in assigned source files; return changed paths, actual check results, deferred verification evidence, and findings to the orchestrator. Do not alter the committed contract or shared files owned by another worker.
 
 Write real code until the suite passes. Run the same command CI runs, not a subset — the profile's `gate.test`.
 
@@ -70,19 +68,19 @@ An optional claims adversary can check guarantees made by new docstrings/comment
 
 ## 4. Ship
 
-After both groups finish, reconcile their results against the current design and contract. Confirm required deferred checks are closed, known blocking findings are resolved, and local test/lint/type gates pass at the implementation revision being shipped. Independent code review remains a subsequent stage; adversarial sampling does not replace it.
+When implementation is complete, reconcile it against the current design and contract. Confirm required deferred checks are closed, known blocking findings are resolved, and local test/lint/type gates pass at the implementation revision being shipped. Independent code review remains a subsequent stage.
 
 Use `ship` for commit/push/open-PR mechanics when shipping is authorized. Ancestry is pinned by the recorded contract base/ref: do not apply its default rebase rule or silently rewrite tests-first history. If updating the branch is necessary, preserve refs and integrate in a way that allows affected contract/design assumptions to be revalidated. Report a blocked update rather than fabricate fresh evidence.
 
-The PR links the issue, design revision, original/current contract refs and coverage record; declares approved mechanism deviations; carries the contract adversary's attempts, findings and dispositions; records deferred verification results and any optional claims review separately; and names the next review action. No findings means the attack sample found none, not proof of resilience. Report the PR number on failure as well as success.
+The PR links the issue, design revision, original/current contract refs and coverage record; declares approved mechanism deviations; links write-tests' adversarial record and carries any contract repairs made here with their rechecks; records deferred verification results and any optional claims review separately; and names the next review action. Report the PR number on failure as well as success.
 
 ## 5. Watch CI and repair — bounded, honest
 
 Use `gh pr checks --watch`. On red: inspect `gh pr checks` and `gh run view <run-id> --log-failed`, fix the cause, push, and re-watch. Never weaken a test, suppress a new type/lint defect, or baseline a finding to manufacture green.
 
-Route test/design defects through §2. Recheck findings affected by changed code and the deferred verification they touch; rerun adversarial work when its contract/design inputs change. Bound attempts within the task's budget and stop after two rounds without material progress. A failed or unavailable required check remains blocked.
+Route test/design defects through §2. Recheck findings affected by changed code and the deferred verification they touch; rerun the affected adversarial lenses when contract or design inputs change. Bound attempts within the task's budget and stop after two rounds without material progress. A failed or unavailable required check remains blocked.
 
 ## 6. Exit
 
-- **Ready for code review:** both groups completed on the recorded contract, blockers are resolved, required verification and CI are green. Hand off to the configured independent code-review workflow; `finalize` remains the existing plugin's next stage. Do not merge.
+- **Ready for code review:** implementation is complete on the recorded contract, blockers are resolved, required verification and CI are green. Hand off to the configured independent code-review workflow; `finalize` remains the existing plugin's next stage. Do not merge.
 - **Blocked/incomplete:** say what remains, why progress stopped, and the next action; retain branch, worktree, refs, evidence and PR number for resume. Distinguish missing verification from a known defect. Escalate design choices, not a queue of technical repairs.

@@ -2,7 +2,7 @@
   "name": "spec-flow",
   "displayName": "spec-flow",
   "version": "0.1.0",
-  "description": "A design-and-tests issue-to-PR pipeline: discuss an issue, turn the design into reviewed contract tests, implement while adversaries challenge those tests, then finalize and ship. Tests encode intent; independent review and adversarial checks challenge their fidelity and discrimination.",
+  "description": "A design-and-tests issue-to-PR pipeline: discuss an issue, turn the design into contract tests that are reviewed and attacked by adversarial implementers, implement against them, then finalize and ship. Tests encode intent; a fidelity review and adversarial implementations challenge them before commit.",
   "keywords": ["tdd", "spec", "code-review", "github", "pipeline"],
   "license": "MIT"
 }
