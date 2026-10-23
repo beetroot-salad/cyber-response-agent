@@ -33,13 +33,13 @@ Two artifacts carry the intent, and each holds what the other can't:
 - **The tests** hold the what, in a form that can fail. A sentence in a document can't stop wrong
   code from shipping. The tests are the spec.
 
-A written spec in between isn't needed. A natural-language spec exists so that people can
+The working assumption is that a written spec in between isn't needed. A natural-language spec exists so that people can
 coordinate on detail too fine for the design and too early for code. Agents don't need that layer:
 given the intent, they can turn it straight into tests, and the tests then serve as the spec,
 exact where prose would leave room for two readings. The design can stay compact and lean on
 shared context. That cuts both ways: whatever it leaves implicit still has to be settled, and here
-that happens when the tests are written and reviewed, not in more prose. This is a judgment from running the
-pipeline without a spec, not a measured comparison.
+that happens when the tests are written and reviewed, not in more prose. It hasn't been measured against a
+version with a spec.
 
 The tests are committed **alone, before any implementation**, as a fixed reference. That makes the
 order provable from git history rather than from an agent's account, and it stops the code stage
