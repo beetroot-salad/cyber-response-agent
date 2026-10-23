@@ -185,7 +185,31 @@ def run_batch(
         except TimeoutError as e:
             log.warning(f"repo lock unavailable: {e}; queue intact")
             return 0
+        try:
+            _require_clean_draft(cfg)
+        except (AuthorError, DeliveryRefused) as e:
+            log.critical(f"{e}")
+            # An already-dirty draft at tick start is recorded as stuck, not skipped silently,
+            # and never handed to the spawn (OD15: no pre-run stray is tolerated).
+            try:
+                _record_stuck(state, channel, e, [])
+            except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
+                log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
+            return 2
         return _tick(cfg=cfg, hold_committed=hold_committed, log=log)
+
+
+def _require_clean_draft(cfg: CorpusAuthorConfig) -> None:
+    """Refuse a claim over a draft that already differs from the batch's base before the spawn
+    runs: whatever stands there would otherwise be read as the spawn's own work. A config with
+    no batch has no draft to judge (it refuses at the commit, `_claim_batch`)."""
+    if cfg.batch is None:
+        return
+    strays = sorted(c.path for c in cfg.batch.change_set())
+    if strays:
+        raise AuthorError(
+            f"the draft is already dirty before the spawn: {strays}; refusing to start the tick"
+        )
 
 
 def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
@@ -320,23 +344,45 @@ def _corpus_name(cfg: CorpusAuthorConfig, path: str) -> str:
     return path[len(cfg.corpus_rel):]
 
 
+#: How many times `_read_citations` will re-read the changed lessons when one moved under it
+#: before giving up. Two is the honest need (read, then confirm nothing moved); the rest is
+#: slack for a concurrent editor that is still writing when the first confirmation runs.
+_CITE_ROUNDS = 4
+
+
 def _read_citations(
     cfg: CorpusAuthorConfig, changed: tuple[AgentChange, ...], batch: set[str],
 ) -> dict[str, frozenset[str]]:
     """change path -> the this-batch ids each changed lesson cites. Each lesson is read through
-    the corpus mount (`cfg.corpus`, #1134), and must still hold the bytes the claim's change set
-    took from it: those are the bytes that land."""
+    the corpus mount (`cfg.corpus`, #1134), in rounds until nothing moved during one (#773 one
+    truth). A lesson whose settled bytes are not the ones the claim's change set took — the
+    bytes that would land — cites nothing: no citation was read from what it would commit, so
+    it is never approved (the claim's reset puts it back)."""
     field_name = provenance_field(cfg.channel.id_key)
     view = cfg.corpus.view()
+
+    def read(change: AgentChange) -> str:
+        return _read_or_empty(view, _corpus_name(cfg, change.path))
+
+    texts: dict[str, str] = {}
+    for _ in range(_CITE_ROUNDS):
+        texts = {change.path: read(change) for change in changed}
+        if all(read(change) == texts[change.path] for change in changed):
+            break
+    else:
+        raise AuthorError(
+            f"{cfg.corpus_rel} kept changing under the citation read for {_CITE_ROUNDS} "
+            "rounds — refusing to commit bytes no citation was read from"
+        )
     cites: dict[str, frozenset[str]] = {}
     for change in changed:
-        text = _read_or_empty(view, _corpus_name(cfg, change.path))
+        text = texts[change.path]
         assert change.content is not None  # `changed` holds no deletion
         if text.encode("utf-8", "surrogateescape") != change.content:
-            raise AuthorError(
-                f"{change.path} changed after the claim's change set was taken — refusing to "
-                "commit bytes no citation was read from"
-            )
+            channel_logger(cfg).warning(
+                f"{change.path} changed after the claim's change set was taken — not approved")
+            cites[change.path] = frozenset()
+            continue
         cites[change.path] = frozenset(_cited_ids_in(text, field_name) & batch)
     return cites
 
@@ -344,10 +390,12 @@ def _read_citations(
 def _assert_corpus_attributable(
     cfg: CorpusAuthorConfig, changed: tuple[AgentChange, ...], ids: set[str],
 ) -> None:
-    """Every corpus file the curator spawn added must cite, under the channel's provenance
-    key, an id this batch read — whatever bucket the curator reported it under. Read through
-    the corpus mount: a refused read cites nothing. (`changed` holds additions only: an edit
-    of a base file citing nothing is repaired, never committed — `_author_batch`.)
+    """Every corpus file in `changed` must cite, under the channel's provenance key, an id
+    this batch read — whatever bucket the curator reported it under. Read through the corpus
+    mount: a refused read cites nothing. (`changed` is every addition, and every edit of a base
+    file that still claims a provenance — no other batch's citations vouch for this batch's
+    edit, #773 C13. An edit of a base file citing nothing at all is repaired, never committed
+    — `_author_batch`.)
 
     The `AuthorError` unwinds the claim (its reset); the batch is bumped and stays queued."""
     field = provenance_field(cfg.channel.id_key)
@@ -421,16 +469,21 @@ def _author_batch(
         buckets=tuple(b.name for b in cfg.buckets), noun=cfg.noun,
     )
     base = batch.base()
+    field = provenance_field(key)
     _assert_corpus_attributable(
-        cfg, tuple(c for c in tree.changed if c.path not in base), batch_ids)
+        cfg,
+        tuple(c for c in tree.changed if c.path not in base
+              or _cited_ids(cfg.corpus.view(), _corpus_name(cfg, c.path), field)),
+        batch_ids)
 
     cites = _read_citations(cfg, tree.changed, batch_ids)
     fates = _decide_fates(
         batch_ids, cites, claimed_committed=set(author_shared.result_list(result, "committed")),
     )
-    # Approved: a changed lesson citing this batch. Every added lesson is (attributable above);
-    # an edit of a base lesson citing nothing from it is corpus repair — left out of the commit,
-    # and put back from the batch's base by the claim's reset. The curator's deletions under the
+    # Approved: a changed lesson citing this batch. Every added lesson, and every edited one
+    # still claiming a provenance, is (attributable above); an edit of a base lesson citing
+    # nothing at all is corpus repair — left out of the commit, and put back from the batch's
+    # base by the claim's reset. The curator's deletions under the
     # corpus land with the approved lessons.
     landing = (*(c for c in tree.changed if cites[c.path]), *tree.deleted)
     commit_sha = (
