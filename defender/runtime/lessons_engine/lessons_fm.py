@@ -65,12 +65,14 @@ def cmd_tags(field: str | None) -> int:
 
 def cmd_show(paths: list[str]) -> int:
     rc = 0
-    corpus = lessons_dir().resolve()
+    knowledge = agent_knowledge()
+    corpus = knowledge.lessons_dir.resolve()
     for raw_path in paths:
         p = Path(raw_path)
         if not p.is_absolute():
-            # Relative to the agent root (`lessons/<name>.md`), the tree the lessons belong to.
-            p = corpus.parent / raw_path
+            # Repo-relative, as the tenant repo that versions the agent root spells it
+            # (`agent/lessons/<name>.md`, #1108 P4 OD6).
+            p = knowledge.agent_root.parent / raw_path
         lesson = p.resolve()
         try:
             lesson.relative_to(corpus)
