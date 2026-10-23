@@ -42,9 +42,9 @@ def model_read_surfaces(defender_dir: Path) -> tuple[Path, ...]:
         return ()
     out.extend(sorted(skills.glob("*/SKILL.md")))
     out.extend(sorted(skills.glob("*/execution.md")))
-    # The catalog through its owner; the `skills/` walk above still spans general and
-    # per-system skills in one tree, which #1108 P4 splits into two roots.
-    queries = KnowledgePaths.of_defender_dir(root).catalog_dir
+    # The catalog through its owner, under the same root: the audit walks one tree whose
+    # `skills/` holds both the product's skills and an agent root's per-system ones.
+    queries = KnowledgePaths(root).catalog_dir
     if queries.is_dir():
         out.extend(sorted(p for p in queries.rglob("*.md")))
     out.extend(sorted(skills.glob(f"*/{_ROSTER_FILENAME}")))

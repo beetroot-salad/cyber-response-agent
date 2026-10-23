@@ -3,14 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender._paths import PATHS, DefenderPaths
+from defender._paths import PATHS
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 
 REPO_ROOT = PATHS.repo_root
 LEARNING_DIR = PATHS.learning_dir
-CATALOG_DIR = PATHS.catalog_dir
-CATALOG_REL = DefenderPaths.catalog_rel
-SKILLS_DIR = PATHS.skills_dir
-SKILLS_REL = DefenderPaths.skills_rel
+# Transitional (#1108 P4): the checkout's layout until the lead lanes write a tenant draft.
+CATALOG_DIR = CHECKOUT_KNOWLEDGE.catalog_dir
+CATALOG_REL = CHECKOUT_KNOWLEDGE.catalog_rel
+SKILLS_DIR = CHECKOUT_KNOWLEDGE.skills_dir
+SKILLS_REL = CHECKOUT_KNOWLEDGE.skills_rel
 #: The catalog's folder below the `skills/` mount (`gather/queries`): drain code reaches the catalog
 #: through the held `skills/` mount, never through a handle rooted at the catalog (#1134).
 CATALOG_FOLDER = CATALOG_REL[len(SKILLS_REL):].strip("/")

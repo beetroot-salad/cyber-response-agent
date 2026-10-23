@@ -142,6 +142,11 @@ class RunProvenance:
     #: wrong-typed on read, each folds to `None` without voiding the record.
     started_at: str | None = None
     alert_label: str | None = None
+    #: How the run came by its knowledge (#1108 P4, OD17): `{kind, commit, stale_kind}` of the
+    #: run's host-held knowledge-source record, informational, never the reason (the record
+    #: beside the run dir is authoritative for every reader). `None` when the record does not
+    #: say (a stamp written before P4, or a malformed value read back).
+    knowledge_source: Mapping[str, str | None] | None = None
 
     def __post_init__(self) -> None:
         """Refuse a record no capture could have produced, so both the writer and `from_obj`
@@ -185,6 +190,8 @@ class RunProvenance:
                 "knowledge": None if self.knowledge is None else self.knowledge.as_wire(),
                 "started_at": self.started_at,
                 "alert_label": self.alert_label,
+                "knowledge_source": (None if self.knowledge_source is None
+                                     else dict(self.knowledge_source)),
             },
             indent=2,
             sort_keys=True,
@@ -242,9 +249,24 @@ class RunProvenance:
                 knowledge=KnowledgeRevision.from_wire(obj.get("knowledge")),
                 started_at=(started_at if isinstance(started_at, str) else None),
                 alert_label=(alert_label if isinstance(alert_label, str) else None),
+                knowledge_source=_knowledge_source_from_wire(obj.get("knowledge_source")),
             )
         except ValueError:
             return None
+
+
+#: The keys the stamp's `knowledge_source` may carry (OD17): never the publish's reason.
+KNOWLEDGE_SOURCE_KEYS = ("kind", "commit", "stale_kind")
+
+
+def _knowledge_source_from_wire(value: object) -> dict[str, str | None] | None:
+    """The stamp's `knowledge_source`, or `None` for anything but a mapping of exactly
+    `KNOWLEDGE_SOURCE_KEYS` to text or null. Never raises: the stamp sits in the box's rw bind."""
+    if not isinstance(value, dict) or set(value) != set(KNOWLEDGE_SOURCE_KEYS):
+        return None
+    if not all(v is None or isinstance(v, str) for v in value.values()):
+        return None
+    return {k: value[k] for k in KNOWLEDGE_SOURCE_KEYS}
 
 
 def _from_build_stamp(environ: Mapping[str, str], why: str) -> RunProvenance:

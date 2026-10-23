@@ -11,13 +11,14 @@ from dataclasses import field
 from defender._model import model
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar
 
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender.configuration._env import env_int, env_str
 from defender.configuration._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
 from defender.run_repository import WIRE_LOG_NAMES
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, LESSONS, LESSONS_QUESTIONER, KnowledgePaths
 
 
 from defender.tenancy._tenant import Tenant
@@ -77,6 +78,35 @@ class LoopPaths(DefenderPaths):
 
     state_dir: Path | LearningRoot | None = None
     tenant: Tenant | None = field(default=None, kw_only=True)
+
+    # Transitional (#1108 P4): the corpus spellings and folders of this checkout, as
+    # `DefenderPaths` carried them before P4 took the knowledge out of the checkout. The lanes
+    # still writing through a worktree read them here until they write a tenant draft instead;
+    # the census (`tenant_1108_p4/test_census.py`) names every such reader.
+    catalog_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.catalog_rel
+    skills_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.skills_rel
+    lessons_dir_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(LESSONS)
+    lessons_questioner_dir_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(LESSONS_QUESTIONER)
+
+    @property
+    def knowledge(self) -> KnowledgePaths:
+        return KnowledgePaths.of_defender_dir(self.defender_dir)
+
+    @property
+    def catalog_dir(self) -> Path:
+        return self.knowledge.catalog_dir
+
+    @property
+    def skills_dir(self) -> Path:
+        return self.knowledge.skills_dir
+
+    @property
+    def lessons_dir(self) -> Path:
+        return self.knowledge.lessons_dir
+
+    @property
+    def lessons_questioner_dir(self) -> Path:
+        return self.knowledge.lessons_questioner_dir
 
     def __post_init__(self) -> None:
         if self.tenant is not None and not isinstance(self.state_dir, LearningRoot):

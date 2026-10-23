@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from pydantic_core import core_schema
 
 from defender.records._locations import (
-    DataRoot, TenantRoot, TenantRecord, RunsBase, SessionsRoot, EpisodesRoot, LearningRoot, WorktreesRoot, ExportsRoot, DraftsRoot, KnowledgeLock, CommitRecord, LegacyRunsRoot, LegacyEpisodesRoot, _unwrap_data_root, _unwrap_tenant_root, _unwrap_runs_base, _unwrap_episodes_root,
+    DataRoot, TenantRoot, TenantRecord, RunsBase, SessionsRoot, EpisodesRoot, LearningRoot, WorktreesRoot, ExportsRoot, DraftsRoot, RunKnowledgeRoot, KnowledgeLock, CommitRecord, LegacyRunsRoot, LegacyEpisodesRoot, _unwrap_data_root, _unwrap_tenant_root, _unwrap_runs_base, _unwrap_episodes_root,
 )
 from defender.records import _alert_input
 from defender.records._run_id import mint_uuid, uuid_id_fault
@@ -351,10 +351,11 @@ class Tenant:
         return DraftsRoot(self._layout.drafts)
 
     @property
-    def run_knowledge(self) -> Path:
-        """Host-made per-run copies of an export (`<run_id>/{owner, settings/, stage/}`), each
-        removed when its run ends and swept by a publish once its owner is dead (#1108 P4)."""
-        return self._layout.run_knowledge
+    def run_knowledge(self) -> RunKnowledgeRoot:
+        """Host-made per-run copies of one export (`<run_id>/{owner, settings/, stage/}`,
+        #1108 P4 U9): what a run reads, removed when the run ends and swept by a publish once
+        their owner is dead."""
+        return RunKnowledgeRoot(self._layout.run_knowledge)
 
     @property
     def publish_status(self) -> Path:
@@ -416,6 +417,13 @@ class Tenant:
         return requested_tenant(self.data_root, raw_id)
 
 
+def clone_halves(tenant: Tenant) -> tuple[Path, Path]:
+    """`(agent/, settings/)` of `tenant`'s clone working tree. No run reads them (#1108 P4, O-B:
+    run start hands its run copy's roots); they are the default roots of a tenant record resolved
+    over the tenant's own folder by a caller that names no export (REPLAY-WT)."""
+    return tenant.agent, tenant.settings
+
+
 def requested_tenant_id(raw: object) -> TenantId:
     """The tenant a request names (`--tenant`), checked against the id grammar — the ONE rule
     every entry point applies to it before accepting: absent is refused (there is no default
@@ -430,14 +438,23 @@ def requested_tenant_id(raw: object) -> TenantId:
 
 def accept_tenant(
     data_root: DataRoot, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
+    clone_tree: bool = True,
 ) -> Tenant:
     """`raw_id` under `data_root`, checked whole — the ONE acceptance of a tenant, and the
     only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
-    FIRST check that fails, in this order:"""
+    FIRST check that fails, in this order:
+
+    `clone_tree=False` is run start's acceptance (#1108 P4, flow 3: "accept tenant" first). A run
+    reads its own copy of an export and nothing of the clone's working tree (P-1), and the run
+    copy's settings are held to `check_run_settings`. The folder rules still judge the clone
+    whenever it has a working tree, so a tenant whose folder is faulted is refused at run start
+    with the tenant check's own reason (#1222 A5), snapshot or none; only a clone whose working
+    tree is gone altogether (both halves absent, its git objects kept: R-I5) is not asked."""
     tenant_id = TenantId(raw_id)
     paths = _TenantPaths(data_root, tenant_id)
     row = _read_row(paths)
-    _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted)
+    _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted,
+                      clone_tree=clone_tree)
     return Tenant(id=tenant_id, data_root=data_root, row=row, _token=_ACCEPTED)
 
 
@@ -507,6 +524,7 @@ def provision_learning(
 
 def _accept_knowledge(
     paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot],
+    clone_tree: bool = True,
 ) -> None:
     """Steps 3-7 of `accept_tenant` over an id and root its layout class already guarded.
     The knowledge folder is neither followed nor resolved: the walk opens `<T>` and
@@ -517,8 +535,9 @@ def _accept_knowledge(
     knowledge_name = paths.knowledge.relative_to(root).as_posix()
     with _real_io.bind(root) as bound:
         _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
-        _check_knowledge(bound.under(knowledge_name), paths.knowledge,
-                         tenant_id=paths.tenant_id)
+        if clone_tree or _has_working_tree(bound, knowledge_name):
+            _check_knowledge(bound.under(knowledge_name), paths.knowledge,
+                             tenant_id=paths.tenant_id)
     root_real = _resolve_or_refuse(root)
     settings_real = root_real / paths.settings.relative_to(root)
     halves_real = (settings_real, root_real / paths.agent.relative_to(root))
@@ -539,6 +558,14 @@ def _accept_knowledge(
                 f"{mounted}, which a box mounts, lies inside tenant {paths.tenant_id!r}'s "
                 f"knowledge folder {paths.knowledge} — a run's writes would land in the "
                 "tenant's repo; keep the runs base and every mounted tree outside it")
+
+
+def _has_working_tree(bound: _real_io.Bound, knowledge_name: str) -> bool:
+    """Whether the knowledge folder has either half of a working tree (judged no-follow): any
+    entry at `settings` or `agent`, sound or not, counts, so only a tree that is gone
+    altogether escapes the folder rules."""
+    return any(not _real_io.stat_entry(bound, f"{knowledge_name}/{half}").absent
+               for half in (SETTINGS_HALF, AGENT_HALF))
 
 
 def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
@@ -612,6 +639,20 @@ def _check_knowledge(
         raise TenantRefused(
             f"{tenant_id_file} names tenant {claimed!r}, not {tenant_id!r} — this knowledge "
             "folder is another tenant's")
+
+
+def check_run_settings(settings: Path) -> None:
+    """The settings rules a run holds its copy of an export's `settings/` to (#1108 P4): the
+    `REQUIRED_SETTINGS` are plain files and the two mapping files stand — the refusals
+    acceptance gives a tenant's own folder, each naming what to fix. `TenantRefused` at the
+    first rule that fails. Reads only."""
+    settings = Path(settings)
+    with _real_io.bind(settings) as bound:
+        for rel in REQUIRED_SETTINGS:
+            _required_setting(_real_io.stat_entry(bound, rel), settings / rel)
+        mapping_faults = _alert_input.settings_reasons(bound)
+    if mapping_faults:
+        raise TenantRefused("; ".join(mapping_faults))
 
 
 def _required_setting(found: _real_io.StatRead, path: Path) -> None:

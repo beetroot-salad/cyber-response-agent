@@ -137,6 +137,17 @@ def _unwrap_drafts_root(location: DraftsRoot) -> Path:
     return location._record_location_path
 
 
+class RunKnowledgeRoot(_Location):
+    """The opaque run-copies root location (`<T>/run-knowledge/`, #1108 P4)."""
+    __slots__ = ()
+
+
+def _unwrap_run_knowledge_root(location: RunKnowledgeRoot) -> Path:
+    if not isinstance(location, RunKnowledgeRoot):
+        raise TypeError("expected RunKnowledgeRoot")
+    return location._record_location_path
+
+
 class KnowledgeLock(_Location):
     """The opaque knowledge lock location."""
     __slots__ = ()

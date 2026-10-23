@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from defender.knowledge._corpus import iter_query_templates
-from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender._paths import adapters_under
 from defender.run_repository import RUN_LAYOUT
 from defender.runtime.system_status import NONE_DOWN
@@ -29,6 +29,10 @@ def _unlisted() -> frozenset[str]:
         RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.wire_log_dir.name,
         RUN_LAYOUT.provenance.name,
     })
+
+
+#: What a map with no tenant knowledge to show says in place of its skills and templates.
+_NO_KNOWLEDGE = "- (no tenant knowledge in this view)"
 
 
 def _safe_name(name: str) -> str:
@@ -63,24 +67,33 @@ DOWN_GUIDANCE = (
 )
 
 
-def _map_roots(run_dir: Path, view: ModelView | None):
+def _map_roots(run_dir: Path, view: ModelView | None, agent_root: Path | None):
+    """The map's code tree, the run's knowledge (`None` when it names no agent root), how a
+    path is shown, and the roots it names. In a run's view the knowledge is the view's agent
+    tree (the run copy, #1108 P4); on the operator's command line it is `agent_root`."""
     if view is not None:
+        from defender.runtime.model_view import MODEL_AGENT
+
         defender_dir = view.to_host("/defender")
         assert defender_dir is not None
-        knowledge = KnowledgePaths.of_defender_dir(defender_dir)
+        agent = view.to_host(str(MODEL_AGENT))
 
         def shown(p: Path) -> str:
             return view.to_model(p)
         roots = [("DEFENDER_DIR", shown(defender_dir)), ("RUN_DIR", shown(run_dir))]
     else:
-        defender_dir, knowledge, shown = DEFENDER_DIR, CHECKOUT_KNOWLEDGE, _rel
+        defender_dir, agent, shown = DEFENDER_DIR, agent_root, _rel
         roots = [("DEFENDER_DIR", str(DEFENDER_DIR)), ("REPO_ROOT", str(REPO_ROOT)),
                  ("RUN_DIR", str(run_dir))]
+        if agent is not None:
+            roots.append(("AGENT_DIR", str(agent)))
+    knowledge = KnowledgePaths(agent) if agent is not None else None
     return defender_dir, knowledge, shown, roots
 
 
 def workspace_map(
     run_dir: Path, *, systems: Sequence[str], down: Mapping[str, str] = NONE_DOWN, view: ModelView | None = None,
+    agent_root: Path | None = None,
 ) -> str:
     """The model's directory view of the run. `systems` (the Adapters section) is the run's
     roster (`read_roster(...).accepted`), never a directory listing, so the map cannot name a
@@ -89,8 +102,12 @@ def workspace_map(
     `view` is the run's model view (#1255 P1): every root and tree the map names is the model
     path of the run's own checkout and run folder, and no host root (the repo root is the
     host's) is named. Without one — the operator's command line — the map names this host's
-    paths, as it always has."""
-    defender_dir, knowledge, shown, roots = _map_roots(run_dir, view)
+    paths, as it always has.
+
+    The system skills and the query templates are the run's own tenant knowledge (#1108 P4):
+    the view's agent tree (the run copy), or `agent_root` on the command line (the export the
+    run was stamped with). With neither, the map says it has none to show."""
+    defender_dir, knowledge, shown, roots = _map_roots(run_dir, view, agent_root)
     lines: list[str] = []
     lines.append("# Workspace map")
     lines.append("")
@@ -114,12 +131,7 @@ def workspace_map(
         lines.append("- (not yet materialized)")
     lines.append("")
 
-    skills_dir = knowledge.skills_dir
-    lines.append(f"## System skills — `{shown(skills_dir)}/`")
-    for name in _list_dir(skills_dir):
-        sk = skills_dir / name / "SKILL.md"
-        marker = " (SKILL.md)" if sk.is_file() else ""
-        lines.append(f"- {name}{marker}")
+    lines.extend(_skills_section(knowledge, shown))
     lines.append("")
 
     lines.append(f"## Adapters — `{shown(adapters_under(defender_dir))}/`")
@@ -136,12 +148,28 @@ def workspace_map(
         lines.append(DOWN_GUIDANCE)
     lines.append("")
 
-    queries_dir = knowledge.catalog_dir
-    lines.append(f"## Gather query templates — `{shown(queries_dir)}/`")
-    lines.extend(_template_counts(queries_dir))
+    if knowledge is None:
+        lines.extend(["## Gather query templates", _NO_KNOWLEDGE])
+    else:
+        queries_dir = knowledge.catalog_dir
+        lines.append(f"## Gather query templates — `{shown(queries_dir)}/`")
+        lines.extend(_template_counts(queries_dir))
     lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+def _skills_section(knowledge: KnowledgePaths | None, shown: Callable[[Path], str]) -> list[str]:
+    """The system skills of the run's agent root, by folder, each marked when it has a
+    `SKILL.md`."""
+    if knowledge is None:
+        return ["## System skills", _NO_KNOWLEDGE]
+    skills_dir = knowledge.skills_dir
+    lines = [f"## System skills — `{shown(skills_dir)}/`"]
+    for name in _list_dir(skills_dir):
+        marker = " (SKILL.md)" if (skills_dir / name / "SKILL.md").is_file() else ""
+        lines.append(f"- {name}{marker}")
+    return lines
 
 
 def _template_counts(queries_dir: Path) -> list[str]:

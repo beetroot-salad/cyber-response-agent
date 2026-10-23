@@ -61,6 +61,7 @@ from defender._io import (
     NotPlainEntry,
 )
 from defender._paths import PATHS
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 from defender.run_repository import (
     EpisodeRuns,
     Run,
@@ -507,7 +508,8 @@ def _launch(  # noqa: PLR0913 — see `main`
     # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
     # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
     # `tmp_path` corpus and this frame is the only one that ever sees the production path.
-    questioner_lessons_dir = PATHS.lessons_questioner_dir if lessons_dir is None else lessons_dir
+    questioner_lessons_dir = (CHECKOUT_KNOWLEDGE.lessons_questioner_dir if lessons_dir is None
+                              else lessons_dir)
     # Injectable so end-to-end tests aren't compared against the suite's own HEAD. The
     # knowledge half reads the EPISODE tenant's clone, as every sibling's stamp will (#1204 D3).
     live_capture = ((lambda: _provenance.capture_run(REPO_ROOT, tenant.tenant.knowledge))

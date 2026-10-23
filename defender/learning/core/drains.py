@@ -26,7 +26,6 @@ from defender.learning.core.config import (
 )
 from defender import _git
 from defender._claim_git import ClaimGit
-from defender._paths import DefenderPaths
 from defender import box as box_mod
 from defender.learning.author import drain
 from defender.learning.author.branch import AuthorBranch, BranchError
@@ -287,7 +286,7 @@ def _drain_curators(
 def _claim_git(paths: LoopPaths, git_timeout: float) -> ClaimGit:
     """The session whose `claim()` resets the worktree after each claim (#1175): its cleanup
     never displaces a propagating fault, and is raised after any other exit."""
-    return ClaimGit(paths.repo_root, DefenderPaths.skills_rel, timeout=git_timeout)
+    return ClaimGit(paths.repo_root, paths.skills_rel, timeout=git_timeout)
 
 
 def _quarantine_lead_author_failure(
