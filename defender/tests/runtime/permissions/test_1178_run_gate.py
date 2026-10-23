@@ -50,7 +50,6 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
     ELASTIC_LEAD,
     NO_MODEL,
     WAZUH_LEAD,
-    _deps,
     _run_dir,
     _worktree,
     draft_of,
@@ -1366,11 +1365,23 @@ class TenantLanes(Lanes):
     skills_dir: Path | None = None
 
     def run_lead(self, paths: LoopPaths, state: Any, run: Any, *, box: Any = None,
-                 on_done: Any, **_kw: Any) -> int:
+                 on_done: Any, batch: Any, **_kw: Any) -> int:
+        from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+            LEAD_DRAFT_LANES,
+            draft_lane_trees,
+            draft_root_of,
+        )
+
         self.handed.append(box)
-        with lead_trees(paths) as trees:
-            deps = dataclasses.replace(_deps(paths, trees, self.agent, [ELASTIC_LEAD]), state=state)
-            self.skills_dir = deps.paths.skills_dir
+        # The lane's held `skills/` mount over the draft of the batch the drain handed down
+        # (OD16), its deps built with that batch (S-H's `batch=`), never `paths`' checkout.
+        with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
+            deps = dataclasses.replace(
+                lead_author.build_lead_author_deps(paths, state=state, trees=trees, batch=batch),
+                invoke_agent=self.agent, extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
+            # The draft's `skills/` lane (OD6: `agent/skills` under the batch's draft root),
+            # where the box's agent writes — not `deps.paths`, which stays product-rooted.
+            self.skills_dir = draft_root_of(batch) / LEAD_DRAFT_LANES[0]
             return lead_author._run_locked(run.run_dir, deps, box=box, on_done=on_done)
 
 

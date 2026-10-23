@@ -25,7 +25,9 @@ from defender.tests.e2e.test_922_spine import (
 from defender.learning.core.state import FINDINGS, PITFALLS, QUESTIONER_FINDINGS
 from defender.tests.tenancy.tenant_1108_delivery._support import merge_on_remote
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    AUTHOR_DRAFT_LANES,
     LESSONS_PREFIX,
+    draft_lane_trees,
     remote_branches,
     touched,
 )
@@ -80,11 +82,14 @@ class TwoLaneRecorder:
             from defender.learning.author.lessons import run as module
 
             build = module.build_author_config
-        cfg = dataclasses.replace(
-            build(paths, state=state, trees=author_trees(paths), box=box, **kw),
-            invoke_agent=self._agent,
-        )
-        module.run_batch(cfg=cfg, hold_committed=True, box=box)
+        # The lane's held mounts over the draft the drain handed it (#1108 P4 OD16), never
+        # `paths`' product-checkout corpus.
+        with draft_lane_trees(kw["batch"], AUTHOR_DRAFT_LANES) as trees:
+            cfg = dataclasses.replace(
+                build(paths, state=state, trees=trees, box=box, **kw),
+                invoke_agent=self._agent,
+            )
+            module.run_batch(cfg=cfg, hold_committed=True, box=box)
 
     @property
     def modules(self) -> list[str]:

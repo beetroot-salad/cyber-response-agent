@@ -852,9 +852,9 @@ def test_a_seam_fault_at_the_runs_stop_halts_the_lessons_drain(tmp_path: Path, m
 import contextlib  # noqa: E402 — the P4 section's own imports
 import importlib  # noqa: E402
 
-from defender.learning.core.config import AUTHOR_DRAIN_LABEL  # noqa: E402
-from defender.learning.core.lane_trees import open_drain_trees  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
+    AUTHOR_DRAFT_LANES,
+    draft_lane_trees,
     _p4_caught,
     drain_paths,
     product_repo,
@@ -913,7 +913,9 @@ class TenantTick:
             self.daemon.mark(f"trigger:{module_name}")
         module, builder = _CURATOR_BUILDERS[module_name]
         mod = importlib.import_module(module)
-        with open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
+        # The lane's held mounts over the draft of the batch the drain handed down (OD16), as
+        # `_drain_support.CuratorTrigger` holds them — never `paths`' product-checkout corpus.
+        with draft_lane_trees(kw["batch"], AUTHOR_DRAFT_LANES) as trees:
             cfg = getattr(mod, builder)(paths, state=state, trees=trees, box=box, **kw)
             cfg = _wire(cfg, self.log, curator=self.curators[module_name], journal=self.journal)
             drains._run_curator_module(
