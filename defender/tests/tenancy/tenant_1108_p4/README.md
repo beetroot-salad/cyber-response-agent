@@ -328,6 +328,9 @@ Repair round r5:
   committed) and adapter-unreadable cases keep their assertions. Deleted, class (i): the `no defender/skills/ at HEAD` and `repo is no git
   repository` raises (the resolver no longer reads a committed tree itself) → `::test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`,
   added: the lane's systems come from the batch base, never the draft, and an unreadable base refuses the deps.
+- `tenancy/alert_front_door_1222/test_1222_lessons_and_corpus.py` p072, p074 (×2), p077 (class ii, repair-list class E): the REAL drain tick runs
+  over a fixture-tenant batch draft (`draft_lane`/`draft_author_cfg`) instead of a checkout-shaped repo, and "committed" is read from the batch
+  branch tip (`lane.landed()`/`text_at_tip`), never the draft; every assertion kept.
 
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
