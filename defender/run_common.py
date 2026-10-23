@@ -155,14 +155,16 @@ def _sidecars(run: Run) -> tuple[Path, ...]:
     verdict, the ticket receipt (#1107 moved it out of the tree) and the run -> case link
     (#1235 did)."""
     return (run.facts.run_end.path, run.facts.scrub_verdict.path,
-            run.observability.ticket_write.path, run.observability.session_pointer.path,
-            RunPaths(run.run_dir).knowledge_source())
+            run.observability.ticket_write.path, run.observability.session_pointer.path)
 
 
 def _clear_stale_sidecars(run: Run) -> None:
     """Remove sidecars a previous attempt under this reused run id left beside its removed dir
-    — exact-run-id-keyed, never a glob. Only called when the dir is absent."""
-    for sidecar in _sidecars(run):
+    — exact-run-id-keyed, never a glob. Only called when the dir is absent. The host-held
+    knowledge-source record (#1108 P4, U12) is cleared with them, but is no evidence that a run
+    has been in the dir: run start writes it before the box, so an interrupted setup has one and
+    its resume rewrites it."""
+    for sidecar in (*_sidecars(run), RunPaths(run.run_dir).knowledge_source()):
         try:
             sidecar.unlink()
         except FileNotFoundError:

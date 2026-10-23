@@ -433,9 +433,12 @@ def accept_tenant(
     only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
     FIRST check that fails, in this order:
 
-    `clone_tree=False` is run start's acceptance (#1108 P4): a run reads its own copy of an
-    export and nothing of the clone's working tree (P-1), so the folder rules over the clone's
-    halves are not asked; the run copy's settings are held to `check_run_settings` instead."""
+    `clone_tree=False` is run start's acceptance (#1108 P4, flow 3: "accept tenant" first). A run
+    reads its own copy of an export and nothing of the clone's working tree (P-1), and the run
+    copy's settings are held to `check_run_settings`. The folder rules still judge the clone
+    whenever it has a working tree, so a tenant whose folder is faulted is refused at run start
+    with the tenant check's own reason (#1222 A5), snapshot or none; only a clone whose working
+    tree is gone altogether (both halves absent, its git objects kept: R-I5) is not asked."""
     tenant_id = TenantId(raw_id)
     paths = _TenantPaths(data_root, tenant_id)
     row = _read_row(paths)
@@ -521,7 +524,7 @@ def _accept_knowledge(
     knowledge_name = paths.knowledge.relative_to(root).as_posix()
     with _real_io.bind(root) as bound:
         _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
-        if clone_tree:
+        if clone_tree or _has_working_tree(bound, knowledge_name):
             _check_knowledge(bound.under(knowledge_name), paths.knowledge,
                              tenant_id=paths.tenant_id)
     root_real = _resolve_or_refuse(root)
@@ -544,6 +547,14 @@ def _accept_knowledge(
                 f"{mounted}, which a box mounts, lies inside tenant {paths.tenant_id!r}'s "
                 f"knowledge folder {paths.knowledge} — a run's writes would land in the "
                 "tenant's repo; keep the runs base and every mounted tree outside it")
+
+
+def _has_working_tree(bound: _real_io.Bound, knowledge_name: str) -> bool:
+    """Whether the knowledge folder has either half of a working tree (judged no-follow): any
+    entry at `settings` or `agent`, sound or not, counts, so only a tree that is gone
+    altogether escapes the folder rules."""
+    return any(not _real_io.stat_entry(bound, f"{knowledge_name}/{half}").absent
+               for half in (SETTINGS_HALF, AGENT_HALF))
 
 
 def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
