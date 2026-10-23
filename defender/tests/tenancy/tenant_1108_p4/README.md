@@ -121,6 +121,8 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - Run copy layout `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`, removed in `finally`; box mounts `stage/` read-only; startup reads the token back; `DEFENDER_AGENT_DIR=/agent`.
 - `RunPaths(run_dir).knowledge_source(runs_base=None) -> <runs base>/<run_id>.knowledge-source.json`, JSON `{kind, commit, stale_kind, reason}` (host-held; U12).
 - Stamp `knowledge_source` limited to keys `{kind, commit, stale_kind}`; `STAMP_FIELD_CLASSES["knowledge_source"]` is informational (`test_1204_family_knowledge`).
+  The stamp "may carry" it (OD17): `RunProvenance(...).as_json(knowledge_source=<mapping>)` writes the key with exactly those
+  three keys (never `reason`); `as_json()` without it omits the key (repair r4, F1).
 
 **Delivery API** (`defender.learning.author.version_control`)
 - `issuer_login(tenant, *, issuer_config, transport=None) -> ForgejoIdentity` (`test_live_dev_issuer.py` omits `transport=`; it is a superset, not a conflict).
@@ -171,6 +173,14 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `launch_publish(spawn=)` is used by `test_publish_child.py` but absent from `_s_b_support.py`'s docstring; the test is authoritative.
 - Two `run_pitfalls` symbols exist by design (drain step vs `pitfalls_curator.run_pitfalls`); not a conflict.
 - `run.main`'s default when `publish=` is omitted: the real publish child (OD14 clarification; agent decision for the owner to confirm).
+- **`declared_systems` marker half (open, repair r4 item 14).** `learning/catalog/test_869_resolver.py` (4 cases) calls
+  `declared_systems(repo)` and expects the marker half read from `repo`'s committed HEAD at `defender/skills/<name>/execution.md`
+  (depth one; raises when the skills tree or the repo is unresolvable). P4 moves the markers to the tenant (`agent/skills/<name>/execution.md`,
+  O1) and no seam here names how the resolver gets the tenant's committed tree. The implementation took
+  `declared_systems(repo_root, *, agent: Mapping | None = None)` (`agent`: a committed tree's repo-relative paths, e.g. `Batch.base`;
+  none given, the adapter half alone). Not respelled: the committed-vs-working-tree and unresolvable-marker halves move to the caller
+  that builds `agent`, which no test here pins yet. Owner call: adopt that seam in this section and respell the 4 cases onto it
+  (plus a lane-level case that the gate hands the batch base, never the draft), or name another seam.
 
 ## 3. Coverage map
 
@@ -234,6 +244,59 @@ Wholly deleted files and their successors:
 Deleted in the post-implementation contract repair (r2, OD12 class i):
 - `learning/curation/test_drain_byte_identity.py` (2 cases): pinned only `drain._byte_identical_to_head`, the checkout-HEAD byte comparison P4 removes → the ChangeSet compares the draft's raw bytes with the batch base's blobs: `tenant_1108_delivery/test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`, `::test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say`, `::test_claim_after_claim_the_box_sees_exactly_the_committed_bytes` (eol=crlf).
 
+Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as r1–r3); each site carries a pointer comment:
+- Deleted, class (i):
+  - `learning/curation/test_drain_byte_identity.py` (whole file, above).
+  - `learning/stages/test_frames_680_lifecycle.py::test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (`revert(branch=)`)
+    → `test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson`, `::test_flow5_revert_cli_waits_out_a_running_author_drain`.
+  - `tenant_1108_delivery/test_forgejo.py::test_the_writer_lease_is_not_held_by_a_fork_pr` (lease on `AuthorBranch`)
+    → `test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does` (`_LEASE_ROWS`, both drains).
+  - `learning/curation/test_curator_glm_engine.py::test_marker_commit_message_with_trailer_rejected` (`commit_corpus` trailer guard; the commit-maker composes none);
+    the result's commit message stays pinned by `::test_marker_empty_commit_message_rejected`.
+  - `learning/curation/test_drain719_hardening.py::test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt` (`GitProbeError` over a worktree index)
+    → `tenant_1108_delivery/test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`. Its infra-fault half is open: §6 L1.
+  - `learning/curation/test_drain719_config.py`: the third leg (a write under the checkout's `defender/learning/` seen as a stray)
+    → `test_changes.py::test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole`.
+  - `learning/curation/test_curator_glm_survival.py`: the staged-index half (unrelated staged work not swept into the commit)
+    → `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`.
+  - `tenancy/test_1204_knowledge_revision.py`: the six `materialize_run` clone-stamp cases (versioned, plain-copy `unversioned`, unreadable `.git`,
+    two read-fault rows, fork sibling) → `test_run_start.py::test_o_b_the_stamp_is_the_export_copied_never_the_clones_head`,
+    `::test_o11_o_b_...`, `::test_o_a_no_current_and_a_failed_publish_refuses_before_message_zero`, `::test_o_pin_...`, `test_branch_replay.py::test_flow7_...`,
+    `::test_o_b_the_live_capture_...`; the arm's no-lineage fields → `storage/ids_1187/test_1187_roster_sibling.py::test_natural_and_arm_stamps_carry_no_world_lineage`.
+  - `learning/branch/test_1204_family_knowledge.py`: the two `--allow-dirty` waiver rows for an `unversioned`/`unavailable` source (OD9)
+    → `test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
+  - `learning/retrieval/test_1195_lessons_run_windows.py`: the `before-the-run` rows (a pre-run stray tolerated, OD15)
+    → `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_...`, `::test_claims_commit_and_reset_one_after_another_within_one_batch`.
+  - `e2e/test_771_write_backstop.py`: the planted-component case and the leaf-alias case of `drain._restore_corpus`
+    → `test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`.
+  - `tooling/layout_contracts/test_1080_episode_frontend_and_pricing.py::test_1080_values_derived_from_a_moved_files_location_resolve_as_before`:
+    the `lessons_fm` `REPO_ROOT` cell → `learning/retrieval/test_lessons_fm.py`.
+  - `tenancy/tenant_1120_piece1/test_1120_check.py::test_1159_check_says_this_machines_git_failed_and_exits_1`: the half pinning that the grant
+    census goes blind with git (the census no longer starts git); r4 pins the converse (no census-not-taken line, no git cause).
+- Re-spelled, class (ii), assertions kept or made stricter: `test_1178_run_gate.py` link/out-of-lane rows (`LeadAuthorError` → `DeliveryRefused`, OD18/OD23),
+  exec rows (mode 100644, P3), the two "larger than any read commits" cases → `..._is_refused`; `test_1134_lead_author_adversary.py` link rows
+  (`DeliveryRefused`); `test_1134_curator_drain.py` hard-linked base lesson → refused claim (owner ruling 2);
+  `test_frames_680_lifecycle.py::test_lead_author_bash_reads_cross_agent_artifact` onto a batch-draft scene; `test_1195_lessons_run_windows.py`
+  out-of-lane stray rows → refused claim (`test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_claim`);
+  `test_curator_manifest.py::test_p4_both_callers_forward_the_abs_corpus_path` over a draft; `tenancy/test_1204_knowledge_revision.py`'s pointer.
+
+Repair round r4 (this round), all additive or stricter:
+- `learning/branch/test_1204_family_knowledge.py::test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states`: the table is the
+  bare record's wire keys plus the one optional `knowledge_source` (OD17 "may carry"), whose class and carried keys are asserted (F1).
+- `test_run_start.py::test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp` (gitfile to nowhere, `.git` removed, uncommitted edit; F3).
+- `test_1120_check.py` git-absent V16 loop: no census-not-taken line and no census git cause (F4).
+- `runtime/state/test_1255_clock_box.py`: the run copy's stage is told by source prefix (one mount or several), and the mounts set aside are only
+  the agent and token mounts, read-only, each kind once (F5).
+- `tenant_1108_delivery/test_changes.py`: LF→CRLF rewrite of an existing lesson is a change of those bytes; a chmod-only edit is none (R-4);
+  `_REFUSED_OUTPUT` gains `hardlink-to-host`, `hardlink-in-lane`, `replace-file-with-hardlink`, `replace-file-with-hardlink-same-bytes`, and the
+  refused-whole reset asserts every draft file single-linked (L3, owner ruling 2).
+- `test_refused_claims.py`: lead claim refused for an out-of-lane path; pitfalls claim refused → rc 0, one attempt, dead-lettered at the
+  ceiling naming `DeliveryRefused` (with its unrefused control) (L4).
+- Support: `_tenants1106.plant_census_catalog(folder)` plants the lead-zero template into each tenant folder's `agent/skills/gather/queries/` (R-2);
+  `_spec1107.plant` re-plants in place keeping `.git`, and the publish stand-in `_launch_publish_p4` fails a lost `.git` (`pytest.fail`) instead of
+  starting the remote anew, and reads `LockBusy` as `stale:transient` (R-3); the fixture tenant ships
+  `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry_983.py` (R-5).
+
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
 ## 5. Expected reds and masking
@@ -252,6 +315,12 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
 
 - (low) Run copy removal on the UNSERVABLE exit path.
 - (minor) Routing of a commit-maker ref-lock (`update-ref`) fault. Not a content refusal; only #773 M5 is pinned (branch unmoved, nothing lands, nothing consumed).
+- **(open owner decision, L1) Does an infrastructure fault in a claim spend an attempt?** Reproducer: `Batch.change_set` raising
+  `GitError("index.lock contention")` on its second call with `max_attempts=1` → `run_batch` rc 0, the row dead-lettered
+  `refused-claim: git update-ref failed`: the implementation folds infra faults into `DeliveryRefused` (`version_control/model.py` `_refusals()`),
+  so U10's one-attempt rule spends the row's attempts on a fault that is not the claim's. The case that pinned "a git failure in a read-only
+  probe does not spend an attempt" (`learning/curation/test_drain719_hardening.py::test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt`)
+  was deleted with `GitProbeError`. U10/OD18 scope refusals to content; nothing decides the infra case. Not tested either way.
 - (minor, TRI-3) The author-drain half of the deleted `test_1179 ... non_member_raises_before_any_batch_work`; the label is an enum.
 - (accepted, test-only) `_tenants1106.run_tenant` defaults to the clone working tree for unit-level callers (section 1).
 - The API reading the host record is enforced only through the stub seam `InMemoryStore.add_run_knowledge` until a real store exists; the design text should say so.
