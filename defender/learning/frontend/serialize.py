@@ -111,24 +111,13 @@ GROUPS: dict[str, GroupSpec] = {
 }
 
 
-def build_view(agent_root: Path) -> dict:
+def build_view(agent_root: Path | None) -> dict:
     """The posture page's contract over the tenant knowledge at `agent_root` (an export's
-    `agent/`, #1108 P4): each group's lessons, spelled relative to the tenant repo."""
+    `agent/`, #1108 P4): each group's lessons, spelled relative to the tenant repo. `None` (no
+    tenant selected, or nothing published for it) is every group with no lesson."""
     groups: dict[str, dict] = {}
-    knowledge = KnowledgePaths(Path(agent_root))
-    root = knowledge.agent_root.parent
     for name, spec in GROUPS.items():
-        skipped: list[Path] = []
-        lessons = [
-            _normalize(lesson.path, lesson.fm, lesson.body, group=name,  # lint-lesson-text: ok — the HTML view escapes every value it renders (build.py escHtml)
-                       title_keys=spec["title_keys"], desc_key=spec["desc_key"],
-                       root=root)
-            for lesson in iter_lessons(knowledge.corpus_dir(spec["dir"]), on_skip=skipped.append)
-        ]
-        lessons += [
-            _skipped_record(path, group=name, root=root) for path in skipped
-        ]
-        lessons.sort(key=lambda rec: rec["title"].lower())
+        lessons = [] if agent_root is None else _group_lessons(Path(agent_root), name, spec)
         groups[name] = {
             "label": spec["label"],
             "blurb": spec["blurb"],
@@ -140,6 +129,23 @@ def build_view(agent_root: Path) -> dict:
     return {"groups": groups}
 
 
+def _group_lessons(agent_root: Path, name: str, spec: dict) -> list[dict]:
+    knowledge = KnowledgePaths(agent_root)
+    root = knowledge.agent_root.parent
+    skipped: list[Path] = []
+    lessons = [
+        _normalize(lesson.path, lesson.fm, lesson.body, group=name,  # lint-lesson-text: ok — the HTML view escapes every value it renders (build.py escHtml)
+                   title_keys=spec["title_keys"], desc_key=spec["desc_key"],
+                   root=root)
+        for lesson in iter_lessons(knowledge.corpus_dir(spec["dir"]), on_skip=skipped.append)
+    ]
+    lessons += [
+        _skipped_record(path, group=name, root=root) for path in skipped
+    ]
+    lessons.sort(key=lambda rec: rec["title"].lower())
+    return lessons
+
+
 def published_agent_root(tenant) -> Path:
     """The `agent/` of the export the tenant's `current` names: the knowledge the page shows.
     `DeliveryRefused` when nothing is published for the tenant."""
@@ -148,7 +154,7 @@ def published_agent_root(tenant) -> Path:
     return current_export(tenant).path / "agent"
 
 
-def stamped_view(agent_root: Path) -> dict:
+def stamped_view(agent_root: Path | None) -> dict:
     view = build_view(agent_root=agent_root)
     view["generated_at"] = z_seconds(_dt.datetime.now(_dt.UTC))
     return view

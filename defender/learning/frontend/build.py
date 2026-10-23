@@ -518,14 +518,18 @@ def render(view: dict) -> str:
 
 
 def main(paths: LoopPaths) -> int:
-    """Both pages, into this directory, for the explicitly selected tenant."""
+    """Both pages, into this directory, for the explicitly selected tenant. The lessons page
+    shows the tenant's published knowledge; with nothing published it shows no lesson (and says
+    why), and the queue page is built all the same."""
     from defender.tenancy._exports import DeliveryRefused
 
-    try:
-        agent_root = serialize.published_agent_root(paths.tenant)
-    except DeliveryRefused as refused:
-        print(f"error: the tenant's lessons cannot be shown: {refused}", file=sys.stderr)
-        return 1
+    agent_root = None
+    if paths.tenant is not None:
+        try:
+            agent_root = serialize.published_agent_root(paths.tenant)
+        except DeliveryRefused as refused:
+            print(f"note: no published knowledge to show lessons from: {refused}",
+                  file=sys.stderr)
     queues = serialize_queues.stamped_view(paths)
     view = serialize.stamped_view(agent_root)
 
