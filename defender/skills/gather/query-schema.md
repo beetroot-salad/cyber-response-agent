@@ -63,11 +63,11 @@ are what keep a future narrowing from re-coining a sibling.
 
 ## Query
 
-The query the verb runs. For an **engine verb** (elastic `esql`, or `query`/`alerts`)
+The query the verb runs. For an **engine verb** (one declared `@verb(engine=…)`, such as an ES|QL or Lucene verb)
 this is the native query LANGUAGE body, fenced in that language: an ES|QL pipe in
 ```` ```esql ````, or a Lucene/KQL string in an **untagged** ```` ``` ```` fence (KQL has
 no canonical highlighter tag, so its fence carries no language). For a **param-only verb**
-(every non-elastic system) the `## Query` is a structured, re-runnable call fenced
+(a verb with no engine) the `## Query` is a structured, re-runnable call fenced
 ```` ```query ````:
 
 ```` ```query ````
@@ -82,7 +82,7 @@ Two kinds of `${name}` placeholder, and the frontmatter classifies each so
 - a **declared param** (`params:`) — a `${name}` that binds a param the verb declares;
 - a **body substitution** (`body_substitutions:`) — a `${name}` interpolated INTO a
   query-language body. The classification is per-VERB, not per-system: `${start}` is a
-  *param* of elastic `query`/`alerts` but a *body substitution* inside an ES|QL pipe.
+  *param* of one engine verb's call but a *body substitution* inside another's ES|QL pipe.
 
 `verb:` and `params:` are **required of every template, drafts included** — the rule is
 per-verb, so a file naming no verb is undecidable rather than exempt, and `params:` must name
