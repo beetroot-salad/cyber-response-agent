@@ -435,8 +435,13 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     def scrub_tree(tree: Path) -> None:
         scrub(tree, write_verdict=write_verdict)
 
-    box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent,
-                    staged_token=tenant.stage_token, write_verdict=write_verdict)
+    # The startup token of the run copy's stage (#1108 P4, U9): a `RunTenant` built over a run
+    # copy carries it, and `start_box` checks the stage and reads it back; a tenant with no stage
+    # (no run copy) has none, and the box is started as before.
+    token = getattr(tenant, "stage_token", None)
+    staged = {} if token is None else {"staged_token": token}
+    box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
+                    write_verdict=write_verdict, **staged)
     drive = _judged(investigate, systems)
     investigation_ok = False
     try:
