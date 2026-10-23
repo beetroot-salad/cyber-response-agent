@@ -295,8 +295,7 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
         record = _provenance.capture_tree(REPO_ROOT)
         if knowledge is not None:
             record = _dataclasses.replace(
-                record, knowledge=_provenance.KnowledgeRevision.at(knowledge.commit),
-                knowledge_source=knowledge.stamp_view())
+                record, knowledge=_provenance.KnowledgeRevision.at(knowledge.commit))
         # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
@@ -304,7 +303,8 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
         record = _dataclasses.replace(
             record, tenant_id=tenant_id, world_id=world_id,
             started_at=started_at, alert_label=alert_label)
-        run.facts.provenance.write(record.as_json())
+        run.facts.provenance.write(record.as_json(
+            knowledge_source=None if knowledge is None else knowledge.stamp_view()))
     except OSError as e:
         _logger.error(f"could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "
                       "nothing downstream can prove which code it ran")
