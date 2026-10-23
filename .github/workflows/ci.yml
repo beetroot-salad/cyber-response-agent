@@ -199,15 +199,17 @@ jobs:
           --ignore tests/e2e/test_540_box_boundary.py
 
       # Standalone suite checks and historical graph utilities ship with the
-      # spec-flow plugin. Keep their tests in CI; graph artifacts are retired
-      # from the active workflow. This suite drives the real check_actors CLI against
-      # throwaway git-repo fixtures; it lives outside defender/ but reuses the
-      # defender venv's pytest + pyyaml, so it runs from the repo root against
-      # defender/.venv (the same idiom as the code-smells lint gates below).
-      - name: Run spec-flow tool tests
-        # Once, not per shard: it is a separate suite (spec-flow/scripts), not part of the split.
+      # contract-first plugin. Defender's tests and the tooling/lint gates do not
+      # read or scan the plugin, so this step is its only CI coverage; graph
+      # artifacts are retired from the active workflow. This suite drives the real
+      # check_actors CLI against throwaway git-repo fixtures; it lives outside
+      # defender/ but reuses the defender venv's pytest + pyyaml, so it runs from
+      # the repo root against defender/.venv (the same idiom as the code-smells
+      # lint gates below).
+      - name: Run contract-first tool tests
+        # Once, not per shard: it is a separate suite (contract-first/scripts), not part of the split.
         if: matrix.shard == 1
-        run: defender/.venv/bin/python -m pytest spec-flow/scripts -q
+        run: defender/.venv/bin/python -m pytest contract-first/scripts -q
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
   # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
