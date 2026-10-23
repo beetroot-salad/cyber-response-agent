@@ -135,24 +135,34 @@ def materialise_export(tenant: Tenant, commit: str) -> TenantExport:
     with _refusals():
         if not isinstance(commit, str) or not _OID.fullmatch(commit):
             raise DeliveryRefused(f"{commit!r} is not a full commit id")
-        repository = LocalRepository.open_local(tenant.knowledge)
-        if not repository.holds_commit(commit):
-            raise DeliveryRefused(
-                f"the tenant clone holds no commit {commit}: only a commit in the clone "
-                "can be materialised (nothing is fetched to find it)"
-            )
+        existing = _unwrap_exports_root(tenant.exports) / commit
+        # An export already there is kept as it is, so the clone is not opened for it: only a
+        # missing export needs the clone's objects.
+        repository = None if _io.entry_present(existing) else _clone_holding(tenant, commit)
         deadline = time.monotonic() + MATERIALISE_LOCK_WAIT
         while True:
             try:
                 with tenant_lock(tenant):
-                    existing = _unwrap_exports_root(tenant.exports) / commit
                     if _io.entry_present(existing):
                         return write_export(tenant, commit, {})
+                    if repository is None:
+                        repository = _clone_holding(tenant, commit)
                     return write_export(tenant, commit, knowledge_at(tenant, repository, commit))
             except LockBusy:
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(_LOCK_RETRY)
+
+
+def _clone_holding(tenant: Tenant, commit: str) -> LocalRepository:
+    """The tenant clone's local object reader, refused unless the clone holds `commit`."""
+    repository = LocalRepository.open_local(tenant.knowledge)
+    if not repository.holds_commit(commit):
+        raise DeliveryRefused(
+            f"the tenant clone holds no commit {commit}: only a commit in the clone "
+            "can be materialised (nothing is fetched to find it)"
+        )
+    return repository
 
 
 def knowledge_at(
