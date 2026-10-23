@@ -515,7 +515,7 @@ def _publish_report(
         line = launch(str(tenant.id), data_root=_unwrap_data_root(data_root))
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
         return run_knowledge.child_failed(f"{type(failed).__name__}: {failed}")
-    return run_knowledge.read_report(line)
+    return run_knowledge.read_publish_report(line)
 
 
 def _default_publish() -> Callable[..., object]:

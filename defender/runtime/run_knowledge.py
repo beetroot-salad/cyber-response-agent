@@ -1,8 +1,8 @@
 """Which knowledge a run reads, and its own copy of it (#1108 P4, flow 3).
 
 Run start never touches git, the network or the issuer (P-3): the launch-time publish runs in
-a child process and hands back one report line. This module reads that line (`read_report`),
-picks the export the run reads (`current`, or the pinned commit), copies it into the run's own
+a child process and hands back one report line. This module reads that line
+(`read_publish_report`), picks the export the run reads (`current`, or the pinned commit), copies it into the run's own
 folder `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, token}}` (U9: the box mounts
 `stage/` only) and writes the host-held record of what was read and why (U12).
 """
@@ -74,7 +74,7 @@ def child_failed(summary: object) -> PublishReport:
     return PublishReport(STALE, stale_kind=OPERATOR, reason=f"publish child failed: {shown}")
 
 
-def read_report(line: object) -> PublishReport:
+def read_publish_report(line: object) -> PublishReport:
     """The child's report line (OD2: `fresh <commit>`, `stale:transient <reason>`,
     `stale:operator <reason>`, `misconfigured <reason>`), or U11's `stale:operator` for anything
     else."""
@@ -205,10 +205,10 @@ class RunCopy:
 
     def remove(self) -> None:
         """Remove the copy; nothing when it is gone already. Never raises for the run."""
-        _remove(self.root.parent, self.root.name)
+        _remove_copy(self.root.parent, self.root.name)
 
 
-def _remove(folder: Path, name: str) -> None:
+def _remove_copy(folder: Path, name: str) -> None:
     """`folder/name` removed as the entry it is, nothing below it followed."""
     try:
         fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -254,7 +254,7 @@ def copy_for_run(tenant: Tenant, source: KnowledgeSource, run_id: str) -> RunCop
             raise KnowledgeRefused(
                 f"run id {run_id} already has a live run copy at {final}: another process is "
                 "running it")
-        _remove(copies, run_id)
+        _remove_copy(copies, run_id)
     temporary = f"{_BUILDING_PREFIX}{run_id}-{secrets.token_hex(4)}"
     try:
         with _io.hold_new(copies, temporary, exclusive=True) as held:
@@ -267,7 +267,7 @@ def copy_for_run(tenant: Tenant, source: KnowledgeSource, run_id: str) -> RunCop
             held.write(f"{STAGE}/{STAGE_TOKEN}", secrets.token_hex(16), mode="create")
         os.rename(copies / temporary, final)
     except BaseException:
-        _remove(copies, temporary)
+        _remove_copy(copies, temporary)
         raise
     return RunCopy(final)
 
@@ -280,6 +280,6 @@ def write_host_record(path: Path, source: KnowledgeSource) -> None:
 __all__ = [
     "FRESH", "MISCONFIGURED", "OPERATOR", "PINNED", "STALE", "STAGE", "STAGE_TOKEN",
     "TRANSIENT", "KnowledgeRefused", "KnowledgeSource", "PublishReport", "RunCopy",
-    "child_failed", "copy_for_run", "pinned_commit", "read_report", "resolve_source",
+    "child_failed", "copy_for_run", "pinned_commit", "read_publish_report", "resolve_source",
     "write_host_record",
 ]

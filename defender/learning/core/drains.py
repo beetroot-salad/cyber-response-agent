@@ -304,7 +304,7 @@ def _batch_kw(batch: Batch | None) -> dict[str, Any]:
 
 
 @contextlib.contextmanager
-def _claim(batch: Batch | None):
+def _batch_claim(batch: Batch | None):
     """One claim of the batch: on every exit the draft is re-synced with the batch branch
     (`Batch.reset`, OD15), so the next claim starts from what landed. A reset that fails never
     displaces a fault already propagating (it is logged); after a clean claim it raises."""
@@ -478,7 +478,7 @@ def _drain_lead_author_markers(
         # The curator's commit, handed back for `BatchDisposition.apply` to record once the
         # batch is delivered.
         done: list[str | None] = []
-        with _claim(batch):
+        with _batch_claim(batch):
             try:
                 drained = run_or_dead_letter(
                     functools.partial(
@@ -596,7 +596,7 @@ def _drain_pitfalls(
     # Only the success-path consumption is handed back; failure dispositions don't depend on
     # the delivery and are applied immediately.
     curated: list[PitfallsDisposition] = []
-    with _claim(batch):
+    with _batch_claim(batch):
         run_or_dead_letter(
             lambda: run_pitfalls(paths, state, box=box, on_curated=curated.append,
                                  **_batch_kw(batch)),

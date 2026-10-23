@@ -58,7 +58,7 @@ LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 #: the gather subagent reads beside it before writing SQL (the same before-the-attempt criterion
 #: that put system pitfalls in `execution.md`). The product page itself is never written
 #: (#1108 P4 O1, O7).
-REDUCER_REL = f"{SKILLS_PREFIX}gather/defender-sql.pitfalls.md"
+REDUCER_REL = f"{SKILLS_PREFIX}gather/defender-sql.pitfalls.md"  # lint-stage-frame: ok — a path
 
 #: The one section a curator addition may land in, on either surface. `_pitfalls_content_rule`
 #: enforces it on the reducer surface; the prompt asks for it on both.

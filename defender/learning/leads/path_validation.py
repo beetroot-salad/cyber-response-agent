@@ -10,9 +10,9 @@ REPO_ROOT = PATHS.repo_root
 LEARNING_DIR = PATHS.learning_dir
 #: The lead lanes' spellings, relative to the tenant repo that versions the agent root (OD6):
 #: every change, commit and handoff path the lanes judge or name is `agent/skills/...`, a path
-#: of a batch's draft (#1108 P4).
-SKILLS_PREFIX = f"{AGENT_REL}/{SKILLS}/"
-CATALOG_PREFIX = f"{AGENT_REL}/{CATALOG}/"
+#: of a batch's draft (#1108 P4). Path spellings, not prompt text.
+SKILLS_PREFIX = f"{AGENT_REL}/{SKILLS}/"  # lint-stage-frame: ok — a path, not a prompt frame
+CATALOG_PREFIX = f"{AGENT_REL}/{CATALOG}/"  # lint-stage-frame: ok — a path, not a prompt frame
 #: The catalog's folder below the `skills/` mount (`gather/queries`): drain code reaches the catalog
 #: through the held `skills/` mount, never through a handle rooted at the catalog (#1134).
 CATALOG_FOLDER = CATALOG[len(SKILLS):].strip("/")
