@@ -1,17 +1,17 @@
 ---
 name: proven-fix
-description: "Make a small fix and prove the test guarding it can actually fail: write the test red first, fix, then mutate only the lines the fix touched. Use for bug fixes and small settled changes, where spec-flow's committed spec graph and adversary worktree are too heavy."
+description: "Make a small fix and prove the test guarding it can actually fail: write the test red first, fix, then mutate only the lines the fix touched. Use for bug fixes and small settled changes, where contract-first's committed spec graph and adversary worktree are too heavy."
 ---
 
 # Proven fix
 
 Three steps, one agent. The fix is the easy part; the point is that the test guarding it discriminates.
 
-Read `.claude/spec-flow.json` for `gate.test`, `gate.checks` and the project's traps. If it is missing, run `/spec-flow:init`.
+Read `.claude/contract-first.json` for `gate.test`, `gate.checks` and the project's traps. If it is missing, run `/contract-first:init`.
 
 ## When NOT to use this
 
-The intent must fit in a sentence and no design may be in question. Anything that changes what the system promises — a new verdict, a new refusal, a surface the model sees — goes to `/spec-flow:discuss-issue`: this skill has nowhere to record a decision, and a decision made here is a decision nobody can find later.
+The intent must fit in a sentence and no design may be in question. Anything that changes what the system promises — a new verdict, a new refusal, a surface the model sees — goes to `/contract-first:discuss-issue`: this skill has nowhere to record a decision, and a decision made here is a decision nobody can find later.
 
 Kick back the moment step 1 turns up a design question rather than a defect.
 

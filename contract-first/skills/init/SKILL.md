@@ -1,0 +1,58 @@
+---
+name: init
+description: "Write the contract-first project profile (.claude/contract-first.json) for this repo by reading its CI config, test layout, and lint rules — the small set of project facts the other contract-first skills refuse to hardcode. Run once per repo, before the first write-tests."
+---
+
+# Init
+
+The contract-first skills are portable; a project's gate is not. This writes the one file that bridges them: `.claude/contract-first.json`, the **project profile**. Everything the other skills need to know about *this* repo lives here, and nowhere else.
+
+Derive it from the repo, not from the user. Ask only what the repo genuinely cannot tell you.
+
+## Find the facts
+
+- **The gate.** The CI config is the source of truth — find it (`.github/workflows/*.yml`, or the project's equivalent) and read what it actually runs. Separate the **test** command from the other **checks** (lint, types, custom project lints); the skills run the test command constantly and the full set once before shipping.
+- **The test layout.** Where tests live. Whether an e2e/integration harness already exists that fakes the system's dependencies — `write-tests` builds on it rather than inventing parallel machinery, so name it precisely (path + how a new scenario is added, in a phrase).
+- **The source roots.** Record the repository-relative source directories and standalone entrypoint files as `sourceRoots` when repository checks consume a source census. Derive them from the shipped layout; this is code-location data, not a requirements graph.
+- **The injection idioms.** How fakes are meant to enter the code under test — a `deps` parameter, a constructor argument, a fixture — and what the project's CI *forbids* (a lint that ratchets monkey-patching, for instance). If a lint enforces it, name the lint.
+- **The traps.** The things that make a green local run a lie: a venv that resolves to the wrong tree from a worktree, an env var the suite needs, a service that must be up. These are what `gate.notes` is for.
+- **The code graph (Python only).** `symbol-refs` resolves who-references / where-defined via pyrefly, and pyrefly *silently* under-resolves unless its import root is on the search path — so this field is derived, not guessed. Give it `codeGraph`: `configDir`, the directory pyrefly should root at (where a `pyproject.toml` lives, or the package dir), and `searchPath`, the import roots **relative to configDir**. Derive `searchPath` from however the project already puts its package on `sys.path`: pytest's `pythonpath`, mypy's `mypy_path` / `explicit_package_bases`, a `src/` layout, an editable install. The case that bites is a **namespace package** (no `__init__.py`, `pyproject.toml` below the import root) — it needs the parent (`..`) added, mirroring pytest's `pythonpath=['..']`. A package at the repo root is just `configDir: "."`, `searchPath: ["."]`. Omit `codeGraph` entirely for a non-Python repo.
+- **The danger lens.** What kind of hostile reality this system faces — attacker-influenced input, resource exhaustion, concurrency. `write-tests` uses it to select targeted review when that risk is relevant; it does not require a fixed lens panel. This one you may have to ask about; the code often shows it (an auth boundary, a parser fed by the network, a job queue).
+- **The principles.** The project's own engineering principles — typically a threat model (what is trusted, what is not, what is *not* assumed hostile) and rules about how code should behave and fail. They belong to the project, not to this profile: point `principles` at the document that holds them (a `docs/principles.md`, an ADR, a section of the contributor guide). `write-tests` judges every fork against them: a fork that only serves something the principles reject or don't require gets proposed for dropping, and forks sharing a root cause get one dissolving design call instead of one patch each. If no such document exists, **ask the owner** and write one in their words — a guessed principle is worse than none, because every later fork is judged against it.
+
+## Write it, then prove it
+
+Write `.claude/contract-first.json` in the shape below, then **run what you wrote** — the test command, the checks, and, if you wrote `codeGraph`, `pyrefly-refs <file>:<line> <symbol>` on a symbol you know is used across several files. A profile that has never been executed is a guess: a path that doesn't resolve, a venv that isn't there from a worktree, a command that needs an env var you didn't know about, a `searchPath` that trips the resolution guard (which is exactly the silent under-resolution `codeGraph` exists to prevent). Fix what fails, and report anything you had to leave uncertain.
+
+```json
+{
+  "project": "<one line: what this codebase is, language, test framework>",
+  "sourceRoots": ["<repository-relative source directory or standalone entrypoint>"],
+  "gate": {
+    "ciConfig": ".github/workflows/ci.yml",
+    "test": "<the exact command CI runs for tests>",
+    "checks": ["<lint>", "<types>", "<custom project lints>"],
+    "notes": "<the traps: worktree/venv gotchas, required env, services>"
+  },
+  "tests": {
+    "language": "<the language the tests are written in>",
+    "dir": "<where tests live>",
+    "harness": "<path to the existing fake/replay harness + how a scenario is added>",
+    "idioms": "<how fakes enter; what CI forbids>"
+  },
+  "codeGraph": {
+    "tool": "pyrefly",
+    "configDir": "<dir pyrefly roots at — where pyproject.toml lives, or the package dir>",
+    "searchPath": ["<import roots relative to configDir>"]
+  },
+  "conventions": {
+    "defaultBranch": "main",
+    "principles": "<path to the project's principles document, and one line on what it covers>",
+    "dangerLens": "<the standing danger-zone enumeration lens, and why>"
+  }
+}
+```
+
+`codeGraph` is consumed as **data** by the `pyrefly-refs` helper; every other field is read by a skill as prose, so write it to be *read* — a sentence that tells the next agent what to do beats a value it has to interpret.
+
+The feature contract is the design plus executable tests. Do not add `specGraph` configuration or a per-feature spec artifact. Preserve existing profile fields used by historical repository checks; do not expand or refresh that legacy configuration as part of init. The `codeGraph` field configures source-reference lookup and is unrelated to the retired requirements graph.

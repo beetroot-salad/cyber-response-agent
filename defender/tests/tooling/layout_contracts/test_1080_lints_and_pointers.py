@@ -21,7 +21,7 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 
 LINT_DIR = S.REPO_ROOT / "tooling" / "lint"
-SPEC_GRAPH_DIR = S.REPO_ROOT / "spec-flow" / "scripts" / "spec_graph"
+SPEC_GRAPH_DIR = S.REPO_ROOT / "contract-first" / "scripts" / "spec_graph"
 # Historical pointer checks use the archived graph configuration, not the active profile.
 PROFILE = S.REPO_ROOT / "docs/archive/spec-flow-project-config.json"
 CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -31,7 +31,7 @@ CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
 def current_profile_data():
     """Translate the retired graph profile once, keeping its snapshot intact."""
     profile = json.loads(PROFILE.read_text(encoding="utf-8"))
-    active = json.loads((S.REPO_ROOT / ".claude/spec-flow.json").read_text(encoding="utf-8"))
+    active = json.loads((S.REPO_ROOT / ".claude/contract-first.json").read_text(encoding="utf-8"))
     profile["specGraph"]["codeRoots"] = active["sourceRoots"]
     for resource in profile["specGraph"].get("resources", {}).values():
         for side in ("writers", "readers"):

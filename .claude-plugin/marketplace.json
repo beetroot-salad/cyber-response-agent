@@ -1,13 +1,13 @@
 {
-  "name": "spec-flow-local",
+  "name": "contract-first-local",
   "owner": {
     "name": "beetroot-salad"
   },
   "plugins": [
     {
-      "name": "spec-flow",
-      "source": "./spec-flow",
-      "description": "A spec-first issue-to-PR pipeline: discuss, write-tests, write-code-from-spec, review, ship."
+      "name": "contract-first",
+      "source": "./contract-first",
+      "description": "A contract-first issue-to-PR pipeline: the design becomes committed contract tests before code is written. Discuss, write-tests, write-code-from-tests, finalize, ship."
     }
   ]
 }

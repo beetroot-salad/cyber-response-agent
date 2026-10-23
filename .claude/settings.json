@@ -1,9 +1,9 @@
 {
   "enabledPlugins": {
-    "spec-flow@spec-flow-local": true
+    "contract-first@contract-first-local": true
   },
   "extraKnownMarketplaces": {
-    "spec-flow-local": {
+    "contract-first-local": {
       "source": {
         "source": "directory",
         "path": "./"

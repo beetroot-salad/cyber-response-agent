@@ -21,7 +21,7 @@ RUN_COMMON_PY = DEFENDER / "run_common.py"
 CLI_PY = DEFENDER / "learning" / "core" / "cli.py"
 SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
 VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
-PROJECT_PROFILE = REPO_ROOT / ".claude" / "spec-flow.json"
+PROJECT_PROFILE = REPO_ROOT / ".claude" / "contract-first.json"
 HISTORICAL_GRAPH_PROFILE = (
     REPO_ROOT / "docs/archive/spec-flow-project-config.json")
 
