@@ -52,7 +52,7 @@ choices determine, and the merge stays human-approved.
 | `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the stages above; useful on its own. |
 | `/contract-first:handoff` | Writes the terse note that lets a cold session resume the work. |
-| `/contract-first:symbol-refs` | Resolves a Python symbol's cross-file references or definitions via Pyrefly, where grep would also match comments and unrelated same-name symbols. |
+| `/contract-first:symbol-refs` | Resolves a symbol's cross-file references or definitions through Claude Code's `LSP` tool, checked against grep, where grep alone would also match comments and unrelated same-name symbols. |
 
 Each stage is a **cold start**: a fresh session that never saw the previous one. GitHub is the only
 channel between them — the issue, its comments, the branch, the PR. That is what makes the pipeline
@@ -76,8 +76,8 @@ repo already keeps for any agent:
   fork is judged against; the project owns it, and it is asked of the owner, never guessed).
 - **The CI config** — the source of truth for what the gate runs. When it and CLAUDE.md disagree,
   believe CI and fix CLAUDE.md.
-- **Pyrefly's config** (`pyrefly.toml`, or `[tool.pyrefly]` in `pyproject.toml`) — the import roots
-  `symbol-refs` needs, for Python projects.
+- **Language-server config** — whatever the project's language server needs to resolve imports
+  (for Python's Pyright, `extraPaths` under `[tool.pyright]`), so `symbol-refs` gets real answers.
 - **The attack deck** (`.claude/contract-first-attacks.md`) — the project's own record of exploit
   shapes that carried real bugs past its suites. `finalize` creates it on the first such escape and
   appends to it after that; the attackers replay it on every new contract. A project without one
@@ -119,9 +119,11 @@ argument.** The stage owns its whole job, including watching CI, and reports one
 
 ## Requirements
 
-`git` and the `gh` CLI (authenticated). For Python projects, two optional suite checks
+`git` and the `gh` CLI (authenticated). `symbol-refs` works best with a code-intelligence plugin
+for the project's language (for example `pyright-lsp` or `typescript-lsp` from Anthropic's
+marketplace) and falls back to grep without one. For Python projects, two optional suite checks
 (`spec-graph calls` and `spec-graph nullstub`) need `python3` or the interpreter named in
-`SPEC_GRAPH_PYTHON`, and `symbol-refs` needs Pyrefly (installed, or fetched through `uvx`).
+`SPEC_GRAPH_PYTHON`.
 
 ## License
 

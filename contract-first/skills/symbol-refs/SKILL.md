@@ -1,33 +1,28 @@
 ---
 name: symbol-refs
-description: "Resolve a Python symbol's cross-file references or definitions — who calls or imports it, where it is defined — as a resolved answer, not grep's lexical guess. Use to settle a census or referential claim (\"these are all the callers\", \"the rename is safe\"), to run the 'same pattern elsewhere' sweep over a symbol, or for any who-references-X question a comment or a same-named unrelated symbol would fool grep on."
+description: "Resolve a symbol's cross-file references or definitions — who calls or imports it, where it is defined — as a resolved answer, not grep's lexical guess. Use to settle a census or referential claim (\"these are all the callers\", \"the rename is safe\"), to run the 'same pattern elsewhere' sweep over a symbol, or for any who-references-X question a comment or a same-named unrelated symbol would fool grep on."
 argument-hint: "[file:line symbol]"
 effort: low
 ---
 
 # Symbol refs
 
-The resolved sibling of the Explore agent. Explore locates code lexically and reads it narratively; this **resolves** it — it links every importer to the actual definition, so "who references `X`" and "where is `X` defined" are answered by the type checker, not approximated by a name match.
-
-grep is the **lexical floor**: every real reference contains the name, so grep never misses one — but it also matches the name in comments, strings, and unrelated same-named symbols, and cannot tell which. This turns that floor into a resolved set.
+grep is the **lexical floor**: every real reference contains the name, so grep never misses one, but it also matches the name in comments, strings and unrelated same-named symbols, and can't tell which. A language server **resolves** the name: it links each use to the actual definition, so "who references `X`" is answered by the type checker rather than a name match.
 
 ## When to reach for it
 
-- A **census** a decision rests on — "these are all the callers / writers / occurrences of `X`": the rename that must hit every site, the invariant every consumer must uphold. grep's hit list is the superset to check; this is the resolved one.
-- The **same pattern elsewhere** sweep when "the same" is a *symbol* (a function, class, constant), not a text pattern.
-- Any who-references / where-defined question where a comment mention or a homonym would inflate or mislead a grep.
+- A **census** a decision rests on: "these are all the callers / writers / occurrences of `X`", the rename that must hit every site, the invariant every consumer must uphold.
+- The **same pattern elsewhere** sweep when "the same" is a symbol (a function, class, constant), not a text pattern.
+- Any who-references or where-defined question where a comment or a homonym would inflate a grep.
 
 ## Run it
 
-`pyrefly-refs <file>:<line> <symbol>` — resolved references. It ships with the plugin and is on your PATH. `<file>:<line>` is any line where the symbol appears — its definition or a usage.
+1. **The floor.** `grep -rlw <symbol>` over the source tree, excluding vendored and generated directories. Note the file count.
+2. **The resolved set.** Use Claude Code's `LSP` tool at a line where the symbol appears: find references, or go to definition. It needs the language's code-intelligence plugin (for example `pyright-lsp` or `typescript-lsp`) and its language server installed. Without one, say so and fall back to the floor, reading each hit to separate real references from comments and homonyms.
+3. **Compare.** Resolved fewer than grep means grep had false positives the server dropped, which is the point. **Resolved collapsing to one file while grep found the name in many** is the language server failing to resolve imports, not a true empty: a project layout it doesn't understand, usually a missing import root in its config. Fix the config or fall back to reading the grep hits; never report a collapsed result as "no references".
 
-- `--defs` — the symbol's definition(s) instead of references; follows imports across files.
-- `--json` — machine-readable.
-
-Read the result against the floor it prints. **Resolved fewer than grep** means grep had false positives the resolver dropped — the win. **Resolved collapsing to one file while grep found many** trips the resolution guard: the tool exits non-zero and says so, because that is pyrefly *silently failing to resolve* (a search-path problem, not a true empty) — never read a guard-tripped result as "no references."
+Record the search with its scope and both counts, so the census is reproducible.
 
 ## What it does not resolve
 
-Static Python only — symbol and call edges. It does **not** see runtime dispatch (a `VERBS`-style registry the runtime imports and calls by data, a subprocess re-exec) or reachability matched on a string (a regex over a filename). Those are not call edges; read the dispatch site yourself. This is a sharper census for the code-symbol slice, not a reachability oracle.
-
-Requires pyrefly (`uvx pyrefly`, fetched on first use) and the project's pyrefly config with its import roots on `search-path` (a `pyrefly.toml`, or `[tool.pyrefly]` in `pyproject.toml`). Without a pinned search path pyrefly silently under-resolves on namespace-package layouts — which is exactly why the guard exists.
+Static symbol and call edges only. A language server doesn't see runtime dispatch (a registry called by data, a subprocess re-exec, reflection) or reachability matched on a string (a regex over a filename). Read those dispatch sites yourself. This sharpens the code-symbol slice of a census; it is not a reachability oracle.
