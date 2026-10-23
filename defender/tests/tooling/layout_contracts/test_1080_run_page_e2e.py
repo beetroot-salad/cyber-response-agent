@@ -26,11 +26,15 @@ def _make_unimportable(monkeypatch, dotted: str) -> None:
 
 
 def _lesson_fixture(tmp_path: Path):
-    from defender.tests.support.learning.retrieval._lessons_corpus import _main_deps, _write_lesson
+    from defender.tests.support.learning.retrieval._lessons_corpus import (
+        _run_copy_main_deps,
+        _write_lesson,
+    )
 
     tmp_path.mkdir(parents=True, exist_ok=True)
-    deps, _run, dfn = _main_deps(tmp_path)
-    corpus = dfn / "lessons"
+    # #1108 P4 (O2): both lazy sites recall from the run copy's corpus, `<agent>/lessons`.
+    deps, _run, agent, _dfn = _run_copy_main_deps(tmp_path)
+    corpus = agent / "lessons"
     corpus.mkdir(parents=True, exist_ok=True)
     _write_lesson(corpus, "lazy-site-1080-lesson", nodes=("type: compute, slot: class",))
     doc = ("```invlang\n"

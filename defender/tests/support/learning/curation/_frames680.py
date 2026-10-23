@@ -280,24 +280,24 @@ def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
     return deps, skills, "rm defender/skills/system/_draft/lesson.md"
 
 
-def _lead_author_draft_deps_scene(tmp_path: Path, result: BoxResult):
-    """The lead author bound as the drain binds it after #1108 P4 (O7, OD6; S-H's assumed
-    seam): `defender_dir` the product tree (its adapters declare the systems), the lane's
-    `skills/` a batch draft's `agent/skills` (`RunScope(tenant_agent=<draft agent/>)`).
-    Returns `(deps, that skills/, an rm of one of its drafts as the box names it)` — the
-    checkout's `rm defender/skills/...` spelling the legacy scene used is gone with O1."""
+def _lead_author_draft_scene(tmp_path: Path, result: BoxResult):
+    """A real LEAD_AUTHOR binding over a batch draft's agent root (#1108 P4, O7/OD6: the lane
+    writes `<draft>/agent/skills/`, compiled under `RunScope(tenant_agent=)` as
+    `test_hardening_772` binds it). Returns `(deps, the draft's skills dir, an admitted rm)` —
+    the rm `_lead_author_deps_scene` spelled under the product tree, which P4 no longer grants."""
     defender_dir = tmp_path / "tree" / "defender"
     agent = tmp_path / "draft" / "agent"
     skills = agent / "skills"
     run = tmp_path / "run"
-    skills.mkdir(parents=True)
+    (skills / "system").mkdir(parents=True)
     run.mkdir(parents=True)
-    # `system` has to BE one since #772 — the grant is compiled per system the product
-    # declares an adapter for.
+    # `system` has to BE one since #772: the grant is compiled per system the product declares
+    # an adapter for, not over an anonymous `<name>/_draft/` shape.
     seed_adapter_stubs(defender_dir, ("system",))
-    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir,
-                scope=RunScope(tenant_agent=agent), box=Box(result))
-    return deps, skills, f"rm {deps.view.to_model(skills)}/system/_draft/lesson.md"
+    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result),
+                scope=RunScope(tenant_agent=agent))
+    target = deps.view.to_model(skills / "system" / "_draft" / "lesson.md")
+    return deps, skills, f"rm {target}"
 
 
 def _learning_read_deps(tmp_path: Path, *, box=None):

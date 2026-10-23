@@ -321,8 +321,10 @@ def test_n2_origin_rewritten_to_a_non_descendant_of_current_is_operator_and_curr
     rewound or force-pushed to a commit that does not descend from `current`. The child reports
     `stale:operator` and `current` does not move. Control: `test_o7b_a_merge_on_origin_is_
     published_and_reported_fresh_at_the_merge` (a descendant is published)."""
-    before = current_commit(tenant.tenant)
     target = _force_main(tenant, how)
+    # Read after the rewrite: the `rewound` setup publishes its merge first, so when the child
+    # runs `current` is that merge, and origin's `main` is the merge's parent (a non-descendant).
+    before = current_commit(tenant.tenant)
     line = B.run_child(tenant, issuer_config)
     _stale(line, "operator")
     assert current_commit(tenant.tenant) == before, (

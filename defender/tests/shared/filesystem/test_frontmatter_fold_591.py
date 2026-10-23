@@ -318,22 +318,33 @@ def test_d_block_scalar_multiparagraph_green(tmp_path):
 
 
 def test_d_catalog_survival():
+    """A real committed catalog survives the fold: one line per system skill it ships.
+
+    #1108 P4 (O1, O4): the product tree ships no per-system skills and `SKILLS_DIR` is banned
+    (`tenant_1108_p4/test_census.py`); a run's catalog is its tenant's `agent/skills/`. The real
+    committed one is the fixture tenant's, so every system skill it ships (with a `SKILL.md`)
+    that the run's grant reaches renders one line, its non-ASCII description intact."""
     from defender.tests.support.tenancy import _tenants1106 as T1106
 
     hook = _hook()
+    skills = T1106.FIXTURE_AGENT / "skills"
     # #1106 M4: the gather grant is a run's (the playground tenant's), not GATHER_DEF's.
-    out = SI.index_text(
-        hook, hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.fixture_grants().gather)
-    assert SI.listing(out)
+    grant = T1106.fixture_grants().gather
+    out = SI.index_text(hook, skills, read_roster(hook.ADAPTERS_DIR), grant)
     adapters_dir = DEFENDER / "integrations"
-    systems = sorted(
+    adapters = {
         p.name[: -len("_adapter.py")].replace("_", "-")
         for p in adapters_dir.glob("*_adapter.py")
-    )
-    assert systems
+    }
+    granted = {system for system, _verb, _mode in grant.entries}
+    systems = sorted(p.parent.name for p in skills.glob("*/SKILL.md")
+                     if p.parent.name in adapters & granted)
+    assert systems, "fixture: the committed tenant ships no system skill the grant reaches"
     lines = SI.listing(out)
-    assert len(lines) == len(systems)
-    assert "- `elastic`:" in out
+    assert len(lines) == len(systems), lines
+    for system in systems:
+        assert f"- `{system}`:" in out, out
+    assert "—" in out, "the description's em-dash did not survive the fold"
 
 
 def test_d_malformed_yaml_collapse(tmp_path):

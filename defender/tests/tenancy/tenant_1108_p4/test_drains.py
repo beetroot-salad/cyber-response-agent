@@ -47,7 +47,9 @@ from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._scenarios import _AnswerLost
 from defender.tests.tenancy.tenant_1108_delivery._support import (
     FORK,
+    NAMESAKE,
     OURS,
+    SIBLING_FORK,
     LockAudit,
     close_on_remote,
     pr_row,
@@ -185,7 +187,9 @@ def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_ca
     paths = drain_paths(t, product_repo(tmp_path))
     queue(paths, [S.finding_row("f1", run_id="f1")])
     trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+    # The fixture's own publish already asked the issuer and the forge; only the drain counts.
     t.vault.calls.clear()
+    t.forge.requests.clear()
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=trigger, box=box)
@@ -280,6 +284,12 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
 _LEASE_ROWS = {
     "ours-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=OURS),
     "fork-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=FORK),
+    # A fork under our own owner, and another repository that took our full name: repository
+    # identity is the id (moved here from `tenant_1108_delivery/test_forgejo.py`'s
+    # `AuthorBranch` lease case when P4 deleted `AuthorBranch`).
+    "sibling-fork-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch",
+                                                            repo=SIBLING_FORK),
+    "namesake-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=NAMESAKE),
     "no-head-repository": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=None),
     "ours-on-the-other-lane": lambda _own, other: pr_row(3, f"{other}earlier-batch", repo=OURS),
 }

@@ -170,6 +170,8 @@ def test_a_id_o8_the_drain_logs_in_from_the_config_path_and_hands_no_login_mater
     curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")},
                             also=lambda *_a: env_seen.append(dict(os.environ)))
     trigger, box = CuratorTrigger(author=curator), BoxSpy()
+    # The fixture's own publish authenticated with ITS identity's token; only the drain counts.
+    t.server.authorizations.clear()
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=trigger, box=box, issuer_config=config,
@@ -305,6 +307,7 @@ def test_o9_a_tenant_open_refuses_is_the_stages_one_line_refusal_and_runs_nothin
     config = write_issuer_config(tmp_path / "playground-issuer" / "client")
     tick = _tick(drain, t, tmp_path, config, vault)
     _break_tenant(t, config, fault)
+    t.forge.requests.clear()  # the fixture's own publish asked the forge; only the tick counts
 
     caplog.clear()
     with caplog.at_level(logging.DEBUG):

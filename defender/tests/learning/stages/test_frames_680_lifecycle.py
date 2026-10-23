@@ -17,7 +17,7 @@ from defender.tests.support.learning.curation._frames680 import (
     _drive_learning_read,
     assert_one_frame,
     _lead_author_deps_scene,
-    _lead_author_draft_deps_scene,
+    _lead_author_draft_scene,
 )
 
 
@@ -138,8 +138,8 @@ def test_learning_bash_returns_success_stdout_and_hostile_stderr_on_a_nonzero_ex
 def test_lead_author_bash_reads_cross_agent_artifact(tmp_path):
     """An actual LEAD_AUTHOR dependency's admitted scoped result is wrapped once under its salt."""
     result = BoxResult(0, b"lead-author cross-agent bytes", b"")
-    # #1108 P4 (O7, OD6): the lane's rm is of a draft in a batch draft's `agent/skills`.
-    deps, _, command = _lead_author_draft_deps_scene(tmp_path, result)
+    # #1108 P4: the lane's admitted rm is under a batch draft's agent root, not the product tree.
+    deps, _, command = _lead_author_draft_scene(tmp_path, result)
     out = _tool_bash(deps, command)
     assert_one_frame(
         out, _format_bash_result(0, "lead-author cross-agent bytes", ""), "untrusted"
@@ -157,12 +157,9 @@ def test_corpus_author_bash_reads_cross_agent_artifact(tmp_path):
     )
 
 
-# #1108 P4 OD12(i): `test_revert_lesson_driver_holds_shared_author_lock_and_calls_through`
-# deleted. It drove `revert_lesson.revert(..., branch=)` over the legacy `AuthorBranch`
-# delivery, which P4 removes (O7: the revert goes through `TenantDelivery.revert`, flow 5), and
-# spelled the lesson `defender/lessons/` (OD6: `agent/lessons/`). The revert's mutual exclusion
-# with the author drain is pinned at the CLI on the tenant path:
-# tests/tenancy/tenant_1108_p4/test_revert_cli.py::test_flow5_revert_cli_waits_out_a_running_author_drain
-# (and the revert itself by ::test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson).
-# Not re-pinned: that the revert HOLDS the lock while it delivers (the reverse direction).
-
+# `test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (the driver calling
+# `revert(branch=)`'s `revert_lesson_pr` under the lock) is deleted with that seam (#1108 P4,
+# OD12 class (i): the revert goes through `TenantDelivery.revert`). Its two halves are pinned on
+# the real CLI: `tenancy/tenant_1108_p4/test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_
+# pr_on_the_tenant_forge_deleting_the_agent_lesson` (lock held at the PR create, released after)
+# and `::test_flow5_revert_cli_waits_out_a_running_author_drain`.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import importlib
 import json
 
@@ -18,7 +17,6 @@ from ._support import (
     TOKEN,
     ForgeHTTP,
     bounded,
-    delivery,
     pr_row,
 )
 
@@ -318,19 +316,11 @@ def test_repository_identity_is_the_repository_id(method):
         [normalized(2, "lessons/a")]
 
 
-def test_the_writer_lease_is_not_held_by_a_fork_pr(repo):
-    """OD8: the writer lease (amendment 3 C1) is the tenant delivery's `open_pr_exists` — the
-    legacy `AuthorBranch` is deleted with the worktree delivery (#1108 P4, O7). Only an open
-    PR of the tenant repository itself, under the lane's prefix, holds it."""
-    http = ForgeHTTP()
-    lane = dataclasses.replace(delivery(repo, http), branch_prefix="lessons/")
-    others = [pr_row(1, "lessons/x", repo=FORK), pr_row(2, "lessons/y", repo=SIBLING_FORK),
-              pr_row(5, "lessons/v", repo=NAMESAKE), pr_row(6, "lessons/w", repo=None),
-              pr_row(7, "lead-author/u")]
-    http.pages = {1: others}
-    assert lane.open_pr_exists() is False
-    http.pages = {1: [*others, pr_row(3, "lessons/z")]}
-    assert lane.open_pr_exists() is True
+# `test_the_writer_lease_is_not_held_by_a_fork_pr` (the lease on `AuthorBranch`) is deleted with
+# `AuthorBranch` (#1108 P4, OD12 class (i)). The writer lease is now pinned at the drains' real
+# entry: `tenant_1108_p4/test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_
+# lease_and_nothing_else_does` (ours, a fork, a sibling fork, a namesake, no head repository, the
+# other lane), on both drains; the listing's identity rules stay pinned above.
 
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])

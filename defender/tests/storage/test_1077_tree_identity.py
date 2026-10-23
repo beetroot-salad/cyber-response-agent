@@ -22,6 +22,25 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
+def _agent(tmp_path: Path) -> Path:
+    """The tenant agent tree the replay reads (`drive(agent=)`, #1108 P4 A8): the fixture
+    tenant's, plus one lesson the golden's document matches. The baseline was captured when the
+    product tree's corpus answered this golden (so the run pushed a lesson and kept
+    `lessons_loaded.jsonl`); after O1/O2 the run's corpus is its tenant's, so the tenant carries
+    the lesson the golden pushes."""
+    import shutil
+
+    from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
+
+    agent = tmp_path / "golden-1077" / "agent"
+    if not agent.is_dir():
+        shutil.copytree(FIXTURE_AGENT, agent, symlinks=True)
+        _write_lesson(agent / "lessons", "tree-1077-identity",
+                      observed=("type: identity, slot: ident",))
+    return agent
+
+
 def _replay(tmp_path: Path, run_id: str = "tree-1077") -> Path:
     """One whole replayed fixture run, driven through the real driver, ended normally."""
     run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
@@ -30,7 +49,7 @@ def _replay(tmp_path: Path, run_id: str = "tree-1077") -> Path:
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
         Turn(text="Investigation complete."),
     ])
-    drive(run_dir, run_id=run_id, main=replay)
+    drive(run_dir, run_id=run_id, main=replay, agent=_agent(tmp_path))
     return run_dir
 
 
