@@ -3,7 +3,7 @@
   "base": "80888efb",
   "how": "At 80888efb, by the group's capture script: the four path-scoped gates' own scans over a tmp tree holding every base defender/scripts module with the test's plant appended in place; the env-read lint's _swept_files over the checkout; the lint scope lists' and tree-read list's dead entries; baseline keys naming defender/scripts paths; _pointers1080.dead_scripts_pointers over the checkout; defender's tracked top-level folders; each staying command's --help usage block run from a tmp working directory; ci.yml's run: lines invoking them.",
   "python": "3.11.15",
-  "amended": "Plugin decoupling: the capture's spec-flow profile rows and its dead-pointer debt in spec-flow plugin files were dropped when defender's tests stopped reading or planting plugin files."
+  "amended": "Plugin decoupling: the capture's plugin-profile rows and its dead-pointer debt in plugin files were dropped when defender's tests stopped reading or planting plugin files."
  },
  "plant_reported_at_base": {
   "defender/scripts/_venv.py": [

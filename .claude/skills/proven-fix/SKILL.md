@@ -1,6 +1,6 @@
 ---
 name: proven-fix
-description: "Make a small fix and prove the test guarding it can actually fail: write the test red first, fix, then mutate only the lines the fix touched. Use for bug fixes and small settled changes, where contract-first's committed spec graph and adversary worktree are too heavy."
+description: "Make a small fix and prove the test guarding it can actually fail: write the test red first, fix, then mutate only the lines the fix touched. Use for bug fixes and small settled changes, where contract-first's committed test contract and adversarial implementers are too heavy."
 ---
 
 # Proven fix

@@ -199,9 +199,9 @@ jobs:
           --ignore tests/e2e/test_540_box_boundary.py
 
       # Standalone suite checks and historical graph utilities ship with the
-      # contract-first plugin. Defender's tests and the tooling/lint gates do not
-      # read or scan the plugin, so this step is its only CI coverage; graph
-      # artifacts are retired from the active workflow. This suite drives the real
+      # contract-first plugin. Defender's tests and the path-scoped tooling/lint
+      # gates no longer scope to the plugin, so this step is its only test
+      # coverage; graph artifacts are retired from the active workflow. This suite drives the real
       # check_actors CLI against throwaway git-repo fixtures; it lives outside
       # defender/ but reuses the defender venv's pytest + pyyaml, so it runs from
       # the repo root against defender/.venv (the same idiom as the code-smells
