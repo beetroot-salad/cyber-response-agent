@@ -136,6 +136,13 @@ class CuratorDeps(AgentDeps):
     role: ClassVar[AgentRole] = AgentRole.CORPUS_AUTHOR
 
     @property
+    def agent_root(self) -> Path | None:
+        """The agent root this curator serves: the batch draft's `agent/` it works over. Its
+        read confine drops the scope's `tenant_agent`, so the knowledge root `bind` was handed
+        is the answer — a read of its lesson then leaves its `lessons_loaded` row."""
+        return Path(self.roots.defender_dir) if self.roots is not None else super().agent_root
+
+    @property
     def corpus_dir(self) -> Path:
         assert self.roots is not None
         assert self.roots.corpus_dir is not None
@@ -155,7 +162,6 @@ class CuratorDeps(AgentDeps):
         scope = RunScope(
             corpus_name=corpus_dir.name,
             read_confine=lesson_read_confine(knowledge_root),
-            tenant_agent=knowledge_root,
         )
         deps = bind(
             CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=knowledge_root,
