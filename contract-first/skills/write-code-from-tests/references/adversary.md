@@ -12,7 +12,7 @@ Inside the code, anything goes: drop a guard, hardcode expected values, special-
 
 ## Where to attack
 
-1. **Replay the deck.** `.claude/contract-first-attacks.md` records every exploit shape that has carried a real bug past a suite in this repo. A replay that passes means a known-shipped class of bug is still open. The deck shows where suites here have been weak, not where this one is, so spend at most a third of your budget on it.
+1. **Replay the deck.** The project's attack deck, `.claude/contract-first-attacks.md`, records every exploit shape that has carried a real bug past a suite in this repo. A replay that passes means a known-shipped class of bug is still open. The deck shows where suites here have been weak, not where this one is, so spend at most a third of your budget on it. If the project has no deck yet, skip this step.
 2. **Go after weak observations:** assertions recorded as not yet exercised, production paths the harness bypasses, canned returns, shape without substance, negatives without a control, and correct-looking assertions that combine into a loophole.
 3. **Sample fresh, lens first.** For each obligation your lens touches, then the rest as budget allows: which part of the honest code could be removed or made lazier and still pass?
 

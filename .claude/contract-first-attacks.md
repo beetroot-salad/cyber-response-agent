@@ -1,15 +1,6 @@
 # Attack deck
 
-Append-only. One entry per exploit shape that carried a real bug past a committed suite in this repo — appended by `finalize` from an artifact-proven tracer attribution, replayed by `write-code-from-tests`'s adversarial implementer against every future spec. Entries record *shapes*, phrased to transfer across specs ("assert shape, not substance, on serialization demands"), never this-bug specifics alone and never doctrine.
-
-Entry format:
-
-```
-## <date> · PR #<n> — <exploit shape, one line>
-- **violated**: <design-doc clause, quoted, and the test meant to enforce it>
-- **exploit**: <how it greened — enough to re-attempt>
-- **killed by**: <what the fix asserts, or "open">
-```
+This repo's record of exploit shapes that carried real bugs past a committed suite, for the contract-first plugin's attackers to replay. Append-only.
 
 ## 2026-07-21 · PR #678 — a catch-all fault demand discharged at ONE seam; fault the other seams the guarded value crosses
 - **violated**: `d7_unmapped_fault_enveloped` — "an unmapped `BaseException` → the fault-class envelope (write a row, never delete one) … never unwinds out of `agent.iter()`" (the pipeline judge's closed-ticket tool, since deleted; `spec_graph_672-closed-ticket-tool.yaml:152`).

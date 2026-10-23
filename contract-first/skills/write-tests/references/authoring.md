@@ -18,7 +18,7 @@ Work in four steps: decide the cases, survey the existing suite, fold, then writ
 
 **1. Decide the cases, before opening any existing test.** Write the case table from the design: one row per case, naming its obligation, condition, action, what it observes and at which boundary, the expected value, and a plausible wrong implementation it would reject. For each important promise, start from a real entry point and an observable result. Unit tests suit narrow rules, but an isolated unit test cannot show that production uses the rule, so flows need tests through their real wiring. Expected values come from the design and explicit fixtures, never from re-implementing the target's logic. Let the design's properties pick the variants worth having (replay, partial progress, ordering, alternate access paths, guard partitions) rather than multiplying combinations. A few cases that separate materially different outcomes beat many that don't; use property-based checks where the invariant and oracle are clear. Sketch cases are rows too. This table becomes the contract map.
 
-**2. Survey, per case.** Find the nearest existing tests and fixtures for each row's entry point through the code map and `py-outline --tests`, and read only those. You're asking two questions: does something already enforce this, and does something pin the opposite?
+**2. Survey, per case.** Find the nearest existing tests and fixtures for each row's entry point through the code map and an outline of the test files, and read only those. You're asking two questions: does something already enforce this, and does something pin the opposite?
 
 **3. Fold.** Give every row one outcome and record it in the map:
 
@@ -51,7 +51,7 @@ Everything you read stays in your context and is re-sent on every later step, an
 
 - Read the design once, whole: it is the shared language.
 - Use the code map for where things are. Open raw files to check an entry you rely on or to read what you change, and report wrong entries instead of quietly working around them.
-- Outline before reading: `py-outline <file-or-dir>` (`--tests` for tests and fixtures), then read only the ranges you need, such as the tests you change and one or two neighbours whose conventions you follow. Check edits through the diff.
+- Outline before reading (the `LSP` tool's document symbols, or a grep for definitions where no language server is installed), then read only the ranges you need, such as the tests you change and one or two neighbours whose conventions you follow. Check edits through the diff.
 - Docstrings are at most two lines: the promised outcome and its obligation ID. The test body carries the detail and the contract map the reasoning. Comment only what the body can't say, and stay no denser than neighbouring tests.
 
 ## Check as you go

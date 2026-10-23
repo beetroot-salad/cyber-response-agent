@@ -146,11 +146,12 @@ package = false
 [tool.setuptools]
 py-modules = []
 
-[tool.pyrefly]
+[tool.pyright]
 # defender is a namespace package (no defender/__init__.py, this pyproject below the import
-# root), so without `..` on the search path `defender.x` imports silently resolve to Unknown.
-# Mirrors pytest's pythonpath = ['..']. Read by the contract-first symbol-refs helper.
-search-path = ["..", "."]
+# root), so without `..` on the path every `defender.x` import is unresolved and a language
+# server's find-references silently stops at the current file. Mirrors pytest's
+# pythonpath = ['..']. Read by the pyright-lsp code-intelligence plugin.
+extraPaths = [".."]
 
 [tool.mypy]
 # Type-check gate (issue #403). BLOCKING: mypy runs in CI's lint job with no

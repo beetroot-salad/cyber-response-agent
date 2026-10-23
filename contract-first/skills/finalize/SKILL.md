@@ -41,7 +41,7 @@ Once your findings are settled, dispatch a tracer, **Sonnet at high effort**, on
 
 Its results go two places, and they stay separate:
 
-- **Deck-eligible** escapes: append the tracer's entry to `.claude/contract-first-attacks.md` in this PR, so it reaches the merge gate with your fixes. The attackers replay this deck on every future contract. It is the one pipeline file you write, and it is append-only.
+- **Deck-eligible** escapes: append the tracer's entry to the project's attack deck, `.claude/contract-first-attacks.md`, in this PR, so it reaches the merge gate with your fixes. `references/attack-deck.md` gives the format and what to do when the deck doesn't exist yet. It is the one pipeline file you write.
 - **Process findings** go in your report. Never edit the pipeline's skills or gates, and don't file issues for these: one PR is one data point, and the human weighs it against others.
 
 For each process finding, give the `file:line`, the tracer's class and citations, and the change you'd make: a lint or gate for a mechanical shape, an upstream rule for a semantic class such as a test that can't tell right from wrong. A *surfaced, resolved away* attribution is a decision that played out, not a miss. If the escapes were one-offs, say so rather than inventing a lever.
