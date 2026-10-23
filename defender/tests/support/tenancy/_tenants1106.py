@@ -483,9 +483,9 @@ def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
 
 
 #: The lead-zero id a planted census repo's folders name, and the established catalog template
-#: that carries it (`defender/skills/gather/queries/alpha/by-entity.md`). M7's CI pass checks
-#: that each folder's `lead-zero.yaml` names a template the catalog holds, so a planted repo
-#: whose folders name one must also hold it.
+#: that carries it (`<folder>/agent/skills/gather/queries/alpha/by-entity.md`, each tenant
+#: folder's own catalog, #1108 P4). M7's CI pass checks that each folder's `lead-zero.yaml`
+#: names a template its catalog holds, so a planted folder that names one must also hold it.
 CENSUS_LEAD_ZERO_ID = "alpha.by-entity"
 CENSUS_QUERY_TEMPLATE = """\
 ---

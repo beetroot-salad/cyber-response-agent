@@ -75,28 +75,38 @@ def _run_copy_stage(mount: dict) -> Path | None:
     return None
 
 
-def _is_agent_or_token_mount(mount: dict, stage: Path) -> bool:
-    """A stage mount is the agent mount (`stage/agent/`, or `stage/` whole, which holds only
-    `agent/` and the token) or the token mount (one file directly in `stage/`); nothing else
-    below `stage/` is a mount of its own."""
+def _stage_mount_kind(mount: dict, stage: Path) -> str | None:
+    """What a stage mount binds: `stage/agent/` (the agent half), `stage/` whole (which holds
+    only `agent/` and the token), or the token (one file directly in `stage/`); `None` for
+    anything else below `stage/`, which is no mount of its own."""
     source = Path(mount["source"])
-    return source in (stage, stage / "agent") or (source.parent == stage and source.name != "agent")
+    if source == stage / "agent":
+        return "agent"
+    if source == stage:
+        return "stage"
+    if source.parent == stage:
+        return "token"
+    return None
 
 
 def _clock_candidates(docker: RecordingDocker) -> list[dict]:
     """Read-only mounts outside the model roots, the run copy's `stage/` aside; only the clock
-    belongs there. The mounts set aside are only the copy's agent and token mounts, each
-    read-only (U9)."""
-    candidates = []
+    belongs there. The mounts set aside are only the copy's agent and token mounts — each kind
+    at most once, each read-only (U9)."""
+    candidates, kinds = [], []
     for m in docker.mounts():
         stage = _run_copy_stage(m)
         if stage is not None:
             assert m["readonly"], f"U9: a run copy stage mount is writable: {m}"
-            assert _is_agent_or_token_mount(m, stage), (
+            kind = _stage_mount_kind(m, stage)
+            assert kind is not None, (
                 f"U9: a mount below the run copy's stage/ is neither its agent half nor its "
                 f"token: {m}")
+            kinds.append(kind)
         elif m["readonly"] and not V.under_model_root(m["target"]):
             candidates.append(m)
+    assert sorted(kinds) == sorted(set(kinds)), (
+        f"U9: the run copy's stage/ is bound more than once as one kind: {kinds}")
     return candidates
 
 

@@ -689,6 +689,8 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
     def assert_census_taken(text: str) -> None:
         assert CENSUS_NOT_TAKEN not in text, (
             f"#1108 P4: the census is git-free, yet it went blind with git ({cause!r}):\n{text}")
+        # The census causes end "... on this machine"; V16's own reason (`unverified_reason`)
+        # is their prefix without it, so V16's line does not match these needles.
         for git_cause in (GIT_ABSENT_CAUSE, GIT_UNRUNNABLE_CAUSE):
             assert git_cause not in text, (
                 f"#1108 P4: the census is git-free, yet the output gives a git cause "
