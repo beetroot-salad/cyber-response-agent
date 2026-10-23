@@ -319,10 +319,12 @@ def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded ra
         tmp_path: Path, *, corpus_name: str, rows: list[dict], channel: Channel,
                  curator: FakeCurator | None, seed_corpus: dict[str, str] | None,
                  state_dir: Path | None, build: Callable[..., Any], runner: Callable[..., int],
-                 cfg_overrides: dict[str, Any]) -> DraftScene:
+                 cfg_overrides: dict[str, Any],
+                 agent_files: dict[str, str] | None = None) -> DraftScene:
     from defender.tests.support.learning.curation import _curator1134 as C
 
-    files = {f"{corpus_name}/{rel}": text for rel, text in (seed_corpus or {}).items()}
+    files = {**(agent_files or {}),
+             **{f"{corpus_name}/{rel}": text for rel, text in (seed_corpus or {}).items()}}
     lane = C.draft_lane(tmp_path, files=files, state_dir=state_dir)
     seed(lane.paths, channel, rows)
     # The draft builders' one funnel resolves the fake here; a fresh one per scene (it is
@@ -343,10 +345,12 @@ def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded ra
 def build_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
                       state_dir: Path | None = None, curator: FakeCurator | None = None,
                       seed_corpus: dict[str, str] | None = None, channel_name: str = "findings",
+                      agent_files: dict[str, str] | None = None,
                       **cfg_overrides: Any) -> DraftScene:
     """`build_scene` after P4: the lessons tick over a draft lane (`_curator1134.draft_lane`),
     `seed_corpus` published in the export commit, the config built with the assumed `batch=`
-    seam (`_curator1134.draft_author_cfg`)."""
+    seam (`_curator1134.draft_author_cfg`). `agent_files` (agent-relative, e.g.
+    `"notes/x.md"`) are published in the export too: content outside the lane's corpus."""
     from defender.tests.support.learning.curation import _curator1134 as C
 
     return _draft_scene(
@@ -354,14 +358,16 @@ def build_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
         rows=list(rows if rows is not None else [finding_row("f1", run_id="f1")]),
         channel=channel_of(channel_name), curator=curator, seed_corpus=seed_corpus,
         state_dir=state_dir, build=C.draft_author_cfg, runner=lessons_run.run_batch,
-        cfg_overrides=cfg_overrides)
+        cfg_overrides=cfg_overrides, agent_files=agent_files)
 
 
 def build_questioner_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
                                  curator: FakeCurator | None = None,
                                  seed_corpus: dict[str, str] | None = None,
+                                 agent_files: dict[str, str] | None = None,
                                  **cfg_overrides: Any) -> DraftScene:
-    """`build_questioner_scene` after P4, over a draft lane (`draft_questioner_cfg`)."""
+    """`build_questioner_scene` after P4, over a draft lane (`draft_questioner_cfg`);
+    `agent_files` as `build_draft_scene`'s."""
     from defender.learning.author.questioner import run as questioner_run
     from defender.tests.support.learning.curation import _curator1134 as C
 
@@ -370,7 +376,7 @@ def build_questioner_draft_scene(tmp_path: Path, *, rows: list[dict] | None = No
         rows=list(rows if rows is not None else [world_row("w1")]),
         channel=QUESTIONER_FINDINGS, curator=curator, seed_corpus=seed_corpus,
         state_dir=None, build=C.draft_questioner_cfg, runner=questioner_run.run_batch,
-        cfg_overrides=cfg_overrides)
+        cfg_overrides=cfg_overrides, agent_files=agent_files)
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,7 @@
-"""#773: bounded deferral, conservation of findings, and the tick's deferral/attempt counters."""
+"""#773: bounded deferral, conservation of findings, and the tick's deferral/attempt counters.
+
+#1108 P4 (OD12 class ii): every tick runs over a batch's git-free draft
+(`_spec773.build_draft_scene`); what landed is read from the batch branch (`agent/...`)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,13 +11,13 @@ import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
 
-LESSON = "defender/lessons/l1.md"
-LESSON2 = "defender/lessons/l2.md"
+LESSON = "agent/lessons/l1.md"
+LESSON2 = "agent/lessons/l2.md"
 
 
 def _orphan_tick(tmp_path, **kw):
     """The plainest deferral: a finding reported committed that no approved file cites."""
-    return S.build_scene(
+    return S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("a", run_id="a"), S.finding_row("orphan", run_id="orphan")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("a")}, committed=["a", "orphan"]),
@@ -147,7 +150,7 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
 def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):
     """With `max_attempts = 1`, a single `RETIRE_SET`-class fault retires the batch on that
     same tick."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(raises=S.author_error("first and only failure")),
@@ -160,7 +163,7 @@ def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):
 
 def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_once_773(tmp_path):
     """The POSITIVE CONTROL for the test above."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("shared", run_id="shared")],
         curator=S.FakeCurator(
@@ -177,7 +180,7 @@ def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_onc
 
 def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
     """The conservation invariant, over a tick that produces all three endings at once."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[
             S.finding_row("ok", run_id="ok"),
@@ -203,7 +206,7 @@ def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
 def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path):
     """A row the curator mentions in no bucket and that no changed file cites stays queued
     EXACTLY as it was, with no counter of any kind bumped."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("named", run_id="named"), S.finding_row("ghost", run_id="ghost")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("named")}, committed=["named"]),
@@ -219,7 +222,7 @@ def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_
     tmp_path,
 ):
     """Rotation runs exactly once per tick whatever M5 returned."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("dup", run_id="dup"), S.finding_row("skip", run_id="skip")],
         curator=S.FakeCurator(
@@ -263,7 +266,7 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
     tmp_path,
 ):
     """A NEGATIVE demand."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("bad", run_id="bad"), S.finding_row("orphan", run_id="orphan")],
         curator=S.FakeCurator(
@@ -276,7 +279,7 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
     assert "deferrals" not in sc.pending_by_id()["orphan"]
     assert sc.head_files() == []
 
-    control = S.build_scene(
+    control = S.build_draft_scene(
         tmp_path / "control",
         rows=[S.finding_row("bad", run_id="bad"), S.finding_row("orphan", run_id="orphan")],
         curator=S.FakeCurator(
@@ -285,13 +288,13 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
     )
     assert control.run() == 0
     assert control.pending_by_id()["orphan"]["deferrals"] == 1
-    assert control.head_files() == ["defender/lessons/l1.md"]
+    assert control.head_files() == ["agent/lessons/l1.md"]
 
 
 def test_repo_lock_wait_exceeded_at_the_closing_rotation_773(tmp_path):
     """A commit that already LANDED is never undone by a later rotation failure."""
     held: dict = {}
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
