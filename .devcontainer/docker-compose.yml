@@ -73,9 +73,10 @@ services:
   #
   # From the dev container: http://forgejo:3000; from the host's browser:
   # http://localhost:${FORGEJO_HTTP_PORT:-3000}. Each tenant has a non-admin bot and a
-  # repository-restricted Authorized Integration. Host delivery receives short-lived Vault
-  # JWTs explicitly; see defender/docs/development-operations.md for provisioning and scope.
-  # Runtime boxes receive exported files and never receive Forgejo or Vault credentials.
+  # repository-restricted Authorized Integration whose issuer is the `openbao` service below.
+  # Host delivery processes log in to it themselves (AppRole) and present its short-lived JWTs;
+  # see defender/docs/development-operations.md for provisioning and scope. Runtime boxes
+  # receive exported files and never receive Forgejo or issuer credentials.
   forgejo:
     # Authorized Integrations authenticate short-lived Vault identities for API and git.
     # Override per machine in .devcontainer/.env.
@@ -97,10 +98,18 @@ services:
       # SSH is reachable only on the compose network (not published to the host).
       FORGEJO__server__SSH_DOMAIN: forgejo
       FORGEJO__server__SSH_PORT: "22"
+      # Authorized Integrations may name only the dev issuer (#1108 P4). Forgejo fetches its
+      # discovery and JWKS over HTTPS on the compose network, trusting the dev CA added below.
+      FORGEJO__authorized_integration__ALLOWED_DOMAINS: openbao
+      SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
     volumes:
-      # A named volume, so repos survive a devcontainer rebuild (`docker compose down` keeps
-      # it; only `down -v` deletes it). Back it up before any `-v`.
-      - forgejo-data:/data
+      # A host folder, gitignored (#1108 P4, U2), so repos survive a rebuild AND
+      # `docker compose down -v`. The old `forgejo-data` named volume is no longer declared, so
+      # `down -v` cannot remove it; it stays until the operator deletes it. Migrate it once with
+      # `.devcontainer/provision-dev-issuer.sh migrate-forgejo-data`.
+      - ../playground-knowledge:/data
+      # The dev CA's certificate only (never its key).
+      - ../playground-issuer/trust:/etc/ssl/dev-issuer-ca:ro
     ports:
       # Loopback only: the UI is for this machine's browser, not the network.
       - "127.0.0.1:${FORGEJO_HTTP_PORT:-3000}:3000"
@@ -110,5 +119,23 @@ services:
     memswap_limit: 512m
     restart: unless-stopped
 
-volumes:
-  forgejo-data:
+  # The dev issuer (#1108 P4, U1): OpenBao signs the identity tokens Forgejo accepts from host
+  # delivery processes (drains, `tenant.py`, the launch-time publish child). File storage and a
+  # static seal (`openbao/openbao.hcl`) keep it unsealed across restarts with no human (O12).
+  # Its storage, seal key, TLS material and the AppRole client config live under
+  # <repo>/playground-issuer/ (gitignored, U4): prepare and provision them with
+  # `.devcontainer/provision-dev-issuer.sh` (it restarts this service once the files exist).
+  # No host port: it is reachable only on the compose network, at https://openbao:8200.
+  openbao:
+    image: openbao/openbao:${OPENBAO_VERSION:-2.4.1}
+    container_name: response-openbao
+    hostname: openbao
+    command: ["bao", "server", "-config=/openbao/config/openbao.hcl"]
+    volumes:
+      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - ../playground-issuer/storage:/openbao/file
+      - ../playground-issuer/seal:/openbao/seal:ro
+      - ../playground-issuer/tls:/openbao/tls:ro
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
