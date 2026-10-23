@@ -27,6 +27,7 @@ from defender.runtime.verb_dispositions import (
 )
 from defender.runtime.verb_grant import GrantError
 from defender.runtime.verbs import RosterRead
+from defender.tenancy._tenants import AGENT_HALF
 
 
 class CensusUnavailable(Exception):
@@ -39,11 +40,10 @@ class CensusUnavailable(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Census:
-    """The running checkout's declared verbs, by system, and its query catalog."""
+    """The running checkout's declared verbs, by system."""
 
     systems: frozenset[str]
     walked: dict[str, frozenset[str]]
-    catalog: list[QueryTemplate]
 
 
 def take_census(defender_dir: Path, repo_root: Path) -> Census:
@@ -77,7 +77,7 @@ def take_census(defender_dir: Path, repo_root: Path) -> Census:
             "literal — an annotated assignment (`VERBS: dict[str, Verb] = {...}`) or a table "
             "built in a loop declares nothing to the reader. Fix the adapter"
             + (f" ({detail})" if detail else ""))
-    return Census(systems=systems, walked=walked, catalog=catalog_templates(defender_dir))
+    return Census(systems=systems, walked=walked)
 
 
 def _unreadable_adapters(
@@ -140,18 +140,18 @@ class TableFindings:
 
 
 def table_findings(settings: Path, census: Census) -> TableFindings:
-    """`settings`' grant table against `census`, and its lead-zero config against the census's
-    catalog. Raises `DispositionError` naming the table when it does not load."""
-    folder = _folder_findings(settings, census.catalog)
+    """`settings`' grant table against `census`, and its lead-zero config against the catalog of
+    the agent half beside it (#1108 P4: a tenant's catalog is its own). Raises `DispositionError` naming the table when it does not load."""
+    folder = _folder_findings(settings, catalog_templates(Path(settings).parent / AGENT_HALF))
     return TableFindings(folder=folder, gaps=census_gaps(census.walked, folder.dispositions))
 
 
-def folder_findings(settings: Path, defender_dir: Path) -> FolderFindings:
+def folder_findings(settings: Path) -> FolderFindings:
     """`settings` judged by every rule that needs no census, for a caller whose census could
     not be taken: the table loads, and the lead-zero config agrees with it and with the catalog
-    of the tree at `defender_dir` (a plain walk of its files, no git). Raises
+    of the agent half beside `settings` (a plain walk of its files, no git). Raises
     `DispositionError` naming the table when it does not load."""
-    return _folder_findings(settings, catalog_templates(defender_dir))
+    return _folder_findings(settings, catalog_templates(Path(settings).parent / AGENT_HALF))
 
 
 def _folder_findings(settings: Path, catalog: list[QueryTemplate]) -> FolderFindings:

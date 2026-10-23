@@ -155,6 +155,7 @@ class CuratorDeps(AgentDeps):
         scope = RunScope(
             corpus_name=corpus_dir.name,
             read_confine=lesson_read_confine(knowledge_root),
+            tenant_agent=knowledge_root,
         )
         deps = bind(
             CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=knowledge_root,

@@ -369,7 +369,7 @@ def _findings(knowledge: Path) -> list[str]:
     try:
         findings += (_tenant_census.table_findings(settings, census).lines(table)
                      if census is not None
-                     else _tenant_census.folder_findings(settings, _DEFENDER_DIR).lines())
+                     else _tenant_census.folder_findings(settings).lines())
     except DispositionError as unloadable:
         findings.append(str(unloadable))
     committed = _tenant_id_committed(knowledge)
