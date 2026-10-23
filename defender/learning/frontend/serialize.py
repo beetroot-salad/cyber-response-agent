@@ -129,7 +129,7 @@ def build_view(agent_root: Path | None) -> dict:
     return {"groups": groups}
 
 
-def _group_lessons(agent_root: Path, name: str, spec: dict) -> list[dict]:
+def _group_lessons(agent_root: Path, name: str, spec: GroupSpec) -> list[dict]:
     knowledge = KnowledgePaths(agent_root)
     root = knowledge.agent_root.parent
     skipped: list[Path] = []
