@@ -296,6 +296,28 @@ Repair round r4 (this round), all additive or stricter:
   `_spec1107.plant` re-plants in place keeping `.git`, and the publish stand-in `_launch_publish_p4` fails a lost `.git` (`pytest.fail`) instead of
   starting the remote anew, and reads `LockBusy` as `stale:transient` (R-3); the fixture tenant ships
   `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry_983.py` (R-5).
+- Older suites reading the product content P4 deleted (item 13), re-spelled, nothing deleted: `invlang/validation/test_lessons_frontier_scale_935.py` (4)
+  and `learning/retrieval/test_986_container_lesson_recall.py` (7) rank against the pre-P4 shipped lessons, now the committed test fixture
+  `tests/fixtures/pre-p4-shipped/agent/` (byte-identical to base `0f62791e`; helper `support/shared/_pre_p4_shipped.py`);
+  `invlang/validation/test_frontier_shared_walk_930.py`'s straddle case recalls from the run copy's `agent/lessons`;
+  `integrations/test_scaffold_rules_901.py`'s template sweep covers every committed `knowledge/*/agent` catalog plus that fixture's (which carries
+  the `_draft`); `learning/curation/test_tacit_registry_authoring_991.py` gates the fixture tenant's and the pre-P4 registry and reads its worked
+  example from the pre-P4 copy; `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_staying_commands_import_modules_that_have_moved`
+  runs `tacit_cli check --defender-dir knowledge/tenant-fixture/agent` (an agent root under the existing flag; not yet named in §2).
+- Deleted with production code the cleanup removed (OD12 class i):
+  - `shared/process/test_git.py`: the `git_rev_list_count` half of the head-sha case, `test_git_commit_pathspec_scoped_and_trailers`,
+    `test_git_commit_no_op_returns_none`, `test_git_worktree_add_remove`, `test_git_worktree_add_branch`, `test_git_push_sets_upstream`,
+    `test_git_fetch_advances_tracking_ref` (callers were `AuthorBranch` and the legacy drains) → `tenant_1108_delivery/test_changes.py`,
+    `test_delivery.py::test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write`, `test_publish.py`.
+  - `e2e/test_771_lifecycle_and_scope.py::test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive` and its driver
+    `_spec771.quarantine_a_tainted_tree` (`quarantine.preserve_tainted_tree`, whose only caller was `AuthorBranch`): no successor, §6 owner item.
+  - Dead support `support/learning/curation/_claim1175.py` (imported the deleted `defender._claim_git`; its suites were deleted with the contract).
+- Re-spelled with the cleanup: `tenant_1120_piece1/test_1120_operator_commands.py::test_1186_learning_operator_cli_uses_the_explicit_tenants_lock`
+  rows for `lessons/run.py` and `questioner/run.py` now meet `.author-drain.lock` ("another drainer holds the lock", rc 0), as those commands run the
+  author lane's tenant batch; census rows naming the deleted `version_control/restore.py` dropped (`e2e/_spec771.py`, `_census1134.py`);
+  `_census_1107.py`/`test_1107_census_lint.py` homonym docs pruned to `skills/connect/SKILL.md` (the others moved to tenants);
+  `tooling/layout_contracts/_pointers1080.vanished_folder_mentions` counts a name live in a tenant's agent half (`agent/lessons/`) as ambiguous,
+  so a bare `lessons/` is not a stale pointer; stale-name test data reworded or suppressed with a reason (`lint_stale_refs` clean).
 
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
@@ -321,6 +343,9 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
   so U10's one-attempt rule spends the row's attempts on a fault that is not the claim's. The case that pinned "a git failure in a read-only
   probe does not spend an attempt" (`learning/curation/test_drain719_hardening.py::test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt`)
   was deleted with `GitProbeError`. U10/OD18 scope refusals to content; nothing decides the infra case. Not tested either way.
+- **(open owner item) No production writer preserves a tainted tree for forensics.** `quarantine.preserve_tainted_tree` was deleted with
+  `AuthorBranch`, its only caller; the case pinning the verdict beside the archive was deleted with it (§4). Decide whether a draft whose
+  claim is refused for a box-planted entry should be archived before the reset.
 - (minor, TRI-3) The author-drain half of the deleted `test_1179 ... non_member_raises_before_any_batch_work`; the label is an enum.
 - (accepted, test-only) `_tenants1106.run_tenant` defaults to the clone working tree for unit-level callers (section 1).
 - The API reading the host record is enforced only through the stub seam `InMemoryStore.add_run_knowledge` until a real store exists; the design text should say so.
