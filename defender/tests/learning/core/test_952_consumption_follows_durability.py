@@ -21,16 +21,25 @@ from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._declared870 import (
+    REDUCER_REL,
     Spawn,
     commit_all,
     consumed_by_id,
-    curate_execution_md,
+    curate_agent_execution_md,
     graveyard_by_id,
     pitfall_row,
     queue_ids,
+    reducer_surface_text,
+    seed_agent_files,
+    seed_product,
     seed_tree,
     shim_row,
     write_reducer_surface,
+)
+from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.learning.curation._lead_author_1134 import (
+    draft_lead_deps,
+    product_lane,
 )
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.tests.support.sandbox._spec791 import (
@@ -368,15 +377,30 @@ def _curator_deps(repo: Path, state: Path, **overrides):
     return replace(deps, **seams)
 
 
-_CATALOG = "defender/skills/gather/queries"
+#: The catalog in a batch draft (OD6): the lane commits `agent/...` (#1108 P4).
+_DRAFT_CATALOG = "agent/skills/gather/queries"
 
 
-def _promoting_agent(repo: Path):
+def _draft_curator_deps(lane, **overrides):
+    """`_curator_deps` over a batch draft (#1108 P4, O7, OD12 class ii): the production
+    lead-author deps over the draft of `seed_skills_repo`'s tree (`product_lane`, ASSUMED SEAM
+    S-H `build_lead_author_deps(..., batch=)`), the two tables bypassed (their own suite)."""
+    seams = dict(
+        extract=lambda _rd: ([], [_lead()]),
+        synthesize=lambda executed, skills=None, where=None, catalog=None, systems=None: [],
+        discover_system_drafts=lambda: [],
+    )
+    seams.update(overrides)
+    return draft_lead_deps(lane, **seams)
+
+
+def _promoting_draft_agent(root: Path):
+    """`_promoting_agent` in the draft: promote `wazuh.newthing` out of `_draft/`."""
     def agent(_rd, _handoffs, _pending, *, box=None) -> int:
-        (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
+        (root / _DRAFT_CATALOG / "wazuh" / "newthing.md").write_text(
             query_template("wazuh.newthing", "established"), encoding="utf-8",
         )
-        (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
+        (root / _DRAFT_CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
         return 0
 
     return agent
@@ -395,15 +419,16 @@ def _without_at(text: str) -> str:
 def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
     tmp_path: Path, deferred: bool,
 ):
-    """O5 + M4, the `_run_locked` write site (after the commit)."""
-    repo = seed_skills_repo(tmp_path / "repo")
+    """O5 + M4, the `_run_locked` write site (after the commit). #1108 P4: over a batch draft;
+    the commit is the batch branch's."""
+    lane = product_lane(tmp_path, seed_skills_repo(tmp_path / "repo"))
     run_dir = _state1135.curation_run_dir("lead-run")
-    deps = _curator_deps(
-        repo, tmp_path / "state",
-        invoke_agent=_promoting_agent(repo),
+    deps = _draft_curator_deps(
+        lane,
+        invoke_agent=_promoting_draft_agent(lane.root),
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
     )
-    head_before = _git.git_head_sha(repo)
+    head_before = lane.tip()
     captured: list[str | None] = []
 
     run = _state1135.run_of(run_dir)
@@ -412,8 +437,9 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
         else lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
-    sha = _git.git_head_sha(repo)
+    sha = lane.tip()
     assert sha != head_before, "the commit is not deferred — only the sentinel is"
+    assert "agent/skills/gather/queries/wazuh/newthing.md" in lane.landed()
     if deferred:
         assert not _done(run_dir).exists(), "deferred mode still wrote the sentinel"
         assert captured == [sha]
@@ -470,6 +496,19 @@ def pitfalls_repo(tmp_path: Path, monkeypatch) -> Path:
     return repo
 
 
+@pytest.fixture
+def pitfalls_lane(tmp_path: Path, monkeypatch):
+    """`pitfalls_repo` after P4 (O7, OD12 class ii): a batch draft of the tenant carrying the
+    reducer add-on (elastic's marker and skill, `gather`), over a product checkout with the
+    elastic and cmdb adapters; threshold 1."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
+    files = seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
+                             non_systems=("gather",))
+    files[REDUCER_REL.removeprefix("agent/")] = reducer_surface_text()
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files)
+
+
 def _three_way_batch(paths: LoopPaths) -> None:
     """One row per partition: a declared-system row the curator teaches (committed), a reducer
     row the curator is offered and declines (held), and an undeclared-system row nothing can
@@ -485,20 +524,24 @@ def _three_way_batch(paths: LoopPaths) -> None:
 
 
 def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_nothing_committed(
-    pitfalls_repo: Path, tmp_path: Path,
+    pitfalls_lane, tmp_path: Path,
 ):
-    """O5 + M4 + O4 at the pitfalls curator."""
-    paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
+    """O5 + M4 + O4 at the pitfalls curator, over a batch draft (#1108 P4; ASSUMED SEAM S-H
+    `run_pitfalls(..., batch=)`)."""
+    lane = pitfalls_lane
+    paths = lane.paths
     _three_way_batch(paths)
-    head_before = _git.git_head_sha(pitfalls_repo)
-    spawn = Spawn(curate_execution_md("elastic"))
+    head_before = lane.tip()
+    spawn = Spawn(curate_agent_execution_md("elastic"), root=lane.root)
     captured: list[PitfallsDisposition] = []
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append,
-                                         trees=lead_trees(paths)) == 0
+    with C.draft_trees(lane) as trees:
+        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append,
+                                             trees=trees, batch=lane.batch) == 0
 
-    sha = _git.git_head_sha(pitfalls_repo)
+    sha = lane.tip()
     assert sha != head_before, "the commit is not deferred — only the consumption is"
+    assert "agent/skills/elastic/execution.md" in lane.landed()
     assert [h.get("surface") for h in spawn.handoffs] == ["system", "reducer"], \
         "the reducer offer was never made, so the held arm is vacuous"
     assert captured == [

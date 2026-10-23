@@ -41,8 +41,11 @@ NESTED_MARKER_RELS = (
 
 #: The fixture tenant's committed catalog (made-up content, `knowledge/tenant-fixture/agent/`).
 FIXTURE_CATALOG = FIXTURE_AGENT / "skills" / "gather" / "queries"
-#: The systems the fixture tenant declares (its one system skill and catalog folder).
-FIXTURE_SYSTEMS = frozenset({"cmdb"})
+#: The systems the fixture tenant declares: `cmdb` (its one system skill, marker and catalog
+#: folder) and `elastic` (the product adapter its catalog's `elastic/` template is for; the
+#: union of the adapter half and the tenant's markers, #869). Its catalog holds an `elastic/`
+#: template (owner ruling U15 / the run-path fixture), which only a declared `elastic` admits.
+FIXTURE_SYSTEMS = frozenset({"cmdb", "elastic"})
 
 
 def _template(system: str, stem: str, *, tid: str | None = None) -> str:
