@@ -155,12 +155,15 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
 
 def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
     g = _g("location_values")
-    assert Path(S.moved_module("cmd_tags").REPO_ROOT).resolve() \
-        == (S.REPO_ROOT / g["lessons_fm_REPO_ROOT"]).resolve()
     # `lessons_frontier`'s cell is retired with its subject (#1108 P4 O4): the import-time
     # `DEFAULT_CORPUS` (the checkout's corpus) becomes a function of an agent root, and S-A's
     # symbol census (`tenant_1108_p4/test_census.py`) bans the constant. The golden's
     # `lessons_frontier_REPO_ROOT` value is kept as base history and read by nothing.
+    # `lessons_fm`'s cell is retired the same way (OD12 class (i)): its `REPO_ROOT` existed only
+    # to root the checkout corpus (`LESSONS_DIR`) and the repo-relative `--show` paths into it;
+    # the corpus is now `$DEFENDER_AGENT_DIR/lessons` (O2), covered by
+    # `learning/retrieval/test_lessons_fm.py` (its corpus fixture and `--show` confinement cases).
+    # The golden's `lessons_fm_REPO_ROOT` value is kept as base history and read by nothing.
     assert Path(S.moved_module("reexec_into_venv", home=S.VENV)._DEFENDER_DIR).resolve() \
         == (S.REPO_ROOT / g["venv_DEFENDER_DIR"]).resolve()
 
