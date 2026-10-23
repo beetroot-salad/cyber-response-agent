@@ -520,16 +520,33 @@ def locked_hook():
 
 
 forge = ForgeHTTP(remote=Path(spec["remote"]), origin=spec["origin"])
-sys.exit(vc.publish_child_main(
-    sys.argv[2:], issuer_config=Path(spec["issuer_config"]), client=forge.client,
+client = forge.client
+if spec.get("forge_error_body"):
+    # The forge answers its branch-protection read with an error whose body spans lines.
+    import httpx
+
+    def reply(request):
+        if request.url.path.lower().endswith("/branches/main"):
+            (marks / "forge-error-served").write_text("1", encoding="utf-8")
+            return httpx.Response(502, text=spec["forge_error_body"])
+        return forge.reply(request)
+
+    client = httpx.Client(transport=httpx.MockTransport(reply))
+rc = vc.publish_child_main(
+    sys.argv[2:], issuer_config=Path(spec["issuer_config"]), client=client,
     identity=VaultHTTP(spec["tenant_id"]).identity(), network_timeout=spec["network_timeout"],
-    locked_hook=locked_hook if spec["locked_sleep"] else None))
+    locked_hook=locked_hook if spec["locked_sleep"] else None)
+(marks / "rc").write_text(repr(rc), encoding="utf-8")
+sys.exit(rc)
 '''
 
 
 def child_command(t: Any, tmp_path: Path, issuer_config: Path, *, network_timeout: float,
-                  locked_sleep: float) -> tuple[list[str], Path, Path]:
-    """`(command, spec path, marks dir)` for a budget test's child process."""
+                  locked_sleep: float, forge_error_body: str | None = None,
+                  ) -> tuple[list[str], Path, Path]:
+    """`(command, spec path, marks dir)` for a real child process. The child writes its exit
+    status to `<marks>/rc` (OD20: 0 for every outcome it reports). `forge_error_body`: the
+    forge answers the branch-protection read 502 with that body (`<marks>/forge-error-served`)."""
     marks = tmp_path / "child-marks"
     marks.mkdir(parents=True, exist_ok=True)
     wrapper = tmp_path / "publish_child_wrapper.py"
@@ -538,5 +555,6 @@ def child_command(t: Any, tmp_path: Path, issuer_config: Path, *, network_timeou
     spec.write_text(json.dumps({
         "tenant_id": t.tenant_id, "remote": str(t.remote), "origin": t.origin,
         "issuer_config": str(issuer_config), "marks": str(marks),
-        "network_timeout": network_timeout, "locked_sleep": locked_sleep}), encoding="utf-8")
+        "network_timeout": network_timeout, "locked_sleep": locked_sleep,
+        "forge_error_body": forge_error_body}), encoding="utf-8")
     return [sys.executable, str(wrapper), str(spec)], spec, marks

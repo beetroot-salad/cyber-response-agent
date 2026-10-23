@@ -96,8 +96,9 @@ _COUNTED = {"AuthorError", "DeliveryRefused"}
 def _refused_claim_routed(sc, got, fid: str) -> None:
     """U10 (human, 2026-10-23): a refused claim returns (no unhandled crash), lands nothing,
     leaves the draft back at the batch base, and holds its row queued with ONE attempt counted —
-    not consumed, not graveyarded, not stuck as a crash — for a retry until #952's ceiling."""
-    assert got[0] == "rc", got
+    not consumed, not graveyarded, not stuck as a crash — for a retry until #952's ceiling. A
+    tick whose only claim was refused returns rc 0: routed, not a stage failure (OD19)."""
+    assert got == ("rc", 0), got
     assert sc.head_files() == []
     assert sc.draft_drift() == []
     assert sc.pending_by_id()[fid].get("attempts") == 1
@@ -113,11 +114,13 @@ def _plain_single(at: Path, text: str) -> bool:
 
 
 @pytest.mark.parametrize("channel", ["lessons", "questioner"])
-def test_a_link_lesson_citing_the_batch_is_unattributable_and_nothing_lands(
+def test_a_link_lesson_citing_the_batch_is_a_refused_claim_and_nothing_lands(
     tmp_path, caplog, channel,
 ):
     """A link the box leaves in its lane, its target citing the batch, is never followed: the
-    claim is unattributed (rc 2, one attempt), logged naming it, and nothing lands (#1134, P4 O7)."""
+    ChangeSet refuses the claim before attribution reads it (OD23, amendment 2 O-D), so it is
+    routed as U10/OD19 — rc 0, one attempt, row held, draft at base — logged naming the entry,
+    and nothing lands (#1134, P4 O7)."""
     caplog.set_level(logging.WARNING)
     fid = "f1" if channel == "lessons" else "w1"
     target = _outside(tmp_path, text=lesson_text(fid, mark=OUT_MARK))
@@ -134,9 +137,8 @@ def test_a_link_lesson_citing_the_batch_is_unattributable_and_nothing_lands(
         got = _run(sc)
         seen = events()
 
-    assert got == ("rc", 2), got
-    assert sc.pending_by_id()[fid].get("attempts") == 1
-    assert sc.head_files() == []
+    _refused_claim_routed(sc, got, fid)
+    assert not os.path.lexists(sc.corpus / PLANTED)
     assert warnings_naming(caplog, PLANTED), caplog.text
     assert seen == [], f"the link's target was opened or read: {seen}"
     assert census(target.parent) == before

@@ -178,6 +178,26 @@ def test_o_warn_fresh_and_pinned_runs_pages_carry_no_stale_banner(run_dir, kind,
         "positive control: the same run recorded stale shows a banner on the same page")
 
 
+@pytest.mark.parametrize("how", ["missing", "corrupt"])
+def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, how):
+    """OD22 (fail closed): with the host record missing or corrupt, the page claims no freshness
+    whatever the box-readable stamp says: a stale banner of kind operator saying the knowledge
+    record is unreadable. Control: the same run with a fresh host record shows no banner."""
+    from defender.tests.tenancy.tenant_1108_p4.test_stale_visibility import (
+        plant_unreadable_host_record,
+    )
+
+    _record(run_dir, knowledge_source("fresh"))
+    assert "stale" not in _visible(_page(run_dir)).lower(), "positive control"
+
+    plant_unreadable_host_record(run_dir, how)  # the stamp still says fresh
+    page = _visible(_page(run_dir)).lower()
+    assert "stale" in page, f"OD22: a {how} host record left the page claiming fresh"
+    assert "operator" in page, f"OD22: the {how}-record banner is not of kind operator"
+    assert "knowledge record unreadable" in page, (
+        f"OD22: the {how}-record banner does not say the knowledge record is unreadable")
+
+
 def test_o_u6_the_run_page_has_no_lesson_history_section_or_toc_entry(run_dir):
     """O-U6 (U6): the run page drops the lesson-history panel (today's footer of "concurrent
     lesson commits", read with `git log` over the product tree) and its table-of-contents link.

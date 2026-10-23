@@ -61,7 +61,8 @@ RAW_REASON = {
                  "https://bao.dev.invalid:8200/v1/auth/approle/login"),
 }
 #: Fragments of either raw reason; none may appear in a posted comment.
-REASON_FRAGMENTS = ("https://", "bao.dev.invalid", "8200", "approle", "timed out",
+#: The port only as `:8200`: a bare "8200" can occur in a random hex commit or run id.
+REASON_FRAGMENTS = ("https://", "bao.dev.invalid", ":8200", "approle", "timed out",
                     "ConnectTimeout", "permission denied", "secret_id", "7f3e91c2")
 
 #: The customer words for each stale kind (design O-WARN: "temporary vs. awaiting operator
@@ -368,8 +369,10 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     """O-WARN through `run.main`: a launch whose publish reports stale runs on `current`; run
     start writes the HOST record beside the run dir (U12) carrying kind, commit and raw reason;
     the comment the run posts (captured by the store fake) and the saved run page say so, naming
-    the commit actually used; the page shows the raw reason to operators while NO file the box
-    can read (the run dir while the box runs: stamp, run copy, everything) carries it.
+    the commit actually used; NO file the box can read carries the raw reason — scanned over the
+    box window (the run dir and `<T>/run-knowledge/` at lifecycle start: stamp, run copy,
+    everything). The saved `runtime.html` is written after the box stops and is an operator
+    surface (OD21): it may, and here must, show the raw reason.
     Seams: `publish=` (design O11), `ticket_writer=` (the real writer bound to the fake store),
     `lifecycle`/`preflight`/`enqueue` recorders."""
     from functools import partial
@@ -653,17 +656,18 @@ def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_th
     carried, the raw reason dropped — and the route serves it. Exercised on the stub store.
 
     ASSUMED SEAM (reported): `InMemoryStore.add_run_knowledge(tenant_id, investigation_id,
-    knowledge_source)` — the stub's seeding entry for a run's record (the `add_*` family; not a
-    port method), applying the store's record->wire rule the port states. It is handed the HOST
-    record (U12) as it lies beside the run dir, raw reason included."""
+    record_text: str | None)` — the stub's seeding entry for a run's record (the `add_*` family;
+    not a port method), applying the store's record->wire rule the port states. It is handed the
+    HOST record (U12) as its file's text, raw reason included (`None`: no record), so the
+    fail-closed rule for a missing or corrupt record (OD22) is the store's too."""
     # A placeholder the mapping must replace (whatever `knowledge`'s nullability turns out to be).
     inv = _investigation("inv-mapped", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
     client = _client(inv)
     store = client.app.state.deps.investigations
     run_dir = tmp_path / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    host = json.loads(write_host_record(run_dir, record).read_text(encoding="utf-8"))
-    store.add_run_knowledge(_TENANT, inv.investigation_id, host)
+    text = write_host_record(run_dir, record).read_text(encoding="utf-8")
+    store.add_run_knowledge(_TENANT, inv.investigation_id, text)
 
     served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge") == wire, (
@@ -723,3 +727,77 @@ def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
         assert k.get("stale_kind") in STALE_KINDS, f"O-WARN: a stale seed names no kind: {k}"
         assert k.get("commit"), f"O-WARN: a stale seed names no commit: {k}"
     assert any(isinstance(k, dict) and k.get("status") == "current" for k in knowledge), knowledge
+
+
+# ---------------------------------------------------------------------------------------------
+# OD22 (fail closed): a missing or unparseable host record is never read as fresh
+# ---------------------------------------------------------------------------------------------
+
+#: The two ways a host record can fail to speak: absent, or bytes that are not a record.
+UNREADABLE_RECORDS = {"missing": None, "corrupt": '{"kind": "fresh", "commit": '}
+
+
+def plant_unreadable_host_record(run_dir: Path, how: str) -> None:
+    """Leave the host record missing, or write a truncated one (JSON that does not parse)."""
+    path = host_record_path(run_dir)
+    path.unlink(missing_ok=True)
+    text = UNREADABLE_RECORDS[how]
+    if text is not None:
+        path.write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize("how", list(UNREADABLE_RECORDS))
+def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_commit_on_the_ticket(
+        tmp_path, monkeypatch, how):
+    """OD22: with the host record missing or corrupt the ticket claims no freshness: the comment
+    adds the operator-kind sentence (customer words: awaiting operator action) and names no commit
+    id. Control: the same run with a fresh record posts today's comment."""
+    use_mapping(monkeypatch, tmp_path / "dfn")
+    fresh, _ = _posted(tmp_path, "verdict", knowledge_source("fresh"), label=f"od22-fresh-{how}")
+    assert fresh == (f"benign — {HOST_CAUSE}\n\n"
+                     "The account is a decommissioned service identity; no egress followed."), fresh
+
+    run_dir = make_run(tmp_path, name=f"s-c-od22-{how}")
+    stamp_knowledge_source(run_dir, stamp_view(knowledge_source("fresh")))  # the box says fresh
+    plant_unreadable_host_record(run_dir, how)
+    store = FakeStore()
+    record(run_dir, store)
+    body = store.comment_body()
+
+    sentence = _added(fresh, body)
+    assert sentence, (
+        f"OD22: a run whose host record is {how} posted a fresh run's comment — it claimed fresh")
+    assert CUSTOMER_WORD["operator"] in sentence.lower(), (
+        f"OD22: the {how}-record sentence is not the operator kind's: {sentence!r}")
+    assert CUSTOMER_WORD["transient"] not in sentence.lower(), sentence
+    for commit in (FRESH_COMMIT, STALE_COMMIT, PINNED_COMMIT):
+        assert not names_commit(sentence, commit), (
+            f"OD22: the {how}-record sentence names a commit id: {sentence!r}")
+    assert not re.search(r"\b[0-9a-f]{7,64}\b", sentence), (
+        f"OD22: the {how}-record sentence carries something shaped like a commit id: {sentence!r}")
+
+
+@pytest.mark.parametrize("how", list(UNREADABLE_RECORDS))
+def test_od22_the_api_serves_an_unreadable_host_record_as_stale_operator_with_no_commit(
+        tmp_path, how):
+    """OD22: the store maps a missing or corrupt host record to `knowledge: {status: stale,
+    stale_kind: operator, commit: null}`; control: a fresh record on the same path is `current`."""
+    inv = _investigation("inv-od22", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
+    client = _client(inv)
+    store = client.app.state.deps.investigations
+    run_dir = tmp_path / "runs" / "run-od22"
+    run_dir.mkdir(parents=True)
+
+    text = write_host_record(run_dir, knowledge_source("fresh")).read_text(encoding="utf-8")
+    store.add_run_knowledge(_TENANT, inv.investigation_id, text)
+    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    assert served.get("knowledge") == _knowledge("current"), served
+
+    plant_unreadable_host_record(run_dir, how)
+    path = host_record_path(run_dir)
+    store.add_run_knowledge(_TENANT, inv.investigation_id,
+                            path.read_text(encoding="utf-8") if path.exists() else None)
+    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    assert served.get("knowledge") == {"status": "stale", "commit": None,
+                                       "stale_kind": "operator"}, (
+        f"OD22: a {how} host record is served as {served.get('knowledge')}")

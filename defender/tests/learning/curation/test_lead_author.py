@@ -436,14 +436,14 @@ def test_verify_skills_state_accepts_in_scope_edits(tmp_path: Path):
 
 
 def test_verify_skills_state_rejects_stray_outside_skills(tmp_path: Path):
-    """An edit outside the lane's `skills/` refuses the claim, naming it outside: nothing lands
-    and the draft is back at its base (#1175, U10). The refuser may be the lane gate or the
-    ChangeSet's lane check — both are a refused claim; how the drain routes it is below."""
+    """An edit outside the lane's `skills/` is refused by the batch's ChangeSet (an out-of-lane
+    path, OD18: before the lane gate reads it), naming it outside: nothing lands and the draft is
+    back at its base (#1175, U10). How the drain routes it is below."""
     from defender.learning.author.version_control import DeliveryRefused
 
     lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
     _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("stray"), "outside",
-             errors=(lead_author.LeadAuthorError, DeliveryRefused))
+             errors=DeliveryRefused)
     assert lane.drift() == []
 
 
@@ -454,27 +454,34 @@ def _queue_entry(paths, where: str, name: str) -> dict | None:
     return json.loads(at.read_text(encoding="utf-8")) if at.is_file() else None
 
 
-@pytest.mark.parametrize("fault", ["refused-claim", "unrelated"])
+@pytest.mark.parametrize("fault", ["refused-claim", "gate-rejection", "unrelated"])
 def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
         tmp_path: Path, fault: str, monkeypatch):
-    """U10 (human, 2026-10-23): the lead-author claim loop serving a run whose claim is refused
-    (a stray outside `skills/`) keeps the request queued with ONE attempt — not dead-lettered,
-    not left in flight — nothing lands and the draft is back at its base. Control: an unrelated
-    fault (the spawn raises) keeps the lane's existing rule, an immediate dead letter
-    (`lead-author-error`, #952), and is not counted as a refused claim (#1175, P4 O7)."""
+    """U10/OD18 (human, 2026-10-23): the lead-author claim loop serving a run whose claim the
+    batch's ChangeSet refuses (a symlink the box left inside `skills/`, at a path the lane gate
+    would admit as a plain file) keeps the request queued with ONE attempt — not dead-lettered,
+    not in flight — nothing lands and the draft is back at its base. Controls keep the lane's
+    existing rule (#952), not U10's: a lane-gate content rejection (a delete-prohibition) and an
+    unrelated spawn fault are dead-lettered at once (`lead-author-error`) (#1175, P4 O7)."""
     from defender.learning.core import drains
     from defender.tests.support.learning.core._state1135 import enqueue_run, state_for_paths
 
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
-    lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
+    lane = _lane(tmp_path)
     run_dir = curation_run_dir("lead-u10")
     state = state_for_paths(lane.paths)
     enqueue_run(state, run_dir)
+    outside = tmp_path / "outside" / "host.md"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text(query_template("wazuh.newthing", "established"))
 
     def agent(rd, handoffs, pending, *, box=None):
         if fault == "unrelated":
             raise RuntimeError("unrelated spawn fault")
-        (lane.skills_dir.parent / "other" / "stray.md").write_text("stray")
+        if fault == "gate-rejection":
+            (lane.skills_dir / "gather/queries/wazuh/auth-events.md").unlink()
+        else:
+            (lane.skills_dir / "gather/queries/wazuh/newthing.md").symlink_to(outside)
         return 0
 
     def serve(paths, st, run, *, box=None, on_done, **_kw):
@@ -489,12 +496,14 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
 
     name = run_dir.name
     assert lane.landed() == []
-    assert lane.drift() == []
     assert _queue_entry(lane.paths, "inflight", name) is None
-    if fault == "unrelated":
+    assert outside.read_text() == query_template("wazuh.newthing", "established")
+    if fault != "refused-claim":
         assert _queue_entry(lane.paths, "", name) is None
-        assert _queue_entry(lane.paths, "failed", name) is not None
+        failed = _queue_entry(lane.paths, "failed", name)
+        assert failed is not None, "the existing rule's dead letter is missing"
         return
+    assert lane.drift() == []
     assert _queue_entry(lane.paths, "failed", name) is None, "a refused claim was dead-lettered"
     queued = _queue_entry(lane.paths, "", name)
     assert queued is not None, "the refused claim's request was lost"
@@ -766,8 +775,8 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_path: Path):
     from defender.learning.author.version_control import DeliveryRefused
 
     lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
-    _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("stray"), "",
-             errors=(lead_author.LeadAuthorError, DeliveryRefused))
+    _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("stray"), "outside",
+             errors=DeliveryRefused)
     assert lane.drift() == []
 
 

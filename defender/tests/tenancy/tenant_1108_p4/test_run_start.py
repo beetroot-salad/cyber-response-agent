@@ -112,7 +112,9 @@ def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_know
     HOST-HELD record beside the run dir names the kind, the commit actually copied, and (stale)
     the stale kind and the child's reason (R-S8). The box-readable stamp may mirror kind, commit
     and stale kind, never the reason: no file the box can read (the run dir, the copy's
-    `stage/`) holds the raw reason text while the run is live."""
+    `stage/`) holds the raw reason text while the run is live, nor any run-dir file after it
+    except the saved run page (`runtime.html`), which is written after the box stops and is an
+    operator surface that may show it (OD21)."""
     reason = "issuer unreachable: s-b reason text 4c1e"
     line = (B.fresh(tenant.commit) if report == "fresh"
             else B.stale(report.split(":")[1], reason))
@@ -131,8 +133,12 @@ def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_know
     assert source.get("commit") == tenant.commit, source
     assert out.seen[0].during == {"run dir": [], "stage": []}, (
         f"OD17/U12: the raw publish reason is in a box-readable file: {out.seen[0].during}")
-    assert B.files_holding(out.run_dir, reason) == [], (
-        "OD17/U12: the raw publish reason was written into the run dir after the lifecycle")
+    # OD21: the saved run page (`runtime.html`, written after the box stops) is an operator
+    # surface and may show the raw reason; every other run-dir file stays reason-free.
+    after = [rel for rel in B.files_holding(out.run_dir, reason) if rel != "runtime.html"]
+    assert after == [], (
+        f"OD17/U12: the raw publish reason was written into a run-dir file other than the saved "
+        f"page after the lifecycle: {after}")
     if report == "fresh":
         assert source.get("kind") == "fresh", source
         assert source.get("stale_kind") is None, source

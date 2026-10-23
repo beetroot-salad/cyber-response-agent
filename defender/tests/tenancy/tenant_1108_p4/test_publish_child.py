@@ -291,6 +291,44 @@ def test_o_stale_a_merged_commit_naming_another_tenant_is_operator(tenant, issue
     _unchanged(tenant)
 
 
+def _force_main(t, how: str) -> str:
+    """Move the fake origin's `main` to a commit that does not descend from `current`: back to
+    an ancestor (`rewound`), or to a parentless commit of the same tree (`force-pushed`)."""
+    import subprocess
+
+    from defender.tests.tenancy.tenant_1108_p4._support import git
+
+    if how == "rewound":
+        merged = t.merge(B.MERGE_FILES)
+        t.publish()
+        assert current_commit(t.tenant) == merged, "premise: current is the merge"
+        target = t.commit
+    else:
+        tree = git(t.remote, "rev-parse", f"{current_commit(t.tenant)}^{{tree}}")
+        target = subprocess.run(  # noqa: S603 — the test's own history rewrite
+            ["git", "-C", str(t.remote), "-c", "user.name=s-b", "-c", "user.email=s-b@test",
+             "commit-tree", tree, "-m", "s-b: history rewritten on origin"],
+            check=True, capture_output=True, text=True).stdout.strip()
+    git(t.remote, "update-ref", "refs/heads/main", target)
+    assert t.origin_main() == target
+    return target
+
+
+@pytest.mark.parametrize("how", ["rewound", "force-pushed"])
+def test_n2_origin_rewritten_to_a_non_descendant_of_current_is_operator_and_current_stays(
+        tenant, issuer_config, how):
+    """N2 (pins the fast-forward-only invariant A-MISMATCH rests on): origin's `main` was
+    rewound or force-pushed to a commit that does not descend from `current`. The child reports
+    `stale:operator` and `current` does not move. Control: `test_o7b_a_merge_on_origin_is_
+    published_and_reported_fresh_at_the_merge` (a descendant is published)."""
+    before = current_commit(tenant.tenant)
+    target = _force_main(tenant, how)
+    line = B.run_child(tenant, issuer_config)
+    _stale(line, "operator")
+    assert current_commit(tenant.tenant) == before, (
+        f"N2: `current` moved off {before[:12]} to a non-descendant of it ({target[:12]})")
+
+
 # --- misconfiguration: refused, before any network call ---------------------------------------
 
 def _network_marks(t) -> tuple[int, int, int]:
@@ -550,6 +588,88 @@ def test_o_budget_a_run_whose_publish_ran_out_of_budget_proceeds_stale_on_the_la
     source = B.knowledge_source(out)
     assert (source.get("kind"), source.get("stale_kind"), source.get("commit")) == (
         "stale", "transient", tenant.commit), source
+
+
+def _child_rc(marks: Path) -> int:
+    rc = marks / "rc"
+    assert rc.is_file(), "the real child never returned from `publish_child_main`"
+    return int(rc.read_text(encoding="utf-8"))
+
+
+def _child_reported(line: object) -> str:
+    """OD20: a reported outcome is the child's own one-line report, passed through."""
+    text = str(line)
+    assert "\n" not in text.strip(), f"OD20: a report spans lines: {text!r}"
+    assert "\r" not in text, f"OD20: a report spans lines: {text!r}"
+    assert not B.outcome_detail(text).startswith("publish child failed"), (
+        f"OD20: the parent took a child that reported an outcome for a failed one: {text!r}")
+    return text
+
+
+@pytest.mark.parametrize("case", ["dirty-clone", "lock-held"])
+def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passed_through(
+        tenant, issuer_config, tmp_path, child_env, case):
+    """OD20: the REAL child process (through `CHILD_WRAPPER`) exits 0 for an outcome it reports,
+    and the parent's line is the child's own: a dirty clone → `stale:operator <reason>`; a drain
+    holding the tenant lock with origin ahead → `stale:transient` naming the lock. Neither is
+    U11's "publish child failed". `current` is unchanged."""
+    tenant.merge(B.MERGE_FILES)
+    if case == "dirty-clone":
+        (B.clone_dir(tenant) / "agent" / "lessons" / "stray-untracked.md").write_text(
+            "an operator's stray edit\n", encoding="utf-8")
+    command, _spec, marks = B.child_command(tenant, tmp_path, issuer_config,
+                                            network_timeout=30.0, locked_sleep=0)
+    launch = B.launcher()
+    if case == "lock-held":
+        with _lock(tenant):
+            line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=30.0,
+                          command=command)
+    else:
+        line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=30.0, command=command)
+    assert _child_rc(marks) == 0, "OD20: a child that reported an outcome exited non-zero"
+    _child_reported(line)
+    if case == "dirty-clone":
+        _stale(line, "operator")
+    else:
+        _stale(line, "transient")
+        assert "lock" in B.outcome_detail(line).lower(), (
+            f"OD20: the lock-busy report does not name the lock: {line!r}")
+    _unchanged(tenant)
+
+
+def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proceeds_on_it(
+        tenant, issuer_config, tmp_path, child_env):
+    """OD20: the forge answers with a multi-line error body; the real child reports ONE line
+    (newlines collapsed) and exits 0; through `run.main` the run proceeds stale on `current`
+    and its host record's reason is that one-line reason."""
+    import functools
+
+    tenant.merge(B.MERGE_FILES)
+    body = "S-B forge error, first line\nsecond line S-B-ERR-2\r\nthird line S-B-ERR-3\n"
+    command, _spec, marks = B.child_command(tenant, tmp_path, issuer_config,
+                                            network_timeout=30.0, locked_sleep=0,
+                                            forge_error_body=body)
+    lines: list[str] = []
+    launch = functools.partial(B.launcher(), budget=30.0, command=command)
+
+    def publish(*a, **k):
+        lines.append(launch(*a, **k))
+        return lines[-1]
+
+    out = B.launch(tenant, tmp_path, publish=publish)
+    assert (marks / "forge-error-served").exists(), "premise: the child read the forge's error"
+    assert lines, out.text()
+    assert _child_rc(marks) == 0, "OD20: a child that reported an outcome exited non-zero"
+    line = _child_reported(lines[0])
+    assert B.outcome_class(line).startswith("stale:"), line
+    assert out.reached, out.text()
+    assert out.rc == 0, out.text()
+    source = B.knowledge_source(out)
+    assert (source.get("kind"), source.get("commit")) == ("stale", tenant.commit), source
+    reason = str(source.get("reason"))
+    assert "\n" not in reason, f"OD20: the recorded reason spans lines: {reason!r}"
+    assert reason == B.outcome_detail(line), (
+        f"OD20: the recorded reason is not the child's one-line reason: {reason!r} vs {line!r}")
 
 
 def test_o_budget_the_parents_default_budget_is_sixty_seconds():

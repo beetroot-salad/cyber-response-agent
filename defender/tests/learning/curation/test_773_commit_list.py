@@ -185,18 +185,22 @@ def test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_con
     assert sc.pending_by_id()["b"]["deferrals"] == 1
 
 
-@pytest.mark.parametrize("fault", ["refused-commit", "control", "unrelated"])
+@pytest.mark.parametrize("fault", ["forbidden-name", "ref-locked", "control", "unrelated"])
 def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
-    """U10 (human, 2026-10-23): when the commit-maker refuses the claim (the batch branch's ref is
-    locked, so `update-ref` fails; objects stay readable) the tick returns, nothing lands, the
-    draft is back at the base and the row stays queued with one attempt. Controls: the same tick
-    unlocked lands and consumes it; an unrelated curator fault keeps the lane's existing rule
-    (#773 O5.3: propagates, row not charged). #773 M5, O7."""
+    """U10/OD18/OD19 (human, 2026-10-23): a claim the batch's ChangeSet refuses (the box left a
+    `.gitattributes` in the lane, a forbidden name) is routed: rc 0, nothing lands, the draft is
+    back at the base, the row stays queued with one attempt. `ref-locked` (the branch's ref is
+    held, so the commit-maker's `update-ref` fails: a fault, not a content refusal, so outside
+    OD18) pins #773 M5 only: the branch does not move and no row is consumed. Controls: the same
+    tick lands and consumes; an unrelated curator fault propagates, row not charged (#773 O5.3).
+    #773 M5, O7."""
     holder: dict = {}
 
     def act(rows, batch_id, cfg):
         sc = holder["sc"]
-        if fault == "refused-commit":
+        if fault == "forbidden-name":
+            (cfg.corpus_dir / ".gitattributes").write_text("* filter=tenant\n", encoding="utf-8")
+        elif fault == "ref-locked":
             lock = sc.repo / ".git" / "refs" / "heads" / f"{sc.lane.batch.branch}.lock"
             lock.parent.mkdir(parents=True, exist_ok=True)
             lock.write_text("held by another writer\n")
@@ -216,13 +220,23 @@ def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
         assert sc.pending_by_id()["f1"].get("attempts") is None
         assert sc.commit_count() == 1
         return
+    if fault == "ref-locked":
+        try:
+            sc.run()
+        except Exception:  # noqa: BLE001 — a system commit fault's routing is not designed
+            pass
+        assert sc.commit_count() == 1
+        assert sc.head_files() == []
+        assert sc.consumed() == []
+        return
 
-    rc = sc.run()  # a refused claim is routed, never an unhandled crash
+    rc = sc.run()
     if fault == "control":
         assert rc == 0
         assert sc.head_files() == [LESSON]
         assert sc.category_of("f1") == "consumed_committed"
         return
+    assert rc == 0, "a refused-only tick is routed, not a stage failure (OD19)"
     assert sc.commit_count() == 1
     assert sc.head_files() == []
     assert sc.draft_drift() == []
