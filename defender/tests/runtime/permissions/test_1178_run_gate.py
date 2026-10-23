@@ -62,11 +62,16 @@ NAME = "defender-drain-g1178"
 
 
 def _outcome(fn: Callable[[], Any]) -> tuple:
-    """`("returned", value)`, or `("raised", class name, message)` for the gate's refusal and the
-    box's fault. Anything else (a call-shape `TypeError`, a `ValidationError`) propagates."""
+    """`("returned", value)`, or `("raised", class name, message)` for the gate's refusal, the
+    box's fault and P3's commit-maker refusal (`DeliveryRefused`: a ChangeSet holding a link,
+    FIFO, oversized file or out-of-lane path, #1108 P4 OD18 — the direct entry raises it, the
+    drain routes it as a U10 refused claim). Anything else (a call-shape `TypeError`, a
+    `ValidationError`) propagates."""
+    from defender.learning.author.version_control import DeliveryRefused
+
     try:
         return ("returned", fn())
-    except (LeadAuthorError, BoxFault) as e:
+    except (LeadAuthorError, BoxFault, DeliveryRefused) as e:
         return ("raised", type(e).__name__, str(e))
 
 
@@ -684,17 +689,20 @@ BIG_SIZE = READ_LIMIT + 2**20
 
 def _assert_plain_file_rule_on_the_batch(got: tuple, s: PitfallsScene | LeadScene, rel: str,
                                          text: str, kind: str) -> None:
-    """The plain-file rule over a draft scene: a refused kind names `rel` and nothing lands; a
-    plain (or executable) file commits with its bytes and mode, read from the batch branch."""
+    """The plain-file rule over a draft scene. #1108 P4 (OD18/OD23, owner ruling 2026-10-23 2):
+    a link, hard link or FIFO in the lane is a ChangeSet refusal of the whole claim, naming
+    `rel`, and nothing lands (the drain routes it as U10, `test_refused_claims.py`). A plain
+    file commits with its bytes; an executable one commits as a plain file too — its bytes, mode
+    `100644` (P3's commit-maker writes plain files only: `tenant_1108_delivery/test_changes.py::
+    test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`)."""
     if kind in REFUSED_KINDS:
-        assert got[:2] == ("raised", "LeadAuthorError"), got
-        assert "refusing to commit" in got[2], got
+        assert got[:2] == ("raised", "DeliveryRefused"), got
         assert rel in got[2], got
         assert s.nothing_landed(), f"a {kind} at {rel} was committed"
         return
     assert got == ("returned", 0), got
     assert s.committed(rel) == text, "the plain control was not committed"
-    assert _head_mode(s.lane.clone, rel, s.lane.tip()) == ("100755" if kind == "exec" else "100644")
+    assert _head_mode(s.lane.clone, rel, s.lane.tip()) == "100644"
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -844,8 +852,9 @@ def test_a_lead_author_stray_the_box_writes_once_started_is_refused(
         assert s.committed(s.rel(AGENT_NAME)) == VETTED
         assert s.committed(DRAFT_STRAY_REL) == "committed\n"
         return
-    assert got[:2] == ("raised", "LeadAuthorError"), got
-    assert "changed files outside" in got[2], got
+    # OD18: a path outside the lane is a ChangeSet refusal of the whole claim (P3's
+    # out-of-lane rule), routed by the drain as U10; the direct entry raises it, naming the path.
+    assert got[:2] == ("raised", "DeliveryRefused"), got
     assert DRAFT_STRAY_REL in got[2], got
     assert s.nothing_landed()
 
@@ -866,8 +875,9 @@ def test_a_pitfalls_stray_the_box_writes_once_started_is_refused(
         assert s.committed(REDUCER_REL) == REDUCER_VETTED
         assert s.committed(DRAFT_STRAY_REL) == "committed\n"
         return
-    assert got[:2] == ("raised", "LeadAuthorError"), got
-    assert "changed files outside" in got[2], got
+    # OD18: a path outside the lane is a ChangeSet refusal of the whole claim (P3's
+    # out-of-lane rule), routed by the drain as U10; the direct entry raises it, naming the path.
+    assert got[:2] == ("raised", "DeliveryRefused"), got
     assert DRAFT_STRAY_REL in got[2], got
     assert s.nothing_landed()
 
@@ -898,20 +908,26 @@ def _head_size(repo: Path, rel: str, rev: str = "HEAD") -> tuple[str, int]:
     return mode, int(size)
 
 
+# #1108 P4 (OD18): an oversized file in the lane is a ChangeSet refusal of the whole claim (P3's
+# size bound), not a commit: the legacy "larger than any read commits" rows are re-spelled to
+# the refusal, naming the entry, with nothing landed. A plain file under the bound commits
+# (`test_the_lead_author_gate_commits_only_a_plain_file[*-plain]`).
 @pytest.mark.parametrize("name", ["elastic/_draft/b1178.md", "gather/queries/wazuh/README.md"],
                          ids=["system-skill-draft", "catalog-readme"])
-def test_a_plain_lead_author_file_larger_than_any_read_commits(tmp_path: Path, name: str):
+def test_a_plain_lead_author_file_larger_than_any_read_is_refused(tmp_path: Path, name: str):
     s = _lead_scene(tmp_path)
     got = _run_lead(s, [], name=name, text=b"# a large note\n", kind="big")
-    assert got == ("returned", 0), got
-    assert _head_size(s.lane.clone, s.rel(name), s.lane.tip()) == ("100644", BIG_SIZE)
+    assert got[:2] == ("raised", "DeliveryRefused"), got
+    assert s.rel(name) in got[2], got
+    assert s.nothing_landed(), "an oversized file was committed"
 
 
-def test_a_plain_execution_md_larger_than_any_read_commits(tmp_path: Path, monkeypatch):
+def test_a_plain_execution_md_larger_than_any_read_is_refused(tmp_path: Path, monkeypatch):
     s = _pitfalls_scene(tmp_path, monkeypatch, _system_rows())
     got = _run_pitfalls(s, [], rel=DRAFT_EXECUTION_REL, text=EXECUTION_TEXT, kind="big")
-    assert got == ("returned", 0), got
-    assert _head_size(s.lane.clone, DRAFT_EXECUTION_REL, s.lane.tip()) == ("100644", BIG_SIZE)
+    assert got[:2] == ("raised", "DeliveryRefused"), got
+    assert DRAFT_EXECUTION_REL in got[2], got
+    assert s.nothing_landed(), "an oversized file was committed"
 
 
 def _queue_claims(s: LeadScene, *run_names: str) -> list[Path]:

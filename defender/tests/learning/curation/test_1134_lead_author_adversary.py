@@ -80,10 +80,22 @@ def _head_mode(repo: Path, rel: str, rev: str = "HEAD") -> str:
     return _git.git(["ls-tree", rev, "--", rel], cwd=repo).split(" ", 1)[0]  # lint-oracle: ok — not the code under test's query
 
 
+def _outcome(fn: Any) -> tuple:
+    """`outcome`, plus P3's commit-maker refusal: `("raised", "DeliveryRefused", message)`. A
+    link or hard link the box leaves in its lane is a ChangeSet refusal (OD18/OD23; owner ruling
+    2026-10-23: no hard-linked entry is ever committed), which the direct entry raises and the
+    drain routes as a U10 refused claim (`test_refused_claims.py`)."""
+    from defender.learning.author.version_control import DeliveryRefused
+
+    try:
+        return outcome(fn)
+    except DeliveryRefused as e:
+        return ("raised", "DeliveryRefused", str(e))
+
+
 #: The curator's edit: one pitfall appended under the reducer's `## Common pitfalls`, a
 #: document the content rule accepts, carrying the mark.
 EDITED_REDUCER = reducer_surface_text(bullets=(OUT_MARK,))
-REDUCER_REFUSALS = {"link": "unreadable as a file", "hardlink": "unreadable as UTF-8 text"}
 
 
 def _pitfalls_lane(tmp_path: Path) -> C.DraftLane:
@@ -124,7 +136,7 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
     head = lane.base
     watch = {"opens": [target]} if left == "link" else {"reads": [target]}
     with C.draft_trees(lane) as trees, kernel_watch(**watch) as events:
-        got = outcome(lambda: pitfalls_curator.run_pitfalls(
+        got = _outcome(lambda: pitfalls_curator.run_pitfalls(
             paths=lane.paths, trees=trees, batch=lane.batch,
             invoke=Spawn(curate, root=Path(lane.batch.draft_root))))
         seen = events()
@@ -136,7 +148,10 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
         assert lane.tip() != head, "the control's edit was not committed"
         assert lane.text_at_tip(REDUCER_REL) == EDITED_REDUCER
         return
-    assert raised(got, "LeadAuthorError", REDUCER_REFUSALS[left]), got
+    # #1108 P4 (OD18/OD23, owner ruling 2): the ChangeSet refuses the claim whole, naming the
+    # entry by its repo-relative path; the lane's own gate never reads it.
+    assert raised(got, "DeliveryRefused", REDUCER_REL), got
+    assert OUT_MARK not in got[2], got
     assert lane.tip() == head, "a link or a hard link was committed"
 
 
@@ -156,26 +171,24 @@ def _lead_lane(tmp_path: Path) -> C.DraftLane:
 @dataclasses.dataclass(frozen=True)
 class Left:
     """What the agent leaves below `skills/`: the name, the bytes, how the gate refuses the
-    plain file (`None`: it passes and is committed), and how it refuses a link or a hard link
-    to an outside file holding the same bytes."""
+    plain file (`None`: it passes and is committed). A link or a hard link to an outside file
+    holding the same bytes is refused by the ChangeSet before any gate (#1108 P4, OD18/OD23)."""
 
     id: str
     name: str
     text: str
     plain_refusal: str | None
-    refusal: str
 
 
 LEFTS = [
     # A well-formed template whose id names another system: a gate that reads it refuses it
     # for its id, quoting the mark.
     Left("template", "gather/queries/wazuh/left.md", marked_template(f"elastic.{OUT_MARK}"),
-         plain_refusal="disagreeing with its directory",
-         refusal="not a readable query template"),
+         plain_refusal="disagreeing with its directory"),
     # A declared system's SKILL.md whose frontmatter is valid: read, it passes.
     Left("skill_md", "elastic/SKILL.md",
          f"---\nname: defender-elastic\n---\n# elastic\n\n- {OUT_MARK}\n",
-         plain_refusal=None, refusal="could not be read"),
+         plain_refusal=None),
 ]
 
 
@@ -210,7 +223,7 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
     watch = {"opens": [target]} if left == "link" else {"reads": [target]}
     deps = draft_lead_deps(lane, invoke_agent=spawn, extract=lambda _rd: ([], [ELASTIC_LEAD]))
     with kernel_watch(**watch) as events:
-        got = outcome(lambda: lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps))
+        got = _outcome(lambda: lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps))
         seen = events()
 
     assert spawn.calls, "the agent was never reached, so the gate never ran"
@@ -226,7 +239,9 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
         assert raised(got, "LeadAuthorError", what.plain_refusal), got
         assert OUT_MARK in got[2], "the control's file was not read"
         return
-    assert raised(got, "LeadAuthorError", what.refusal), got
+    # #1108 P4 (OD18/OD23, owner ruling 2): a link or hard link in the lane is a ChangeSet
+    # refusal of the whole claim, naming the entry; nothing behind it is read.
+    assert raised(got, "DeliveryRefused", rel), got
     assert OUT_MARK not in repr(got) + repr(logged(caplog)), got
 
 
@@ -359,7 +374,7 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
     deps = draft_lead_deps(lane, invoke_agent=spawn, extract=lambda _run_dir: ([], []))
 
     with kernel_watch(reads=[target]) as events:
-        got = outcome(lambda: lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps))
+        got = _outcome(lambda: lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps))
         seen = events()
 
     assert seen == [], f"the hard link's outside file was read: {seen}"
@@ -455,7 +470,7 @@ def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
     spawn = Spawn()
 
     with trees, kernel_watch(reads=[queue], opens=[queue]) as events:
-        got = outcome(lambda: pitfalls_curator.run_pitfalls(paths=paths, trees=trees,
+        got = _outcome(lambda: pitfalls_curator.run_pitfalls(paths=paths, trees=trees,
                                                             invoke=spawn))
         seen = events()
 
