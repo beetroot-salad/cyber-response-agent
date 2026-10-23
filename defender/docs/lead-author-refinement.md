@@ -66,7 +66,7 @@ actually do its job well.
    (see #1).
 
 6. **Schema not loaded into prompt.** The agent has to remember (or
-   follow a link to) `SCHEMA.md` for the keyword-recall + filter-binding
+   follow a link to) `skills/gather/query-schema.md` for the keyword-recall + filter-binding
    conventions.
 
 Findings #1, #5, #6 collapse to one diagnosis: **the handoff is too
@@ -107,7 +107,7 @@ Walking the (goal, query) cardinality dimensions:
   informed by the agg's output. Inter-query dependency.
 - *Alternative-binding sweep* — same template, N parameter values.
 - *Cross-system join* — auth-events ∧ CMDB ∧ IAM, glued by entity.
-  Per `SCHEMA.md` §"What is not a template," these stay as separate
+  Per `skills/gather/query-schema.md` §"What is not a template," these stay as separate
   primitives.
 
 **Meta** (out of scope for the catalog):
