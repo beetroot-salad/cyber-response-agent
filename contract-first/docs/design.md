@@ -1,8 +1,7 @@
 # How contract-first works, and why
 
-This is the design behind the plugin: where it comes from, what each stage is for, the reasons for
-the choices that look odd at first, and where it falls short. The [README](../README.md) covers
-install and use; the skills hold the working instructions.
+This is the design behind the plugin: where it comes from, what each stage is for, the reasoning, and where it falls short.
+The [README](../README.md) covers install and use; the skills hold the working instructions.
 
 ## Not a new idea
 
@@ -16,32 +15,32 @@ The plugin borrows from:
   attackers here are hand-written, intent-aware mutants.
 - **Extreme Programming's spike**: throwaway code written to learn, not to keep.
 
-The name overlaps with two unrelated ideas: Bertrand Meyer's *design by contract* (pre- and
-post-conditions inside the code) and *contract-first APIs* (writing the OpenAPI schema before the
+The name overlaps with two unrelated ideas: Bertrand Meyer's _design by contract_ (pre- and
+post-conditions inside the code) and _contract-first APIs_ (writing the OpenAPI schema before the
 service). Neither is what this plugin does.
 
-What's specific here is the setting: the authors, implementers and reviewers are agents. Agents are
-fast and tireless, but an agent asked to implement an issue will decide what it means, write code to
-that reading, and then write tests that pass on that code. Every step agrees with the one before, so
-nothing disagrees. Bugs ship green, and the design decisions behind them were made quietly, where no
-human saw them. The plugin's job is to put disagreement back: a human settles the intent, tests pin
-it before code exists, and each later stage is set up to doubt the one before.
+What's specific here is that the authors, implementers and reviewers are agents. Left to itself, an
+agent decides what an issue means, writes code to that reading, then writes tests that pass on that
+code, so nothing ever disagrees. The plugin puts disagreement back: a human settles the intent,
+tests pin it before code exists, and each later stage is set up to doubt the one before.
 
-## Why a design and tests, and no spec
+## Why a design and tests, and no independent spec
 
 Two artifacts carry the intent, and each holds what the other can't:
 
-- **The design** holds the why: scope and non-goals, data models, flows, the architecture chosen and
+- **The design** holds the why: scope and non-goals, data models and types, flows, the architecture chosen and
   the trade-offs behind it. Tests can't express a rationale or a deliberate omission.
 - **The tests** hold the what, in a form that can fail. A sentence in a document can't stop wrong
-  code from shipping.
+  code from shipping. The tests are the spec.
 
-A separate spec in between would be a third description of the same intent, and it drifts. This
-plugin tried one: an earlier version kept a formal requirements graph that mapped every obligation
-to the test enforcing it, with checkers to keep it honest. Keeping that graph in step with the
-design and the tests became its own job, and its checker had 4,872 open findings when it was
-retired. What survives is a compact map from design obligations to tests, kept as working notes for
-the agents, not as an artifact anyone maintains.
+Why not a written spec as well? This is a judgment call, not a measured result. A spec would sit
+between the two: wordier than the design, which can lean on shared context and leave things
+implicit (a double-edged sword), and looser than the tests, which can't be read two ways.
+Everything in it would also be stated in one of the others, which gives them one more place to
+disagree. The one time this plugin kept a third artifact, a formal graph mapping each obligation to
+its test, keeping it in step became a job of its own; its checker had 4,872 open findings when it
+was retired. That's one project, and a formal graph rather than prose. The pipeline runs without a
+spec, but nobody has measured whether adding one would catch more.
 
 The tests are committed **alone, before any implementation**, as a fixed reference. That makes the
 order provable from git history rather than from an agent's account, and it stops the code stage
@@ -67,16 +66,16 @@ flowchart LR
     K -. replayed .-> C
 ```
 
-| Stage | Produces | The human decides |
-|---|---|---|
-| discuss-issue | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map | What to promise, and the consequential trade-offs |
-| write-tests | A committed test contract and a map of which test enforces which promise | Only design amendments the tests expose |
-| write-code-from-tests | Code that passes the contract, attacked by wrong variants; a PR | Only design amendments the code exposes |
-| finalize or `/code-review` | A reviewed, re-greened PR; follow-up issues; new attack-deck entries | Whether to merge |
+| Stage                      | Produces                                                                                      | The human decides                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| discuss-issue              | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map | What to promise, and the consequential trade-offs |
+| write-tests                | A committed test contract and a map of which test enforces which promise                      | Only design amendments the tests expose           |
+| write-code-from-tests      | Code that passes the contract, attacked by wrong variants; a PR                               | Only design amendments the code exposes           |
+| finalize or `/code-review` | A reviewed, re-greened PR; follow-up issues; new attack-deck entries                          | Whether to merge                                  |
 
 ## Sketch and spike: finding the better way before it's expensive
 
-Everyone knows the moment: halfway through building something one way, you see how it should have
+A familiar moment: halfway through building something one way, you see how it should have
 been built. Usually that moment arrives after the expensive work is done, and then you either
 rewrite or live with the first way.
 
@@ -93,11 +92,11 @@ changing course costs a few files instead of a suite.
 A contract can fail in two ways, and each needs a different check:
 
 - **Fidelity:** does the suite demand the right behavior, nothing invented and nothing narrowed?
-  That's a question about meaning, so a fresh reviewer *reads* it, without the author's reasoning.
+  That's a question about meaning, so a fresh reviewer _reads_ it, without the author's reasoning.
 - **Discrimination:** does the suite reject wrong code? Reading can't answer that. Suites that
   readers had cleared still passed five to nineteen deliberately wrong implementations.
 
-So discrimination is tested by running. Once the honest implementation passes, two or three
+Discrimination is tested by running. Once the honest implementation passes, two or three
 attackers, each focused on one risk area, try to keep the suite green with wrong variants of that
 code. Starting from working code is cheaper than each attacker building its own, and each exploit
 becomes a patch that the repaired test must be shown to catch.
@@ -121,12 +120,12 @@ flowchart TD
 Every stage can find a problem that belongs to an earlier one. Findings are grouped by cause first,
 since one model or flow change often dissolves several, then routed by kind:
 
-| Finding | Goes to |
-|---|---|
-| A factual question | A probe. The human doesn't decide what existing code does |
-| Code is wrong under the settled design | Fixed in the code stage |
-| A test omits, misstates or fails to enforce settled behavior | write-tests' repair author |
-| The design is wrong or leaves a consequential choice open | discuss-issue's amendment, put to the human as "this is a bug; here are the trade-offs" |
+| Finding                                                      | Goes to                                                                                 |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| A factual question                                           | A probe. The human doesn't decide what existing code does                               |
+| Code is wrong under the settled design                       | Fixed in the code stage                                                                 |
+| A test omits, misstates or fails to enforce settled behavior | write-tests' repair author                                                              |
+| The design is wrong or leaves a consequential choice open    | discuss-issue's amendment, put to the human as "this is a bug; here are the trade-offs" |
 
 Human attention goes to consequential design choices, never to one question per edge case.
 
@@ -141,7 +140,7 @@ inspectable by a person, and runnable headless as one command per stage.
 write-tests writes its hand-off note for the implementer, and the implementer reads it. finalize
 deliberately doesn't. A reviewer who has read the argument for each choice tends to agree with it,
 because the argument is right there. finalize reads the code, the diff and the tests. It does read
-the earlier *review* trail, but checks who wrote each comment, since on a public repo anyone can
+the earlier _review_ trail, but checks who wrote each comment, since on a public repo anyone can
 comment and finalize holds a push credential.
 
 ## Two nets for what escapes
@@ -149,7 +148,7 @@ comment and finalize holds a push credential.
 When a bug ships green, finalize traces it back, through a subagent that reads the records it
 skipped, to the stage where the defense should have held. The result goes to one of two places:
 
-- **The attack deck** gets the exploit's *shape*, when the design stated the intent and the suite
+- **The attack deck** gets the exploit's _shape_, when the design stated the intent and the suite
   passed anyway. Attackers replay the deck on every future contract.
 - **The human** gets process findings: which stage missed, and what rule or check might stop it.
   One PR is one data point, so the human weighs it against others before changing the pipeline.
