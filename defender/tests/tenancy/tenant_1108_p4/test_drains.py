@@ -185,7 +185,9 @@ def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_ca
     paths = drain_paths(t, product_repo(tmp_path))
     queue(paths, [S.finding_row("f1", run_id="f1")])
     trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+    # The fixture's own publish already asked the issuer and the forge; only the drain counts.
     t.vault.calls.clear()
+    t.forge.requests.clear()
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=trigger, box=box)

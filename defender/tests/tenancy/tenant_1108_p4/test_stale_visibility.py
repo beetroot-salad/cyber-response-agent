@@ -396,10 +396,13 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     box_readable: dict[str, bytes] = {}
 
     def before_lifecycle(run_dir: Path) -> None:
-        # The box window: everything under the run dir is what the box can read (and write).
+        # The box window: everything under the run dir is what the box can read (and write),
+        # plus every run copy's `stage/` (U9: the only part of a copy the box mounts). A copy's
+        # `settings/` is host-only and legitimately carries the fixture's `https://` endpoints.
         from defender.tests.tenancy.tenant_1108_p4._s_b_support import run_copies
 
-        for root in (Path(run_dir), run_copies(p4_tenant)):
+        stages = sorted(run_copies(p4_tenant).glob("*/stage"))
+        for root in (Path(run_dir), *stages):
             for path in sorted(root.rglob("*")) if root.is_dir() else ():
                 if path.is_file() and not path.is_symlink():
                     box_readable[str(path)] = path.read_bytes()
@@ -438,6 +441,8 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
         assert "reason" not in stamp["knowledge_source"], stamp
 
     assert box_readable, "fixture: the box window saw no run-dir files"
+    assert [n for n in box_readable if "/stage/" in n], (
+        "fixture: the box window saw no run copy's stage/ files")
     leaked = [(name, f) for name, data in box_readable.items() for f in REASON_FRAGMENTS
               if f.encode() in data]
     assert leaked == [], (

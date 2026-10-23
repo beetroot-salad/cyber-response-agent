@@ -122,6 +122,7 @@ def test_flow5_revert_cli_waits_out_a_running_author_drain(p4_tenant):
     bind_forge(t)
     lock = location_path(t.tenant.learning) / AUTHOR_DRAIN_LOCK.file
     lock.parent.mkdir(parents=True, exist_ok=True)
+    t.forge.requests.clear()  # the fixture's own publish asked the forge; only the revert counts
     with lock.open("a+") as holder:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
