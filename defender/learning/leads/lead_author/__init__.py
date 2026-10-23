@@ -282,15 +282,16 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
 def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
     run: Run, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
     box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
-    deps: LeadAuthorDeps | None = None,
+    batch: Any = None, deps: LeadAuthorDeps | None = None,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
-    drain's work step opens them for its label). Never skips. `run` is the run the drain
-    opened from the claim's address; `deps` given (built over the tick's batch) are used as
-    built."""
+    drain's work step opens them over `batch`'s draft). Never skips. `run` is the run the drain
+    opened from the claim's address; `deps` given are used as built, else they are built over
+    `batch`."""
     if deps is None:
-        deps = build_lead_author_deps(paths, state=state, trees=trees, git_timeout=git_timeout)
+        deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
+                                      git_timeout=git_timeout)
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 

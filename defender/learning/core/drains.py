@@ -90,9 +90,7 @@ def _invoke_lead_author(
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
                 run, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
-                git_timeout=git_timeout,
-                deps=mod.build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
-                                                git_timeout=git_timeout),
+                git_timeout=git_timeout, batch=batch,
             ),
         )
     if rc not in (0, None):
