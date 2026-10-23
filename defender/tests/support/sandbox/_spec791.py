@@ -21,9 +21,6 @@ RUN_COMMON_PY = DEFENDER / "run_common.py"
 CLI_PY = DEFENDER / "learning" / "core" / "cli.py"
 SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
 VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
-PROJECT_PROFILE = REPO_ROOT / ".claude" / "contract-first.json"
-HISTORICAL_GRAPH_PROFILE = (
-    REPO_ROOT / "docs/archive/spec-flow-project-config.json")
 
 # `OLDER_SPEC_GRAPH` (spec_graph_774.yaml) and `LIVE_STAGE_WORD` ("projection") left with
 # #797: the graph is deleted and the live projection stage is retired, so the two demands

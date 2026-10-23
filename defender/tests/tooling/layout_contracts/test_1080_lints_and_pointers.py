@@ -15,44 +15,14 @@ import pytest
 import yaml
 
 from defender import _git
-from defender.tests.support.shared.contracts._by_path import load_lint_gate, load_module
+from defender.tests.support.shared.contracts._by_path import load_lint_gate
 from defender.tests.tooling.layout_contracts import _pointers1080 as P
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 
 LINT_DIR = S.REPO_ROOT / "tooling" / "lint"
-SPEC_GRAPH_DIR = S.REPO_ROOT / "contract-first" / "scripts" / "spec_graph"
-# Historical pointer checks use the archived graph configuration, not the active profile.
-PROFILE = S.REPO_ROOT / "docs/archive/spec-flow-project-config.json"
 CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
-
-@functools.cache
-def current_profile_data():
-    """Translate the retired graph profile once, keeping its snapshot intact."""
-    profile = json.loads(PROFILE.read_text(encoding="utf-8"))
-    active = json.loads((S.REPO_ROOT / ".claude/contract-first.json").read_text(encoding="utf-8"))
-    profile["specGraph"]["codeRoots"] = active["sourceRoots"]
-    for resource in profile["specGraph"].get("resources", {}).values():
-        for side in ("writers", "readers"):
-            sinks = []
-            for sink in resource.get(side, []):
-                path, separator, symbol = sink.partition("::")
-                path = S.current_path(path)
-                if not (S.REPO_ROOT / path).is_file() and symbol:
-                    definitions = S.definitions(symbol)
-                    if len(definitions) == 1:
-                        path = definitions[0]
-                sinks.append(path + separator + symbol)
-            resource[side] = sinks
-    return profile
-
-
-@pytest.fixture(autouse=True)
-def current_profile(tmp_path, monkeypatch):
-    translated = tmp_path / "current-graph-profile.json"
-    translated.write_text(json.dumps(current_profile_data()), encoding="utf-8")
-    monkeypatch.setitem(globals(), "PROFILE", translated)
 
 MOVED_HOMES: dict[str, tuple[tuple[str, str | None], ...]] = {
     "defender/scripts/_venv.py": (("reexec_into_venv", S.VENV),),
@@ -113,11 +83,6 @@ def _lint(stem: str) -> Any:
 
 
 @functools.cache
-def _spec_graph_config() -> Any:
-    return load_module(SPEC_GRAPH_DIR / "_config.py", name="spec1080_spec_graph_config",
-                       sys_path=(SPEC_GRAPH_DIR,))
-
-
 def _homes(base_path: str) -> list[str]:
     """Where `base_path`'s code lives now: one home per anchor (found by symbol)."""
     return [S.home_of(sym, home=home) for sym, home in MOVED_HOMES[base_path]]
@@ -258,18 +223,6 @@ def baseline_keys_naming_scripts() -> dict[str, list[str]]:
             for name, entries in baselines().items()}
 
 
-def profile_rows() -> list[tuple[str, str, str]]:
-    """`(resource, side, sink)` for every writer and reader row of the profile's resources."""
-    res = json.loads(PROFILE.read_text(encoding="utf-8"))["specGraph"].get("resources", {})
-    return [(name, side, sink) for name, row in res.items()
-            for side in ("writers", "readers") for sink in row.get(side, []) or []]
-
-
-def _defines(relpath: str, sym: str) -> bool:
-    p = S.REPO_ROOT / relpath
-    return p.is_file() and sym in S.module_level_names(p.read_bytes(), relpath)
-
-
 def _git_repo(root: Path, files: Mapping[str, str]) -> Path:
     """A tmp git repo at `root` holding `files` (repo-relative path -> text), all `git add`ed."""
     for rel, text in files.items():
@@ -390,7 +343,7 @@ def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
         f"a record-name literal planted in {engine} was not reported: {found}")
 
 
-def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_top_level_package(tmp_path, monkeypatch):
+def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_top_level_package(tmp_path):
     at_base = _golden()["plant_reported_at_base"]
     owed: dict[str, set[str]] = {}
     for base, gates in at_base.items():
@@ -408,11 +361,6 @@ def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_
         "a gate that reported the plant at the old location does not report it at the new one "
         f"(home -> silent gates): {narrowed}")
 
-    monkeypatch.chdir(S.REPO_ROOT)
-    cfg = _spec_graph_config()
-    census = {S.rel(p) for p in cfg.source_files(cfg.load(str(PROFILE)))}
-    uncovered = sorted(t for t in owed if t not in census)
-    assert not uncovered, f"the profile's codeRoots do not reach these homes: {uncovered}"
 
 
 def test_1080_every_path_a_lint_scope_names_exists():
@@ -493,56 +441,6 @@ def test_vulture_baseline_holds_fingerprints_keyed_by_files_that_moved(monkeypat
     monkeypatch.setenv("PATH", f"{Path(sys.executable).parent}:{S.child_env()['PATH']}")
     assert _lint("lint_vulture").main([]) == 0, "the vulture gate is red after the change"
     assert _lint("lint_unnarrowed_parse").main([]) == 0, "the unnarrowed-parse gate is red"
-
-
-def _moved_rows() -> list[dict[str, Any]]:
-    """The base profile rows naming a module the design moves (golden)."""
-    return [r for r in _golden()["profile_rows_naming_scripts"]
-            if r["sink"].partition("::")[0] in MOVED_HOMES]
-
-
-def _current_rows_for(row: Mapping[str, Any]) -> list[str]:
-    sym = row["sink"].partition("::")[2]
-    return [sink for res, side, sink in profile_rows()
-            if res == row["resource"] and side == row["side"] and sink.partition("::")[2] == sym]
-
-
-def test_1080_the_spec_flow_profile_covers_the_new_homes_and_names_no_moved_path(monkeypatch):
-    monkeypatch.chdir(S.REPO_ROOT)
-    cfg = _spec_graph_config()
-    census = {S.rel(p) for p in cfg.source_files(cfg.load(str(PROFILE)))}
-    homes = sorted({h for base in MOVED_HOMES for h in _homes(base)})
-    uncovered = [h for h in homes if h not in census]
-    assert not uncovered, f"codeRoots do not cover these new homes: {uncovered}"
-
-    missing = [(res, side, sink) for res, side, sink in profile_rows()
-               if not (S.REPO_ROOT / sink.partition("::")[0]).is_file()]
-    assert not missing, f"profile rows naming files that do not exist: {missing}"
-    wrong: list[tuple[str, list[str]]] = []
-    for row in _moved_rows():
-        if not row["defined_at_base"]:
-            continue
-        sym = row["sink"].partition("::")[2]
-        now = _current_rows_for(row)
-        good = [s for s in now if not S.under(s.partition("::")[0], "defender/scripts")
-                and _defines(s.partition("::")[0], sym)]
-        if not good or len(good) != len(now):
-            wrong.append((f"{row['resource']}.{row['side']} {row['sink']}", now))
-    assert not wrong, f"rows naming a moved file that do not name its new home: {wrong}"
-
-
-def test_profile_code_roots_leave_a_new_top_level_package_uncovered(monkeypatch):
-    monkeypatch.chdir(S.REPO_ROOT)
-    cfg = _spec_graph_config()
-    census = {S.rel(p) for p in cfg.source_files(cfg.load(str(PROFILE)))}
-    homes = sorted({h for base in MOVED_HOMES for h in _homes(base)})
-    base_tops = set(_golden()["defender_top_level_dirs_at_base"])
-    new_tops = sorted({"/".join(h.split("/")[:2]) for h in homes
-                       if len(h.split("/")) > 2 and h.split("/")[1] not in base_tops})
-    uncovered = [f for top in new_tops for f in S.py_files(S.REPO_ROOT, (top,)) if f not in census]
-    assert not uncovered, f"new top-level packages {new_tops} leave these uncovered: {uncovered}"
-    missing = [h for h in homes if h not in census]
-    assert not missing, f"codeRoots do not cover these homes: {missing}"
 
 
 def test_1080_no_tracked_doc_or_comment_names_a_moved_scripts_path(tmp_path):

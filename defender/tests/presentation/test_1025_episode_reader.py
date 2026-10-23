@@ -15,7 +15,6 @@ import yaml
 from defender._io import bind
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.sandbox._spec791 import PROJECT_PROFILE
 from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -78,10 +77,11 @@ def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
     return table
 
 
-_CODE_ROOTS = tuple(
-    Path(root).relative_to("defender").as_posix()
-    for root in json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))["sourceRoots"]
-    if Path(root).is_relative_to("defender"))
+#: The shipped roots under `defender/` (files or packages) the census reads.
+_CODE_ROOTS = (
+    "box", "execution", "runtime", "learning", "integrations", "presentation", "cli", "tenancy",
+    "knowledge", "episodes", "records", "run_repository", "configuration", "run.py", "_io.py",
+    "_filesystem")
 _OWNER_MODULE = "episodes/_episode_paths.py"
 _LAYOUT_MODULE = "run_repository/_layout.py"
 _OWNER_MODULES = (_OWNER_MODULE, _LAYOUT_MODULE)

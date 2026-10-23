@@ -99,7 +99,7 @@ GENERIC_NAMES = {
 # Trees holding frozen copies of things the live tree may have deleted: a name surviving only
 # here cannot vouch that it survives. Distinct from EXCLUDED_GREP_DIRS ("is this dir a
 # reference source"), which includes live dirs.
-_ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "defender/docs/archive/", "playground-v2/docs/archive/", "spec-flow/specs/archive/",
+_ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "defender/docs/archive/", "playground-v2/docs/archive/",
                   "defender/tests/tooling/layout_contracts/goldens/")
 
 # Trees whose removals are not code changes (local scratch: research runs, experiment
@@ -120,8 +120,6 @@ EXCLUDED_GREP_DIRS = (
     # they are not code that should be kept consistent with current names.
     "tasks", "docs",
     "defender/docs",
-    # The spec corpus quotes pre-change code by construction.
-    "spec-flow/specs",
     # An entry matches `rel == d` or `rel` under `d + "/"`, so it does not cover a
     # same-prefixed sibling directory; these are listed explicitly rather than relaxing the
     # match to a bare prefix, which would swallow any future `defender/tests-*` sibling.

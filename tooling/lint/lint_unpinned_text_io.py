@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Unpinned text-I/O: flag text reads/writes under ``defender/`` and the ``contract-first/scripts/``
-tool tree that decode or encode under the ambient locale instead of pinning ``encoding="utf-8"``.
+"""Unpinned text-I/O: flag text reads/writes under ``defender/`` that decode or encode under the ambient locale instead of pinning ``encoding="utf-8"``.
 
 Every text file this system touches is UTF-8 (lessons corpora with em-dashes, invlang
 companions, vendor alerts). A bare ``read_text()`` / ``open(p)`` / ``write_text(s)`` uses
@@ -18,7 +17,7 @@ A convention that lives only in a docstring gets re-derived wrong, hence a gate.
 ``PLW1514`` covers only calls where it can infer a ``pathlib.Path`` receiver; this check is
 syntactic on purpose.
 
-What it flags, under the scanned trees (``defender/`` production code + ``contract-first/scripts/``):
+What it flags, under the scanned tree (``defender/`` production code):
 
 - ``<x>.read_text(...)`` / ``<x>.write_text(...)`` with no ``encoding=`` keyword
 - an opener in text mode with no ``encoding=`` — ``open`` / ``io.open`` / ``codecs.open`` /
@@ -55,15 +54,12 @@ Under ``defender/`` the canonical readers are ``defender._io.read_text_utf8`` (p
 and ``read_text_soft`` (pinned, returns ``(text, reason)``); the write-side pin for a CLI's
 stdout is ``defender._io.use_utf8_stdio``. Guard a read with ``defender._io.TEXT_READ_ERRORS``:
 a ``UnicodeDecodeError`` is a ``ValueError``, not an ``OSError`` (nor a
-``json.JSONDecodeError``), so ``except OSError`` does not hold it. Under ``contract-first/scripts/``
-those helpers are out of reach (the plugin has no ``defender`` on its path), so pin
-``encoding="utf-8"`` inline and, for a CLI, reconfigure ``sys.stdout``/``stderr`` in ``main``
-as ``check_actors.py`` does.
+``json.JSONDecodeError``), so ``except OSError`` does not hold it.
 
 Mark a deliberate site with ``# lint-text-io: ok — <reason>`` on the call's line span.
 Pre-existing sites are ratcheted via ``lint_unpinned_text_io_baseline.json``; the gate fails
-only on a new file+function pair. Fingerprints are prefixed with the tree-relative path
-(``defender/…`` vs ``contract-first/scripts/…``) so the two trees can't collide. The baseline ships
+only on a new file+function pair. Fingerprints are prefixed with the repo-relative path of the
+scanned tree (``defender/…``). The baseline ships
 empty, so an entry is a chosen regression.
 
 Run from repo root:  python tooling/lint/lint_unpinned_text_io.py
@@ -91,11 +87,8 @@ from _astlib import (
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# The trees this gate scans. `defender/` is production code with the `defender._io` helpers
-# one import away. `contract-first/scripts/` is standalone plugin tooling that cannot import
-# `defender._io`, so its sites pin `encoding="utf-8"` inline; an unpinned read there can drop a
-# non-ASCII source file's import edges and report clean.
-SCOPES = (REPO_ROOT / "defender", REPO_ROOT / "contract-first" / "scripts")
+# The tree this gate scans: production code with the `defender._io` helpers one import away.
+SCOPES = (REPO_ROOT / "defender",)
 BASELINE_PATH = Path(__file__).with_name("lint_unpinned_text_io_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
@@ -208,9 +201,9 @@ def _prefixed_scan(root: Path, prefix: str) -> list[Finding]:
 
 
 HEADER = (
-    "lint_unpinned_text_io baseline — text reads/writes under defender/ and contract-first/scripts/ "
+    "lint_unpinned_text_io baseline — text reads/writes under defender/ "
     "that decode or encode under the AMBIENT LOCALE instead of pinning encoding=\"utf-8\" "
-    "(#588/#589; scope widened to the spec-graph tooling in #655). Fingerprint is "
+    "(#588/#589). Fingerprint is "
     "<tree>/file:function:kind (read|write|open|subprocess; no line number), path relative to the "
     "repo root. CI fails on a fingerprint absent here. This baseline ships EMPTY — an entry in it is "
     "a regression someone chose. Regenerate: python tooling/lint/lint_unpinned_text_io.py "
@@ -228,8 +221,7 @@ def main(
     args = sys.argv[1:] if argv is None else argv
     baseline = BASELINE_PATH if baseline_path is None else baseline_path
     # An injected `scope` scans as-is with no prefix (the tests' fingerprints). The real run
-    # prefixes each root's repo-relative path, so one baseline entry cannot silence a
-    # same-named site in the other tree.
+    # prefixes each root's repo-relative path.
     roots = [scope] if scope is not None else list(SCOPES)
     for root in roots:
         if not root.is_dir():

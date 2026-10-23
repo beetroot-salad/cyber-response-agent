@@ -468,12 +468,12 @@ _MODULE_CALL = re.compile(r"-m\s+(defender\.(?:cli|box|presentation)(?:\.\w+)+)"
 
 def _caller_files() -> list[str]:
     """The non-test callers a command may have: the `bin/` shims, `run_common`, CI workflows
-    and tracked docs (not the spec-flow records or experiments' fixtures)."""
+    and tracked docs (not experiments' fixtures)."""
     tracked = C.tracked_files(S.REPO_ROOT, ".")
     out = []
     for r in tracked:
         parts = r.split("/")
-        if "tests" in parts or parts[0] in {"spec-flow", ".spec-flow", "experiments"}:
+        if "tests" in parts or parts[0] == "experiments":
             continue
         if S.under(r, "defender/bin") or r == "defender/run_common.py" \
                 or S.under(r, ".github/workflows") or r.endswith(".md"):

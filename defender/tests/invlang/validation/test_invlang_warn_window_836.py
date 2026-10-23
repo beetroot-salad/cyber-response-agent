@@ -416,7 +416,7 @@ def test_close_gate_distinguishes_model_invoked_from_framework_invoked(tmp_path)
 
 
 def test_forced_close_failure_is_distinguishable_from_a_committed_close(tmp_path):
-    """Renamed from `test_forced_close_handler_surfaces_a_gate_refusal` (HD-1, `.spec-flow/frontiers/94-hd-repairs.md`) to state the property this body actually asserts."""
+    """Renamed from `test_forced_close_handler_surfaces_a_gate_refusal` (HD-1 repairs) to state the property this body actually asserts."""
     deps_ok, run_ok = main_deps(tmp_path / "commits")
     seed_investigation(run_ok, PROLOGUE)
     _run, _t_ok, exit_ok = _drive_to_retry_exhaustion(deps_ok)

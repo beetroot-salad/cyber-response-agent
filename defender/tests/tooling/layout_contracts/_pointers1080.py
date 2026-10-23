@@ -15,7 +15,7 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 #: Never scanned (module docstring), as repo-relative directory prefixes.
 EXCLUDED_DIRS: tuple[str, ...] = (
     # archival: frozen records of their moment
-    "experiments/", "docs/decisions/", "docs/archive/", "defender/docs/decisions/", "defender/docs/archive/", "playground-v2/docs/archive/", "spec-flow/specs/", ".claude/worktrees/",
+    "experiments/", "docs/decisions/", "docs/archive/", "defender/docs/decisions/", "defender/docs/archive/", "playground-v2/docs/archive/", ".claude/worktrees/",
     # recorded data that quotes the code of its moment (lint_stale_refs.EXCLUDED_GREP_DIRS)
     "playground-v2/examples/alerts/", "defender/tests/fixtures/e2e/", "defender/lessons/", "defender/lessons-actor/",
     "defender/lessons-environment/", "defender/lessons-questioner/",

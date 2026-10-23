@@ -115,9 +115,9 @@ def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
     _pyfile(a, "_config.py", "def f(p):\n    return p.read_text()\n")
     _pyfile(b, "_config.py", "def f(p):\n    return p.read_text()\n")
     fa = gate._prefixed_scan(a, "defender/")
-    fb = gate._prefixed_scan(b, "contract-first/scripts/")
+    fb = gate._prefixed_scan(b, "tooling/")
     assert [f.fingerprint for f in fa] == ["defender/_config.py:f:read"]
-    assert [f.fingerprint for f in fb] == ["contract-first/scripts/_config.py:f:read"]
+    assert [f.fingerprint for f in fb] == ["tooling/_config.py:f:read"]
     assert not ({f.fingerprint for f in fa} & {f.fingerprint for f in fb})
     assert gate._prefixed_scan(a, "") == gate._scan(a)
 

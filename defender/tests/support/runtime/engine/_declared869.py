@@ -1,4 +1,4 @@
-"""Substrate for the issue-869 executable spec (`spec-flow/specs/spec_graph_869.yaml`)."""
+"""Substrate for the issue-869 executable spec (`docs/archive/spec-graphs/spec_graph_869.yaml`)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base

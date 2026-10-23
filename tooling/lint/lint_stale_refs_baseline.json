@@ -170,7 +170,6 @@
     "defender/tests/learning/curation/test_curator_write_lanes_691.py:forward_check": "history, not a reference: the docstring records that #773 retired the curator's `forward_check` tool lane; #1166 deleted the config field of the same name, so the word now matches a removed identifier.",
     "defender/tests/lint/test_lint_unnarrowed_parse.py:parse_verdict": "collision, not a reference: #1166 deleted the forward check's `parse_verdict`; this is a planted source string inside the lint's own test, a made-up function the lint is run over.",
     "defender/tests/runtime/engine/test_scope_intent_850.py:source_refs": "false positive: names the file `source_refs.yaml`, which stays on the confined agents' answer-key deny list (`CASE_ANSWER_KEY_NAMES`); #1166 removed only the run layout's `source_refs` accessor.",
-    "contract-first/scripts/spec_graph/lint_spec_graph_baseline.json:VerdictError": "frozen data, not a reference: the retired spec-graph checker's baseline quotes a finding against the committed #773 spec graph, a frozen spec artifact; #1166 deleted the forward check's `VerdictError` it names.",
     "tooling/lint/lint_vulture_baseline.json:test_773_gap_ledger": "",
     "defender/tests/runtime/state/test_1255_clock_natural.py:_branch_clock": "a contract docstring naming the retired site, not a reference: #1255's committed contract (tag contract/1255-v1) describes the arm-only `now:` line by the function that rendered it, which #1255 (D1, P4) deletes; tests are not edited by the implementer.",
     ".claude/contract-first-attacks.md:test_1025_a_gather_summary_stem_that_is_hostile": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
@@ -364,12 +363,6 @@
     "tooling/lint/lint_unnarrowed_parse.py:comprehension": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
     "tooling/lint/lint_vulture_baseline.json:test_1120_runs_base_for_a_tenant_is_its_runs_folder": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
     "tooling/lint/lint_vulture_baseline.json:test_drain719_fold": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
-    "tooling/lint/lint_vulture_baseline.json:test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_commit_fn_773": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
-    "contract-first/scripts/spec_graph/tests/test_fixes_calls.py:Regression": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
-    "contract-first/scripts/spec_graph/tests/test_fixes_frontiers_trace.py:Regression": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
-    "contract-first/scripts/spec_graph/tests/test_fixes_frontiers_trace.py:append_row": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
-    "contract-first/scripts/spec_graph/tests/test_fixes_gate.py:Regression": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
-    "contract-first/scripts/spec_graph/tests/test_fixes_stub.py:Regression": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
-    "contract-first/scripts/spec_graph/tests/test_mechanical_checks.py:append_row": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import"
+    "tooling/lint/lint_vulture_baseline.json:test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_commit_fn_773": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import"
   }
 }
