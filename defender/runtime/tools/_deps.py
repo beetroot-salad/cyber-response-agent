@@ -148,12 +148,10 @@ class AgentDeps:
     def view(self) -> ModelView:
         """Every filesystem role uses the same mapping; roots and cwd determine its layout.
         Learning identity remains explicit in the role's instructions (#1262)."""
-        if self.roots is not None:
-            agent = self.roots.tenant_agent
-        else:
-            agent = self.tenant.agent if self.tenant is not None else None
+        # The agent tree is the one `knowledge` reads (`agent_root`), so every corpus path the
+        # role is shown has a model spelling.
         return ModelView.for_scope(
-            Path(self.run_dir), Path(self.defender_dir), self.cwd_anchor, agent,
+            Path(self.run_dir), Path(self.defender_dir), self.cwd_anchor, self.agent_root,
             extra_roots=self.roots.model_roots if self.roots is not None else (),
         )
 
