@@ -136,6 +136,20 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
         rec.record("get-host", ctx, {"host": host})
         return {"host": host}
 
+    # #1108 P4 (O1, O-U5): a system's skill descriptor (the dispatch's "Systems of record"
+    # line) is tenant knowledge, read from the run's agent root; the committed fixture tenant
+    # describes only `cmdb`. So the fixture tenant the replay will run as is given a made-up
+    # descriptor for every other system its grant reaches (in its folder under the data root,
+    # which the harness publishes before the drive), and the index below can show whether the
+    # grant that filters it is the fixture's.
+    from defender.tests.support.tenancy import _tenants1106
+
+    agent = Path(_tenants1106.fixture_tenant().agent)
+    for system in sorted({s for s, _ in D995.GATHER_CENSUS}):
+        skill = agent / "skills" / system / "SKILL.md"
+        if not skill.exists():
+            skill.parent.mkdir(parents=True, exist_ok=True)
+            skill.write_text(_tenants1106.system_skill_text(system), encoding="utf-8")
     run_dir = R.materialize(tmp_path / "replay", R.GOLDEN_AB3, run_id='h2-1120-fixture')
     main = R.ReplayFn([_dispatch("cmdb"), R.Turn(text="Investigation complete.")])
     gather = R.ReplayFn([

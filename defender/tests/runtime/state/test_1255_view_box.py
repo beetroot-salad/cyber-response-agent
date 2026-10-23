@@ -210,9 +210,13 @@ def test_b5_the_unboxed_fallback_never_hands_its_shims_the_real_runs_folder(tmp_
     assert ident.out.decode("utf-8").strip() == layout.tenant.id, ident.out
     staged_tags = _run(box, f"{env['DEFENDER_DIR']}/bin/defender-lessons --tags")
     assert staged_tags.rc == 0, staged_tags
+    # #1108 P4 (O1, O4): the shim reads the lessons of the agent root `DEFENDER_AGENT_DIR`
+    # names (the tenant's), never the checkout's, so the control names the same agent half the
+    # box was handed (the staged view of it is what the box's own call reads).
     direct = subprocess.run(
         [str(layout.checkout / "bin" / "defender-lessons"), "--tags"], capture_output=True,
-        timeout=60, env={**os.environ, "DEFENDER_DIR": str(layout.checkout)}, check=True)
+        timeout=60, env={**os.environ, "DEFENDER_DIR": str(layout.checkout),
+                         "DEFENDER_AGENT_DIR": str(layout.agent)}, check=True)
     assert direct.stdout, "control: the checkout's own shim enumerates its tags"
     assert staged_tags.out == direct.stdout, (
         "the staged defender tree does not answer as the run's checkout does")

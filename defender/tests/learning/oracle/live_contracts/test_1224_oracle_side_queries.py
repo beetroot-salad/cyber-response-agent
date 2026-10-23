@@ -150,14 +150,15 @@ def _confined_estate(tmp_path: Path, **kw: Any) -> _Estate:
 
 
 def _tacit_estate(tmp_path: Path) -> _Estate:
-    """The fixture estate plus the REAL tacit_knowledge adapter and a registry under the
-    estate's defender tree (`tacit_knowledge_adapter.registry_path`)."""
+    """The fixture estate plus the REAL tacit_knowledge adapter and a registry in the estate
+    TENANT's agent half (`tacit_knowledge_adapter.registry_path`: #1108 P4 (O1, O4), the
+    registry is the run's agent knowledge, never a defender tree's)."""
     source = (S.DEFENDER / "integrations" / "tacit_knowledge_adapter.py").read_text(
         encoding="utf-8")
     # The checkout adapter puts its repo root on sys.path; a planted copy must not.
     source = source.replace("_sys.path.insert(0, _root)", "pass")
     est = _estate(tmp_path, extra=(("tacit-knowledge", source, ("lookup", "health-check")),))
-    registry = est.defender_dir / "skills" / "tacit-knowledge" / "registry.yaml"
+    registry = Path(est.run_tenant().agent) / "skills" / "tacit-knowledge" / "registry.yaml"
     registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(_yaml.safe_dump({"entries": [TACIT_ENTRY]}), encoding="utf-8")
     return est

@@ -839,10 +839,13 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     sib_daemon, sib = _scripted_daemon(), dict[str, Any]()
     lifecycle = functools.partial(_lifecycle(), start_box=_start_with(sib_daemon),
                                   investigate=_capture_inputs(sib))
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
     rc = S.sym("run", "main")(
         ["--episode", ep.name, "--world", "b", "--tenant", planted.tenant_id],
         lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
-        ticket_writer=S.NoTicket())
+        ticket_writer=S.NoTicket(), publish=in_process_publish())
     assert rc == 0, f"the sibling run failed (rc={rc})"
     assert "run_dir" in sib, "the sibling never started its box"
     sib_binds = _readonly_binds_inside(sib_daemon.mounts())
