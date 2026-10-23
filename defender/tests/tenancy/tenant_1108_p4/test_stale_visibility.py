@@ -39,10 +39,9 @@ from defender.tests.support.runtime.engine._spec767 import (
 # question below is a one-line change for every S-C test.
 # ---------------------------------------------------------------------------------------------
 
-#: The run record's vocabulary (design O-STALE) and the API's (design O-WARN). The record says
-#: `fresh` where the API says `current`; `stale` and `pinned` are spelled alike.
+#: The run record's vocabulary (design O-STALE). The API says `current` where the record says
+#: `fresh` (pinned on production by `test_o_warn_api_maps_the_run_records_knowledge_source_*`).
 RECORD_KINDS = ("fresh", "stale", "pinned")
-API_STATUS_OF_RECORD_KIND = {"fresh": "current", "stale": "stale", "pinned": "pinned"}
 STALE_KINDS = ("transient", "operator")
 
 #: Commits as the knowledge reader accepts them (40 lowercase hex). Distinct per role, and never
@@ -434,6 +433,75 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     assert all(w not in body.lower() for w in CUSTOMER_WORD.values()), body
 
 
+#: The commit a tampering box writes into the run record: never the export the run used.
+TAMPERED_COMMIT = "0ddba110ddba110ddba110ddba110ddba110ddba"
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("tamper", ["suppress", "forge"])
+def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_record(
+        tmp_path, p4_tenant, tamper):
+    """O-WARN through `run.main`, danger lens (R-I4): the box can rewrite the run record's
+    `knowledge_source` while the investigation runs (the lifecycle stand-in does exactly that).
+    The posted comment follows the host's launch outcome both ways:
+    - suppress: the launch was stale (transient), the box rewrites the record to fresh -> the
+      comment still carries the stale sentence naming the commit the run used;
+    - forge: the launch was fresh, the box rewrites the record to stale (operator) naming a
+      commit of its own -> the comment is exactly today's fresh comment."""
+    from functools import partial
+
+    from defender import run as run_py
+    from defender.integrations import ticket_writer
+    from defender.tests.support.runtime.engine._spec767 import write_report
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+
+    commit = p4_tenant.commit
+    if tamper == "suppress":
+        outcome = _stale_outcome("transient", RAW_REASON["transient"])
+        planted = knowledge_source("fresh", commit=commit)
+    else:
+        outcome = f"fresh {commit}"
+        planted = knowledge_source("stale", stale_kind="operator", commit=TAMPERED_COMMIT,
+                                   reason="call https://evil.invalid/ now")
+
+    store = FakeStore()
+    deps = ticket_writer.TicketWriterDeps(request=store)
+    writer = SimpleNamespace(
+        open_case_ticket=partial(ticket_writer.open_case_ticket, deps=deps),
+        record_case_ticket=partial(ticket_writer.record_case_ticket, deps=deps))
+    tampered: list[Path] = []
+
+    def box_rewrites_the_record(run_dir: Path) -> None:
+        write_report(run_dir)
+        S1107.seed_session_store(run_dir)
+        stamp_knowledge_source(run_dir, planted)
+        tampered.append(run_dir)
+
+    alert = S1107.plant_alert(tmp_path / "alert")
+    rec = S1107.RunRecorder(tmp_path / "unused" / f"s-c-tamper-{tamper}",
+                            before_lifecycle=box_rewrites_the_record)
+    seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
+    argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
+    rc = run_py.main(argv, publish=lambda *a, **k: outcome, ticket_writer=writer, **seams)
+
+    assert rc == 0, rc
+    assert tampered, "fixture: the lifecycle stand-in never rewrote the record"
+    body = store.comment_body()
+    assert TAMPERED_COMMIT[:SHORT_COMMIT] not in body, (
+        f"O-WARN: the comment names the commit the box wrote into the record: {body!r}")
+    assert "evil.invalid" not in body, body
+    if tamper == "suppress":
+        assert names_commit(body, commit), (
+            "O-WARN: the box suppressed the stale sentence by rewriting the record to fresh — "
+            f"the comment must follow the host's stale outcome: {body!r}")
+        assert CUSTOMER_WORD["transient"] in body.lower(), body
+    else:
+        assert body == (f"benign — {HOST_CAUSE}\n\n"
+                        "The account is a decommissioned service identity; no egress followed."), (
+            "O-WARN: the box forged a stale sentence into a fresh run's comment by rewriting "
+            f"the record: {body!r}")
+
+
 # ---------------------------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------------------------
@@ -505,19 +573,49 @@ def test_o_warn_api_serves_investigation_knowledge_through_the_store_port(status
 
 
 def test_o_warn_api_knowledge_vocabulary_is_the_apis_not_the_run_records():
-    """O-WARN (API): the API says `current` where the run record says `fresh`; the record's word,
-    an unknown status and an unknown stale kind are refused by the wire model."""
+    """O-WARN (API): the wire model refuses the run record's words (`fresh`, `stale:transient`)
+    and an unknown stale kind; it accepts each of the API's own words (positive control)."""
     from pydantic import ValidationError
 
-    assert API_STATUS_OF_RECORD_KIND["fresh"] == "current"
     for bad in ({"status": "fresh", "commit": FRESH_COMMIT, "stale_kind": None},
                 {"status": "stale", "commit": STALE_COMMIT, "stale_kind": "outage"},
                 {"status": "stale:transient", "commit": STALE_COMMIT, "stale_kind": None}):
         with pytest.raises(ValidationError):
             _investigation("inv-bad", bad)
-    # Positive control: the same model accepts each of the API's own words.
     for status, stale_kind in CASES:
         assert _investigation("inv-ok", _knowledge(status, stale_kind)).knowledge is not None
+
+
+#: Run record -> what the API serves, per the design (O-STALE record vocabulary, O-WARN wire).
+RECORD_TO_WIRE = [
+    (knowledge_source("fresh"), _knowledge("current")),
+    (knowledge_source("stale", stale_kind="transient"), _knowledge("stale", "transient")),
+    (knowledge_source("stale", stale_kind="operator"), _knowledge("stale", "operator")),
+    (knowledge_source("pinned"), _knowledge("pinned")),
+]
+
+
+@pytest.mark.parametrize(("record", "wire"), RECORD_TO_WIRE,
+                         ids=["fresh", "stale-transient", "stale-operator", "pinned"])
+def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_the_store(
+        record, wire):
+    """O-WARN (API): the store turns the run record's `knowledge_source` into the API's
+    `knowledge` — fresh -> current, stale -> stale + its kind, pinned -> pinned, the commit
+    carried, the raw reason dropped — and the route serves it. Exercised on the stub store.
+
+    ASSUMED SEAM (reported): `InMemoryStore.add_run_knowledge(tenant_id, investigation_id,
+    knowledge_source)` — the stub's seeding entry for a run's record (the `add_*` family; not a
+    port method), applying the store's record->wire rule the port states."""
+    # A placeholder the mapping must replace (whatever `knowledge`'s nullability turns out to be).
+    inv = _investigation("inv-mapped", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
+    client = _client(inv)
+    store = client.app.state.deps.investigations
+    store.add_run_knowledge(_TENANT, inv.investigation_id, record)
+
+    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    assert served.get("knowledge") == wire, (
+        f"O-WARN: the record {record} is served as {served.get('knowledge')}, not {wire}")
+    assert "reason" not in (served.get("knowledge") or {}), served
 
 
 def test_o_warn_api_published_contract_declares_the_knowledge_field():

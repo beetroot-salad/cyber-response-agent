@@ -7,7 +7,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
 import importlib
-import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -98,40 +97,30 @@ def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
 
 
 def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
-               dispatches_lead_zero: bool = False) -> Any:
+               dispatches_lead_zero: bool = False, agent_root: Path | None = None) -> Any:
     """The driver's `RunTenant` for `tenant` (an accepted `Tenant`), built from the real
     pieces and nothing else (#1107): run start's readiness function (`resolve_run_tenant`: the
-    same grants, the lead-zero dispatch identity checked over `defender_dir`'s catalog, default
-    this checkout, only when `dispatches_lead_zero` — the harness says so for exactly the runs
-    the driver dispatches the lead on — and the same refusals, raised as run start raises them),
-    then `resolved_settings` (systems, Elastic view, ticket mapping). A scenario that wants
-    other grants plants a tenant whose `verb-grants.yaml` says so."""
+    same grants, the lead-zero dispatch identity checked over the run's agent root's catalog,
+    only when `dispatches_lead_zero` — the harness says so for exactly the runs the driver
+    dispatches the lead on — and the same refusals, raised as run start raises them), then
+    `resolved_settings` (systems, Elastic view, ticket mapping). A scenario that wants other
+    grants plants a tenant whose `verb-grants.yaml` says so.
+
+    #1108 P4 (O2, O4, flow 3; P-1): the run's knowledge is an agent root — for a run, the agent
+    half of an export (or a run copy of one) — and both the lead-zero catalog and the run's
+    tenant record take it. ASSUMED SEAMS (S0, review round 1): `resolve_run_tenant(settings, *,
+    agent_root=..., dispatches_lead_zero=...)` and `RunTenant(..., agent_root=...)` (whose
+    `.agent` is then that root). `agent_root` defaults to the accepted tenant's own `agent/` for
+    a caller that hands its own tenant; the replay harness hands an export's. Red until P4:
+    there is no pre-P4 fallback (OD13). `defender_dir` is kept only so existing callers keep
+    their call shape; the catalog no longer comes from it (O1: the checkout holds none)."""
+    del defender_dir
     rt = mod("runtime.run_tenant")
+    root = Path(agent_root) if agent_root is not None else Path(tenant.agent)
     ready = rt.resolve_run_tenant(
-        tenant.settings, **_lead_zero_catalog(rt, tenant, defender_dir),
-        dispatches_lead_zero=dispatches_lead_zero)
+        tenant.settings, agent_root=root, dispatches_lead_zero=dispatches_lead_zero)
     return rt.RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
-                        **rt.resolved_settings(tenant))
-
-
-def _lead_zero_catalog(rt: Any, tenant: Any, defender_dir: Path | None) -> dict[str, Any]:
-    """Where run start resolves the lead-zero template: the tenant's own catalog.
-
-    #1108 P4 (O2, O4, flow 3 "lead-zero (templates from the copy's catalog)"): the catalog is
-    a function of an agent root, never of `defender_dir` (`KnowledgePaths.of_defender_dir` is
-    in O4's census). ASSUMED SEAM (S-G2): `resolve_run_tenant(settings, *, agent_root=<agent
-    root>, dispatches_lead_zero=...)`. A replay has no run copy of its own (the harness drives
-    the driver, not `run.py`), so the agent root it hands is the accepted tenant's own
-    `agent/` — fixture content, never the product tree.
-
-    Transitional only: until the seam exists the pre-P4 keyword (`defender_dir`, the checkout's
-    catalog) is passed, so the ~130 suites that build a tenant through this helper keep
-    reaching their own promises instead of all failing on one missing keyword. Once P4 lands
-    the checkout holds no catalog (O1), so the old branch can no longer pass a lead-zero
-    replay and is dead."""
-    if "agent_root" in inspect.signature(rt.resolve_run_tenant).parameters:
-        return {"agent_root": Path(tenant.agent)}
-    return {"defender_dir": defender_dir if defender_dir is not None else DEFENDER}
+                        agent_root=root, **rt.resolved_settings(tenant))
 
 
 def fixture_run_tenant(**kw: Any) -> Any:

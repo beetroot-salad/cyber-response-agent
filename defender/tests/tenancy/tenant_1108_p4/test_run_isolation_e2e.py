@@ -250,3 +250,29 @@ def test_o2_the_tacit_adapter_answers_from_the_run_copys_registry_and_not_anothe
         f"O2: the tacit adapter did not read the run copy's registry: {payloads[0]}")
     assert payloads[1].get("matched") is None, (
         f"O2: another tenant's registry entry answered this run's lookup: {payloads[1]}")
+
+
+# --- R-I6: traversal at the copy's geometry ---------------------------------------------------
+
+@pytest.mark.parametrize("surface", ["typed", "bash"])
+def test_r_i6_reads_climbing_out_of_the_agent_half_are_refused(tenants, tmp_path, monkeypatch,
+                                                                surface):
+    """R-I6: `/agent/..` climbs to whatever sits beside the copy's `agent/` (its `settings/`, the
+    staged token, an owner record). A read of the copy's `settings/` through it is refused and
+    its bytes never reach the model; a listing of `/agent/..` shows the model neither
+    `settings/` nor any other sibling of `agent/`. Positive control: the own-copy lesson read in
+    the same run returns its bytes."""
+    t, _other = tenants
+    climb = f"/agent/../{B.CMDB_ENV}"
+    listing = R.Turn(tool_calls=[("bash", {"command": "ls -a /agent/.."})])
+    main = R.ReplayFn([_read(surface, LESSON_IN_BOX), _read(surface, climb), listing,
+                       R.Turn(text="done")])
+    out = B.drive_main(t, tmp_path, monkeypatch, main=main)
+    assert out.reached, out.text()
+    assert out.rc == 0, out.text()
+    assert B.SEEDED_MARK in main.seen[1], "control: the own-copy read returned its bytes"
+    assert main.seen[2].count("Blocked") == main.seen[1].count("Blocked") + 1, (
+        f"R-I6: {climb} was not refused: {main.seen[2][-400:]}")
+    assert B.MARK_KEY not in "\n".join(main.seen), "R-I6: the copy's settings reached the model"
+    shown = main.seen[3][len(main.seen[2]):]
+    assert "settings" not in shown, f"R-I6: `/agent/..` lists the copy's siblings: {shown[-400:]}"

@@ -471,28 +471,35 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
             "beside it is silently discarded — assert over the source run's own handle instead")
 
 
-def _default_tenant(agent: Path | None = None) -> Any:
-    """The tenant a replay that names none runs as: the committed fixture, set up under the
-    current data root (#1120 H2) — the test's own, or, for a module-scoped drive that runs
-    before it, the session's (conftest's `session_data_root`).
+def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
+    """The tenant a replay that names none runs as, and the agent root the run reads: the
+    agent half of that tenant's PUBLISHED export (#1108 P4, P-1/O11: every reader of tenant
+    knowledge reads an export, made by the one real helper), never the clone's working tree.
 
-    `agent` (#1108 P4, A8: a golden carries the agent content it reads) is a golden's own
-    `agent/` tree: the tenant is then the fixture's settings with THAT tree as its agent half,
-    under an id of its own (one per golden), published for real through the shared helper
-    (`tenant_1108_p4._support`, O11) so the run has an export of it. A second drive over the same
-    golden in one data root reuses it."""
-    if agent is None:
-        return _tenants1106.fixture_tenant()
+    Without `agent`: the committed fixture tenant, set up under the current data root (#1120
+    H2) — the test's own, or, for a module-scoped drive that runs before it, the session's
+    (conftest's `session_data_root`). With `agent` (A8: a golden carries the agent content it
+    reads): the fixture's settings with THAT tree as the agent half, under an id of its own
+    (one per golden). Either is published through `tenant_1108_p4._support.publish_once` on each
+    drive (an unchanged folder republishes the same commit), so an edit a test made to the
+    tenant's folder is what the run reads."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-    from defender.tests.tenancy.tenant_1108_p4._support import place_fixture, publish_once
+    from defender.tests.tenancy.tenant_1108_p4._support import (
+        export_dir,
+        place_fixture,
+        publish_once,
+    )
 
-    agent = Path(agent)
     root = current_data_root()
-    tenant_id = fixture_uuid(f"tenant:golden-agent:{agent.parent.name}")
-    if not (root / tenant_id / "tenant.json").is_file():
-        place_fixture(root, tenant_id, agent=agent)
-        publish_once(root.with_name(f"{root.name}-p4-forge"), root=root, tenant_id=tenant_id)
-    return _tenants1106.accept(root, tenant_id)
+    if agent is None:
+        tenant_id = str(_tenants1106.fixture_tenant().id)
+    else:
+        tenant_id = fixture_uuid(f"tenant:golden-agent:{Path(agent).parent.name}")
+        if not (root / tenant_id / "tenant.json").is_file():
+            place_fixture(root, tenant_id, agent=Path(agent))
+    published = publish_once(root.with_name(f"{root.name}-p4-forge"), root=root,
+                             tenant_id=tenant_id)
+    return published.tenant, export_dir(published.tenant, published.commit) / "agent"
 
 
 def _no_docker_daemon(argv: list[str], **_kw: Any) -> Any:
@@ -616,9 +623,11 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     # scenario that will dispatch the lead (an injected registry, no resume), exactly the runs
     # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
     # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
+    agent_root = None
+    if tenant is None:
+        tenant, agent_root = _default_tenant(agent)
     run_tenant = _tenants1106.run_tenant(
-        tenant if tenant is not None else _default_tenant(agent),
-        defender_dir=tree,
+        tenant, defender_dir=tree, agent_root=agent_root,
         dispatches_lead_zero=resume is None and verbs is not None,
     )
     seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)

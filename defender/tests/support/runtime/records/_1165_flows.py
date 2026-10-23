@@ -115,8 +115,9 @@ def drive_run(  # noqa: PLR0913 — the real driver's injection inputs
             return gather_model
         return main_model
 
+    default, agent_root = replay._default_tenant()
     tenant = _tenants1106.run_tenant(
-        replay._default_tenant(), defender_dir=tree,
+        default, defender_dir=tree, agent_root=agent_root,
         dispatches_lead_zero=resume is None and verbs is not None)
     kwargs: dict[str, Any] = {}
     if state is not None:

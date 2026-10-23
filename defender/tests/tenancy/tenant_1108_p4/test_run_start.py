@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._support import (
     current_commit,
@@ -122,6 +123,8 @@ def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_know
         assert source.get("kind") == "stale", source
         assert source.get("stale_kind") == report.split(":")[1], source
         assert isinstance(source.get("reason"), str), source
+        assert reason in source["reason"], (
+            f"R-S8: the stale record does not carry the child's reason ({reason!r}): {source}")
         assert source["reason"].strip(), (
             f"O-STALE: a stale record must say why: {source}")
 
@@ -227,7 +230,9 @@ def test_o_pin_a_pin_to_a_commit_with_no_export_refuses_before_message_zero(tena
     assert not out.reached, "a pin to an unexported commit reached the box"
     assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
     assert out.refusal is not None, out.text()
+    assert "usage:" not in out.refusal, f"argparse refused the flag, not the run: {out.refusal}"
     assert merged[:7] in out.refusal, out.text()
+    _no_copy_left(tenant)
 
 
 # --- O2: lead-zero templates from the copy's catalog ------------------------------------------
@@ -246,6 +251,7 @@ def test_o2_lead_zero_templates_come_from_the_run_copys_catalog_not_the_product_
         "product catalog")
     assert out.refusal is not None, out.text()
     assert B.CORRELATE_ID in out.refusal, out.text()
+    _no_copy_left(t)
 
 
 # --- O8 parent half ---------------------------------------------------------------------------
@@ -259,10 +265,100 @@ def test_o8_the_run_process_hands_the_publish_child_identifiers_only_and_holds_n
     assert out.reached, out.text()
     ((args, kwargs),) = out.publish_calls
     leaves = B.flat_values([args, kwargs])
-    assert any(str(leaf) == tenant.tenant_id for leaf in leaves), (
-        f"the child was not told which tenant to publish: {args!r} {kwargs!r}")
-    odd = [leaf for leaf in leaves if not isinstance(leaf, (str, os.PathLike, int, type(None)))
-           and type(leaf).__name__ not in ("DataRoot", "TenantId")]
-    assert odd == [], f"O8: the run process handed the publish child objects: {odd!r}"
+    spelled = sorted(str(location_path(leaf)) for leaf in leaves
+                     if not isinstance(leaf, str) or leaf not in kwargs)
+    assert spelled == sorted([tenant.tenant_id, str(Path(tenant.data_root))]), (
+        f"O8: the run process handed the publish child more (or less) than the tenant id and the "
+        f"data root: {args!r} {kwargs!r}")
     assert not [k for k in out.seen[0].environ if B.ISSUER_ENV.search(k)], (
         "P-4/O8: issuer material in the run process's environment")
+
+
+def test_o8_operator_issuer_variables_never_reach_the_runs_environment(tenant, tmp_path,
+                                                                       monkeypatch):
+    """O8/P-4: an operator shell that exported `BAO_TOKEN`/`VAULT_TOKEN` starts a run; the
+    environment run start builds for the run's host lanes (`run_env`, handed to the ticket
+    writer) carries neither variable nor value. Control: an ordinary variable planted the same
+    way does pass."""
+    monkeypatch.setenv("BAO_TOKEN", "s-b-operator-bao-token-77e1")
+    monkeypatch.setenv("VAULT_TOKEN", "s-b-operator-vault-token-91a4")
+    monkeypatch.setenv("S_B_ORDINARY", "s-b-ordinary-value")
+    envs: list[dict] = []
+
+    class Writer:
+        def open_case_ticket(self, *_a: Any, env: Any, **_k: Any) -> None:
+            envs.append(dict(env))
+
+        def record_case_ticket(self, *_a: Any, env: Any, **_k: Any) -> None:
+            envs.append(dict(env))
+
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
+                   argv_extra=("--update-ticket",), ticket_writer=Writer())
+    assert out.reached, out.text()
+    assert envs, "the ticket writer was never handed the run's environment"
+    assert all(env.get("S_B_ORDINARY") == "s-b-ordinary-value" for env in envs), "control"
+    assert B.leaks(("s-b-operator-bao-token-77e1", "s-b-operator-vault-token-91a4"),
+                   run_env=envs) == [], "O8: operator issuer material reached the run's env"
+    assert [k for env in envs for k in env if B.ISSUER_ENV.search(k)] == []
+
+
+def _no_copy_left(t: Any) -> None:
+    """R-S4: nothing of a run is left under `<T>/run-knowledge/` after it ended."""
+    copies = B.run_copies(t)
+    left = sorted(os.listdir(copies)) if copies.is_dir() else []
+    assert left == [], f"R-S4/O-SWEEP: a run copy outlived its run: {left}"
+
+
+@pytest.mark.parametrize("seam", ["ticket_writer", "visualize"])
+def test_r_s4_a_raise_after_the_lifecycle_still_removes_the_run_copy(tenant, tmp_path, seam):
+    """R-S4: the run's post-lifecycle steps (the ticket write-back, the page) raise; the run copy
+    is removed anyway (`finally`)."""
+    class Boom(Exception):
+        pass
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise Boom(seam)
+
+    class Writer:
+        def open_case_ticket(self, *_a: Any, **_k: Any) -> None:
+            pass
+
+        record_case_ticket = staticmethod(boom)
+
+    seams = ({"ticket_writer": Writer()} if seam == "ticket_writer" else {"visualize": boom})
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
+                   argv_extra=("--update-ticket",) if seam == "ticket_writer" else (), **seams)
+    assert out.reached, out.text()
+    assert isinstance(out.raised, Boom), out.text()
+    _no_copy_left(tenant)
+
+
+@pytest.mark.parametrize("value", ["../current", "current", "SHORT"])
+def test_o_pin_knowledge_commit_accepts_only_a_full_commit_id(tenant, tmp_path, value):
+    """O-PIN: `--knowledge-commit` names an export by its full commit id; `../current`,
+    `current` and a short id are refused before the box (never resolved as a path)."""
+    pin = tenant.commit[:7] if value == "SHORT" else value
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
+                   argv_extra=("--knowledge-commit", pin))
+    assert not out.reached, f"--knowledge-commit {pin!r} reached the box"
+    assert out.raised is None, out.text()
+    assert out.refusal is not None, out.text()
+    assert "unrecognized arguments" not in out.refusal, (
+        f"argparse does not know the flag yet: {out.refusal}")
+    _no_copy_left(tenant)
+
+
+def test_r_i5_a_run_never_reads_the_clones_working_tree(tenant, tmp_path):
+    """R-I5 (behavioural complement to the census): after publish, the clone's working tree
+    (`agent/`, `settings/`) is gone (its git objects stay); a run with a stub publish completes
+    from its copy of `current` with the same stamp."""
+    import shutil
+
+    clone = B.clone_dir(tenant)
+    for half in ("agent", "settings"):
+        shutil.rmtree(clone / half)
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
+    assert out.reached, f"the run read the clone's working tree: {out.text()}"
+    assert out.rc == 0, out.text()
+    assert out.seen[0].agent_files == B.export_half(tenant, tenant.commit, "agent")
+    assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}

@@ -16,8 +16,9 @@ from __future__ import annotations
 import ast
 import json
 import re
+from pathlib import Path
 
-from defender.tests.support.shared.contracts._by_path import WORKTREE
+from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE
 from defender.tests.tenancy.tenant_1108_delivery.test_architecture import (
     _agent_facing_text, _folded, non_docstring_nodes, production_trees,
 )
@@ -65,7 +66,8 @@ def test_the_old_spellings_are_recognised_and_the_new_ones_are_not():
         "`{defender_dir}/skills/gather/queries/cmdb`", "$DEFENDER_DIR/skills/cmdb/SKILL.md",
         "defender/skills/<system>/execution.md", "defender/skills/{system}/SKILL.md",
         "see queries/SCHEMA.md", "lessons-actor/", "skills/gather/verb-roster.md",
-        "mounted at /tenant/agent",
+        "mounted at /tenant/agent", 'exec grep -r "${DEFENDER}/lessons"',
+        "LESSONS=$DEFENDER_DIR/lessons-questioner",
     ]
     new = [
         "$DEFENDER_AGENT_DIR/lessons/x.md", "/agent/skills/gather/queries/cmdb/t.md",
@@ -78,11 +80,24 @@ def test_the_old_spellings_are_recognised_and_the_new_ones_are_not():
     assert [(s, old_spellings(s)) for s in new if old_spellings(s)] == []
 
 
+def box_surfaces() -> list[Path]:
+    """What the model's box runs or is policed by, beyond prose (review R-I7): the
+    extension-less command shims it calls (`bin/defender-*`, `defender-lessons` among them),
+    the bash policy, and the box image's Dockerfile."""
+    surfaces = [*sorted((DEFENDER / "bin").glob("defender-*")),
+                DEFENDER / "runtime" / "bash_policy.json", DEFENDER / "box.Dockerfile"]
+    missing = [str(p) for p in surfaces if not p.is_file()]
+    assert not missing, f"box surfaces moved; update this scan: {missing}"
+    assert len(surfaces) > 2, surfaces
+    return surfaces
+
+
 def test_model_facing_text_names_no_product_tree_knowledge_path():
-    """O-TEXT: no text a model may be handed — `SKILL.md`s, gather/handbook/connect pages,
-    learning prompts, and the template and fixture tenants' `agent/` — spells an old path."""
+    """O-TEXT: no text a model may be handed or run — `SKILL.md`s, gather/handbook/connect
+    pages, learning prompts, the template and fixture tenants' `agent/`, the box's command
+    shims, bash policy and image — spells an old path."""
     found: list[str] = []
-    for path in _agent_facing_text():
+    for path in [*_agent_facing_text(), *box_surfaces()]:
         rel = path.relative_to(WORKTREE).as_posix()
         if rel in ALLOWLIST:
             continue

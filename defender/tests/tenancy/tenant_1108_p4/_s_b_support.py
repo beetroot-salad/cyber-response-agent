@@ -16,12 +16,15 @@ ASSUMED SEAMS (reported; the implementer provides them):
 - `run.py --knowledge-commit <sha>` (O-PIN): starts on `<T>/exports/<sha>/`, skips `publish`.
 - The child's in-process entry (O11 "the child is tested in-process against P3's fake forge"):
   `defender.learning.author.version_control.publish_for_run(tenant_id, *, data_root,
-  issuer_config: Path, client=None, identity=None, network_timeout=None) -> str` — accepts the
-  tenant itself from id + data root, reads the tenant row's forge binding and the issuer config
-  file itself (misconfiguration decided before any network call, whatever is injected), logs in
-  through `issuer_login(tenant, issuer_config=...)` (OD4) unless `identity=` is injected (the
-  in-process stand-in for the login, as S-C's `tenant.py update` takes it), opens P3's
-  `TenantDelivery` with `client=` (the forge client) and publishes, and returns the report line.
+  issuer_config: Path, client=None, issuer_transport=None, identity=None,
+  network_timeout=None) -> str` — accepts the tenant itself from id + data root, reads the
+  tenant row's forge binding and the issuer config file itself (misconfiguration decided before
+  any network call, whatever is injected), logs in through `issuer_login(tenant,
+  issuer_config=..., transport=issuer_transport)` (OD4 + S-D's `transport=` seam: the httpx
+  transport its OpenBao client sends through) — or, when `identity=` is injected, uses that
+  identity instead (the in-process stand-in for the login, kept only for cases whose subject is
+  not the login) — opens P3's `TenantDelivery` with `client=` (the forge client) and publishes,
+  and returns the report line.
 """
 from __future__ import annotations
 
@@ -175,13 +178,52 @@ def child_entry() -> Callable[..., str]:
 
 
 def run_child(t: Any, issuer_config: Path, *, identity: Any = None, client: Any = None,
-              **kw: Any) -> str:
-    """The real child, in-process, against P3's fakes: forge client and (unless given) a fresh
-    identity over the issuer fake (`t.vault`, so a fault set there is seen)."""
-    return child_entry()(
-        t.tenant_id, data_root=t.data_root, issuer_config=issuer_config,
-        client=client if client is not None else t.forge.client,
-        identity=identity if identity is not None else t.vault.identity(), **kw)
+              login: Any = None, **kw: Any) -> str:
+    """The real child, in-process, against P3's fakes and the forge client. With `login` (S-D's
+    `AppRoleVault`) the child REALLY logs in from `issuer_config` through `login.transport`;
+    otherwise it is handed `identity` (default: a fresh identity over `t.vault`, so a fault set
+    there is seen)."""
+    seams: dict[str, Any] = {"client": client if client is not None else t.forge.client}
+    if login is not None:
+        seams["issuer_transport"] = login.transport
+    else:
+        seams["identity"] = identity if identity is not None else t.vault.identity()
+    return child_entry()(t.tenant_id, data_root=t.data_root, issuer_config=issuer_config,
+                         **seams, **kw)
+
+
+@contextlib.contextmanager
+def real_login(t: Any, where: Path) -> Iterator[tuple[Any, Path, tuple[str, ...]]]:
+    """S-D's AppRole issuer fake for `t` (its origin then accepts only what that issuer mints),
+    the issuer config file it expects (known `role_id`/`secret_id`) under
+    `<where>/playground-issuer/client/`, and the secret VALUES that must never leave the child:
+    role_id, secret_id, the issuer client token, the minted forge token and the config path."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        CLIENT_TOKEN,
+        ROLE_ID,
+        SECRET_ID,
+        AppRoleVault,
+        write_issuer_config,
+    )
+
+    vault = AppRoleVault(t.tenant_id)
+    accepted = t.server.token
+    t.server.token = vault.minted()
+    config = write_issuer_config(Path(where) / "playground-issuer" / "client")
+    try:
+        yield vault, config, (ROLE_ID, SECRET_ID, CLIENT_TOKEN, vault.minted(), str(config))
+    finally:
+        t.server.token = accepted
+
+
+def leaks(secrets: tuple[str, ...], **channels: Any) -> list[tuple[str, str]]:
+    """`(channel, secret)` for every secret VALUE found in a channel's text (dicts and lists are
+    scanned key and value; anything else by `str`)."""
+    found = []
+    for name, value in channels.items():
+        text = json.dumps(value, default=str) if isinstance(value, (dict, list, tuple)) else str(value)
+        found += [(name, secret) for secret in secrets if secret and secret in text]
+    return found
 
 
 # --- run.main ---------------------------------------------------------------------------------
@@ -398,6 +440,9 @@ from pathlib import Path
 spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 marks = Path(spec["marks"])
 (marks / "started").write_text(repr(time.time()), encoding="utf-8")
+import os
+(marks / "seen.json").write_text(json.dumps({"argv": sys.argv, "env": dict(os.environ)}),
+                                 encoding="utf-8")
 
 from defender.learning.author import version_control as vc
 from defender.tests.tenancy.tenant_1108_delivery._identity import VaultHTTP

@@ -8,6 +8,10 @@ fake (`VaultHTTP`) plus OpenBao's AppRole login as its API documents it.
 ASSUMED SEAMS (the implementer provides them; see each S-D test file's doc):
   author_drain(paths, *, trigger_author=, client=, identity=, issuer_config=, issuer_transport=,
                start_box=, stop_box=)
+  OD16: the drain hands its tick's batch (P3's `Batch`) to every lane entry as `batch=`
+  (`trigger_author(..., batch=)`, `run_lead_author(paths, state, run, *, batch, ...)`,
+  `run_pitfalls(paths, state, *, batch, ...)`); `paths` stays the product-rooted `LoopPaths`
+  (`repo_root` = the product checkout, learning state); the lane's corpus is the batch's draft.
   lead_author_drain(paths, *, run_lead_author=, run_pitfalls=, client=, identity=,
                     issuer_config=, issuer_transport=, start_box=, stop_box=, git_timeout=)
   version_control.issuer_login(tenant, *, issuer_config, transport=None)   # OD4 + transport
@@ -112,32 +116,57 @@ _BUILDERS = {
 }
 
 
+#: The lanes each drain's box mounts writable, relative to the batch's draft root (OD6).
+AUTHOR_DRAFT_LANES = ("agent/lessons", "agent/lessons-questioner")
+LEAD_DRAFT_LANES = ("agent/skills",)
+
+
+def draft_root_of(batch: Any) -> Path:
+    """The draft a batch's lane works in (P3's `Batch.draft_root`)."""
+    return Path(batch.draft_root)
+
+
+def draft_lane_trees(batch: Any, lanes: tuple[str, ...]) -> Any:
+    """The held mounts over `batch`'s draft lanes (`DrainTrees.open`, as S-H's `draft_trees`):
+    the fakes' trees come from the batch the drain handed them, never from `paths` (OD16)."""
+    from defender.learning.core.lane_trees import DrainTrees
+
+    root = draft_root_of(batch)
+    return DrainTrees.open(tuple(root / lane for lane in lanes))
+
+
 class CuratorTrigger:
     """The drain's `trigger_author` seam: runs the REAL curator module for the module it is asked
-    for, as the default step does (the lane's held trees, the real config builder, the module's
-    `run_batch`), with only the model spawn (`cfg.invoke_agent`) replaced by `curators[module]`.
-    A module with no fake is recorded and not run. Records each call's module."""
+    for, as the default step does (held trees over the batch's draft lanes, the real config
+    builder with `batch=`, the module's `run_batch`), with only the model spawn
+    (`cfg.invoke_agent`) replaced by `curators[module]`. A module with no fake is recorded and
+    not run. Records each call's module, its keywords, the batch and the paths it was handed.
+
+    OD16 ASSUMED SEAM: the drain calls `trigger_author(paths, state, channel, threshold_env,
+    module_name, pending_label, *, batch, box, ...)`; the builders take `batch=` (S-H's spelling)."""
 
     def __init__(self, **curators: Any) -> None:
         self.curators = curators
         self.calls: list[str] = []
         self.handed: list[dict] = []
+        self.batches: list[Any] = []
+        self.paths_seen: list[Any] = []
 
     def __call__(self, paths: Any, state: Any, channel: Any, threshold_env: str,
-                 module_name: str, pending_label: str, **kw: Any) -> None:
-        from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-        from defender.learning.core.lane_trees import open_drain_trees
-
+                 module_name: str, pending_label: str, *, batch: Any, **kw: Any) -> None:
         self.calls.append(module_name)
         self.handed.append(dict(kw))
+        self.batches.append(batch)
+        self.paths_seen.append(paths)
         curator = self.curators.get(module_name)
         if curator is None:
             return
         module, builder = _BUILDERS[module_name]
         mod = importlib.import_module(module)
         box = kw.pop("box", None)
-        with open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
-            cfg = getattr(mod, builder)(paths, state=state, trees=trees, box=box, **kw)
+        with draft_lane_trees(batch, AUTHOR_DRAFT_LANES) as trees:
+            cfg = getattr(mod, builder)(paths, state=state, trees=trees, box=box, batch=batch,
+                                        **kw)
             cfg = dataclasses.replace(cfg, invoke_agent=curator)
             mod.run_batch(hold_committed=True, cfg=cfg, box=box)
 
@@ -295,35 +324,40 @@ def write_issuer_config(folder: Path, **overrides: Any) -> Path:
 
 class LeadStep:
     """The drain's `run_lead_author` seam: the REAL lead author for one served run
-    (`lead_author.run_under_held_queue_lock`, over the lane's held trees and the real
-    `build_lead_author_deps`), with only the run's extraction (`deps.extract`, `deps.build_handoff`,
-    `deps.discover_system_drafts`) and the model spawn (`deps.invoke_agent`) replaced. Draft
-    synthesis (`deps.synthesize`) stays real.
+    (`lead_author.run_under_held_queue_lock`, over held trees on the batch's draft skills lane and
+    the real `build_lead_author_deps(..., batch=)`), with only the run's extraction
+    (`deps.extract`, `deps.build_handoff`, `deps.discover_system_drafts`) and the model spawn
+    (`deps.invoke_agent`) replaced. Draft synthesis (`deps.synthesize`) stays real.
 
     `executed[run_name]` is the run's extracted leads; `edits[run_name]` maps a path under the
-    lane's skills dir (`deps.paths.skills_dir`, the draft's in P4) to the text the fake model
-    appends there; `rc[run_name]` is what the spawn returns after writing (default 0). A
-    non-zero rc is raised as `LeadAuthorError`, as the default step does.
+    draft's skills lane (`<batch.draft_root>/agent/skills`, taken from the batch the drain
+    handed — `paths` stays product-rooted, OD16) to the text the fake model appends there;
+    `rc[run_name]` is what the spawn returns after writing (default 0). A non-zero rc is raised
+    as `LeadAuthorError`, as the default step does. Records each call's batch and paths.
 
-    ASSUMED SEAM: `run_under_held_queue_lock(run, *, paths, state, trees, box, on_done,
-    git_timeout=, deps=None)` — `deps` given are used as built."""
+    ASSUMED SEAMS: `run_lead_author(paths, state, run, *, batch, box, on_done, ...)` (OD16);
+    `build_lead_author_deps(paths, *, state, trees, batch)` (S-H);
+    `run_under_held_queue_lock(run, *, paths, state, trees, box, on_done, git_timeout=,
+    deps=None)` — `deps` given are used as built."""
 
     def __init__(self, *, executed: dict, edits: dict, rc: dict | None = None) -> None:
         self.executed, self.edits, self.rc = executed, edits, rc or {}
         self.served: list[str] = []
+        self.batches: list[Any] = []
+        self.paths_seen: list[Any] = []
 
-    def __call__(self, paths: Any, state: Any, run: Any, *, box: Any = None,
+    def __call__(self, paths: Any, state: Any, run: Any, *, batch: Any, box: Any = None,
                  on_done: Any = None, **kw: Any) -> None:
-        from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-        from defender.learning.core.lane_trees import open_drain_trees
         from defender.learning.leads import lead_author as la
         from defender.learning.leads.lead_extraction import LeadAuthorError
 
         name = Path(run.run_dir).name
         self.served.append(name)
-        with open_drain_trees(paths, LEAD_AUTHOR_DRAIN_LABEL) as trees:
-            deps = la.build_lead_author_deps(paths, state=state, trees=trees)
-            skills_dir = Path(deps.paths.skills_dir)
+        self.batches.append(batch)
+        self.paths_seen.append(paths)
+        skills_dir = draft_root_of(batch) / LEAD_DRAFT_LANES[0]
+        with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
+            deps = la.build_lead_author_deps(paths, state=state, trees=trees, batch=batch)
 
             def spawn(_run_dir: Any, _handoffs: Any, _drafts: Any, *, box: Any = None) -> int:
                 for rel, text in self.edits.get(name, {}).items():
@@ -346,31 +380,41 @@ class LeadStep:
 class PitfallsStep:
     """The drain's `run_pitfalls` seam: the REAL pitfalls curation (`run_pitfalls` over the
     lane's held trees) with only its model spawn (`invoke=`) replaced by one that appends
-    `bullet` to each handed-off surface (`handoff["path"]`, relative to the root the curator
-    hands the spawn as `repo_root` — the draft's in P4)."""
+    `bullet` to each handed-off surface (`handoff["path"]`, `agent/skills/...` (OD6), under the
+    draft root of the batch the drain handed — never a draft-rooted `paths`, OD16). Records the
+    handoffs, the `repo_root` the curator handed the spawn, and each call's batch and paths.
+
+    ASSUMED SEAMS: `run_pitfalls(paths, state, *, batch, box, on_curated, ...)` as the drain's
+    step (OD16); `pitfalls_curator.run_pitfalls(*, paths, state, trees, batch, invoke, ...)` (S-H)."""
 
     def __init__(self, bullet: str) -> None:
         self.bullet = bullet
         self.handoffs: list[list[dict]] = []
+        self.repo_roots: list[Path] = []
+        self.batches: list[Any] = []
+        self.paths_seen: list[Any] = []
 
-    def __call__(self, paths: Any, state: Any, *, box: Any = None, on_curated: Any = None,
-                 **kw: Any) -> int:
-        from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-        from defender.learning.core.lane_trees import open_drain_trees
+    def __call__(self, paths: Any, state: Any, *, batch: Any, box: Any = None,
+                 on_curated: Any = None, **kw: Any) -> int:
         from defender.learning.leads import pitfalls_curator
+
+        self.batches.append(batch)
+        self.paths_seen.append(paths)
+        root = draft_root_of(batch)
 
         def invoke(handoffs: list[dict], *, state: Any, repo_root: Any, box: Any = None) -> int:
             self.handoffs.append(list(handoffs))
+            self.repo_roots.append(Path(repo_root))
             for h in handoffs:
-                target = Path(repo_root) / h["path"]
+                target = root / h["path"]
                 target.write_text(target.read_text(encoding="utf-8").rstrip("\n") + "\n"
                                   + self.bullet + "\n", encoding="utf-8")
             return 0
 
-        with open_drain_trees(paths, LEAD_AUTHOR_DRAIN_LABEL) as trees:
+        with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
             return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=trees,
-                                                 invoke=invoke, box=box, on_curated=on_curated,
-                                                 **kw)
+                                                 batch=batch, invoke=invoke, box=box,
+                                                 on_curated=on_curated, **kw)
 
 
 def executed_lead(query_id: str, *, system: str = "cmdb", verb: str = "get-host",

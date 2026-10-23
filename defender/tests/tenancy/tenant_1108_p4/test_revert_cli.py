@@ -19,13 +19,19 @@ from __future__ import annotations
 import fcntl
 import importlib
 import logging
+from pathlib import Path
 from typing import Any
 
 from defender._git import REPO_ROOT
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._support import merged_agent_lesson
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, git
-from defender.tests.tenancy.tenant_1108_p4._drain_support import critical_text, remote_branches, touched
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    critical_text,
+    product_repo,
+    remote_branches,
+    touched,
+)
 
 LESSON = "p4-reverted"
 LESSON_PATH = f"agent/lessons/{LESSON}.md"
@@ -42,10 +48,23 @@ def _revert(t: Any, name: str) -> int:
                        identity=t.vault.identity())
 
 
-def _product_refs() -> str:
+def _product_refs(repo: Path = REPO_ROOT) -> str:
     """The product checkout's lesson-branch refs (where the legacy revert pushed a branch)."""
-    return git(REPO_ROOT, "for-each-ref", "--format=%(refname) %(objectname)",
+    return git(repo, "for-each-ref", "--format=%(refname) %(objectname)",
                "refs/heads/lessons/", "refs/remotes/origin/lessons/")
+
+
+def test_control_the_product_refs_channel_sees_a_lesson_branch(tmp_path):
+    """R-L6 control for `_product_refs`: on a scratch product checkout (never the real one, whose
+    refs are shared) it reads nothing at first and sees a `lessons/` branch, and a remote-tracking
+    `origin/lessons/` ref, once one is made — the shape the legacy revert left."""
+    repo = product_repo(tmp_path)
+    assert _product_refs(repo) == ""
+    git(repo, "branch", "lessons/revert-p4")
+    head = git(repo, "rev-parse", "HEAD")
+    assert _product_refs(repo) == f"refs/heads/lessons/revert-p4 {head}"
+    git(repo, "update-ref", "refs/remotes/origin/lessons/revert-p4", head)
+    assert "refs/remotes/origin/lessons/revert-p4" in _product_refs(repo)
 
 
 def test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson(

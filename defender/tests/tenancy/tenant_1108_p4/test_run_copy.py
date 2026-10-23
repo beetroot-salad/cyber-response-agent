@@ -87,13 +87,15 @@ def _exec_cats(docker: RecordingDocker) -> list[Path]:
 # --- O-A: the mount set and the bind proof ----------------------------------------------------
 
 def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_token_back(
-        tenant, tmp_path, boxed_only):
+        tenant, tmp_path, boxed_only, monkeypatch):
     """O-A: in the box, `/agent` (DEFENDER_AGENT_DIR) resolves into the run copy's `agent/`
     with the export's bytes; no mount source exposes the copy's `settings/`, the clone, or the
     exports; startup read back a token planted in the copy outside `agent/`; nothing reads a
     `.tenant-id` in the box (P2's check retired)."""
     from defender.runtime.model_view import MODEL_AGENT
 
+    monkeypatch.setenv("BAO_TOKEN", "s-b-operator-bao-token-77e1")
+    monkeypatch.setenv("VAULT_TOKEN", "s-b-operator-vault-token-91a4")
     docker, investigation = RecordingDocker(), _Investigation()
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    lifecycle=_boxed_lifecycle(docker, investigation))
@@ -120,6 +122,9 @@ def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_tok
     assert tokens, f"O-A: startup never read a token back from the run copy: {cats}"
     assert not [c for c in docker.calls if any(".tenant-id" in part for part in c)], (
         "O-A: the retired in-box `.tenant-id` check still runs")
+    # O8/P-4: operator issuer variables never reach the box (control: the env is read above).
+    assert B.leaks(("s-b-operator-bao-token-77e1", "s-b-operator-vault-token-91a4"),
+                   create_argv=docker.create_argv) == []
 
 
 class _OtherCopyDocker(RecordingDocker):
@@ -150,6 +155,7 @@ def test_o_a_a_box_bound_to_another_copy_refuses_before_message_zero(tenant, tmp
     assert out.reached, f"the run never got to its box: {out.text()}"
     assert investigation.calls == 0, "O-A: a box bound to another copy got past startup"
     assert out.rc != 0, out.text()
+    assert not _copy_root(tenant, out).exists(), "R-S4: a refused box start left the run copy"
 
 
 def test_o8_the_issuer_client_config_lies_under_no_box_mount_source(tenant, tmp_path,
@@ -189,6 +195,26 @@ def test_o2_current_advanced_mid_run_changes_nothing_the_run_reads(tenant, tmp_p
     assert after["settings"] == seen.settings_files, "O-B: the run's settings changed under it"
     assert B.SEEDED_MARK in after["agent"][B.LESSON_REL].decode()
     assert after["stamp"] == seen.stamp
+
+
+def test_f_hardlink_the_run_copy_shares_no_inode_with_its_export(tenant, tmp_path):
+    """F-HARDLINK: the run copy is a copy — no file of it is the export's own inode."""
+    def inodes(seen: B.Seen) -> list[str]:
+        export = export_dir(tenant.tenant, tenant.commit)
+        shared = []
+        for half, root in (("agent", seen.agent), ("settings", seen.settings)):
+            for path in Path(root).rglob("*"):
+                if path.is_file():
+                    twin = export / half / path.relative_to(root)
+                    if twin.exists() and os.stat(twin).st_ino == os.stat(path).st_ino:
+                        shared.append(f"{half}/{path.relative_to(root)}")
+        return shared
+
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
+                   during=inodes)
+    assert out.reached, out.text()
+    assert out.seen[0].agent_files, "premise: the copy holds files"
+    assert out.seen[0].during == [], f"the run copy hard-links its export: {out.seen[0].during}"
 
 
 # --- O-SWEEP: owner, lifetime, sweep ----------------------------------------------------------
@@ -253,6 +279,14 @@ _ORPHAN_SCRIPT = textwrap.dedent("""
 """)
 
 
+@pytest.fixture
+def issuer_config(tmp_path, tenant):
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
+
+    bind_forge(tenant)
+    return B.write_issuer_config(tmp_path / "operator")
+
+
 def test_o_sweep_a_killed_runs_copy_is_swept_by_the_next_publish(tenant, tmp_path):
     """O-SWEEP: a run process SIGKILLed mid-run leaves its copy (its `finally` never ran); the
     next publish, under the tenant lock, sees the owner dead and removes it."""
@@ -284,3 +318,49 @@ def test_o_sweep_a_killed_runs_copy_is_swept_by_the_next_publish(tenant, tmp_pat
     tenant.publish()
 
     assert not orphan.exists(), "O-SWEEP: publish did not sweep a dead owner's run copy"
+
+
+def _start_run_process(tenant, tmp_path) -> tuple[subprocess.Popen, Path]:
+    ready = tmp_path / "ready"
+    script = tmp_path / "orphan_run.py"
+    script.write_text(_ORPHAN_SCRIPT, encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+    proc = subprocess.Popen(  # noqa: S603 — a test's own child run process
+        [sys.executable, str(script), str(B.plant_alert(tmp_path / "alert")), tenant.tenant_id,
+         tenant.commit, str(ready)], env=env, cwd=str(WORKTREE),
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    deadline = time.monotonic() + 120
+    while not ready.exists() and proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if not ready.exists():
+        proc.kill()
+        proc.wait(timeout=30)
+        raise AssertionError(
+            f"the child run never reached its lifecycle (rc={proc.poll()}): "
+            f"{proc.stderr.read().decode(errors='replace')[-2000:]}")
+    return proc, B.run_copies(tenant) / Path(ready.read_text(encoding="utf-8")).name
+
+
+def test_r_s5_a_live_run_in_another_process_keeps_its_copy_and_a_locked_out_publish_sweeps_nothing(
+        tenant, tmp_path, issuer_config):
+    """R-S5/O-SWEEP: a run LIVE in another process keeps its copy across a publish (its owner is
+    alive, and is not the publisher). Killed, its copy stays while a drain holds the tenant lock
+    — the child cannot sweep (it reports `stale:transient`) — and the next publish under the
+    lock sweeps it."""
+    from defender.learning.author.version_control import tenant_lock
+
+    proc, copy = _start_run_process(tenant, tmp_path)
+    try:
+        assert copy.is_dir(), "premise: the live run's copy exists"
+        tenant.publish()
+        assert copy.is_dir(), "O-SWEEP: a publish swept a LIVE run's copy (another process)"
+    finally:
+        proc.send_signal(signal.SIGKILL)
+        proc.wait(timeout=30)
+    tenant.merge(B.MERGE_FILES)  # origin ahead, so a locked-out child cannot be fresh (O7b)
+    with tenant_lock(tenant.tenant):
+        line = B.run_child(tenant, issuer_config)
+        assert copy.is_dir(), "O-SWEEP: a sweep ran without the tenant lock"
+    assert B.outcome_class(line) == "stale:transient", line
+    tenant.publish()
+    assert not copy.exists(), "O-SWEEP: publish did not sweep the dead owner's copy"

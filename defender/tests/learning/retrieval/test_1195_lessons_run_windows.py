@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from pydantic_ai.exceptions import ModelRetry
 
@@ -857,6 +858,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
     _p4_caught,
     drain_paths,
     product_repo,
+    product_state,
     remote_branches,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import (  # noqa: E402
@@ -901,6 +903,7 @@ class TenantTick:
     triggered: list[tuple[str, Any]] = dataclasses.field(default_factory=list)
     daemon: X.FakeDaemon | None = None
     head: str = ""
+    product_before: dict = dataclasses.field(default_factory=dict)
 
     def trigger(self, paths: LoopPaths, state: Any, _channel: Any, _threshold_env: str,
                 module_name: str, _pending_label: str, *, box: Any = None, **kw: Any) -> None:
@@ -941,7 +944,7 @@ def _tenant_tick(  # noqa: PLR0913 — the scene's knobs, all keyword
     S.seed(paths, QUESTIONER_FINDINGS, [S.world_row(i) for i in q_rows])
     return TenantTick(t=t, product=product, paths=paths, log=log,
                       curators={"author": curator, "questioner_curator": q_curator},
-                      head=_git.git_head_sha(product))
+                      head=_git.git_head_sha(product), product_before=product_state(product))
 
 
 def _delivered(tt: TenantTick) -> dict[str, str]:
@@ -961,6 +964,38 @@ def _nothing_delivered(tt: TenantTick) -> None:
     assert _delivered(tt) == {}, f"a branch reached the tenant origin: {_delivered(tt)}"
     assert tt.t.forge.creates == [], f"a PR was opened: {tt.t.forge.creates}"
     assert _git.git_head_sha(tt.product) == tt.head, "the product checkout moved"
+    assert product_state(tt.product) == tt.product_before, "the product checkout changed"
+
+
+def test_control_nothing_delivered_sees_each_delivery_channel(tmp_path: Path, tenant_of: Any):
+    """R-L6 control for `_nothing_delivered`: on an untouched scene it passes, and it fails on
+    each channel once something is planted there — a file in the product checkout's `defender/`,
+    a product branch, a `lessons/` branch on the tenant origin, a PR request on the forge."""
+    tt = _tenant_tick(tmp_path, tenant_of, [], curator=S.FakeCurator(writes={}),
+                      q_curator=S.FakeCurator(writes={}))
+    _nothing_delivered(tt)
+
+    planted = tt.product / "defender" / "lessons" / "planted.md"
+    planted.write_text("planted\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="product checkout changed"):
+        _nothing_delivered(tt)
+    planted.unlink()
+    p4_git(tt.product, "branch", "lessons/planted")
+    with pytest.raises(AssertionError, match="product checkout changed"):
+        _nothing_delivered(tt)
+    p4_git(tt.product, "branch", "-D", "lessons/planted")
+    _nothing_delivered(tt)
+
+    p4_git(tt.t.remote, "branch", "lessons/planted", "main")
+    with pytest.raises(AssertionError, match="reached the tenant origin"):
+        _nothing_delivered(tt)
+    p4_git(tt.t.remote, "branch", "-D", "lessons/planted")
+    _nothing_delivered(tt)
+
+    tt.t.forge.requests.append(httpx.Request(
+        "POST", "http://forge.invalid/pulls", json={"head": "lessons/planted", "base": "main"}))
+    with pytest.raises(AssertionError, match="a PR was opened"):
+        _nothing_delivered(tt)
 
 
 LESSON_REL = "agent/lessons/a.md"

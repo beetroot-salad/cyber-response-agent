@@ -52,19 +52,28 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     fresh_process_env,
 )
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    LEAD_PREFIX,
     LESSON_NAME,
     LESSON_PATH,
+    LESSONS_PREFIX,
     BoxSpy,
     CuratorTrigger,
+    LeadStep,
+    PitfallsStep,
     author_drain,
     critical_text,
     draft_entries,
     drafts_dir,
     drain_paths,
+    drains,
+    executed_lead,
+    lead_author_drain,
     product_repo,
     product_state,
     queue,
+    queued_run,
     remote_branches,
+    run_stage,
     touched,
     under,
 )
@@ -256,47 +265,83 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
 # OD8: the writer lease (amendment 3 keeps the `state=open` listing; D-fork)
 # ---------------------------------------------------------------------------------------------
 
-#: An open PR row on the tenant forge, by who holds it: our own repository on this lane, a fork
-#: on this lane's prefix, a row whose head repository is gone (D-fork), our own repository on
-#: the OTHER lane's prefix.
+#: An open PR row on the tenant forge, by who holds it, for a drain whose lane prefix is `own` and
+#: whose other lane's prefix is `other`: our own repository on this lane, a fork on this lane's
+#: prefix, a row whose head repository is gone (D-fork), our own repository on the OTHER lane.
 _LEASE_ROWS = {
-    "our-open-lessons-pr": lambda: pr_row(3, "lessons/earlier-batch", repo=OURS),
-    "fork-pr": lambda: pr_row(3, "lessons/earlier-batch", repo=FORK),
-    "no-head-repository": lambda: pr_row(3, "lessons/earlier-batch", repo=None),
-    "our-open-lead-author-pr": lambda: pr_row(3, "lead-author/earlier-batch", repo=OURS),
+    "ours-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=OURS),
+    "fork-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=FORK),
+    "no-head-repository": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=None),
+    "ours-on-the-other-lane": lambda _own, other: pr_row(3, f"{other}earlier-batch", repo=OURS),
 }
+#: The lead lane's model edit for a tick that delivers (an existing catalog template).
+_LEAD_TEMPLATE = "gather/queries/cmdb/host-owner.md"
+
+
+def _lead_tick(t: Any, tmp_path: Path, monkeypatch: Any, label: str) -> tuple[Any, Any, LeadStep]:
+    """The lead lane awake on one queued run, the REAL lead author editing one template (as the
+    writers' F-LEAD case): `(paths, run name, step)`. The pitfalls and lift knobs stay shut."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+    run = queued_run(t, paths, label).name
+    step = LeadStep(executed={run: [executed_lead("cmdb.owner-by-tag")]},
+                    edits={run: {_LEAD_TEMPLATE: "\nAlso check the asset tag.\n"}})
+    return paths, run, step
+
+
+def _queue_file(paths: Any, case: str) -> Path:
+    return Path(location_path(paths.state_root)) / "author-queue" / f"{case}.json"
 
 
 @pytest.mark.parametrize("holder", sorted(_LEASE_ROWS))
+@pytest.mark.parametrize("drain", ["author", "lead"])
 def test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does(
-        p4_tenant, tmp_path, thresholds, caplog, holder):
-    """OD8 (amendment 3 C1, D-fork): an open PR of OUR tenant repository on this lane's branch
-    prefix holds the lane's writer lease: the tick starts no batch — no curator, box, draft,
-    branch or PR — and leaves its row queued. A fork's PR on the same prefix, a PR row with no
-    head repository, and our own open PR on the other lane's prefix hold nothing: the tick
-    serves and opens its PR (positive controls on the same channels)."""
+        p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain, holder):
+    """OD8 (amendment 3 C1, D-fork), on both drains (R-L3): an open PR of OUR tenant repository
+    on this lane's branch prefix (`lessons/` for the author drain, `lead-author/` for the lead
+    drain) holds the lane's writer lease: the tick starts no batch — no curator or lead step,
+    box, draft, branch or PR — and leaves its row queued. A fork's PR on the same prefix, a PR
+    row with no head repository, and our own open PR on the other lane's prefix hold nothing:
+    the tick serves and opens its PR (positive controls on the same channels)."""
     t = p4_tenant
     bind_forge(t)
-    t.forge.add_pr(_LEASE_ROWS[holder]())
-    paths = drain_paths(t, product_repo(tmp_path))
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})
-    trigger, box = CuratorTrigger(author=curator), BoxSpy()
+    own, other = (LESSONS_PREFIX, LEAD_PREFIX) if drain == "author" else (LEAD_PREFIX, LESSONS_PREFIX)
+    t.forge.add_pr(_LEASE_ROWS[holder](own, other))
+    box = BoxSpy()
+    if drain == "author":
+        paths = drain_paths(t, product_repo(tmp_path))
+        queue(paths, [S.finding_row("f1", run_id="f1")])
+        curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})
+        trigger = CuratorTrigger(author=curator)
+        with caplog.at_level(logging.INFO):
+            rc = author_drain(t, paths, trigger=trigger, box=box)
+        ran = trigger.calls
 
-    with caplog.at_level(logging.INFO):
-        rc = author_drain(t, paths, trigger=trigger, box=box)
+        def still_queued() -> bool:
+            return [r["finding_id"] for r in S.pending(paths, S.channel_of("findings"))] == ["f1"]
+    else:
+        paths, _run, step = _lead_tick(t, tmp_path, monkeypatch, "p4-lease")
+        with caplog.at_level(logging.INFO):
+            rc = lead_author_drain(t, paths, box=box, run_lead_author=step,
+                                   run_pitfalls=lambda *_a, **_k: 0)
+        ran = step.served
+
+        def still_queued() -> bool:
+            return _queue_file(paths, "case-p4-lease").is_file()
 
     assert rc == 0, critical_text(caplog)
-    if holder == "our-open-lessons-pr":
-        assert trigger.calls == []
+    if holder == "ours-on-this-lane":
+        assert ran == []
         assert box.requests == []
         assert draft_entries(t) == []
-        assert remote_branches(t.remote) == {}
+        assert remote_branches(t.remote, own) == {}
         assert t.forge.creates == []
-        assert [r["finding_id"] for r in S.pending(paths, S.channel_of("findings"))] == ["f1"]
+        assert still_queued()
     else:
-        (branch, _tip), = remote_branches(t.remote).items()
+        (branch, _tip), = remote_branches(t.remote, own).items()
         assert [c["head"] for c in t.forge.creates] == [branch]
+        assert ran
 
 
 # ---------------------------------------------------------------------------------------------
@@ -392,3 +437,211 @@ def test_o_sweep_a_draft_never_shows_an_unowned_moment_to_a_publisher(p4_tenant)
 
     assert draft_entries(t) == ["fresh"]
     assert batch.draft_root.is_dir()
+
+
+# ---------------------------------------------------------------------------------------------
+# OD16 (R-L1): what the drain hands its lane entries
+# ---------------------------------------------------------------------------------------------
+
+
+def _one_batch(batches: list[Any]) -> Any:
+    """The one batch every call of a tick was handed (the same object each time)."""
+    assert batches, "no lane entry was called"
+    assert all(b is batches[0] for b in batches), batches
+    return batches[0]
+
+
+def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_rooted_paths(
+        p4_tenant, tmp_path, thresholds, caplog):
+    """OD16 (R-L1): every `trigger_author` call of one author tick receives `batch=` — the batch
+    of THIS tick: its draft is a folder of `<T>/drafts/`, the draft the box mounted as `staged`,
+    and its branch is the one the tick pushed — and the `paths` the drain was given, still rooted
+    at the product checkout (the corpus is the draft's, never a draft-rooted `LoopPaths`)."""
+    t = p4_tenant
+    bind_forge(t)
+    product = product_repo(tmp_path)
+    paths = drain_paths(t, product)
+    queue(paths, [S.finding_row("f1", run_id="f1")])
+    trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+
+    with caplog.at_level(logging.INFO):
+        rc = author_drain(t, paths, trigger=trigger, box=box)
+
+    assert rc == 0, critical_text(caplog)
+    assert trigger.calls == ["author", "questioner_curator"], trigger.calls
+    batch = _one_batch(trigger.batches)
+    draft = Path(batch.draft_root)
+    assert draft.parent == drafts_dir(t), draft
+    [staged] = [Path(m.source) for m in box.requests[0].mounts if m.kind == "staged"]
+    assert staged == draft, (staged, draft)
+    assert list(remote_branches(t.remote)) == [batch.branch]
+    assert all(p is paths for p in trigger.paths_seen), trigger.paths_seen
+    assert Path(paths.repo_root) == product
+    assert not draft.is_relative_to(product)
+
+
+def test_od16_the_lead_drain_hands_both_steps_the_ticks_batch_and_product_rooted_paths(
+        p4_tenant, tmp_path, monkeypatch, caplog):
+    """OD16 (R-L1): one lead tick serving a queued run AND curating a pitfall hands both steps
+    (`run_lead_author`, `run_pitfalls`) the same `batch=` — the tick's: a draft under
+    `<T>/drafts/`, the box's `staged` mount, the `lead-author/` branch it pushed — and the
+    product-rooted `paths`; the pitfalls curator hands its spawn that batch's draft root."""
+    from defender.learning.core.state import PITFALLS
+    from defender.tests.support.learning.core._declared870 import shim_row
+
+    t = p4_tenant
+    bind_forge(t)
+    paths, run, step = _lead_tick(t, tmp_path, monkeypatch, "p4-od16")
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    queue(paths, [shim_row("p4-run:1")], channel=PITFALLS)
+    pitfalls, box = PitfallsStep("- **Name the unnested column.**"), BoxSpy()
+
+    with caplog.at_level(logging.INFO):
+        rc = lead_author_drain(t, paths, box=box, run_lead_author=step, run_pitfalls=pitfalls)
+
+    assert rc == 0, critical_text(caplog)
+    assert step.served == [run]
+    batch = _one_batch(step.batches + pitfalls.batches)
+    assert pitfalls.batches, "the pitfalls step was never called"
+    draft = Path(batch.draft_root)
+    assert draft.parent == drafts_dir(t), draft
+    [staged] = [Path(m.source) for m in box.requests[0].mounts if m.kind == "staged"]
+    assert staged == draft
+    assert list(remote_branches(t.remote, LEAD_PREFIX)) == [batch.branch]
+    assert all(p is paths for p in step.paths_seen + pitfalls.paths_seen)
+    assert pitfalls.repo_roots, "the pitfalls curator never spawned"
+    assert all(r == draft for r in pitfalls.repo_roots), pitfalls.repo_roots
+    assert not draft.is_relative_to(Path(paths.repo_root))
+
+
+# ---------------------------------------------------------------------------------------------
+# R-L4: a fault discards the draft
+# ---------------------------------------------------------------------------------------------
+
+
+class _FaultingStart(BoxSpy):
+    """`BoxSpy` whose start raises `BoxFault` after noting the drafts present at the call."""
+
+    def __init__(self, t: Any) -> None:
+        super().__init__()
+        self.t = t
+        self.drafts_at_start: list[list[str]] = []
+
+    def start(self, request: Any, **_kw: Any) -> Any:
+        from defender.execution.box_codec import BoxFault
+
+        self.requests.append(request)
+        self.drafts_at_start.append(draft_entries(self.t))
+        raise BoxFault("p4: the box did not start")
+
+
+def _fault(kind: str) -> BaseException:
+    from defender.execution.box_codec import BoxFault
+    from defender.learning.leads.lead_extraction import LeadAuthorError
+
+    return BoxFault("p4: the box went away mid-batch") if kind == "mid-batch-box-fault" \
+        else LeadAuthorError("p4: the curator failed")
+
+
+@pytest.mark.parametrize("fault", ["box-start-fault", "mid-batch-box-fault", "curator-fault"])
+@pytest.mark.parametrize("drain", ["author", "lead"])
+def test_r_l4_a_faulted_tick_leaves_no_draft_behind(
+        p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain, fault):
+    """R-L4 (flow 4 `discard()`): a tick whose box fails to start, whose box faults mid-batch,
+    or whose curator / lead step fails leaves nothing under `<T>/drafts/`, on both drains.
+    Positive controls on the same channel: the draft was there while the tick ran (at the box's
+    start, or inside the failing step)."""
+    t = p4_tenant
+    bind_forge(t)
+    seen: list[list[str]] = []
+    box: BoxSpy = _FaultingStart(t) if fault == "box-start-fault" else BoxSpy()
+
+    def failing(*_a: Any, **_k: Any) -> None:
+        seen.append(draft_entries(t))
+        raise _fault(fault)
+
+    if drain == "author":
+        paths = drain_paths(t, product_repo(tmp_path))
+        queue(paths, [S.finding_row("f1", run_id="f1")])
+        curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")}, also=failing)
+        with caplog.at_level(logging.INFO):
+            author_drain(t, paths, trigger=CuratorTrigger(author=curator), box=box)
+    else:
+        paths, _run, _step = _lead_tick(t, tmp_path, monkeypatch, "p4-fault")
+        with caplog.at_level(logging.INFO):
+            lead_author_drain(t, paths, box=box, run_lead_author=failing,
+                              run_pitfalls=lambda *_a, **_k: 0)
+
+    if fault == "box-start-fault":
+        assert box.drafts_at_start, "the box was never started"
+        assert all(box.drafts_at_start), f"no draft at the box's start: {box.drafts_at_start}"
+        assert seen == [], "a lane step ran without a box"
+    else:
+        assert seen, "the failing step never ran"
+        assert all(seen), f"the failing step saw no draft: {seen}"
+    assert draft_entries(t) == [], draft_entries(t)
+
+
+# ---------------------------------------------------------------------------------------------
+# R-I3: the drains' default box start never falls back to an unsandboxed lane
+# ---------------------------------------------------------------------------------------------
+
+
+def _default_box_tick(t: Any, tmp_path: Path, monkeypatch: Any, drain: str) -> tuple[int, list]:
+    """One tick through the REAL drain entry with NO `start_box`/`stop_box` seam (production's
+    default box start), the issuer and forge seams as every case: `(rc, the lane calls made)`."""
+    ran: list[str] = []
+    seams = {"client": t.forge.client, "identity": t.vault.identity()}
+    if drain == "author":
+        paths = drain_paths(t, product_repo(tmp_path))
+        queue(paths, [S.finding_row("f1", run_id="f1")])
+
+        def trigger(*_a: Any, **_k: Any) -> None:
+            ran.append("curator")
+
+        return run_stage(lambda: drains().author_drain(paths, trigger_author=trigger, **seams)), ran
+    paths, _run, _step = _lead_tick(t, tmp_path, monkeypatch, "p4-sandbox")
+
+    def lead(*_a: Any, **_k: Any) -> None:
+        ran.append("lead")
+
+    def pitfalls(*_a: Any, **_k: Any) -> int:
+        ran.append("pitfalls")
+        return 0
+
+    return run_stage(lambda: drains().lead_author_drain(
+        paths, run_lead_author=lead, run_pitfalls=pitfalls, **seams)), ran
+
+
+@pytest.mark.parametrize("drain", ["author", "lead"])
+def test_r_i3_a_drain_with_no_daemon_refuses_even_under_the_unsandboxed_opt_out(
+        p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain):
+    """R-I3 (C3 at the drain): with production's default box start, the operator opt-out
+    (`DEFENDER_ALLOW_UNSANDBOXED=1`) and no reachable daemon (`DOCKER_HOST` at an absent socket),
+    the drain refuses — exit 2, no curator or lead step ran, no draft left — never a host
+    executor. Positive control: the same tick over a fake daemon (`_box1195.FakeDaemon` as the
+    `docker` on `PATH`) gets past the box start and runs its lane."""
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+
+    t = p4_tenant
+    bind_forge(t)
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    monkeypatch.setenv("DOCKER_HOST", f"unix://{tmp_path / 'no-daemon.sock'}")
+
+    with caplog.at_level(logging.INFO):
+        rc, ran = _default_box_tick(t, tmp_path / "down", monkeypatch, drain)
+
+    assert rc == 2, critical_text(caplog)
+    assert ran == [], ran
+    assert draft_entries(t) == []
+    assert remote_branches(t.remote, LESSONS_PREFIX if drain == "author" else LEAD_PREFIX) == {}
+
+    daemon = FakeDaemon(tmp_path / "daemon")
+    daemon.install(monkeypatch)
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        rc, ran = _default_box_tick(t, tmp_path / "up", monkeypatch, drain)
+    assert rc == 0, critical_text(caplog)
+    assert ran, "the control never got past the box start"
+    assert draft_entries(t) == []

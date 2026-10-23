@@ -54,6 +54,12 @@ CURRENT = "O6-BODY-FROM-CURRENT-AND-THE-CLONE-HEAD"
 WORKTREE = "O6-BODY-FROM-THE-CLONE-WORKING-TREE"
 MARKERS = (PRODUCT, EXPORT, CURRENT, WORKTREE)
 
+#: A file in the export's `settings/` half (beside `agent/`) that a lesson name walking out of
+#: `agent/lessons/` would reach: `../../settings/verb-grants` → `settings/verb-grants.md`.
+TRAVERSAL_NAME = "../../settings/verb-grants"
+SETTINGS_MARKER = "O6-SETTINGS-BYTES-A-TRAVERSING-LESSON-NAME-WOULD-REACH"
+SETTINGS_BAIT = ("settings/verb-grants.md", f"{SETTINGS_MARKER}\n")
+
 #: A full object id no repository in the scene holds.
 ABSENT_COMMIT = "0123456789abcdef" * 2 + "01234567"
 
@@ -113,7 +119,8 @@ def scene(tmp_path, data_root):
     """The four-way plant, then an accepted episode under the published tenant (the data
     root's one tenant, so `_judge_921`'s builders land the episode under it)."""
     with published_tenant(tmp_path / "forge", root=data_root,
-                          files={TENANT_PATH: _lesson(EXPORT)}) as t:
+                          files={TENANT_PATH: _lesson(EXPORT),
+                                 SETTINGS_BAIT[0]: SETTINGS_BAIT[1]}) as t:
         k1 = t.commit
         k2 = t.merge({TENANT_PATH: _lesson(CURRENT)}, message="a later merged lesson edit")
         assert t.publish().commit == k2
@@ -124,16 +131,18 @@ def scene(tmp_path, data_root):
         yield Scene(t=t, product=product, k1=k1, k2=k2, ep=Path(ep))
 
 
-def _stamp(scene: Scene, *, code: str, knowledge: object) -> None:
+def _stamp(scene: Scene, *, code: str, knowledge: object,
+           names: tuple[str, ...] = (NAME,)) -> None:
     """Every world of the episode ran at code commit `code` with knowledge stamp `knowledge`
-    (`KnowledgeRevision` wire) and loaded lesson `NAME` (one `lessons_loaded.jsonl` row)."""
+    (`KnowledgeRevision` wire, written raw: the stamp is box-writable) and loaded the lessons
+    `names` (one `lessons_loaded.jsonl` row each)."""
     for label in ("a", "b", "c"):
         world = scene.ep / "worlds" / T.world_id(scene.ep, label)
         (world / "provenance.json").write_text(json.dumps(J.provenance_record(
             commit=code, knowledge=knowledge, tenant_id=scene.t.tenant_id)), encoding="utf-8")
-        (world / "lessons_loaded.jsonl").write_text(json.dumps(
-            {"lesson_name": NAME, "ts": "2026-10-20T10:00:00Z", "kind": "read",
-             "role": "main"}) + "\n",
+        (world / "lessons_loaded.jsonl").write_text("".join(json.dumps(
+            {"lesson_name": name, "ts": "2026-10-20T10:00:00Z", "kind": "read",
+             "role": "main"}) + "\n" for name in names),
             encoding="utf-8")
 
 
@@ -228,3 +237,63 @@ def test_o6_a_post_move_run_with_no_readable_knowledge_commit_is_unreadable_nami
         f"the unreadable slot does not name why ({cause!r}):\n{section[:600]}")
     assert not export_dir(scene.t.tenant, ABSENT_COMMIT).exists(), (
         "an export folder was made for a commit the clone does not hold")
+
+
+def test_o6_a_traversing_lesson_name_is_never_read_out_of_the_export(scene):
+    """O6 under the danger lens (R-I8): `lessons_loaded.jsonl` is box-writable, so a row's
+    `lesson_name` may walk out of `agent/lessons/` (`../../settings/verb-grants`). The export
+    holds a file at exactly that place (`settings/verb-grants.md`); the judge never shows its
+    bytes. The row's slot is still shown, named and marked rather than dropped. Positive
+    control in the same pass: the ordinary lesson beside it renders from the export."""
+    _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1},
+           names=(TRAVERSAL_NAME, NAME))
+    assert (export_dir(scene.t.tenant, scene.k1) / SETTINGS_BAIT[0]).is_file(), (
+        "fixture bug: the bait the traversal would reach is not in the export")
+
+    shown = _shown(scene)
+
+    assert SETTINGS_MARKER not in shown, (
+        "a traversing lesson name was read outside the export's agent/lessons/")
+    assert f"### {TRAVERSAL_NAME}" in shown, "the hostile row's slot vanished from the view"
+    _only(shown, EXPORT)
+
+
+HOSTILE_COMMITS = {
+    #: Would join to `exports/../knowledge/` — the clone's working tree (`WORKTREE` bytes).
+    "parent-walk": "../knowledge",
+    #: Option-shaped: `git show --output=<file>` would write a host file.
+    "option": "--output={out}",
+    #: Absolute: a join would discard `exports/`.
+    "absolute": "{abs}",
+    #: Hex-looking but not an object id's length.
+    "short-hex": "abc",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(HOSTILE_COMMITS))
+def test_o6_a_hostile_knowledge_commit_is_unreadable_and_reads_nothing_outside_exports(
+        scene, tmp_path, shape):
+    """O6 under the danger lens (R-I8): the knowledge stamp is box-writable. A commit that is
+    not a full object id — a parent walk, an option, an absolute path, a short hex — is
+    unreadable: no body from any source is shown (not the clone's working tree a `../knowledge`
+    join reaches, not the absolute path's file), nothing is written outside `exports/` (the
+    option's output file never appears), and no export folder is made for it. The slot stays,
+    named. Positive control: the readable post-move case (`EXPORT` shown)."""
+    out = tmp_path / "written-by-an-option"
+    bait = tmp_path / "absolute-bait"
+    (bait / "agent" / "lessons").mkdir(parents=True)
+    (bait / "agent" / "lessons" / f"{NAME}.md").write_text(
+        _lesson("O6-BODY-FROM-AN-ABSOLUTE-PATH"), encoding="utf-8")
+    commit = HOSTILE_COMMITS[shape].format(out=out, abs=bait)
+    exports = export_dir(scene.t.tenant, scene.k1).parent
+    before = sorted(p.name for p in exports.iterdir())
+    _stamp(scene, code=scene.product.post, knowledge={"commit": commit})
+
+    shown = _shown(scene)
+
+    leaked = [m for m in (*MARKERS, "O6-BODY-FROM-AN-ABSOLUTE-PATH") if m in shown]
+    assert not leaked, f"a hostile knowledge commit read a body from somewhere: {leaked}"
+    assert f"### {NAME}" in shown, "the lesson vanished from the judge's view entirely"
+    assert not out.exists(), "an option-shaped commit made git write a host file"
+    assert sorted(p.name for p in exports.iterdir()) == before, (
+        "an export folder was made for a hostile commit")

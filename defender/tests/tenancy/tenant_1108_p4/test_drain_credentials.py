@@ -29,8 +29,12 @@ it next to `VaultHTTP`.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
+import re
+import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +42,8 @@ import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
 from defender.tests.tenancy.tenant_1108_delivery._identity import ISSUER
-from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, unbind_forge
+from defender.learning.core.state import FINDINGS
+from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, git, unbind_forge
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     CLIENT_TOKEN,
     DEV_CLIENT_DIR,
@@ -54,6 +59,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     author_drain,
     critical_text,
     drain_paths,
+    draft_entries,
     executed_lead,
     lead_author_drain,
     product_repo,
@@ -191,55 +197,70 @@ def test_a_id_o8_the_drain_logs_in_from_the_config_path_and_hands_no_login_mater
     assert [k for k, v in os.environ.items() if SECRET_ID in v] == ["P4_CONTROL_PROBE"]
 
 
-def test_o9_a_drain_with_no_issuer_config_refuses_before_any_model_call(
-        p4_tenant, tmp_path, monkeypatch, caplog):
-    """O9: a drain given an issuer config path that holds no file refuses at once — exit 2, the
-    refusal logged naming the issuer config — with no request to the issuer or the forge and no
-    draft, box or curator. (Control: the previous case, same seams, a config present.)"""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    t = p4_tenant
-    bind_forge(t)
-    vault = AppRoleVault(t.tenant_id)
-    paths = drain_paths(t, product_repo(tmp_path))
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+# ---------------------------------------------------------------------------------------------
+# O9: P3 `open()` refusals x both drains (R-L7)
+# ---------------------------------------------------------------------------------------------
 
-    with caplog.at_level(logging.INFO):
-        rc = author_drain(t, paths, trigger=trigger, box=box,
-                          issuer_config=tmp_path / "playground-issuer" / "client" / "issuer.json",
-                          issuer_transport=vault.transport)
-
-    assert rc == 2
-    said = critical_text(caplog).lower()
-    assert "issuer" in said, said
-    assert "config" in said, said
-    assert vault.calls == []
-    assert t.forge.requests == []
-    assert trigger.calls == []
-    assert box.requests == []
-    assert remote_branches(t.remote) == {}
+#: Each refusal P3's `TenantDelivery.open` (or the login before it) makes on a tenant that cannot
+#: be delivered to, and what its one critical line must name (regex, lower-cased).
+O9_REFUSALS = {
+    "issuer-config": r"issuer.*config|config.*issuer",
+    "forge-binding": r"forge",
+    "unversioned": r"version|git",
+    "local-origin": r"network|origin",
+    "unprotected-main": r"protect",
+}
+#: The refusals decided locally, before any request to the issuer or the forge.
+_LOCAL = ("issuer-config", "forge-binding")
 
 
-@pytest.mark.parametrize("missing", ["config", "binding"])
-def test_o9_a_lead_tick_that_cannot_log_in_is_the_stages_one_line_refusal_and_serves_nothing(
-        p4_tenant, tmp_path, monkeypatch, caplog, missing):
-    """O9 on the lead lane's P4 path (restores the refusal shape `test_1105_pr2_review_fixes_2`'s
-    deleted no-data-root case pinned, over a refusal P4 keeps: no issuer client config file, or
-    no forge binding in the tenant row). The stage runner turns it into exit 2 with ONE critical
-    line naming the cause and no traceback; no box starts, the lane's steps are handed nothing,
-    and the queued curation row stays at the top of the queue, not in flight. Positive control:
-    the same tick with the config and the binding in place logs in and serves the row."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
-    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    t = p4_tenant
-    vault = AppRoleVault(t.tenant_id)
-    t.server.token = vault.minted()
-    config = write_issuer_config(tmp_path / "playground-issuer" / "client")
-    if missing == "config":
-        bind_forge(t)
-        config.unlink()
-    else:
+def _break_tenant(t: Any, config: Path, fault: str) -> None:
+    """Make `t` refuse delivery as `fault` names, the way P3's own open-refusal cases do
+    (`tenant_1108_delivery/test_open.py`); `"none"` leaves it deliverable (the control)."""
+    if fault == "forge-binding":
         unbind_forge(t)
+        return
+    if fault == "local-origin":
+        # Whichever of the binding and the clone's configured origin the drain reads, it is a
+        # filesystem path, not a network origin.
+        bind_forge(t, origin="/tmp/p4-local-origin.git")
+        git(t.clone, "remote", "set-url", "origin", "/tmp/p4-local-origin.git")
+        return
+    bind_forge(t)
+    if fault == "issuer-config":
+        config.unlink()
+    elif fault == "unversioned":
+        shutil.rmtree(t.clone / ".git")
+    elif fault == "unprotected-main":
+        t.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
+
+
+@dataclasses.dataclass
+class _Tick:
+    """One drain's tick over `t`: `run()` drives it through the stage runner with the issuer
+    config path (the drain logs in itself); `handed()` is everything its work steps were handed;
+    `queued_untouched()` is its row still waiting where it was queued, not in flight."""
+
+    run: Callable[[], int]
+    handed: Callable[[], list]
+    queued_untouched: Callable[[], bool]
+    delivered: Callable[[], bool]
+    box: BoxSpy
+
+
+def _tick(drain: str, t: Any, tmp_path: Path, config: Path, vault: AppRoleVault) -> _Tick:
+    box = BoxSpy()
+    seams = {"issuer_config": config, "issuer_transport": vault.transport}
+    if drain == "author":
+        paths = drain_paths(t, product_repo(tmp_path))
+        queue(paths, [S.finding_row("f1", run_id="f1")])
+        trigger = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")}))
+        return _Tick(
+            run=lambda: author_drain(t, paths, trigger=trigger, box=box, **seams),
+            handed=lambda: list(trigger.calls),
+            queued_untouched=lambda: "f1" in S.pending_by_id(paths, FINDINGS),
+            delivered=lambda: bool(remote_branches(t.remote)) and bool(t.forge.creates),
+            box=box)
     paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
     run = queued_run(t, paths, "p4-lead-refused").name
     case = "case-p4-lead-refused"
@@ -247,41 +268,89 @@ def test_o9_a_lead_tick_that_cannot_log_in_is_the_stages_one_line_refusal_and_se
     assert (queue_dir / f"{case}.json").is_file(), "control: the row is read where it was queued"
     step = LeadStep(executed={run: [executed_lead("cmdb.owner-by-tag")]}, edits={})
     pitfalls_calls: list[Any] = []
-    box = BoxSpy()
 
     def pitfalls(*a: Any, **k: Any) -> int:
         pitfalls_calls.append((a, k))
         return 0
 
+    return _Tick(
+        run=lambda: lead_author_drain(t, paths, box=box, run_lead_author=step,
+                                      run_pitfalls=pitfalls, **seams),
+        handed=lambda: [*step.served, *pitfalls_calls],
+        queued_untouched=lambda: ((queue_dir / f"{case}.json").is_file()
+                                  and not (queue_dir / "inflight" / f"{case}.json").is_file()),
+        delivered=lambda: step.served == [run],
+        box=box)
+
+
+@pytest.mark.parametrize("drain", ["author", "lead"])
+@pytest.mark.parametrize("fault", list(O9_REFUSALS))
+def test_o9_a_tenant_open_refuses_is_the_stages_one_line_refusal_and_runs_nothing(
+        p4_tenant, tmp_path, monkeypatch, caplog, drain, fault):
+    """O9 (R-L7), both drains: each refusal P3's open makes — no issuer client config file, no
+    forge binding in the tenant row, an unversioned tenant clone, a non-network origin, an
+    unprotected `main` — is the stage runner's refusal: exit 2 with ONE critical line naming the
+    cause and no traceback; no box starts, the lane's work steps (curator; lead author and
+    pitfalls) are handed nothing, no draft is left under `<T>/drafts/`, no branch reaches the
+    origin, and the queued row stays where it was (the lead lane's at the top of the queue, not
+    in flight). A refusal decidable locally (config, binding) reaches neither the issuer nor the
+    forge. Restores the stage-refusal shape `test_1105_pr2_review_fixes_2`'s deleted no-data-root
+    case pinned. Positive control: the next case, same seams, nothing broken."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    t = p4_tenant
+    vault = AppRoleVault(t.tenant_id)
+    t.server.token = vault.minted()
+    config = write_issuer_config(tmp_path / "playground-issuer" / "client")
+    tick = _tick(drain, t, tmp_path, config, vault)
+    _break_tenant(t, config, fault)
+
     caplog.clear()
     with caplog.at_level(logging.DEBUG):
-        rc = lead_author_drain(t, paths, box=box, run_lead_author=step, run_pitfalls=pitfalls,
-                               issuer_config=config, issuer_transport=vault.transport)
+        rc = tick.run()
 
     assert rc == 2, critical_text(caplog)
     critical = [r.getMessage() for r in caplog.records if r.levelno >= logging.CRITICAL]
     assert len(critical) == 1, critical
-    said = critical[0].lower()
-    assert ("issuer" in said and "config" in said) if missing == "config" else "forge" in said, said
+    assert re.search(O9_REFUSALS[fault], critical[0].lower()), critical[0]
     assert "\n" not in critical[0], critical[0]
     assert [r.getMessage() for r in caplog.records if r.exc_info] == [], "a traceback was logged"
-    assert vault.calls == []
-    assert box.requests == [], "a box was started for a tick that could not log in"
-    assert step.served == []
-    assert pitfalls_calls == []
-    assert (queue_dir / f"{case}.json").is_file(), "the row left the top of the queue"
-    assert not (queue_dir / "inflight" / f"{case}.json").is_file(), "the row was left in flight"
-    assert remote_branches(t.remote, "lead-author/") == {}
+    if fault in _LOCAL:
+        assert vault.calls == []
+        assert t.forge.requests == []
+    assert tick.box.requests == [], "a box was started for a tick that could not deliver"
+    assert tick.handed() == []
+    assert draft_entries(t) == []
+    assert remote_branches(t.remote, "") == {"main": t.origin_main()}
+    assert tick.queued_untouched(), "the row left its place in the queue"
 
-    # Control: config and binding in place, the same tick logs in and serves the row.
-    write_issuer_config(tmp_path / "playground-issuer" / "client")
-    bind_forge(t)
+
+@pytest.mark.parametrize("drain", ["author", "lead"])
+def test_control_o9_a_deliverable_tenant_logs_in_and_serves_the_row(
+        p4_tenant, tmp_path, monkeypatch, caplog, drain):
+    """Positive control for the O9 matrix: the same scene and seams with nothing broken — the
+    drain logs in with AppRole, the work step is handed the row, and (author lane) a `lessons/`
+    branch and its PR reach the tenant forge. The matrix's observers see each channel here."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    t = p4_tenant
+    vault = AppRoleVault(t.tenant_id)
+    t.server.token = vault.minted()
+    config = write_issuer_config(tmp_path / "playground-issuer" / "client")
+    tick = _tick(drain, t, tmp_path, config, vault)
+    _break_tenant(t, config, "none")
+    assert tick.queued_untouched(), "control: the observer sees the queued row"
+
     caplog.clear()
-    rc = lead_author_drain(t, paths, box=box, run_lead_author=step, run_pitfalls=pitfalls,
-                           issuer_config=config, issuer_transport=vault.transport)
+    with caplog.at_level(logging.INFO):
+        rc = tick.run()
+
     assert rc == 0, critical_text(caplog)
     assert vault.logins() == [{"role_id": ROLE_ID, "secret_id": SECRET_ID}]
-    assert step.served == [run]
+    assert tick.handed() != []
+    assert tick.delivered()
 
 
 def test_o8_the_dev_issuer_client_config_lies_under_no_drain_box_mount_source(p4_tenant):

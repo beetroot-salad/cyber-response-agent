@@ -243,11 +243,13 @@ ALL_DRAFT_LANES = ("agent/lessons", "agent/lessons-questioner", "agent/skills")
 
 
 def _drain_tick_over_draft(tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch,
-                           label: DrainLabel, step: Callable[[Any, Any], None]) -> tuple[int, Any]:
+                           label: DrainLabel, step: Callable[[Any, Any, Any], None]) -> tuple[int, Any]:
     """One real P4 drain tick of `label`'s lane over the fixture tenant (#1108 P4 flow 4), its
-    work step replaced by `step(step_paths, box_spy)`, run once, inside the batch, after the box
-    started: through `trigger_author` (author lane, a queued finding wakes it) or `run_pitfalls`
-    (lead lane, a queued pitfall wakes it). Returns `(exit status, the BoxSpy)`."""
+    work step replaced by `step(step_paths, batch, box_spy)`, run once, inside the batch, after
+    the box started: through `trigger_author` (author lane, a queued finding wakes it) or
+    `run_pitfalls` (lead lane, a queued pitfall wakes it). OD16: the drain hands each lane entry
+    its tick's batch as `batch=`; `step_paths` stays the product-rooted `LoopPaths`. Returns
+    `(exit status, the BoxSpy)`."""
     from defender.learning.core.state import FINDINGS, PITFALLS
     from defender.tests.support.learning.core._declared870 import shim_row
     from defender.tests.support.learning.curation._drain719 import finding_row, seed
@@ -258,10 +260,10 @@ def _drain_tick_over_draft(tmp_path: Path, data_root: Path, monkeypatch: pytest.
     box = BoxSpy()
     ran: list[str] = []
 
-    def once(step_paths: Any) -> None:
+    def once(step_paths: Any, batch: Any) -> None:
         if not ran:
             ran.append("ran")
-            step(step_paths, box)
+            step(step_paths, batch, box)
 
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
@@ -269,14 +271,14 @@ def _drain_tick_over_draft(tmp_path: Path, data_root: Path, monkeypatch: pytest.
         if label is AUTHOR:
             monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
             seed(paths, FINDINGS, [finding_row("f1", run_id="f1")])
-            rc = author_drain(t, paths, trigger=lambda step_paths, *_a, **_kw: once(step_paths),
+            rc = author_drain(t, paths, trigger=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch),
                               box=box)
         else:
             monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
             seed(paths, PITFALLS, [shim_row("p1:1")])
             rc = lead_author_drain(
                 t, paths, box=box, run_lead_author=lambda *_a, **_kw: None,
-                run_pitfalls=lambda step_paths, *_a, **_kw: once(step_paths) or 0)
+                run_pitfalls=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch) or 0)
     assert ran, "the lane's work step never ran inside a batch"
     return rc, box
 
@@ -324,19 +326,23 @@ def _restore(moved: dict[Path, Path]) -> None:
 def _o4_step(label: DrainLabel, swap: str, outside: Path, seen: dict[str, Any]):
     """The lane's work step for the O4 case: records what the box mounted and how the roots
     `open_drain_trees` holds behave across a swap. Observations only: a raise here is contained
-    by the drain as a curator fault."""
+    by the drain as a curator fault.
+
+    ASSUMED SEAM (OD16): `open_drain_trees(paths, label, *, batch)` holds `label`'s lanes under
+    `batch.draft_root` (the box's rw mounts) while `paths` stays product-rooted."""
 
     def swapped_in(rw: list[Path]) -> Any:
         return census(outside) if swap == "link_to_outside" else {m: census(m) for m in rw}
 
-    def step(step_paths: Any, box: Any) -> None:
+    def step(step_paths: Any, batch: Any, box: Any) -> None:
         [request] = box.requests
         [staged] = [Path(m.source) for m in request.mounts if m.kind == "staged"]
         rw = [Path(m.source) for m in request.mounts if m.writable]
         drafts = staged.parent
-        seen.update(staged=staged, rw=rw, held_before=held_roots(drafts))
+        seen.update(staged=staged, rw=rw, held_before=held_roots(drafts),
+                    draft_root=Path(batch.draft_root), repo_root=Path(step_paths.repo_root))
         others = [staged / rel for rel in ALL_DRAFT_LANES if rel not in DRAFT_LANES[label]]
-        with open_drain_trees(step_paths, label) as trees:
+        with open_drain_trees(step_paths, label, batch=batch) as trees:
             seen.update(type=type(trees), mounts=trees.mounts, held=held_roots(drafts))
             helds = {m: trees.mount(m) for m in rw}
             seen["held_types"] = {type(h) for h in helds.values()}
@@ -376,6 +382,8 @@ def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves
 
     staged, rw = seen["staged"], seen["rw"]
     assert [m.relative_to(staged).as_posix() for m in rw] == list(DRAFT_LANES[label])
+    assert seen["draft_root"] == staged, "the step's batch is not the draft the box mounted"
+    assert not staged.is_relative_to(seen["repo_root"]), "the step's paths are draft-rooted"
     assert seen["held_before"] == []
     assert seen["type"] is DrainTrees
     assert seen["mounts"] == tuple(rw), "the held roots are not the box's rw mounts"

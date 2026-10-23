@@ -70,11 +70,20 @@ def _stale(line: str, kind: str) -> None:
 
 # --- fresh (positive control for every class below) -------------------------------------------
 
-def test_o7b_a_merge_on_origin_is_published_and_reported_fresh_at_the_merge(tenant, issuer_config):
-    """O7b: after a PR merges on the fake origin, the child fetches, publishes the merge as
-    `current`, and reports `fresh <merge>`."""
+def test_o7b_a_merge_on_origin_is_published_and_reported_fresh_at_the_merge(tenant, tmp_path):
+    """O7b/O8: after a PR merges on the fake origin, the child logs in ITSELF from the issuer
+    config file (AppRole: the file's role_id/secret_id, nothing injected), fetches with the
+    token the issuer minted, publishes the merge as `current`, and reports `fresh <merge>` —
+    a line carrying none of the login material or the config path."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import ROLE_ID, SECRET_ID
+
     merged = tenant.merge(B.MERGE_FILES)
-    line = B.run_child(tenant, issuer_config)
+    with B.real_login(tenant, tmp_path / "operator") as (vault, config, secrets):
+        line = B.run_child(tenant, config, login=vault)
+    assert vault.logins() == [{"role_id": ROLE_ID, "secret_id": SECRET_ID}], (
+        "O8: the child did not log in from the config file")
+    assert tenant.server.authorized("git-upload-pack"), "the fetch never carried the minted token"
+    assert B.leaks(secrets, report_line=line) == []
     assert B.outcome_class(line) == "fresh", line
     assert B.outcome_detail(line) == merged, line
     assert current_commit(tenant.tenant) == merged
@@ -162,13 +171,98 @@ def test_o_budget_a_stalled_fetch_ends_within_the_childs_timeout_and_leaves_noth
 
 # --- stale:operator ---------------------------------------------------------------------------
 
-def test_o_stale_an_issuer_auth_refusal_is_operator(tenant, issuer_config):
-    """A refused login (the issuer answers 403: bad `secret_id`/policy) needs a human."""
+def test_o_stale_an_issuer_auth_refusal_is_operator(tenant, tmp_path):
+    """A refused login (the config's `secret_id` is not the one the issuer holds) needs a human:
+    `stale:operator`, and the reason names none of the login material."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import write_issuer_config
+
     tenant.merge(B.MERGE_FILES)
-    tenant.vault.status = 403
-    tenant.vault.body = {"errors": ["permission denied"]}
+    with B.real_login(tenant, tmp_path / "operator") as (vault, _config, secrets):
+        wrong = write_issuer_config(tmp_path / "wrong" / "playground-issuer" / "client",
+                                    secret_id="s-b-revoked-secret-id-31d0")
+        line = B.run_child(tenant, wrong, login=vault)
+    assert vault.logins(), "premise: the child tried to log in"
+    _stale(line, "operator")
+    assert B.leaks((*secrets, "s-b-revoked-secret-id-31d0", str(wrong)), report_line=line) == []
+    _unchanged(tenant)
+
+
+def test_o_stale_the_forge_rejecting_the_minted_token_is_operator(tenant, issuer_config):
+    """The origin refuses the token the issuer minted (the forge's integration does not trust
+    it): `stale:operator`."""
+    tenant.merge(B.MERGE_FILES)
+    tenant.server.refuse.add("git-upload-pack")
+    line = B.run_child(tenant, issuer_config)
+    assert tenant.server.offered_and_refused("git-upload-pack"), "premise: the token was refused"
+    _stale(line, "operator")
+    _unchanged(tenant)
+
+
+def test_o_stale_a_diverged_clone_is_operator(tenant, issuer_config):
+    """STALE-DIVERGED: the clone holds an unpushed local commit and origin moved on: the
+    fast-forward cannot happen — `stale:operator`, `current` unchanged."""
+    from defender.tests.tenancy.tenant_1108_p4._support import git
+
+    clone = B.clone_dir(tenant)
+    (clone / "agent" / "lessons" / "local-only.md").write_text("local\n", encoding="utf-8")
+    git(clone, "add", "-A")
+    git(clone, "commit", "-m", "an operator's local commit, never pushed")
+    tenant.merge(B.MERGE_FILES)
     line = B.run_child(tenant, issuer_config)
     _stale(line, "operator")
+    _unchanged(tenant)
+
+
+def test_o_stale_a_merged_link_is_operator(tenant, issuer_config):
+    """A human merged a symlink under `agent/`: refused on content — `stale:operator`."""
+    from defender.tests.tenancy.tenant_1108_p4._support import index_entry, push_to_remote
+
+    push_to_remote(tenant.p3, tenant.scratch,
+                   lambda w: index_entry(w, "120000", "agent/lessons/evil.md", data=b"/etc/passwd"),
+                   "a link merged by a human", stage=False)
+    line = B.run_child(tenant, issuer_config)
+    _stale(line, "operator")
+    _unchanged(tenant)
+
+
+def test_o_stale_an_issuer_api_timeout_is_transient(tenant, tmp_path):
+    """The issuer's login endpoint times out: `stale:transient`."""
+    tenant.merge(B.MERGE_FILES)
+    with B.real_login(tenant, tmp_path / "operator") as (_vault, config, _secrets):
+        def slow(request):
+            raise httpx.ReadTimeout("issuer read timed out", request=request)
+
+        timing_out = type("TimingOut", (), {"transport": httpx.MockTransport(slow)})()
+        line = B.run_child(tenant, config, login=timing_out)
+    _stale(line, "transient")
+    _unchanged(tenant)
+
+
+def test_o_stale_a_forge_api_timeout_is_transient(tenant, issuer_config):
+    tenant.merge(B.MERGE_FILES)
+    tenant.forge.fault = lambda request: httpx.ReadTimeout("forge read timed out", request=request)
+    line = B.run_child(tenant, issuer_config)
+    _stale(line, "transient")
+    _unchanged(tenant)
+
+
+def test_o7b_lock_held_with_the_clone_at_origin_main_but_current_behind_is_stale(
+        tenant, issuer_config):
+    """O7b: the clone's HEAD already equals `origin/main` (fast-forwarded outside a publish) but
+    `current` still names the older export, and a drain holds the lock: the run cannot read the
+    merge, so the outcome is stale — never fresh."""
+    from defender.tests.tenancy.tenant_1108_p4._support import git
+
+    merged = tenant.merge(B.MERGE_FILES)
+    clone = B.clone_dir(tenant)
+    git(clone, "fetch", str(tenant.remote), "+refs/heads/*:refs/remotes/origin/*")
+    git(clone, "merge", "--ff-only", "refs/remotes/origin/main")
+    assert git(clone, "rev-parse", "HEAD") == merged
+    assert current_commit(tenant.tenant) == tenant.commit
+    with _lock(tenant):
+        line = B.run_child(tenant, issuer_config)
+    assert B.outcome_class(line).startswith("stale:"), (
+        f"O7b: `current` is behind origin/main and could not move, yet the child said {line!r}")
     _unchanged(tenant)
 
 
@@ -226,19 +320,63 @@ def test_o_stale_misconfiguration_is_refused_before_any_network_call(
 
 # --- wired into run.main ----------------------------------------------------------------------
 
-def _child_publish(t, issuer_config):
+def _child_publish(t, issuer_config, *, login=None, lines: list | None = None):
     """`run.main`'s `publish=` bound to the REAL child in-process (identifiers from the parent
-    are ignored here; the child is told its tenant by closure, as the CLI would by argv)."""
-    return lambda *a, **k: B.run_child(t, issuer_config)
+    are ignored here; the child is told its tenant by closure, as the CLI would by argv). With
+    `login`, the child logs in itself from `issuer_config`. `lines` collects the report lines."""
+    def publish(*_a, **_k):
+        line = B.run_child(t, issuer_config, login=login)
+        if lines is not None:
+            lines.append(line)
+        return line
+    return publish
 
 
-def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, issuer_config,
-                                                                      tmp_path):
-    """O7b end to end: merge on the fake origin, launch; the run's copy holds the merged lesson,
-    its stamp and `knowledge_source` name the merge commit, kind fresh."""
+def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp_path, monkeypatch):
+    """O7b end to end, and O8 by value: merge on the fake origin, launch with the REAL child
+    logging in itself from the config file; the run's copy holds the merged lesson, its stamp and
+    `knowledge_source` name the merge commit, kind fresh. None of role_id, secret_id, the issuer
+    client token, the minted forge token or the config path appears in the run process's
+    environment, what it handed the child, the stamp, the run page, the posted comment or the
+    report line. (Control on the env channel: a value planted in the environment is found.)"""
+    import os
+    from functools import partial
+    from types import SimpleNamespace
+
+    from defender import run_common
+    from defender.integrations import ticket_writer
+    from defender.tests.support.runtime.engine._spec767 import FakeStore, write_report
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+
     merged = tenant.merge(B.MERGE_FILES)
-    out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, issuer_config))
+    store = FakeStore()
+    deps = ticket_writer.TicketWriterDeps(request=store)
+    writer = SimpleNamespace(
+        open_case_ticket=partial(ticket_writer.open_case_ticket, deps=deps),
+        record_case_ticket=partial(ticket_writer.record_case_ticket, deps=deps))
+    lines: list[str] = []
+
+    def seed(seen: B.Seen) -> None:
+        write_report(seen.run_dir)
+        S1107.seed_session_store(seen.run_dir)
+
+    with B.real_login(tenant, tmp_path / "operator") as (vault, config, secrets):
+        out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, config, login=vault,
+                                                                lines=lines),
+                       argv_extra=("--update-ticket",), during=seed, ticket_writer=writer,
+                       visualize=run_common.visualize)
     assert out.reached, out.text()
+    assert store.calls, "control: the run posted its comment"
+    assert vault.logins(), "O8: the child did not log in from the config file"
+    page = out.run_dir / "runtime.html"
+    assert page.is_file(), "control: the run page was saved"
+    assert B.leaks(
+        secrets, env=out.seen[0].environ, handed=out.publish_calls, report_line=lines,
+        stamp=out.stamp_after, page=page.read_text(encoding="utf-8") if page.is_file() else "",
+        comment=[str(c.body) for c in store.calls],
+    ) == [], "O8: login material left the publish child"
+    monkeypatch.setenv("S_B_CONTROL_PROBE", secrets[1])
+    assert B.leaks(secrets[1:2], env=dict(os.environ)) == [("env", secrets[1])]
     assert out.rc == 0, out.text()
     assert B.MERGED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
     assert B.stamped_commit(out.stamp_after) == {"commit": merged}
@@ -309,8 +447,31 @@ def _no_leftovers(t, spec: Path) -> None:
         pass
 
 
+def _child_saw_no_login_material(marks: Path, secrets: tuple[str, ...]) -> None:
+    """O8: what the child process was started with — its argv and its environment — carries no
+    secret value and no issuer-named variable (P-4: file-only, never environment)."""
+    import json
+
+    seen = json.loads((marks / "seen.json").read_text(encoding="utf-8"))
+    assert B.leaks(secrets, argv=seen["argv"], env=seen["env"]) == []
+    assert [k for k in seen["env"] if B.ISSUER_ENV.search(k)] == [], (
+        "O8: the parent handed its publish child an issuer-named environment variable")
+    assert seen["env"].get("S_B_ORDINARY") == "s-b-ordinary-value", (
+        "control: an ordinary variable reaches the child, so the env channel is read")
+
+
+@pytest.fixture
+def operator_env(monkeypatch):
+    """An operator shell that exported issuer material (it must go nowhere) and an ordinary
+    variable (the positive control on the same channel)."""
+    monkeypatch.setenv("BAO_TOKEN", "s-b-operator-bao-token-77e1")
+    monkeypatch.setenv("VAULT_TOKEN", "s-b-operator-vault-token-91a4")
+    monkeypatch.setenv("S_B_ORDINARY", "s-b-ordinary-value")
+    return ("s-b-operator-bao-token-77e1", "s-b-operator-vault-token-91a4")
+
+
 def test_o_budget_the_parent_stops_waiting_at_the_budget_in_the_network_phase(
-        tenant, issuer_config, tmp_path, child_env):
+        tenant, issuer_config, tmp_path, child_env, operator_env):
     """O-BUDGET: origin stalls the fetch for ever and the child's own network timeout is far
     beyond the budget: the parent stops waiting at the budget, ends the child (no process, no
     `index.lock`, lock free) and reports `stale:transient`; `current` is unchanged."""
@@ -333,6 +494,7 @@ def test_o_budget_the_parent_stops_waiting_at_the_budget_in_the_network_phase(
     _stale(line, "transient")
     assert elapsed < BUDGET + SLACK, f"O-BUDGET: the launch waited {elapsed:.1f}s"
     assert not (marks / "locked").exists(), "premise: the child never reached its locked phase"
+    _child_saw_no_login_material(marks, (*operator_env, B.ISSUER_SECRET_ID, B.ISSUER_ROLE_ID))
     _no_leftovers(tenant, spec)
     _unchanged(tenant)
 
@@ -388,3 +550,66 @@ def test_o_budget_a_run_whose_publish_ran_out_of_budget_proceeds_stale_on_the_la
     source = B.knowledge_source(out.stamp_after)
     assert (source.get("kind"), source.get("stale_kind"), source.get("commit")) == (
         "stale", "transient", tenant.commit), source
+
+
+def test_o_budget_the_parents_default_budget_is_sixty_seconds():
+    """O-BUDGET: "at most 60 s" is the launcher's default budget."""
+    import inspect
+
+    assert inspect.signature(B.launcher()).parameters["budget"].default == 60.0
+
+
+class _RecordingSpawn:
+    """`launch_publish`'s spawn seam (assumed: `subprocess.Popen`'s signature): records the argv
+    and environment the parent would start its child with, then starts a harmless process."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], dict]] = []
+
+    def __call__(self, argv, **kw):
+        import os
+        import subprocess
+        import sys
+
+        env = kw.get("env")
+        self.calls.append((list(map(str, argv)), dict(os.environ if env is None else env)))
+        return subprocess.Popen([sys.executable, "-c", "pass"],  # noqa: S603 — a test double
+                                stdout=kw.get("stdout"), stderr=kw.get("stderr"),
+                                stdin=kw.get("stdin"))
+
+
+def test_o8_the_default_child_command_carries_identifiers_only_and_no_issuer_environment(
+        tenant, operator_env):
+    """O8/O11 (parent half, DEFAULT launch — no `command=`): the parent starts the real child
+    with the tenant id and data root, and neither its argv nor its environment carries an
+    issuer-named variable or any planted secret. (What the harmless stand-in reports back is
+    D3's, pending; not asserted.)"""
+    import contextlib
+
+    spawn = _RecordingSpawn()
+    launch = B.launcher()  # resolved first: a missing launcher is red, not "no child"
+    with contextlib.suppress(Exception):
+        launch(tenant.tenant_id, data_root=tenant.data_root, budget=5.0, spawn=spawn)
+    assert len(spawn.calls) == 1, f"the parent did not start exactly one child: {spawn.calls}"
+    argv, env = spawn.calls[0]
+    assert tenant.tenant_id in argv, argv
+    assert B.leaks(operator_env, argv=argv, env=env) == []
+    assert [k for k in env if B.ISSUER_ENV.search(k)] == [], sorted(env)
+    assert env.get("S_B_ORDINARY") == "s-b-ordinary-value", "control: the env channel is read"
+
+
+def test_r_s7_a_first_ever_publish_through_the_real_child_is_fresh_and_the_run_proceeds(
+        tenant, issuer_config, tmp_path):
+    """R-S7: no export has ever been written (`<T>/exports/` empty, no `current`): the real
+    child publishes the first one, reports fresh, and the run starts on it."""
+    import shutil
+
+    exports = export_dir(tenant.tenant, tenant.commit).parent
+    shutil.rmtree(exports)
+    exports.mkdir()
+    out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, issuer_config))
+    assert out.reached, out.text()
+    assert out.rc == 0, out.text()
+    assert current_commit(tenant.tenant) == tenant.commit
+    source = B.knowledge_source(out.stamp_after)
+    assert (source.get("kind"), source.get("commit")) == ("fresh", tenant.commit), source

@@ -36,7 +36,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
     git,
 )
-from defender.tests.tenancy.tenant_1108_p4._drain_support import remote_branches, touched
+from defender.tests.tenancy.tenant_1108_p4._drain_support import product_repo, remote_branches, touched
 
 SYSTEM = "acme-cmdb"
 CONNECT = DEFENDER / "skills" / "connect"
@@ -68,14 +68,35 @@ def _propose(t: Any, staged: Path) -> int:
                                  identity=t.vault.identity())
 
 
-def _product_trace() -> dict:
+def _product_trace(repo: Path = REPO_ROOT) -> dict:
     """What a product-repo landing of connect's tenant half would move: the system's folders
     in this checkout and any `connect/` branch."""
     return {
-        "status": git(REPO_ROOT, "status", "--porcelain", "--untracked-files=all", "--",
+        "status": git(repo, "status", "--porcelain", "--untracked-files=all", "--",
                       f"defender/skills/{SYSTEM}", f"defender/skills/gather/queries/{SYSTEM}"),
-        "refs": git(REPO_ROOT, "for-each-ref", "--format=%(refname)", "refs/heads/connect/"),
+        "refs": git(repo, "for-each-ref", "--format=%(refname)", "refs/heads/connect/"),
     }
+
+
+def test_control_the_product_trace_sees_the_systems_files_and_a_connect_branch(tmp_path):
+    """R-L6 control for `_product_trace`: on a scratch product checkout (never the real one) it
+    sees the system's skill and its query folder written the product-tree way, and a `connect/`
+    branch, each on its own; an unrelated product file moves neither."""
+    repo = product_repo(tmp_path)
+    clean = _product_trace(repo)
+    assert clean == {"status": "", "refs": ""}
+    (repo / "defender" / "README.md").write_text("unrelated\n", encoding="utf-8")
+    assert _product_trace(repo) == clean, "an unrelated product edit is not connect's landing"
+    for rel in (f"defender/skills/{SYSTEM}/SKILL.md",
+                f"defender/skills/gather/queries/{SYSTEM}/host-owner.md"):
+        path = repo / rel
+        path.parent.mkdir(parents=True)
+        path.write_text("x\n", encoding="utf-8")
+        assert rel.rsplit("/", 1)[0] in _product_trace(repo)["status"], rel
+        path.unlink()
+    assert _product_trace(repo)["status"] == ""
+    git(repo, "branch", f"connect/{SYSTEM}")
+    assert _product_trace(repo)["refs"] == f"refs/heads/connect/{SYSTEM}"
 
 
 # ---------------------------------------------------------------------------------------------
