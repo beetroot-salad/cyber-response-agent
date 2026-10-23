@@ -194,6 +194,10 @@ class _TenantLayout:
         return self.tenant_root / "run-knowledge"
 
     @property
+    def publish_status(self) -> Path:
+        return self.tenant_root / "publish-status.json"
+
+    @property
     def knowledge_lock(self) -> Path:
         return self.tenant_root / "knowledge.lock"
 
@@ -351,6 +355,13 @@ class Tenant:
         """Host-made per-run copies of an export (`<run_id>/{owner, settings/, stage/}`), each
         removed when its run ends and swept by a publish once its owner is dead (#1108 P4)."""
         return self._layout.run_knowledge
+
+    @property
+    def publish_status(self) -> Path:
+        """The outcome of the tenant's last publish attempt, by any trigger (a run launch, a
+        drain start, `tenant.py update`): its refusal, or the commit it published. What
+        `tenant.py check` reports a stalled publish from (#1108 P4 O-SEE)."""
+        return self._layout.publish_status
 
     @property
     def knowledge_lock(self) -> KnowledgeLock:

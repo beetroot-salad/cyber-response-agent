@@ -13,6 +13,7 @@ from .model import (
     DeliveryStatus,
     LockBusy,
 )
+from .publish import publish_child_main, publish_for_run
 from .repository import NETWORK_TIMEOUT
 
 __all__ = [
@@ -32,5 +33,7 @@ __all__ = [
     "current_export",
     "issuer_login",
     "materialise_export",
+    "publish_child_main",
+    "publish_for_run",
     "tenant_lock",
 ]
