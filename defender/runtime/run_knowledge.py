@@ -20,6 +20,8 @@ from typing import Any
 
 from defender import _io
 from defender.records._locations import _unwrap_exports_root, _unwrap_run_knowledge_root
+from defender.tenancy._exports import DeliveryRefused, current_export, regular_files
+from defender.tenancy._owner import owner_alive, write_owner
 from defender.tenancy._tenant import Tenant
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
 
@@ -146,8 +148,6 @@ def _export_of(tenant: Tenant, commit: str) -> Path:
 
 def _current_commit(tenant: Tenant) -> str | None:
     """The commit `<T>/exports/current` names, or `None` when there is no usable snapshot."""
-    from defender.learning.author.version_control import DeliveryRefused, current_export
-
     try:
         return current_export(tenant).commit
     except DeliveryRefused:
@@ -230,11 +230,8 @@ def _remove(folder: Path, name: str) -> None:
 
 
 def _files_of(root: Path) -> dict[str, bytes]:
-    from defender.learning.author.version_control import DeliveryRefused
-    from defender.learning.author.version_control.files import _regular_files
-
     try:
-        return _regular_files(root)
+        return regular_files(root)
     except DeliveryRefused as refused:
         raise KnowledgeRefused(f"the export cannot be copied for this run: {refused}") from refused
 
@@ -247,8 +244,6 @@ def copy_for_run(tenant: Tenant, source: KnowledgeSource, run_id: str) -> RunCop
 
     A copy already at `<run_id>` (a resumed run id whose earlier run was killed) is replaced
     when its owner is dead, and refused while it lives."""
-    from defender.learning.author.version_control.owner import owner_alive, write_owner
-
     export = _export_of(tenant, source.commit)
     agent_files = _files_of(export / AGENT_HALF)
     settings_files = _files_of(export / SETTINGS_HALF)

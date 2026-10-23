@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from defender.tenancy._exports import regular_files as _regular_files
 from defender.tenancy._tenant import Tenant
 from defender import box
 from defender.runtime.model_view import ModelView
 
 from .commits import CommitMaker, _Line
 from .exports import TenantExport, agent_blobs
-from .files import _folders_of, _regular_files, _remove_entry, _resync
+from .files import _folders_of, _remove_entry, _resync
 from .model import AgentChange, ChangeSet, _refusals, _require_in_lanes
 from .repository import GitRepository
 

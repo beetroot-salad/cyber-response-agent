@@ -1,7 +1,8 @@
 """A tenant's published knowledge, read from files alone: what a run (which has no git, no
 network and never imports the delivery package, #1108 P4 P-3) needs to find the export it
-copies, and who holds the tenant's knowledge lock. Writing exports is the delivery package's
-(`learning/author/version_control/exports.py`); this module only reads."""
+copies, its files read whole with no link followed, and who holds the tenant's knowledge lock.
+Writing exports is the delivery package's (`learning/author/version_control/exports.py`); this
+module only reads."""
 from __future__ import annotations
 
 import re
@@ -87,3 +88,46 @@ def knowledge_lock_holder(tenant: Tenant) -> int | None:
         read = folder.read(path.name, errors="replace")
     written = (read.text or "").strip()
     return int(written) if written.isdigit() else None
+
+
+def regular_files(root: Path) -> dict[str, bytes]:
+    """Every regular file below `root`, by POSIX relative path, with its bytes: walked and read
+    with no link followed and no FIFO opened, each file under `READ_LIMIT` (`_io.bind`). Any
+    other entry (a link, a symlinked folder, a FIFO, socket or device), an oversized file or one
+    that cannot be read refuses the whole read, naming it: nothing is skipped."""
+    files: dict[str, bytes] = {}
+    with _io.bind(root) as bound:
+        pending = [""]
+        while pending:
+            folder = pending.pop()
+            listed = _io.stat_entries(bound.under(folder) if folder else bound)
+            if listed.stats is None:
+                raise DeliveryRefused(
+                    f"{root / folder} could not be listed: "
+                    f"{listed.refusal or 'it is absent'}"
+                )
+            for name, st in sorted(listed.stats.items()):
+                rel = f"{folder}/{name}" if folder else name
+                if stat.S_ISDIR(st.st_mode):
+                    pending.append(rel)
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    raise DeliveryRefused(
+                        f"{root / rel} is not a regular file or a folder "
+                        f"(mode {stat.filemode(st.st_mode)}): refused whole"
+                    )
+                if st.st_size > _io.READ_LIMIT:
+                    raise DeliveryRefused(
+                        f"{root / rel} is larger than {_io.READ_LIMIT} bytes: "
+                        "refused whole"
+                    )
+                read = bound.read_bytes(
+                    rel
+                )  # lint-whole-read: ok — `_io.Bound`, which enforces READ_LIMIT and the no-follow guards
+                if read.data is None:
+                    raise DeliveryRefused(
+                        f"{root / rel} could not be read: "
+                        f"{read.refusal or 'it vanished'}: refused whole"
+                    )
+                files[rel] = read.data
+    return files

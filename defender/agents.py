@@ -3,7 +3,7 @@ from __future__ import annotations
 from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF
 from defender.learning.branch.estate.oracle import ORACLE_CHECK_DEF, ORACLE_DEF
 from defender.learning.branch.questioner import QUESTIONER_DEF
-from defender.learning.judge.run import JUDGE_DEF
+from defender.learning.judge_role import JUDGE_DEF
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
 from defender.runtime.agent_definition import AgentDefinition, build_registry
 from defender.runtime.agent_role import AgentRole

@@ -294,7 +294,7 @@ def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
     from dataclasses import replace
 
     from defender.learning.author import version_control as vc
-    from defender.learning.author.version_control.files import _regular_files
+    from defender.tenancy._exports import regular_files as _regular_files
 
     batch = None
     try:
