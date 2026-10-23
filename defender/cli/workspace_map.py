@@ -8,6 +8,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _io  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.presentation.workspace_map import DEFENDER_DIR, workspace_map  # noqa: E402
 
@@ -36,8 +37,34 @@ def main(argv: list[str]) -> int:
     except RegistryError as e:
         sys.stderr.write(f"workspace_map: {e}\n")
         return 2
-    print(workspace_map(Path(run.run_dir), systems=tuple(roster.accepted)), end="")
+    print(workspace_map(Path(run.run_dir), systems=tuple(roster.accepted),
+                        agent_root=_stamped_agent_root(ns.tenant, Path(run.run_dir))), end="")
     return 0
+
+
+def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
+    """The agent half of the export the run read (#1108 P4: its host-held knowledge record's
+    commit, `<T>/exports/<commit>/agent`), or `None` when the run names none or the export is
+    gone: the map then says it has no tenant knowledge to show."""
+    import json
+
+    from defender.records._locations import _unwrap_exports_root
+    from defender.run_repository import RunPaths
+    from defender.tenancy import _tenant
+
+    raw, _reason = _io.read_guarded(RunPaths(run_dir).knowledge_source())
+    try:
+        commit = json.loads(raw).get("commit") if raw is not None else None
+    except (ValueError, AttributeError):
+        commit = None
+    if not isinstance(commit, str) or not commit.isalnum():
+        return None
+    try:
+        tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
+    except _tenant.TenantRefused:
+        return None
+    agent = _unwrap_exports_root(tenant.exports) / commit / "agent"
+    return agent if agent.is_dir() else None
 
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text

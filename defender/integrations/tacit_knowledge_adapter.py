@@ -66,14 +66,14 @@ _BRACKET_EXPR_RE = re.compile(r"\[!?\]?[^\]]*\]")
 _BLANKET_SCOPES = frozenset({"*", "all", "any"})
 
 
-def registry_path(defender_dir: Path) -> Path:
-    """Where the registry lives inside a defender tree.
+def registry_path(agent_root: Path) -> Path:
+    """Where the registry lives under an agent root (a run's copy, #1108 P4).
 
     Under `skills/` as a system's data (so the model-facing instruction audit sees it),
     not a tenant's `settings/systems/{system}/`, which holds endpoints and credentials for live
     services.
     """
-    return KnowledgePaths.of_defender_dir(Path(defender_dir)).system_skill_dir(SYSTEM) / "registry.yaml"
+    return KnowledgePaths(Path(agent_root)).system_skill_dir(SYSTEM) / "registry.yaml"
 
 
 def _literal_chars(value: str) -> int:
@@ -278,8 +278,8 @@ def _as_of_date(ctx: VerbContext) -> dt.date:
 
 
 def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
-    """This system's settings check (#1256 O-5): it needs none. The registry is the defender
-    tree's own file, never a tenant setting, so no settings — not even a broken
+    """This system's settings check (#1256 O-5): it needs none. The registry is the run's agent
+    knowledge (its run copy's `skills/tacit-knowledge/`), never a tenant setting, so no settings — not even a broken
     `systems/tacit-knowledge/config.env` — make a verb here raise `ConfigFault`, and this check
     never raises."""
     del tenant  # declared, and read for nothing: the system needs no settings
@@ -288,7 +288,7 @@ def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter
 def health_check(ctx: VerbContext) -> dict:
     """Liveness for a system with no service: does the registry exist, and how many entries
     does it hold. Returns data rather than printing, so the queries table records a payload."""
-    path = registry_path(ctx.defender_dir)
+    path = registry_path(ctx.tenant.agent)
     present = path.is_file()
     return {
         "system": SYSTEM,
@@ -307,7 +307,7 @@ def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `thr
     names nothing — not a near match, not an expired entry — since an almost-hit's id would be a
     citation waiting to be written.
     """
-    entries = load_entries(registry_path(ctx.defender_dir))
+    entries = load_entries(registry_path(ctx.tenant.agent))
     return {
         "matched": find_entry(
             entries, actor=actor, host=host, pattern=pattern, now=_as_of_date(ctx),

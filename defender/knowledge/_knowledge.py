@@ -25,25 +25,24 @@ SKILLS = "skills"
 #: The saved query catalog, under the agent root.
 CATALOG = f"{SKILLS}/gather/queries"
 
-#: Where the agent root sits inside the product checkout until #1108 moves it out.
-_CHECKOUT_AGENT_REL = "defender"
+#: The agent root's spelling inside the tenant repo that versions it (`<repo>/agent/`): the
+#: prefix of every repo-relative knowledge path a commit, ChangeSet or handoff names (OD6).
+AGENT_REL = "agent"
 
 
 @model(frozen=True)
 class KnowledgePaths:
-    """One tenant's agent knowledge, rooted at `agent_root`.
-
-    `agent_rel` is `agent_root`'s spelling relative to the git repo that versions it (`defender`
-    in the product checkout); the `*_rel` spellings are built from it."""
+    """One tenant's agent knowledge, rooted at `agent_root`: a run copy's `stage/agent/`, a
+    draft's `agent/` or an export's `agent/` (#1108 P4). Nothing else roots it, so a run's paths
+    never reach another tenant's knowledge or the product tree."""
 
     agent_root: Path
-    agent_rel: str
 
     @classmethod
     def of_defender_dir(cls, defender_dir: Path) -> KnowledgePaths:
-        """The knowledge inside the code tree at `defender_dir` (a checkout's or a worktree's
-        `defender/`), where it lives until #1108 moves it into the tenant's repo."""
-        return cls(agent_root=Path(defender_dir), agent_rel=_CHECKOUT_AGENT_REL)
+        """Transitional: the knowledge inside the code tree at `defender_dir`, as it lay before
+        #1108 P4 (`_CheckoutKnowledge`). Not a reader of any run's knowledge."""
+        return _CheckoutKnowledge(agent_root=Path(defender_dir))
 
     def corpus_dir(self, corpus: str) -> Path:
         """A lesson corpus by name (one of `LESSON_CORPORA`, or a retired corpus)."""
@@ -73,8 +72,8 @@ class KnowledgePaths:
         return self.agent_root / CATALOG
 
     def rel(self, sub: str) -> str:
-        """`sub`'s spelling relative to the versioning repo, with a trailing slash."""
-        return f"{self.agent_rel}/{sub}/"
+        """`sub`'s spelling relative to the tenant repo (`agent/<sub>/`), with a trailing slash."""
+        return f"{AGENT_REL}/{sub}/"
 
     @property
     def skills_rel(self) -> str:
@@ -85,7 +84,25 @@ class KnowledgePaths:
         return self.rel(CATALOG)
 
 
-#: The knowledge the running checkout carries. Every import-time reader of the knowledge (a
-#: module-level default, a `git` pathspec, a spelling in model-facing text) goes through this
-#: one value, so #1108's move re-points them in one place.
-CHECKOUT_KNOWLEDGE = KnowledgePaths.of_defender_dir(REPO_ROOT / "defender")
+@model(frozen=True)
+class _CheckoutKnowledge(KnowledgePaths):
+    """The knowledge a product checkout carried before #1108 P4 moved it into the tenant repo:
+    rooted at the checkout's `defender/`, spelled `defender/<sub>/` relative to the product repo.
+
+    Kept for the judge's pre-move branch (O6: a run whose code commit's tree has
+    `defender/lessons/<name>.md` is read from the product repo at that commit). Learning code
+    not yet moved onto drafts (#1108 P4's later slices) still reaches it through
+    `KnowledgePaths.of_defender_dir`; the census (`tenant_1108_p4/test_census.py`) names each such
+    reader until it takes an agent root."""
+
+    @property
+    def agent_rel(self) -> str:
+        return "defender"
+
+    def rel(self, sub: str) -> str:
+        return f"{self.agent_rel}/{sub}/"
+
+
+#: The knowledge the running checkout carried before #1108 P4 (`_CheckoutKnowledge`): the judge's
+#: pre-move branch is its one design-sanctioned reader.
+CHECKOUT_KNOWLEDGE = _CheckoutKnowledge(agent_root=REPO_ROOT / "defender")

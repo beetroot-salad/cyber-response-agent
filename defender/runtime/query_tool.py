@@ -82,7 +82,6 @@ from defender.runtime.query_catalog import (
     _LIST_VERBS_UNLOADABLE as _LIST_VERBS_UNLOADABLE,
     _LIST_VERBS_UNREACHABLE as _LIST_VERBS_UNREACHABLE,
     _RERAISE as _RERAISE,
-    _SKILLS_REL as _SKILLS_REL,
     _echoed_system as _echoed_system,
     _granted_systems as _granted_systems,
     _json_default as _json_default,

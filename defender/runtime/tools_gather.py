@@ -101,17 +101,19 @@ def _payload_note(deps: GatherDeps, record: dict) -> str:
     return f"\n[record_query] raw payload: {view.to_model(host) if view is not None else host}"
 
 
-def _repo_rel(defender_dir: Path, path: Path) -> str:
+def _repo_rel(knowledge: KnowledgePaths, path: Path) -> str:
+    """`path`'s spelling relative to the tenant repo (`agent/...`), or as given outside it."""
     try:
-        return str(path.relative_to(defender_dir.parent))
+        return f"{knowledge.rel(path.relative_to(knowledge.agent_root).as_posix()).rstrip('/')}"
     except ValueError:
         return str(path)
 
 
-def _locator(defender_dir: Path, t: QueryTemplate, view: ModelView | None = None) -> str:
+def _locator(knowledge: KnowledgePaths, t: QueryTemplate, view: ModelView | None = None) -> str:
     """The `id — path` line shared by the dispatch index and `template_search` hits. The path
-    is the template's model path for a role in the model view (#1255 P1), else repo-relative."""
-    shown = view.to_model(t.path) if view is not None else _repo_rel(defender_dir, t.path)
+    is the template's model path for a role in the model view (#1255 P1), else tenant-repo
+    relative."""
+    shown = view.to_model(t.path) if view is not None else _repo_rel(knowledge, t.path)
     return f"- `{t.id}` — `{shown}`"
 
 
@@ -127,7 +129,7 @@ class TemplateIndex:
 
 
 def _template_index(
-    defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
+    knowledge: KnowledgePaths, dispatched: str, verb_grant: VerbGrant | None = None,
     *, view: ModelView | None = None,
 ) -> TemplateIndex:
     """Two tiers: the dispatched system's templates with their `## Goal`; every other system's
@@ -140,13 +142,13 @@ def _template_index(
     on_target: list[str] = []
     elsewhere: list[str] = []
     established_seen = 0
-    for t in iter_query_templates(KnowledgePaths.of_defender_dir(defender_dir).catalog_dir):
+    for t in iter_query_templates(knowledge.catalog_dir):
         if not is_established(t):
             continue
         established_seen += 1
         if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
             continue
-        locator = _locator(defender_dir, t, view)
+        locator = _locator(knowledge, t, view)
         if t.system == dispatched:
             on_target.append(f"{locator}\n  {' '.join(t.goal.split())}")
         else:
@@ -263,7 +265,7 @@ def _gather_prompt(
             f"{_execution_surface(deps.knowledge, request.system, view)}\n\n"
             f"{catalog}\n"
         )
-    index = _template_index(deps.defender_dir, request.system, verb_grant, view=view)
+    index = _template_index(deps.knowledge, request.system, verb_grant, view=view)
     if index.text:
         block += _INDEX_HEADER + index.text + "\n"
     else:
@@ -343,7 +345,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
         shown = matched[:_SEARCH_LINES_PER_TEMPLATE]
         dropped += len(matched) - len(shown)
         hit = "\n".join(
-            [_locator(deps.defender_dir, t, deps.view), *(f"    {ln}" for ln in shown)]
+            [_locator(deps.knowledge, t, deps.view), *(f"    {ln}" for ln in shown)]
         )
         (untrusted if permission.is_untrusted_read(t.path) else trusted).append(hit)
 

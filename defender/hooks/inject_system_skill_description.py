@@ -7,18 +7,18 @@ from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
-from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 from defender._paths import adapters_under
 from defender.runtime.system_status import NONE_DOWN
 from defender.runtime.verb_grant import DENY_ALL, VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry, RosterRead
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
-SKILLS_DIR = CHECKOUT_KNOWLEDGE.skills_dir
 ADAPTERS_DIR = adapters_under(DEFENDER_DIR)
 
 
-def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
+def read_description(system: str, skills_dir: Path) -> str | None:
+    """`system`'s skill description from `skills_dir` (the run's agent root's `skills/`,
+    #1108 P4), or `None` when it has none to show."""
     skill_path = (skills_dir / system / "SKILL.md").resolve()
     try:
         skill_path.relative_to(skills_dir.resolve())

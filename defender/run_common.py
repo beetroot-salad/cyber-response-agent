@@ -32,6 +32,7 @@ _logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from defender.run_repository import EpisodeRuns
     from defender.runtime.branch._family import ResumeWorld
+    from defender.runtime.run_knowledge import KnowledgeSource
 
 _GENERIC_ALERT_STEMS = {"alert"}
 
@@ -66,18 +67,26 @@ def _setup_state(run: Run) -> str:
     return "setup"
 
 
-def materialize_run(
+def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the knowledge it reads
     alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None = None,
     world: ResumeWorld | None = None, episode_runs: EpisodeRuns | None = None,
+    settings: Path | None = None, knowledge: KnowledgeSource | None = None,
 ) -> Run:
     """Build (or finish building) the run directory for `run_id` and return the tenant-bound
-    handle the run's later records are saved through."""
+    handle the run's later records are saved through.
+
+    `settings` is the settings half the run reads (its run copy's, #1108 P4: the alert mapping
+    comes from it) and `knowledge` the source of the knowledge it reads, whose commit the stamp
+    records (O-B: the export copied, never a clone's HEAD). Both default to what a caller that
+    names no run copy has: the tenant's own folder, and a stamp that says nothing of knowledge."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     started_at = _started_at()
     pinned = run_id is not None
     admitted = _admit_run_id(run_id)
-    front_door = _admit_input(alert, tenant=tenant, world=world)
+    if settings is None:
+        settings = _tenant.clone_halves(tenant)[1]
+    front_door = _admit_input(alert, settings=settings, world=world)
     try:
         if world is not None:
             if episode_runs is None:
@@ -114,7 +123,7 @@ def materialize_run(
         with contextlib.suppress(OSError):
             paths.provenance.unlink()
     _stamp(
-        run, knowledge_dir=tenant.knowledge, model=model, tenant_id=run.tenant_id,
+        run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
         started_at=started_at, alert_label=_alert_label(alert),
     )
@@ -146,7 +155,8 @@ def _sidecars(run: Run) -> tuple[Path, ...]:
     verdict, the ticket receipt (#1107 moved it out of the tree) and the run -> case link
     (#1235 did)."""
     return (run.facts.run_end.path, run.facts.scrub_verdict.path,
-            run.observability.ticket_write.path, run.observability.session_pointer.path)
+            run.observability.ticket_write.path, run.observability.session_pointer.path,
+            RunPaths(run.run_dir).knowledge_source())
 
 
 def _clear_stale_sidecars(run: Run) -> None:
@@ -170,9 +180,10 @@ class _FrontDoor:
     record: str
 
 
-def _admit_input(alert: Path, *, tenant: _tenant.Tenant, world: ResumeWorld | None) -> _FrontDoor:
-    """Admit the operator's alert (A8) and settle its facts through the tenant's alert mapping,
-    read once (A1) — or exit with the fixed reason, before a run folder exists. A sibling's input
+def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None) -> _FrontDoor:
+    """Admit the operator's alert (A8) and settle its facts through the alert mapping of the
+    run's `settings`, read once (A1) — or exit with the fixed reason, before a run folder
+    exists. A sibling's input
     is its episode's copy of the source run's alert, carried with the record launch copied
     beside it; neither is derived again."""
     try:
@@ -194,7 +205,7 @@ def _admit_input(alert: Path, *, tenant: _tenant.Tenant, world: ResumeWorld | No
                      f"({reason or 'the record is missing, malformed or for another alert'})")
         return _FrontDoor(raw=raw, record=text)
     try:
-        mapping = _alert_input.load_alert_mapping(tenant.settings)
+        mapping = _alert_input.load_alert_mapping(settings)
     except _alert_input.AlertMappingFault as fault:
         sys.exit(f"[run.py] this run's tenant cannot be used: {fault}")
     facts = _alert_input.derive_facts(admitted.document, mapping)
@@ -267,18 +278,23 @@ def _seal(input_dir: Path) -> None:
 
 
 def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
-    run: Run, *, knowledge_dir: Path, model: str | None = None,
+    run: Run, *, knowledge: KnowledgeSource | None, model: str | None = None,
     tenant_id: str | None = None, world_id: str | None = None,
     started_at: str | None = None, alert_label: str | None = None,
 ) -> None:
     """Write the run's stamp, never taking the run down doing it (ENOSPC, read-only remount,
     a planted alias). Unlike a missing alert, a missing stamp only means the run's code cannot
     be proven later, so it is logged loudly and the run continues. An interrupted setup is
-    resumable, so a retry re-stamps. `knowledge_dir` is the run's tenant knowledge clone,
-    whose checked-out commit rides beside the product's (#1204)."""
+    resumable, so a retry re-stamps. `knowledge` is where the run's tenant knowledge came from:
+    its export's commit rides beside the product's (#1204; #1108 P4 O-B: the export copied,
+    never a clone's checked-out commit), with the informational `knowledge_source` (OD17)."""
     path = run.facts.provenance.path
     try:
-        record = _provenance.capture_run(REPO_ROOT, knowledge_dir)
+        record = _provenance.capture_tree(REPO_ROOT)
+        if knowledge is not None:
+            record = _dataclasses.replace(
+                record, knowledge=_provenance.KnowledgeRevision.at(knowledge.commit),
+                knowledge_source=knowledge.stamp_view())
         # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
@@ -292,15 +308,28 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
                       "nothing downstream can prove which code it ran")
 
 
+#: Variables that may carry knowledge-delivery login material (an OpenBao/Vault token, an
+#: AppRole `role_id`/`secret_id`, a forge token): no run child is ever handed one (#1108 P4 O8,
+#: P-4: login material is file-only and reaches only host-side delivery processes).
+_ISSUER_WORDS = frozenset({"BAO", "OPENBAO", "VAULT", "ISSUER", "APPROLE"})
+_ISSUER_PAIRS = ("ROLE_ID", "SECRET_ID", "FORGEJO_TOKEN")
+
+
+def _issuer_variable(name: str) -> bool:
+    upper = name.upper()
+    return (bool(_ISSUER_WORDS & set(upper.split("_")))
+            or any(pair in upper for pair in _ISSUER_PAIRS))
+
+
 def provider_scrubbed_environ() -> dict[str, str]:
-    """The process's environment as a copy, with every registered provider's API-key variable removed — the base of
-    every host child's environment (`run_env` adds a run's variables on top; the branch
-    launcher's write door, which has no run yet, takes it as is). The ONE scrub, so no host
-    child is handed a registered provider's key by a caller that forgot to drop it (other
-    credential variables are not this scrub's to know)."""
+    """The process's environment as a copy, with every registered provider's API-key variable
+    and every issuer/forge login variable (`_issuer_variable`) removed — the base of every host
+    child's environment (`run_env` adds a run's variables on top; the branch launcher's write
+    door, which has no run yet, takes it as is). The ONE scrub, so no host child is handed a
+    registered provider's key or an operator's issuer token by a caller that forgot to drop it."""
     from defender.runtime import providers
 
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if not _issuer_variable(k)}
     for var in providers.api_key_vars():
         env.pop(var, None)
     return env

@@ -14,7 +14,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender.knowledge._corpus import iter_query_templates
 from defender._io import Bound
-from defender._paths import PATHS
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 from defender.learning.leads.path_validation import CATALOG_FOLDER
 
 
@@ -76,7 +76,7 @@ def load_catalog(catalog: Bound | Path | None = None, *, where: Path | None = No
     where=catalog_dir)`, so each `path` is today's `catalog_dir / "<sys>/x.md"`. A `Path` is bound
     here and roots wherever it points, so drain code never passes one (N-h); `None` is the repo's
     own catalog, `PATHS.catalog_dir`."""
-    root = catalog if catalog is not None else PATHS.catalog_dir
+    root = catalog if catalog is not None else CHECKOUT_KNOWLEDGE.catalog_dir
     return [
         Template(
             id=t.id,
@@ -256,8 +256,8 @@ def main(argv: list[str]) -> int:
     p.add_argument(
         "--catalog",
         type=Path,
-        default=PATHS.catalog_dir,
-        help=f"Catalog dir (defaults to {PATHS.catalog_dir}).",
+        default=CHECKOUT_KNOWLEDGE.catalog_dir,
+        help=f"Catalog dir (defaults to {CHECKOUT_KNOWLEDGE.catalog_dir}).",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
 

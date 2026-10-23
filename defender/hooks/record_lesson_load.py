@@ -6,21 +6,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
-from defender.knowledge._knowledge import LESSON_CORPORA
+from defender.knowledge._knowledge import LESSON_CORPORA, KnowledgePaths
 from defender.runtime.agent_role import AgentRole
 
 
 
-def lesson_name(file_path: str, corpora: frozenset[str] = LESSON_CORPORA) -> str | None:
+def lesson_name(file_path: str, corpora: frozenset[str] = LESSON_CORPORA, *,
+                agent_root: Path | None) -> str | None:
+    """The lesson `file_path` is — a direct `.md` child (not `_`-prefixed) of one of `corpora`'s
+    folders under `agent_root`, the agent root the reading role serves (#1108 P4, O5: its run
+    copy) — or `None`. A corpus folder under any other root is not this run's corpus; with no
+    agent root nothing is a lesson."""
+    if agent_root is None:
+        return None
     p = Path(file_path)
-    if (
-        p.suffix == ".md"
-        and not p.name.startswith("_")
-        and p.parent.name in corpora
-        and p.parent.parent.name == "defender"
-    ):
-        return p.stem
-    return None
+    if p.suffix != ".md" or p.name.startswith("_") or p.parent.name not in corpora:
+        return None
+    knowledge = KnowledgePaths(Path(agent_root))
+    if p.parent.resolve() not in {knowledge.corpus_dir(c).resolve() for c in corpora}:
+        return None
+    return p.stem
 
 
 

@@ -19,10 +19,15 @@ if TYPE_CHECKING:
 
 
 def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
-    """The run's lessons corpus (its `KnowledgePaths`' `lessons_dir`), or `None` with a warning under the caller's `lane` prefix. A
-    missing corpus is otherwise silent (the model reads silence as "nothing new matched"), so
-    a mis-resolved `defender_dir` would disable the lane unnoticed."""
-    corpus = KnowledgePaths.of_defender_dir(deps.defender_dir).lessons_dir
+    """The run's lessons corpus (`deps.knowledge.lessons_dir`, under the run's own agent root —
+    #1108 P4), or `None` with a warning under the caller's `lane` prefix. A missing corpus is
+    otherwise silent (the model reads silence as "nothing new matched"), so a mis-resolved
+    agent root would disable the lane unnoticed."""
+    agent = deps.agent_root
+    if agent is None:
+        _logger.warning(f"{lane} the role names no agent root; omitting the lessons push")
+        return None
+    corpus = KnowledgePaths(agent).lessons_dir
     if not corpus.is_dir():
         _logger.warning(f"{lane} no lessons corpus at {corpus}; omitting the lessons push")
         return None
@@ -45,8 +50,8 @@ def record(deps: AgentDeps, hits: Iterable[Hit]) -> None:
     """One `push` row per hit, like a Read. `lessons_loaded.jsonl` is the only "was this
     lesson in context" signal (e.g. for `cli/learning/trace_lesson.py`).
 
-    Paths are resolved: `record_lesson_load.lesson_name` checks
-    `p.parent.parent.name == "defender"`, so a symlink or `..` would drop the row.
+    Paths are resolved: `record_lesson_load.lesson_name` recognises a lesson by its place under
+    the run's agent root, so a symlink or `..` would drop the row.
     """
     from .tools._deps import _record_lesson_load
 

@@ -158,9 +158,23 @@ class AgentDeps:
         )
 
     @property
+    def agent_root(self) -> Path | None:
+        """The run's agent root (its run copy's `agent/`, #1108 P4), or `None` for a role whose
+        scope names none: the resolved roots' tenant agent half, else the run tenant's."""
+        if self.roots is not None and self.roots.tenant_agent is not None:
+            return Path(self.roots.tenant_agent)
+        return Path(self.tenant.agent) if self.tenant is not None else None
+
+    @property
     def knowledge(self) -> KnowledgePaths:
-        """The agent knowledge this role reads (#1108): today the corpus inside `defender_dir`."""
-        return KnowledgePaths.of_defender_dir(self.defender_dir)
+        """The agent knowledge this role reads (#1108 P4): its run's agent root, never the code
+        tree. A role with no agent root reads no knowledge, so asking is a wiring fault."""
+        agent = self.agent_root
+        if agent is None:
+            raise RuntimeError(
+                f"{type(self).__name__} has no agent root (no run tenant and no tenant agent "
+                "root): it reads no tenant knowledge")
+        return KnowledgePaths(agent)
 
     @classmethod
     def _for_run(
@@ -253,7 +267,7 @@ def _record_lesson_load(
     """
     if kind not in _LOAD_KINDS:
         raise ValueError(f"lessons_loaded row kind must be one of {sorted(_LOAD_KINDS)}: {kind!r}")
-    name = _lesson_name(str(path), corpora)
+    name = _lesson_name(str(path), corpora, agent_root=deps.agent_root)
     if name is None:
         return
     try:

@@ -27,7 +27,8 @@ from pydantic_ai.exceptions import (
 )
 
 
-from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import SKILLS
+from defender.runtime.model_view import MODEL_AGENT
 
 from defender.hooks.budget_enforcer import BudgetKill
 
@@ -92,8 +93,9 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
 
 
 
-#: Where a system's skill sits, as the model-facing notes below name it (`defender.knowledge._knowledge`).
-_SKILLS_REL = CHECKOUT_KNOWLEDGE.skills_rel
+#: Where a system's skill sits, as the model-facing notes below name it: the run's agent root
+#: in the model view (`/agent/skills/`, #1108 P4 O-TEXT), laid out by `defender.knowledge._knowledge`.
+_SKILLS_SHOWN = f"{MODEL_AGENT}/{SKILLS}/"
 
 
 
@@ -103,7 +105,7 @@ _LIST_VERBS_UNLOADABLE = (
     "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
     "derived for it right now, and no file carries a copy — the verb roster and its params are "
     "read from the live signatures and nowhere else. "
-    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
+    f"`{_SKILLS_SHOWN}{{system}}/execution.md` still states this system's value constraints and "
     "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
     "param name."
 )
@@ -115,7 +117,7 @@ _LIST_VERBS_UNLOADABLE = (
 _LIST_VERBS_UNDERIVABLE = (
     "`{system}` — UNAVAILABLE: its verb surface could not be derived ({err}). That is a "
     "defender-side fault, not something your call can fix, and no file carries a copy of the "
-    f"surface. `{_SKILLS_REL}{{system}}/execution.md` still states this system's value "
+    f"surface. `{_SKILLS_SHOWN}{{system}}/execution.md` still states this system's value "
     "constraints and recorded pitfalls; report the failure in your summary rather than guessing "
     "a verb or a param name."
 )
@@ -126,7 +128,7 @@ _LIST_VERBS_UNDERIVABLE = (
 _LIST_VERBS_NO_VERBS = (
     "`{system}` — UNAVAILABLE: its adapter declares no verbs at all, so no verb surface can be "
     "derived for it, and no file carries a copy. "
-    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
+    f"`{_SKILLS_SHOWN}{{system}}/execution.md` still states this system's value constraints and "
     "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
     "param name."
 )

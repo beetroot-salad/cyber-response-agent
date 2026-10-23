@@ -11,13 +11,15 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender import _git
 from defender._paths import DefenderPaths
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 from defender.learning.leads._errors import LeadAuthorError
 from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, read_roster
 
 #: From `DefenderPaths` rather than re-spelled, so the resolver and the gates agree on where
 #: adapters live.
 ADAPTERS_REL = DefenderPaths.adapters_rel
-SKILLS_REL = DefenderPaths.skills_rel
+# Transitional (#1108 P4): the checkout's layout until the lead lanes write a tenant draft.
+SKILLS_REL = CHECKOUT_KNOWLEDGE.skills_rel
 
 _logger = logging.getLogger(__name__)
 
