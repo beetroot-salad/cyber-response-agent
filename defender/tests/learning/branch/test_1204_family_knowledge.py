@@ -400,13 +400,26 @@ def test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states():
     """D4's census (and #1108 P4 O-STALE): `STAMP_FIELD_CLASSES` names exactly the fields a
     `RunProvenance` record carries on the wire, each in one of the five classes, as D4 (plus
     P4's `knowledge_source: informational`) states. A new stamp field cannot be left out of the
-    fork check, and `knowledge_source` is recorded, never compared."""
+    fork check, and `knowledge_source` is recorded, never compared.
+
+    OD17: the stamp "may carry" `knowledge_source`, so a bare record's wire keys are the table
+    less that one optional key, and the key reaches the wire (with only `{kind, commit,
+    stale_kind}`, never the reason) when the run hands it to the stamp."""
 
     table = _table()
-    wire = set(json.loads(_provenance.RunProvenance(commit="0" * 40, dirty=False).as_json()))
-    assert set(table) == wire, (
-        f"stamp table vs record fields: only in table {set(table) - wire}, "
+    record = _provenance.RunProvenance(commit="0" * 40, dirty=False)
+    wire = set(json.loads(record.as_json()))
+    optional = {"knowledge_source"}
+    assert set(table) == wire | optional, (
+        f"stamp table vs record fields: only in table {set(table) - wire - optional}, "
         f"only on the record {wire - set(table)}")
+    assert table["knowledge_source"] == "informational", table
+    source = {"kind": "stale", "commit": "1" * 40, "stale_kind": "operator",
+              "reason": "forge said no"}
+    carried = json.loads(record.as_json(knowledge_source=source))
+    assert set(carried) == wire | optional, set(carried) ^ (wire | optional)
+    assert carried["knowledge_source"] == {
+        "kind": "stale", "commit": "1" * 40, "stale_kind": "operator"}, carried
     assert set(table.values()) <= CLASSES, table
     assert table == D4, {k: (table.get(k), D4.get(k)) for k in set(table) | set(D4)
                          if table.get(k) != D4.get(k)}
