@@ -897,137 +897,119 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
         knowledge = _knowledge_source(accepted, pin=pin, publish=publish, data_root=data_root)
         copy = _copy_knowledge(accepted, knowledge, run_id)
         try:
-            return _run_on_copy(
-                ns, accepted=accepted, tenant_of=tenant_of, world=world, episode=episode,
-                episode_runs=episode_runs, source=source, run_id=run_id, knowledge=knowledge,
-                copy=copy, lifecycle=lifecycle, visualize=visualize, ticket_writer=ticket_writer,
-                enqueue_curation=enqueue_curation, preflight=preflight, materialize=materialize,
-                oracle=oracle, verifier=verifier, roster=roster)
+            # The tenant's settings (and with them the one tenant check), resolved before the input
+            # is read and before anything is spent; nothing below reads them again.
+            tenant = tenant_of()
+            # The run's one judgement of its systems (#1256), before the run is made: the roster
+            # this run reads (the injected one, or the checkout's, read once here), judged by the
+            # adapters' own settings checks over those settings — a start at which no granted
+            # system is usable refused here (O-8, a sibling's own start too) — and handed to the
+            # lifecycle whole, so the investigation reads that roster and does not judge again.
+            from defender.runtime.branch._family import family_identities
+
+            known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
+            systems = _judge_start(
+                tenant, defender_dir=DEFENDER_DIR,
+                roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
+                known_ids=known_ids)
+
+            model = driver.resolve_main_model(ns.model)
+            # Runs in siblings too: models are resolved per process, so each sibling must check (and
+            # record) its own; a sibling also checks the oracle roles it serves through (M25=A).
+            rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
+            if rc:
+                return rc
+            seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
+
+            # The input is read after the tenant check and the role preflight: a tenant the check
+            # refuses is told so before anything about its input is.
+            alert, _arm_id = _case_input(ns, world, episode_runs)
+
+            # The handle, not just its directory: the post-run step saves the run page through it.
+            # The alert mapping is the run copy's, and the stamp records the export copied (O-B).
+            read = {"settings": copy.settings, "knowledge": knowledge}
+            run = (materialize(alert, run_id, tenant=accepted, model=model, **read) if world is None
+                   else materialize(alert, run_id, tenant=accepted, model=model, world=world,
+                                    episode_runs=episode_runs, **read))
+            run_dir = run.run_dir
+            _write_knowledge_record(run_dir, knowledge)
+
+            # Every log line from here on, the crash included, names this run and the tenant this
+            # process resolved once above and hands inward as one value.
+            with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
+                if ns.update_ticket:
+                    ticket_writer.open_case_ticket(
+                        run, tenant=tenant, defender_dir=DEFENDER_DIR,
+                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
+
+                _logger.info(f"run_dir={run_dir} model={model}")
+                _announce_provenance(run_dir)
+
+                try:
+                    summary = lifecycle(
+                        run=run,
+                        model=model,
+                        model_override=ns.model,
+                        defender_dir=DEFENDER_DIR,
+                        tenant=tenant,
+                        world=world,
+                        episode=episode,
+                        systems=systems,
+                        **seams,
+                    )
+                except (ServingAbort, BaseExceptionGroup) as escaped:
+                    abort = _serving_abort(escaped)
+                    if abort is None or world is None or episode is None:
+                        raise
+                    _record_unservable_world(episode, world, abort)
+                    _logger.error(f"--episode: world {world.label} is unservable; the sibling ends "
+                                  f"({getattr(abort, 'reason', '')})")
+                    return UNSERVABLE_EXIT
+
+                # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
+                out = str(summary.get("output") or "")
+                _logger.info(f"done ({summary.get('requests')} model requests); "
+                             f"output: {out[:200]}")
+
+                artifacts = [entry.name for entry in sorted(run_dir.iterdir())]
+                _logger.info("artifacts: %s", ", ".join(artifacts), extra={"artifacts": artifacts})
+                # The reap-scan verdict sits outside the tree it judges (in-tree, the box could
+                # forge it), so the listing above cannot show it; name it for the operator.
+                verdict = box_mod.verdict_path(run_dir)
+                if verdict.is_file():
+                    _logger.info(f"../{verdict.name}: the reap scan's verdict — sits beside the "
+                                 "run dir, not in it")
+                else:
+                    _logger.warning(f"../{verdict.name} MISSING — this tree was never scrubbed")
+
+                _run.cross_check_tables(run_dir)
+
+                # No automatic feed into the learning pipeline; only catalog curation is triggered
+                # here, and its failure does not affect the exit status. The ticket comment (never a
+                # close — that is a person's act) is recorded before the curation marker, which a
+                # drainer may pick up immediately.
+                if ns.update_ticket:
+                    # Both inputs come from the driver's summary, not from a possibly stale sidecar.
+                    ticket_writer.record_case_ticket(
+                        run, tenant=tenant, defender_dir=DEFENDER_DIR,
+                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
+                        closed_before_cut=summary.get("closed_before_cut") is True)
+
+                # A sibling's evidence was staged on purpose, so it must never feed the catalog.
+                if world is not None:
+                    _logger.info("--episode: a sibling world is not enqueued for curation")
+                elif ns.no_learn:
+                    _logger.info("--no-learn set; not enqueuing for curation")
+                elif enqueue_curation(run, alert, truncated_by=summary.get("truncated_by")):
+                    _logger.info("enqueued for catalog curation")
+
+                try:
+                    visualize(run, update_ticket=ns.update_ticket)
+                except _run.VisualizeFailed:
+                    _logger.warning("the run page was not saved", exc_info=True)
+                return _exit_code(summary)
         finally:
             copy.remove()
-
-
-def _run_on_copy(  # noqa: C901, PLR0913 — `main`'s run, every value it settled handed in by name
-    ns: argparse.Namespace, *, accepted: _tenant.Tenant, tenant_of: Callable[[], RunTenant],
-    world: Any, episode: Episode | None, episode_runs: Any, source: Run | None, run_id: str,
-    knowledge: run_knowledge.KnowledgeSource, copy: run_knowledge.RunCopy,
-    lifecycle: Callable[..., dict[str, Any]], visualize: Callable[..., None], ticket_writer: Any,
-    enqueue_curation: Callable[..., bool], preflight: Callable[..., int],
-    materialize: Callable[..., Run], oracle: Any, verifier: Any, roster: Any,
-) -> int:
-    """The run, once its knowledge is copied (`main`): tenant check, start judgement,
-    preflight, the run dir, the box, the post-steps."""
-    # The tenant's settings (and with them the one tenant check), resolved before the input
-    # is read and before anything is spent; nothing below reads them again.
-    tenant = tenant_of()
-    # The run's one judgement of its systems (#1256), before the run is made: the roster
-    # this run reads (the injected one, or the checkout's, read once here), judged by the
-    # adapters' own settings checks over those settings — a start at which no granted
-    # system is usable refused here (O-8, a sibling's own start too) — and handed to the
-    # lifecycle whole, so the investigation reads that roster and does not judge again.
-    from defender.runtime.branch._family import family_identities
-
-    known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
-    systems = _judge_start(
-        tenant, defender_dir=DEFENDER_DIR,
-        roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
-        known_ids=known_ids)
-
-    model = driver.resolve_main_model(ns.model)
-    # Runs in siblings too: models are resolved per process, so each sibling must check (and
-    # record) its own; a sibling also checks the oracle roles it serves through (M25=A).
-    rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
-    if rc:
-        return rc
-    seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
-
-    # The input is read after the tenant check and the role preflight: a tenant the check
-    # refuses is told so before anything about its input is.
-    alert, _arm_id = _case_input(ns, world, episode_runs)
-
-    # The handle, not just its directory: the post-run step saves the run page through it.
-    # The alert mapping is the run copy's, and the stamp records the export copied (O-B).
-    read = {"settings": copy.settings, "knowledge": knowledge}
-    run = (materialize(alert, run_id, tenant=accepted, model=model, **read) if world is None
-           else materialize(alert, run_id, tenant=accepted, model=model, world=world,
-                            episode_runs=episode_runs, **read))
-    run_dir = run.run_dir
-    _write_knowledge_record(run_dir, knowledge)
-
-    # Every log line from here on, the crash included, names this run and the tenant this
-    # process resolved once above and hands inward as one value.
-    with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
-        if ns.update_ticket:
-            ticket_writer.open_case_ticket(
-                run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
-
-        _logger.info(f"run_dir={run_dir} model={model}")
-        _announce_provenance(run_dir)
-
-        try:
-            summary = lifecycle(
-                run=run,
-                model=model,
-                model_override=ns.model,
-                defender_dir=DEFENDER_DIR,
-                tenant=tenant,
-                world=world,
-                episode=episode,
-                systems=systems,
-                **seams,
-            )
-        except (ServingAbort, BaseExceptionGroup) as escaped:
-            abort = _serving_abort(escaped)
-            if abort is None or world is None or episode is None:
-                raise
-            _record_unservable_world(episode, world, abort)
-            _logger.error(f"--episode: world {world.label} is unservable; the sibling ends "
-                          f"({getattr(abort, 'reason', '')})")
-            return UNSERVABLE_EXIT
-
-        # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
-        out = str(summary.get("output") or "")
-        _logger.info(f"done ({summary.get('requests')} model requests); "
-                     f"output: {out[:200]}")
-
-        artifacts = [entry.name for entry in sorted(run_dir.iterdir())]
-        _logger.info("artifacts: %s", ", ".join(artifacts), extra={"artifacts": artifacts})
-        # The reap-scan verdict sits outside the tree it judges (in-tree, the box could forge
-        # it), so the listing above cannot show it; name it for the operator.
-        verdict = box_mod.verdict_path(run_dir)
-        if verdict.is_file():
-            _logger.info(f"../{verdict.name}: the reap scan's verdict — sits beside the run dir, "
-                         "not in it")
-        else:
-            _logger.warning(f"../{verdict.name} MISSING — this tree was never scrubbed")
-
-        _run.cross_check_tables(run_dir)
-
-        # No automatic feed into the learning pipeline; only catalog curation is triggered
-        # here, and its failure does not affect the exit status. The ticket comment (never a
-        # close — that is a person's act) is recorded before the curation marker, which a
-        # drainer may pick up immediately.
-        if ns.update_ticket:
-            # Both inputs come from the driver's summary, not from a possibly stale sidecar.
-            ticket_writer.record_case_ticket(
-                run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
-                closed_before_cut=summary.get("closed_before_cut") is True)
-
-        # A sibling's evidence was staged on purpose, so it must never feed the catalog.
-        if world is not None:
-            _logger.info("--episode: a sibling world is not enqueued for curation")
-        elif ns.no_learn:
-            _logger.info("--no-learn set; not enqueuing for curation")
-        elif enqueue_curation(run, alert, truncated_by=summary.get("truncated_by")):
-            _logger.info("enqueued for catalog curation")
-
-        try:
-            visualize(run, update_ticket=ns.update_ticket)
-        except _run.VisualizeFailed:
-            _logger.warning("the run page was not saved", exc_info=True)
-        return _exit_code(summary)
 
 
 #: A sibling whose world went unservable exits with this (its world record says why).
