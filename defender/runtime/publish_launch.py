@@ -130,10 +130,11 @@ def _read_report(returncode: int | None, out: bytes | str | None, err: bytes | s
     if returncode != 0:
         why = text(err).strip().splitlines()
         return _failed(f"it exited with status {returncode}" + (f": {why[-1]}" if why else ""))
-    if len(said) != 1:
-        return _failed("it printed no report line" if not said
-                       else f"it printed {len(said)} lines, not one report line")
-    line = said[0]
+    if not said:
+        return _failed("it printed no report line")
+    # The report is the child's last line: a stray line printed before it (a library's
+    # warning on stdout) does not turn a reported outcome into a failure.
+    line = said[-1]
     head, _, detail = line.partition(" ")
     if head not in _CLASSES or not detail.strip():
         return _failed(f"its report is not one of the publish outcomes: {line!r}")

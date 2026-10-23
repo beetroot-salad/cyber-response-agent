@@ -115,7 +115,8 @@ def _say(message: object) -> None:
 # setup
 # ==========================================================================================
 
-def setup(tenant_id: str, learning_state_from: Path | None = None) -> int:
+def setup(tenant_id: str, learning_state_from: Path | None = None, *,
+          issuer_config: Path | None = None) -> int:
     """Validate the placed knowledge and learning adoption plan before writing the row, then
     provision or adopt tenant learning state. Refuse at the first rule it fails: the id grammar (before anything
     under the data root is looked at), the data root, the one-tenant guard (which admits the
@@ -142,7 +143,7 @@ def setup(tenant_id: str, learning_state_from: Path | None = None) -> int:
         _say(refused)
         return 1
     if _has_forge_binding(tenant):
-        return _publish(tenant, by="tenant.py setup")
+        return _publish(tenant, by="tenant.py setup", issuer_config=issuer_config)
     return 0
 
 
@@ -693,6 +694,9 @@ def main(argv: list[str]) -> int:
     setup_p.add_argument("tenant_id")
     setup_p.add_argument("--learning-state-from", type=Path, default=None,
                          help="explicit legacy learning directory to adopt offline")
+    setup_p.add_argument("--issuer-config", type=Path, default=None,
+                         help="the issuer client config file, for the publish of a tenant whose "
+                              "row is bound to a forge (default: the dev path)")
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
@@ -718,7 +722,7 @@ def main(argv: list[str]) -> int:
     if ns.command == "scaffold":
         return scaffold(ns.tenant_id, ns.target)
     if ns.command == "setup":
-        return setup(ns.tenant_id, ns.learning_state_from)
+        return setup(ns.tenant_id, ns.learning_state_from, issuer_config=ns.issuer_config)
     if ns.command == "migrate":
         return migrate(ns.tenant_id, ns.target)
     if ns.command == "update":
