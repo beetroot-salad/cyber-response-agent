@@ -70,15 +70,16 @@ class _LeadAuthorRetry(Exception):
 
 
 def _invoke_lead_author(
-    paths: LoopPaths, state: LearningState, run: Run, *, label: DrainLabel, batch: Batch,
-    box: Any = None, on_done: Callable[[str | None], None],
+    paths: LoopPaths, state: LearningState, run: Run, *, label: DrainLabel,
+    batch: Batch | None = None, box: Any = None, on_done: Callable[[str | None], None],
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
     `lead_author_drain`): the held roots of its writable mounts — the lanes of `batch`'s draft —
     are opened here, with the batch's box stopped, and closed when the claim's serve returns or
     raises (#1134 A3, #1108 P4). A fault holding them propagates as itself, never as a
-    swallowed transient."""
+    swallowed transient. With no `batch` (a checkout-shaped scene), the label's trees over
+    `paths` are held, and the curator refuses at its commit (it commits only into a batch)."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
