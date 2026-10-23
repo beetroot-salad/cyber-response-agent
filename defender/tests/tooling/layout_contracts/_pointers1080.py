@@ -176,7 +176,12 @@ def vanished_folder_mentions(root: Path) -> list[tuple[str, int, str]]:
     gone = vanished_folders(root)
     if not gone:
         return []
-    ambiguous = {g for g in gone if (root / "defender" / g).is_dir()}
+    # A name still live as a directory is ambiguous: a bare `<name>/` may mean the live one.
+    # Live means under `defender/`, or (#1108 P4, OD6) in a tenant's agent half, where the
+    # corpora moved (`agent/lessons/`, `agent/lessons-questioner/`): a bare `lessons/` is the
+    # tenant corpus (a branch prefix, a lane), not a pointer to the vanished checkout folder.
+    ambiguous = {g for g in gone if (root / "defender" / g).is_dir()
+                 or any(p.is_dir() for p in (root / "knowledge").glob(f"*/agent/{g}"))}
     bare_names = sorted(set(gone) - ambiguous, key=len, reverse=True)
     bare = re.compile(r"(?<![\w./-])(?:" + "|".join(re.escape(g) for g in bare_names)
                       + r")/") if bare_names else None
