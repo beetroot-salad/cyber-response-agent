@@ -510,6 +510,8 @@ def test_1204_only_a_40_or_64_lowercase_hex_sha_is_a_commit(tmp_path, site):
 # ::test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_and_knowledge_from_its_copy_of_current,
 # tenant_1108_p4/test_branch_replay.py::test_flow7_siblings_are_pinned_to_the_source_knowledge_commit_materialised_first
 # and ::test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_publish.
+# The fork sibling's no-lineage fields (`world_id`/`parent_run_id`/`fork_turn` null on an arm):
+# storage/ids_1187/test_1187_roster_sibling.py::test_natural_and_arm_stamps_carry_no_world_lineage.
 # The clone-reading revision reader itself is still pinned by the cases above.
 
 

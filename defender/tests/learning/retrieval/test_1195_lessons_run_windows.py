@@ -350,8 +350,9 @@ STRAY_EDIT = "rewritten by the box\n"
 # `untouched` is the positive control: the file left as the base holds it, the tick commits.
 @pytest.mark.parametrize("when", ["once-started", "untouched"])
 @pytest.mark.parametrize("channel", CHANNELS)
-def test_the_pre_state_is_captured_before_the_run_starts(tmp_path: Path, monkeypatch,
-                                                         channel: str, when: str):
+def test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_claim(
+        tmp_path: Path, monkeypatch,
+        channel: str, when: str):
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     fid = "f1"
     curator = S.FakeCurator(writes={"a.md": S.lesson(fid)})
