@@ -210,18 +210,21 @@ def _planted_repo(tmp_path: Path, *, fixture_rows: dict = GRANTED_ROWS,
     zero catalog template, a template folder and a fixture folder — plus, on request, a lab under
     knowledge/tenants/ (`lab_rows`) or a broken one (`broken_lab`)."""
     repo = D995.planted_tree(tmp_path, systems or {"alpha": "lookup", "beta": "lookup"})
-    T1106.plant_census_catalog(repo)
     lead_zero = T1106.lead_zero_text(T1106.CENSUS_LEAD_ZERO_ID)
-    T1106.plant_tenant(repo / "knowledge", "tenant-template", table=_table(template_rows),
-                       configs={}, lead_zero=lead_zero)
-    T1106.plant_tenant(repo / "knowledge", "tenant-fixture", table=_table(fixture_rows),
-                       configs={}, lead_zero=lead_zero)
+    # #1108 P4: each folder carries the lead-zero template in its own catalog.
+    folders = [
+        T1106.plant_tenant(repo / "knowledge", "tenant-template", table=_table(template_rows),
+                           configs={}, lead_zero=lead_zero),
+        T1106.plant_tenant(repo / "knowledge", "tenant-fixture", table=_table(fixture_rows),
+                           configs={}, lead_zero=lead_zero)]
     if lab_rows is not None:
-        T1106.plant_tenant(repo / "knowledge" / "tenants", "playground", table=_table(lab_rows),
-                           configs={}, lead_zero=lead_zero)
+        folders.append(T1106.plant_tenant(repo / "knowledge" / "tenants", "playground",
+                                          table=_table(lab_rows), configs={}, lead_zero=lead_zero))
     if broken_lab:
-        T1106.plant_tenant(repo / "knowledge" / "tenants", "x", configs={},
-                           lead_zero=lead_zero, omit=("verb-grants.yaml",))
+        folders.append(T1106.plant_tenant(repo / "knowledge" / "tenants", "x", configs={},
+                                          lead_zero=lead_zero, omit=("verb-grants.yaml",)))
+    for folder in folders:
+        T1106.plant_census_catalog(folder)
     seed_repo(repo, add="-A", message="tenants")
     return repo
 
