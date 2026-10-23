@@ -260,7 +260,10 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
 - `declared_systems` split-root gap: 4 `@sys` folder-gate cases in `test_1134_lead_author_holes.py`.
 - Evals `expect.json` assertions are vacuous until the harness resolves against a draft.
 - `Investigation.knowledge` nullability for queued/running investigations (G-C3).
-- F-HARDLINK P3 half: whether a regular file with nlink>1 refuses the claim (P4 half covered: no inode shared with the export).
+- (closed by owner ruling 2) F-HARDLINK P3 half: a regular file with nlink>1 in a lane refuses the claim whole and the
+  reset leaves every draft file single-linked: `tenant_1108_delivery/test_changes.py::test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole`
+  rows `hardlink-to-host`, `hardlink-in-lane`, `replace-file-with-hardlink`, `replace-file-with-hardlink-same-bytes`
+  (P4 half: no inode shared with the export).
 - (closed by U14) OD21 consequence: covered by `e2e/test_920_branch_resume.py::test_od21_...` on the resume re-binding (`drive(resume=)`, the path a branch sibling runs). The branch CLI's spawned siblings are observed only as argv (`test_branch_replay.py`), so the in-box half is pinned on the resume path alone.
 
 ## 7. Review record

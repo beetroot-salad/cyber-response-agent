@@ -222,6 +222,7 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
     blobs = agent_blobs(clone, base)
     for rel, data in blobs.items():
         assert plain_file(agent / rel, data), f"the reset left agent/{rel} other than git's blob"
+        assert os.lstat(agent / rel).st_nlink == 1, f"the reset left agent/{rel} hard-linked"
     assert odd_entries(agent) == []
     assert files_under(agent) == blobs
     assert _changes(batch.change_set()) == {}
