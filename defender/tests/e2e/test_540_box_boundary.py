@@ -387,8 +387,13 @@ def test_run_dir_and_defender_dir_are_readable_in_box(box, run_dir):
 def test_write_under_defender_dir_fails_erofs_by_errno(box, run_dir):
     """A write to any path under `defender_dir` fails EROFS: the ro bind is the enforcement, so a
     hijacked agent cannot poison its own corpus, skills, or lessons."""
+    # #1108 P4 (O1): the product tree's `lessons/` is gone, and a write under a folder that does
+    # not exist fails ENOENT before the ro bind is ever met — so the poisoned file goes into a
+    # skills folder the product tree still ships, where only the ro bind can refuse it.
+    poisoned = DEFENDER / "skills" / "gather" / "poisoned.md"
+    assert poisoned.parent.is_dir(), f"{poisoned.parent} is gone; the EROFS probe would meet ENOENT"
     targets = [
-        DEFENDER / "lessons" / "poisoned.md",
+        poisoned,
         DEFENDER / "SKILL.md",
         DEFENDER / "runtime" / "permission" / "bash.py",
     ]
@@ -398,7 +403,7 @@ def test_write_under_defender_dir_fails_erofs_by_errno(box, run_dir):
         assert res["errno"] == errno_mod.EROFS, f"{target}: errno={res['errno']}"
         assert res["exc"] == "OSError", (
             f"{target}: EROFS must surface as a bare OSError, got {res['exc']} (C56a)")
-    assert not (DEFENDER / "lessons" / "poisoned.md").exists()
+    assert not poisoned.exists()
     assert b"box-was-here" not in (DEFENDER / "SKILL.md").read_bytes()
 
 

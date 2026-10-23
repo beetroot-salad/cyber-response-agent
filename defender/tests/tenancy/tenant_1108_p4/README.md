@@ -331,6 +331,12 @@ Repair round r5:
 - `tenancy/alert_front_door_1222/test_1222_lessons_and_corpus.py` p072, p074 (×2), p077 (class ii, repair-list class E): the REAL drain tick runs
   over a fixture-tenant batch draft (`draft_lane`/`draft_author_cfg`) instead of a checkout-shaped repo, and "committed" is read from the batch
   branch tip (`lane.landed()`/`text_at_tip`), never the draft; every assertion kept.
+- Vacuous or broken reads of the deleted product corpus, re-pointed at content that exists, each with a guard that it is not empty:
+  `e2e/test_540_exec_seam.py::test_relative_operand_names_the_same_file_at_all_three_sites` (a repo-root-relative operand now names the product
+  `skills/gather/SKILL.md`, with the control that its full path IS readable); `learning/curation/test_620_authoring_contract.py` (the
+  placeholder<->param sweep covers the pre-P4 shipped catalog fixture, ≥20 templates, plus every committed `knowledge/*/agent` catalog);
+  `e2e/test_540_box_boundary.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
+  the product still ships, so the probe meets the ro bind rather than ENOENT; box-only, not run locally).
 
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
