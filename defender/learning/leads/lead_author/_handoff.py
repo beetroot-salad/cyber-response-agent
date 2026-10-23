@@ -55,7 +55,7 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
     extract,
     extract_from_joined,
 )
-from defender.learning.leads._lead_spine import _spawn_author_agent
+from defender.learning.leads._lead_spine import _spawn_author_agent, draft_view
 
 _logger = logging.getLogger(__name__)
 
@@ -263,16 +263,16 @@ def invoke_agent(
     box: Any = None,
 ) -> int:
     """Spawn the lead author over the lane's tree at `repo_root` (a batch draft's root, holding
-    the `agent/` its paths name, #1108 P4 OD6)."""
+    the `agent/` its paths name, #1108 P4 OD6). The context names each folder as the model sees
+    it (`draft_view`); handoff paths stay relative to the draft root (`agent/...`)."""
     pending_drafts = pending_drafts or []
-    from defender.runtime.model_view import ModelView
-
-    view = ModelView.for_learning(run_dir, repo_root)
+    view = draft_view(run_dir, repo_root)
     stage_salt = salt if salt is not None else uuid4().hex
     context = (
         f"run_dir: {view.to_model(run_dir)}\n"
-        f"catalog_dir: {CATALOG_PREFIX}\n"
-        f"skills_dir: {SKILLS_PREFIX}"
+        f"draft_root: {view.to_model(repo_root)}\n"
+        f"catalog_dir: {view.to_model(repo_root / CATALOG_PREFIX)}\n"
+        f"skills_dir: {view.to_model(repo_root / SKILLS_PREFIX)}"
     )
     user_prompt = stage_user_message(
         stage_salt,

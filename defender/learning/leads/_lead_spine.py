@@ -57,6 +57,16 @@ def _spawn_author_agent(
     )
 
 
+def draft_view(run_dir: Path, root: Path):  # noqa: ANN201 — `ModelView`
+    """The model's coordinates for a lead-lane spawn over the draft at `root`: the draft as
+    `/draft` (its `agent/` the working directory, as the drain box mounts it) and the learning
+    run's folder beside it — what the bound deps' view names (#1108 P4)."""
+    from defender.runtime.model_view import MODEL_DRAFT, MODEL_LEARNING, ModelView
+
+    return ModelView(((MODEL_DRAFT, Path(root)), (MODEL_LEARNING, Path(run_dir))),
+                     MODEL_DRAFT / AGENT_REL)
+
+
 def committed_text(
     root: Path, path: str, *, base: Mapping[str, bytes] | None = None,
 ) -> str | None:

@@ -32,6 +32,7 @@ from defender.learning.leads._lead_spine import (
     _spawn_author_agent,
     _verify_corpus_scope,
     committed_text,
+    draft_view,
     lane_skills,
 )
 from defender.learning.leads.declared_systems import (
@@ -133,9 +134,13 @@ def _invoke_pitfalls_agent(
     box=None,
 ) -> int:
     stage_salt = salt if salt is not None else uuid4().hex
+    learning_run_dir = state.stage_dir(_loop_config.LEAD_AUTHOR_DRAIN_LABEL)
+    view = draft_view(learning_run_dir, repo_root)
+    context = (f"draft_root: {view.to_model(repo_root)}\n"
+               f"skills_dir: {view.to_model(repo_root / SKILLS_PREFIX)}")
     user_prompt = stage_user_message(
         stage_salt,
-        wrap(f"skills_dir: {SKILLS_PREFIX}", "pitfalls_context", stage_salt),
+        wrap(context, "pitfalls_context", stage_salt),
         wrap(structured_json_body(handoffs), "pitfalls_handoffs", stage_salt),
     )
     return spawn(
@@ -143,7 +148,7 @@ def _invoke_pitfalls_agent(
         batch_id="pitfalls",
         user_prompt=user_prompt,
         repo_root=repo_root,
-        learning_run_dir=state.stage_dir(_loop_config.LEAD_AUTHOR_DRAIN_LABEL),
+        learning_run_dir=learning_run_dir,
         log_label="pitfalls curator",
         salt=stage_salt, box=box,
     )
