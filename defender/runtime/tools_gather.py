@@ -28,7 +28,7 @@ from . import run_end
 from . import session_store
 from . import tools
 from .agent_role import GATHER_AGENT_ID_PREFIX
-from .model_view import ModelView
+from .model_view import MODEL_AGENT, ModelView
 from .tools import (
     DeadEnd,
     GatherDeps,
@@ -37,7 +37,7 @@ from .tools import (
 )
 
 from defender.knowledge._corpus import QueryTemplate, is_established, iter_query_templates
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import SKILLS, KnowledgePaths
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
@@ -249,23 +249,30 @@ def _gather_prompt(
     view = deps.view
     # Section order is the cache prefix: the indexes vary only per system, the Dispatch block
     # per lead, so indexes go first to let same-system leads share a cached prefix.
+    # A role handed no agent root (#1108 P4: no run copy) reads no tenant knowledge: its
+    # dispatch names the skill by its model path and gets the index's degradation block.
+    knowledge = deps.knowledge if deps.agent_root is not None else None
     block = "Begin gathering this lead.\n\n"
     if catalog:
+        skill_dir = (view.to_model(knowledge.system_skill_dir(request.system))
+                     if knowledge is not None else f"{MODEL_AGENT}/{SKILLS}/{request.system}")
+        surface = (f" {_execution_surface(knowledge, request.system, view)}"
+                   if knowledge is not None else "")
         block += (
             "## Systems of record (descriptor index — frontmatter only, "
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
-            f"`{view.to_model(deps.knowledge.system_skill_dir(request.system))}/SKILL.md` ONLY on "
+            f"`{skill_dir}/SKILL.md` ONLY on "
             "demand, when you "
             "need field vocab the descriptor lacks; not on every dispatch. Which verbs you may "
             "run and what params each one binds come from `list_verbs`, not from either file — "
             "but the VALUES a param accepts (an enum, a clamp, a timestamp format) are still "
-            "the execution surface's to state. "
-            f"{_execution_surface(deps.knowledge, request.system, view)}\n\n"
+            f"the execution surface's to state.{surface}\n\n"
             f"{catalog}\n"
         )
-    index = _template_index(deps.knowledge, request.system, verb_grant, view=view)
+    index = (_template_index(knowledge, request.system, verb_grant, view=view)
+             if knowledge is not None else TemplateIndex("", 0))
     if index.text:
         block += _INDEX_HEADER + index.text + "\n"
     else:
