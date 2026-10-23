@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from defender._paths import PATHS
-from defender.knowledge._knowledge import AGENT_REL, CATALOG, SKILLS
+from defender.knowledge._knowledge import AGENT_REL, CATALOG, CATALOG_SCHEMA_NAME, SKILLS
 
 REPO_ROOT = PATHS.repo_root
 LEARNING_DIR = PATHS.learning_dir
@@ -83,7 +83,7 @@ def _is_draft_readme(path: str) -> bool:
 
 
 def _is_schema_md(path: str) -> bool:
-    return _is_catalog_path(path) and Path(path).name == "SCHEMA.md"
+    return _is_catalog_path(path) and Path(path).name == CATALOG_SCHEMA_NAME
 
 
 def _is_in_scope(path: str) -> bool:

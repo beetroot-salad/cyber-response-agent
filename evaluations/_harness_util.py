@@ -67,7 +67,7 @@ class _NoIssuer:
     def __init__(self, tenant_id: str) -> None:
         self.tenant_id = tenant_id
 
-    def token(self, *, min_validity: int = 0) -> str:
+    def token(self, *, min_validity: float = 0) -> str:
         del min_validity
         return "evals-harness-no-issuer"
 
@@ -131,12 +131,8 @@ class LocalTenant:
         from defender.learning.author.version_control import TenantDelivery
         from defender.learning.author.version_control.forgejo import ForgejoForge
 
-        from typing import cast
-
-        from defender.learning.author.version_control.auth import ForgejoIdentity
-
-        # Duck-typed: the forge reads only `token()` off its identity.
-        identity = cast("ForgejoIdentity", _NoIssuer(HARNESS_TENANT_ID))
+        # A `ForgeCredential`: the forge and the transport read only its tenant and token.
+        identity = _NoIssuer(HARNESS_TENANT_ID)
         repository = _local_origin_repository()(
             self.clone, FAKE_ORIGIN,
             ForgejoForge(origin=FAKE_ORIGIN, identity=identity, client=self.forge.client),

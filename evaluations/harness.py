@@ -44,13 +44,16 @@ def _agent_source(tmp: Path) -> Path:
 
 
 def _state_dir(tmp: Path) -> Path:
-    return tmp / "learning"
+    """The learning state the scenario's queue sits in: where a checkout keeps it
+    (`defender/learning/`), so the scenario tree reads as before; it holds no corpus."""
+    return tmp / "defender" / "learning"
 
 
 def materialize(scenario: Path, tmp: Path) -> None:
     """The scenario as a tenant's agent root (`agent-source/agent/`: the two author corpora,
     seeded with the scenario's lessons) and the learning state its queue sits in
-    (`learning/_pending/findings.jsonl`, the scenario's findings; `runs/` beside it)."""
+    (`defender/learning/_pending/findings.jsonl`, the scenario's findings; `runs/` beside
+    it)."""
     agent = _agent_source(tmp)
     for corpus in ("lessons", "lessons-questioner"):
         (agent / corpus).mkdir(parents=True)

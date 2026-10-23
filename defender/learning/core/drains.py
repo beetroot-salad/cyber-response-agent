@@ -539,13 +539,15 @@ def _rehydrate(
 
 
 def _invoke_pitfalls(
-    paths: LoopPaths, state: LearningState, *, label: DrainLabel, batch: Batch, box: Any = None,
-    on_curated: Callable[[PitfallsDisposition], None], lock_wait_seconds: int | None = None,
+    paths: LoopPaths, state: LearningState, *, label: DrainLabel, batch: Batch | None = None,
+    box: Any = None, on_curated: Callable[[PitfallsDisposition], None],
+    lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
     """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
     of the `label` lane's writable mounts in `batch`'s draft are opened here and closed when the
-    curation returns or raises (#1134 A3)."""
+    curation returns or raises (#1134 A3). With no `batch` (a checkout-shaped scene), the
+    label's trees over `paths` are held, and the curation refuses any commit."""
     _logger.info("step=pitfalls-curation")
     with open_drain_trees(paths, label, batch=batch) as trees:
         rc = _run_curator_module(

@@ -227,9 +227,9 @@ def check_config(report: Report, settings_dir: Path, system: str) -> None:
     _check_values(report, assignments(text))
 
 
-def check_skill(report: Report, staged: KnowledgePaths, system: str) -> None:
-    """The per-system skill of the staged tenant half (`staged`, agent-root-shaped)."""
-    skill_dir = staged.system_skill_dir(system)
+def check_skill(report: Report, staged: Path, system: str) -> None:
+    """The per-system skill of the staged tenant half (`staged`, an agent root's shape)."""
+    skill_dir = KnowledgePaths(staged).system_skill_dir(system)
     skill = skill_dir / "SKILL.md"
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
@@ -255,12 +255,12 @@ def check_skill(report: Report, staged: KnowledgePaths, system: str) -> None:
         report.add(WARN, "no execution.md and no inline ## Execution section")
 
 
-def check_templates(report: Report, staged: KnowledgePaths, system: str, verbs) -> None:
+def check_templates(report: Report, staged: Path, system: str, verbs) -> None:
     """Every template of `system` in the staged tenant half, drafts included, since `_draft/`
     is where the lead-authoring lane writes. The rules are `_scaffold_rules`, shared with the
     loop's commit gate.
     """
-    qdir = staged.catalog_dir / system
+    qdir = KnowledgePaths(staged).catalog_dir / system
     templates = [t for t in iter_query_templates(qdir.parent) if t.system == system]
     if not templates:
         report.add(WARN, f"no seed query templates under skills/gather/queries/{system}/ (they grow post-merge)")
@@ -325,7 +325,7 @@ def main() -> None:
         report.add(FAIL, f"skills/{system}/ and its seed templates not checked — give the "
                          "staged tenant half with --staged <dir>")
     else:
-        staged = KnowledgePaths(args.staged.resolve())
+        staged = args.staged.resolve()
         check_skill(report, staged, system)
         check_templates(report, staged, system, verbs)
     report.render_and_exit()

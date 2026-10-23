@@ -15,6 +15,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpx
@@ -63,6 +64,17 @@ def _timestamp(value: object) -> float:
     ):
         raise ForgejoAuthError("Vault identity has invalid lifetime claims")
     return float(value)
+
+
+class ForgeCredential(Protocol):
+    """What the forge client and the git transport read off a tenant's credential: the tenant
+    it is for, and a bearer token valid for at least `min_validity` more seconds.
+    `ForgejoIdentity` is the production one; a local harness with no issuer supplies its own."""
+
+    @property
+    def tenant_id(self) -> str: ...
+
+    def token(self, *, min_validity: float = ...) -> str: ...
 
 
 @dataclass

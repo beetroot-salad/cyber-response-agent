@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.knowledge._knowledge import CATALOG, SKILLS, KnowledgePaths
+from defender.knowledge._knowledge import CATALOG, CATALOG_SCHEMA_NAME, SKILLS, KnowledgePaths
 from defender._model import model
 from defender._paths import adapters_under, process_defender_dir
 from defender.learning.core import config
@@ -63,7 +63,7 @@ _CATALOG_TAIL = CATALOG[len(SKILLS):].lstrip("/") + "/"
 #: discarding the batch: `SCHEMA.md` (`_is_schema_md`) and `execution.md`
 #: (`_skills_path_rule`), both at any depth. The pitfalls curator's `{system}/execution.md` is
 #: reached by L5 as a literal.
-_REFUSED_BASENAMES = ("SCHEMA.md", "execution.md")
+_REFUSED_BASENAMES = (CATALOG_SCHEMA_NAME, "execution.md")
 
 
 def _md_name(*also: str) -> str:

@@ -35,6 +35,16 @@ class TenantExport:
     path: Path
 
 
+def read_export_text(export: TenantExport, rel: str) -> tuple[str | None, str | None]:
+    """`(text, None)` for the file `rel` (relative to the export folder, e.g. `agent/...`) of
+    `export`, or `(None, why)`: read below the export folder with no link followed."""
+    with _io.bind(export.path) as root:
+        got = root.read(rel)
+    if got.text is None:
+        return None, "it is absent" if got.absent else got.reason
+    return got.text, None
+
+
 def current_export(tenant: Tenant) -> TenantExport:
     """The export `<T>/exports/current` names, read from the files alone: no git and no process
     (P4's runs have neither). An absent or empty pointer, one that is not an object id (one

@@ -87,6 +87,12 @@ def _templates_by_identity(catalog: list) -> dict:
     return by_id
 
 
+def _agent_spelled(path: Path, where: Path) -> str:
+    """`path` below the `skills/` mount spelled `where`, as the tenant repo names it
+    (`agent/skills/...`, OD6)."""
+    return SKILLS_PREFIX + path.relative_to(where).as_posix()
+
+
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
     *, repo_root: Path = REPO_ROOT, skills: Bound, where: Path,
@@ -94,7 +100,10 @@ def build_handoff(
 ) -> list[dict]:
     """One handoff per executed catalog template. `skills` is the held `skills/` mount's view and
     `where` the Path it is spelled as: the catalog (when not given) and each template's rendering
-    are read through it, never through a link (#1134)."""
+    are read through it, never through a link (#1134). Each template is named by its
+    repo-relative `agent/skills/...` spelling (OD6), whatever host path the mount lies at."""
+
+    del repo_root  # the callers' keyword; no handoff path is spelled from the host root
     if catalog is None:
         catalog = lead_neighbors.load_lane_catalog(skills, where=where)
     by_id = _templates_by_identity(catalog)
@@ -156,12 +165,12 @@ def build_handoff(
             )
         handoffs.append(
             {
-                "executed_template_path": str(tpl.path.relative_to(repo_root)),
+                "executed_template_path": _agent_spelled(tpl.path, where),
                 "query_id": tpl.id,
                 "status": tpl.status,
                 "neighbors": [
                     {
-                        "template_path": str(n.template_path.relative_to(repo_root)),
+                        "template_path": _agent_spelled(n.template_path, where),
                         "score": n.score,
                     }
                     for n in neighbors
