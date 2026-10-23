@@ -550,8 +550,8 @@ def assert_verbatim(entry_text: str, owner_text: str, *, entry: str) -> None:
 # keyed to the running checkout, so a data root placed inside the COPY's tree is the cell, and
 # the real worktree is never written into). It is a real copy of this worktree's `defender/`
 # (tests, docs, caches, replay fixtures and the golden eval cases left out) plus `knowledge/`,
-# git-initialised because the census's marker half is a committed-tree read
-# (`declared_systems._marker_names` reads HEAD). Run its scripts with `run_script`, pointing
+# git-initialised as a checkout is (#1108 P4: the census itself reads the adapters cold and
+# starts no git; the system markers are the tenant's, not the checkout's). Run its scripts with `run_script`, pointing
 # at the copy's own file (`checkout / script_of(module).relative_to(REPO_ROOT)`).
 # ======================================================================================
 
