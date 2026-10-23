@@ -111,7 +111,7 @@ GROUPS: dict[str, GroupSpec] = {
 }
 
 
-def build_view(*, agent_root: Path) -> dict:
+def build_view(agent_root: Path) -> dict:
     """The posture page's contract over the tenant knowledge at `agent_root` (an export's
     `agent/`, #1108 P4): each group's lessons, spelled relative to the tenant repo."""
     groups: dict[str, dict] = {}

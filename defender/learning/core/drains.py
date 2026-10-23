@@ -108,7 +108,7 @@ def _maybe_trigger_author(  # noqa: PLR0913 — the trigger seam's call shape, p
     pending_label: str,
     *,
     label: DrainLabel,
-    batch: Batch,
+    batch: Batch | None = None,
     box: Any = None,
 ) -> None:
     """The author lane's default work step for one curator. `label` is the lane's (bound in by
@@ -116,7 +116,9 @@ def _maybe_trigger_author(  # noqa: PLR0913 — the trigger seam's call shape, p
     writable mounts — the lanes of `batch`'s draft — are opened here, with the batch's box
     stopped, and closed when the curator's batch returns or raises (#1134 A3, #1108 P4). Each
     curator opens its own and is one claim of the batch. A fault holding them propagates out of
-    this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash."""
+    this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash. With no
+    `batch` (a checkout-shaped scene), the label's trees over `paths` are held instead, and the
+    curator refuses any commit (it commits only into a batch's draft)."""
     threshold = env_int(threshold_env, 5)
     # Held is logged beside authorable: the count is authorable rows, not queue depth, so
     # without it a queue of permanent holds would log `pending=0` with no explanation.
