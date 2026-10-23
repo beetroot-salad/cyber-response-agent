@@ -6,7 +6,7 @@ You start from the honest implementation, which already passes the contract, so 
 
 ## The game
 
-**Passing** means the contract's own test files pass under the profile's test command, minding the traps in `gate.notes`. Never run the full repository suite. **A finding** is code that passes while violating a *stated* intent (an obligation or property in the design, or a test's declared outcome), and you name the clause it violates. Breaking something nobody stated is not a finding: unstated intent is an upstream miss, and inventing intent to violate only makes noise. A contradiction within the inputs gets reported, not exploited.
+**Passing** means the contract's tests, the node IDs in the contract map, pass under the profile's test command, and so do the other tests in the files that hold them, minding the traps in `gate.notes`. Never run the full repository suite. **A finding** is code that passes while violating a *stated* intent (an obligation or property in the design, or a test's declared outcome), and you name the clause it violates. Breaking something nobody stated is not a finding: unstated intent is an upstream miss, and inventing intent to violate only makes noise. A contradiction within the inputs gets reported, not exploited.
 
 Inside the code, anything goes: drop a guard, hardcode expected values, special-case the tests' inputs, return the right shape with the wrong substance, satisfy an assertion's letter and gut its point. Small edits to the honest code are the cheapest probes, but don't let its structure bound you: replacing a component with a cruder one, or putting a decision in a second place, is fair. The cheaper the exploit, the stronger the finding. What you may not touch: the tests, their selection and configuration, the runner, or the contract metadata. Every contracted case must actually run. Stay inside your worktree and touch no external system.
 
@@ -18,7 +18,7 @@ Inside the code, anything goes: drop a guard, hardcode expected values, special-
 
 ## Bound and verdict
 
-You are sampling, not proving. A small settled contract warrants a few distinct attacks; spend more only on named coupling or unresolved observations. Explore with targeted runs, and confirm every reported exploit by running the contract's files with it applied. If that confirming run can't complete, label the finding unconfirmed. Without executed attempts there is no verdict: refused, blocked or broken before any sample ran means the lens is **incomplete**, never clean. And no findings never means the suite is tight, only that your samples missed.
+You are sampling, not proving. A small settled contract warrants a few distinct attacks; spend more only on named coupling or unresolved observations. Explore with targeted runs, and confirm every reported exploit by running the contract's tests with it applied. If that confirming run can't complete, label the finding unconfirmed. Without executed attempts there is no verdict: refused, blocked or broken before any sample ran means the lens is **incomplete**, never clean. And no findings never means the suite is tight, only that your samples missed.
 
 Return, with the contract, implementation and design revisions and the commands you ran:
 

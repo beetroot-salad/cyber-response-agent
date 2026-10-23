@@ -7,7 +7,7 @@ Keep the smallest record that lets a cold agent pick up the work: what the contr
 Scratch state lives under `.contract-first/`, outside the committed diff. It holds:
 
 - the identities everything depends on: design revision, base commit, profile, current test ref, and the skill revision used;
-- the **contract map**: design obligations, their scenarios and entry points, the enforcing tests, and verification status. A Markdown table is enough, for example `O-retry | same operation after uncertain result | import API | test_retry_preserves_identity: returned ID + row count | awaiting implementation`. A row is a claim to inspect, not proof;
+- the **contract map**: design obligations, their scenarios and entry points, the enforcing tests by node ID, each row's fold outcome (already enforced, extended, new, or conflict updated), and verification status. A Markdown table is enough, for example `O-retry | same operation after uncertain result | import API | tests/test_import.py::test_retry_preserves_identity (extended): returned ID + row count | awaiting implementation`. A row is a claim to inspect, not proof. Because folded tests sit in many files, the map's node IDs, not a file list, define the contract;
 - findings and decisions by stable ID, with cause, disposition, evidence, the human's ruling where one was needed, and what they affect. Nothing gets silently dropped;
 - the claims inherited from discuss-issue plus new load-bearing observations, in its format. An ID does not make an unprobed fact settled;
 - which reviews ran against which revision, what verification is still owed and by whom, and the next action.
@@ -32,7 +32,7 @@ Scratch paths don't survive into a cold session, so publish a compact coverage a
 
 State **ready**, **blocked**, or **repair required**, with:
 
-- design revision, branch, base, immutable contract ref and suite paths;
+- design revision, branch, base, immutable contract ref, and the contract's test node IDs (with the files that hold them);
 - where the durable record and the code map live;
 - design amendments and consequential decisions. Chosen mechanisms bind the implementer even where tests can't observe them;
 - the checks actually run and their results, expected reds, and every assertion or environment check owed by the code stage, with its owner;

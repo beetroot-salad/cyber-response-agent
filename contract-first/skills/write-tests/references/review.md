@@ -18,6 +18,7 @@ Check both directions:
 
 - Every promise has an enforcing assertion at the right observable boundary, interactions included. A map entry, a probe or a passing unit helper is not enforcement.
 - Every assertion follows from the design, an adopted property, or a justified detail. Flag invented scope and consequential interpretations chosen silently.
+- Every row the map marks **already enforced** really is: the cited test asserts the same observable at the same boundary. Every existing test the contract changed is a conflict the design calls for, not a loosening.
 - Human rulings are implemented at their actual scope, not narrowed to the one fixture someone wrote.
 - Grounding corrections and earlier findings with behavioral consequences became tests, explicit exclusions or justified dismissals. Follow them by ID; matching counts proves nothing.
 - Source assumptions the tests rely on hold in the real code, particularly where injection might hide production behavior.

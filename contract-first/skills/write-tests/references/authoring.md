@@ -14,9 +14,21 @@ The deliverable is a **friction log**: one entry per place where you had to gues
 
 ## Writing the thorough contract
 
-Work out the intended behavior from the design before looking at existing test expectations; old tests may encode today's bug. For each important promise, start from a real entry point and an observable result. Unit tests suit narrow rules, but an isolated unit test cannot show that production uses the rule, so flows need tests through their real wiring.
+Work in four steps: decide the cases, survey the existing suite, fold, then write. Deciding first keeps old tests from anchoring you, since they may encode today's bug. Writing last means you don't pay for test code that folding would throw away.
 
-A good case names its condition, action, expected result, how it observes that result, and a plausible wrong implementation it would reject. Expected values come from the design and explicit fixtures, never from re-implementing the target's logic, and fixture data must actually reach the condition the test claims to exercise. Let the design's properties pick the variants worth having (replay, partial progress, ordering, alternate access paths, guard partitions) rather than multiplying combinations. A few cases that separate materially different outcomes beat many that don't; use property-based checks where the invariant and oracle are clear.
+**1. Decide the cases, before opening any existing test.** Write the case table from the design: one row per case, naming its obligation, condition, action, what it observes and at which boundary, the expected value, and a plausible wrong implementation it would reject. For each important promise, start from a real entry point and an observable result. Unit tests suit narrow rules, but an isolated unit test cannot show that production uses the rule, so flows need tests through their real wiring. Expected values come from the design and explicit fixtures, never from re-implementing the target's logic. Let the design's properties pick the variants worth having (replay, partial progress, ordering, alternate access paths, guard partitions) rather than multiplying combinations. A few cases that separate materially different outcomes beat many that don't; use property-based checks where the invariant and oracle are clear. Sketch cases are rows too. This table becomes the contract map.
+
+**2. Survey, per case.** Find the nearest existing tests and fixtures for each row's entry point through the code map and `py-outline --tests`, and read only those. You're asking two questions: does something already enforce this, and does something pin the opposite?
+
+**3. Fold.** Give every row one outcome and record it in the map:
+
+- **already enforced**: an existing test asserts this observable at the same boundary. Cite it and write nothing. A test that checks only shape, or checks at another boundary, doesn't count; extend it instead;
+- **extend**: add a parameter row or an assertion to an existing test;
+- **new test in an existing file**, reusing its fixtures and conventions;
+- **new file**, only for a surface no existing file covers;
+- **conflict**: an existing test pins behavior the design changes. Update it as part of the contract and flag it in the map for review; never change it quietly. A conflict the design didn't list is a gap to report.
+
+**4. Write.** Make sure fixture data actually reaches the condition each test claims to exercise.
 
 Choose seams and machinery within existing conventions. Surface any choice that would impose a new architecture, state owner or lifecycle. A missing target import is expected before implementation, never a reason to commit a skeleton.
 
