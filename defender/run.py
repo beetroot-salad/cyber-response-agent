@@ -25,7 +25,7 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
-from defender.records._locations import DataRoot, RunsBase, EpisodesRoot
+from defender.records._locations import DataRoot, RunsBase, EpisodesRoot, _unwrap_data_root
 
 import logging
 import json
@@ -512,7 +512,7 @@ def _publish_report(
     `stale:operator`, never fresh."""
     try:
         launch = publish if publish is not None else _default_publish()
-        line = launch(str(tenant.id), data_root=data_root)
+        line = launch(str(tenant.id), data_root=_unwrap_data_root(data_root))
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
         return run_knowledge.child_failed(f"{type(failed).__name__}: {failed}")
     return run_knowledge.read_report(line)
