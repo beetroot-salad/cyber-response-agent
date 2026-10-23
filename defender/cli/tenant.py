@@ -35,8 +35,9 @@ commits (failing closed when git cannot answer). `check <id>` judges the tenant 
 folder with no data root at all (tenant CI).
 
 `update` publishes (#1108 P4 flow 1): it logs in to the issuer from the issuer client config
-file (by path; dev default `<repo>/playground-issuer/client/issuer.json`), fetches the tenant
-row's bound origin, fast-forwards the clone, writes the export and points `current` at it.
+file (`--issuer-config`; by default the dev issuer's client config under the repository),
+fetches the tenant row's bound origin, fast-forwards the clone, writes the export and points
+`current` at it.
 `setup` does the same once the row carries a forge binding. `check <id>` also reports how far
 `current` trails the clone's `origin/main` and the last publish refusal any trigger met (a run
 launch, a drain start, `update`), so a sealed issuer or a refused merge is visible (O-SEE).

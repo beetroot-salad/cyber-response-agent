@@ -26,6 +26,7 @@ from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING
 
+from defender._text import one_line
 from defender.tenancy._tenant import (
     Tenant,
     TenantRefused,
@@ -39,7 +40,7 @@ from .exports import _pointed_at, publish_locked, tenant_lock
 from .issuer import DEV_ISSUER_CONFIG, issuer_login, read_issuer_config
 from .model import DeliveryRefused, LockBusy, _refusals
 from .repository import GitRepository
-from .status import OPERATOR, classify, one_line, record_published, record_refused
+from .status import OPERATOR, classify, record_published, record_refused
 
 if TYPE_CHECKING:
     import httpx
@@ -58,7 +59,9 @@ _TRIGGER = "launch-time publish"
 
 
 def report(kind: str, detail: str) -> str:
-    """One report line: `kind` and its one-line detail."""
+    """One report line: `kind` (one of `REPORT_CLASSES`) and its one-line detail."""
+    if kind not in REPORT_CLASSES:
+        raise ValueError(f"{kind!r} is not a publish outcome")
     return f"{kind} {one_line(detail)}"
 
 
@@ -188,7 +191,7 @@ def publish_child_main(
     `issuer_config` defaults to `--issuer-config`, else the dev config path."""
     parser = argparse.ArgumentParser(prog="publish-child", add_help=False)
     parser.add_argument("tenant_id")
-    parser.add_argument("--data-root", required=True, type=Path)
+    parser.add_argument("--data-root", dest="root", required=True, type=Path)
     parser.add_argument("--issuer-config", type=Path, default=None)
     ns = parser.parse_args(list(argv))
     config = issuer_config or ns.issuer_config or DEV_ISSUER_CONFIG
@@ -196,7 +199,7 @@ def publish_child_main(
     try:
         line = publish_for_run(
             ns.tenant_id,
-            data_root=ns.data_root,
+            data_root=ns.root,
             issuer_config=config,
             client=client,
             identity=identity,

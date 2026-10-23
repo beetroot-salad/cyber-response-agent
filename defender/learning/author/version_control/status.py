@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 import httpx
 
 from defender import _git, _io
+from defender._text import one_line
 from defender.tenancy._tenant import Tenant
 
 from .forgejo import ForgeError
@@ -52,11 +53,6 @@ def _chain(error: BaseException) -> list[BaseException]:
     return seen
 
 
-def one_line(text: str) -> str:
-    """`text` on one line: every run of whitespace (newlines included) collapsed to a space."""
-    return " ".join(str(text).split())
-
-
 def classify(error: BaseException) -> tuple[str, str]:
     """`(kind, one-line reason)` of a publish fault: `transient` or `operator` (module doc)."""
     reason = str(error)
@@ -68,10 +64,10 @@ def classify(error: BaseException) -> tuple[str, str]:
             if body:
                 reason = f"{reason}: {body}"
             break
-    return _kind(error), one_line(reason)
+    return _fault_kind(error), one_line(reason)
 
 
-def _kind(error: BaseException) -> str:
+def _fault_kind(error: BaseException) -> str:
     if isinstance(error, LockBusy):
         return TRANSIENT
     for fault in _chain(error):
@@ -85,7 +81,7 @@ def _kind(error: BaseException) -> str:
     return OPERATOR
 
 
-def _now() -> str:
+def _recorded_at() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
@@ -97,7 +93,7 @@ def _write(tenant: Tenant, record: dict) -> None:
 
 def record_published(tenant: Tenant, commit: str, *, by: str) -> None:
     """A publish by `by` (the trigger) succeeded at `commit`: any earlier refusal is over."""
-    _write(tenant, {"at": _now(), "by": by, "published": commit})
+    _write(tenant, {"at": _recorded_at(), "by": by, "published": commit})
 
 
 def record_refused(tenant: Tenant, error: BaseException, *, by: str) -> None:
@@ -105,7 +101,7 @@ def record_refused(tenant: Tenant, error: BaseException, *, by: str) -> None:
     if isinstance(error, LockBusy):
         return
     kind, reason = classify(error)
-    _write(tenant, {"at": _now(), "by": by, "refused": reason, "kind": kind})
+    _write(tenant, {"at": _recorded_at(), "by": by, "refused": reason, "kind": kind})
 
 
 @contextlib.contextmanager

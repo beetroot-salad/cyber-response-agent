@@ -773,11 +773,13 @@ def read_forge_binding(tenant: Tenant) -> ForgeBinding:
         raise TenantRefused(
             f"{path} has no forge binding (`forge: {{origin, audience, issuer_role}}`): "
             "the tenant's repository is not bound to a forge")
-    values = forge.get if isinstance(forge, dict) else (lambda _key: None)
-    bad = [key for key in _FORGE_KEYS if not isinstance(values(key), str) or not values(key)]
+    fields = forge if isinstance(forge, dict) else {}
+    found = {key: fields.get(key) for key in _FORGE_KEYS}
+    bad = [key for key, value in found.items() if not isinstance(value, str) or not value]
     if bad:
         raise TenantRefused(f"{path}'s forge binding lacks {', '.join(bad)}")
-    return ForgeBinding(**{key: values(key) for key in _FORGE_KEYS})
+    return ForgeBinding(origin=str(found["origin"]), audience=str(found["audience"]),
+                        issuer_role=str(found["issuer_role"]))
 
 
 # ==========================================================================================

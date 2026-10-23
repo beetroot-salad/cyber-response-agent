@@ -25,7 +25,7 @@ from .model import DeliveryRefused
 
 #: The dev issuer client config (U4): under the repository, outside `defender/` (so under no box
 #: mount source), gitignored. Production passes its own path.
-DEV_ISSUER_CONFIG = REPO_ROOT / "playground-issuer" / "client" / "issuer.json"
+DEV_ISSUER_CONFIG = REPO_ROOT / "playground-issuer" / "client" / "issuer.json"  # lint-shippable: ok — the dev default path (U4); a deployment passes its own config path
 #: OpenBao's identity-token endpoint below its address, and its AppRole login.
 IDENTITY_PATH = "/v1/identity/oidc"
 LOGIN_PATH = "/v1/auth/approle/login"

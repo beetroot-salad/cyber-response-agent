@@ -25,6 +25,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from defender._text import one_line
 from defender.tenancy._exports import OID, knowledge_lock_holder
 from defender.tenancy._tenant import TenantRefused, data_root_from_path, requested_tenant
 
@@ -45,12 +46,8 @@ _SUMMARY_LIMIT = 200
 Spawn = Callable[..., Any]
 
 
-def _one_line(text: str) -> str:
-    return " ".join(str(text).split())
-
-
 def _failed(summary: str) -> str:
-    return f"stale:operator publish child failed: {_one_line(summary)[:_SUMMARY_LIMIT]}"
+    return f"stale:operator publish child failed: {one_line(summary)[:_SUMMARY_LIMIT]}"
 
 
 def child_environment(environ: dict[str, str] | None = None) -> dict[str, str]:
