@@ -91,85 +91,19 @@ def test_git_status_pathspec_scopes(tmp_path):
     assert scoped == ["sub/x.md"]
 
 
-def test_git_head_sha_and_rev_list_count(tmp_path):
+def test_git_head_sha(tmp_path):
     repo = _repo(tmp_path)
     assert len(_git.git_head_sha(repo)) == 40
-    assert _git.git_rev_list_count(repo) == 1
-    assert _git.git_rev_list_count(repo, grep="^Nonexistent-Trailer:") == 0
 
 
-def test_git_commit_pathspec_scoped_and_trailers(tmp_path):
-    repo = _repo(tmp_path)
-    (repo / "corpus").mkdir()
-    (repo / "corpus" / "lesson.md").write_text("body\n")
-    (repo / "stray.txt").write_text("stray\n")
-    _git.git(["add", "stray.txt"], cwd=repo)
-    sha = _git.git_commit(
-        repo, repo / "corpus", "batch", trailers=[("Generation", "3")]
-    )
-    assert sha == _git.git_head_sha(repo)
-    files = _git.git(["show", "--name-only", "--pretty=format:", "HEAD"], cwd=repo).split()
-    assert files == ["corpus/lesson.md"]
-    assert "Generation: 3" in _git.git(["log", "-1", "--pretty=%B", "HEAD"], cwd=repo)
-
-
-def test_git_commit_no_op_returns_none(tmp_path):
-    repo = _repo(tmp_path)
-    (repo / "corpus").mkdir()
-    assert _git.git_commit(repo, repo / "corpus", "nothing staged") is None
-
-
-def test_git_worktree_add_remove(tmp_path):
-    repo = _repo(tmp_path)
-    wt = tmp_path / "wt"
-    _git.git_worktree_add(repo, wt, "HEAD", detach=True)
-    assert (wt / "seed.md").is_file()
-    assert _git.git_head_sha(wt) == _git.git_head_sha(repo)
-    _git.git_worktree_remove(repo, wt)
-    assert not wt.exists()
-
-
-def test_git_worktree_add_branch(tmp_path):
-    repo = _repo(tmp_path)
-    wt = tmp_path / "wt"
-    _git.git_worktree_add(repo, wt, "HEAD", branch="feature/x")
-    assert _git.git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=wt) == "feature/x"
-
-
-def _repo_with_origin(tmp_path: Path) -> Path:
-    """A seeded work repo whose ``origin`` is a local bare remote carrying ``main`` —
-    the fixture for the remote-lifecycle helpers (fetch/push need a real remote)."""
-    origin = tmp_path / "origin.git"
-    _git.git(["init", "-q", "--bare", "-b", "main", str(origin)], cwd=tmp_path)
-    work = _repo(tmp_path)
-    _git.git(["remote", "add", "origin", str(origin)], cwd=work)
-    _git.git(["push", "-q", "origin", "main"], cwd=work)
-    return work
-
-
-def test_git_push_sets_upstream(tmp_path):
-    work = _repo_with_origin(tmp_path)
-    _git.git(["checkout", "-q", "-b", "feature/x"], cwd=work)
-    (work / "f.md").write_text("f\n")
-    _git.git(["add", "-A"], cwd=work)
-    _git.git(["commit", "-q", "-m", "feat"], cwd=work)
-    _git.git_push(work, "feature/x")
-    assert _git.git(["ls-remote", "--heads", "origin", "feature/x"], cwd=work)
-    assert (
-        _git.git(["rev-parse", "--abbrev-ref", "feature/x@{upstream}"], cwd=work)
-        == "origin/feature/x"
-    )
-
-
-def test_git_fetch_advances_tracking_ref(tmp_path):
-    work = _repo_with_origin(tmp_path)
-    other = tmp_path / "other"
-    _git.git(["clone", "-q", str(tmp_path / "origin.git"), str(other)], cwd=tmp_path)
-    _git.git(["config", "user.email", "t@t"], cwd=other)
-    _git.git(["config", "user.name", "t"], cwd=other)
-    (other / "new.md").write_text("x\n")
-    _git.git(["add", "-A"], cwd=other)
-    _git.git(["commit", "-q", "-m", "second"], cwd=other)
-    _git.git(["push", "-q", "origin", "main"], cwd=other)
-    _git.git_fetch(work)
-    assert _git.git(["rev-parse", "origin/main"], cwd=work) == _git.git_head_sha(other)
+# #1108 P4 OD12(i): the cases for `_git.git_rev_list_count` (the `rev_list_count` half of the
+# case above), `git_commit` (pathspec-scoped with trailers, and the no-op), `git_worktree_add`/
+# `git_worktree_remove` (detached and on a branch), `git_push` (sets upstream) and `git_fetch`
+# (advances the tracking ref) are deleted with those helpers: their only callers were the
+# deleted `AuthorBranch` worktree delivery and the legacy checkout drains. Every corpus commit,
+# push and fetch now goes through P3's delivery, pinned in `tests/tenancy/tenant_1108_delivery/`:
+# `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`
+# and `::test_the_first_commit_makes_the_branch_and_never_takes_one_over` (the commit-maker's
+# commit and branch), `test_delivery.py::test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write`
+# (the push), and `test_publish.py::test_publish_writes_the_commits_blobs_and_points_current_at_them`
+# (the fetch the publish exports).
