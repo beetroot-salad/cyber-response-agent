@@ -220,17 +220,37 @@ def _questioner_rel(t: Tick, name: str) -> str:
     return (t.sc.lane.sibling_dir / name).relative_to(t.sc.lane.root).as_posix()
 
 
+def _journal_batch(batch: Any, log: list) -> None:
+    """Wrap the batch's change set and commit (P3's `Batch.change_set` / `Batch.commit`) so each
+    call logs `("change_set",)` / `("commit",)`: the host's read of the box's output and its
+    commit, journalled beside the spawns."""
+    change_set, commit = batch.change_set, batch.commit
+
+    def logged_change_set() -> Any:
+        log.append(("change_set",))
+        return change_set()
+
+    def logged_commit(*a: Any, **k: Any) -> Any:
+        log.append(("commit",))
+        return commit(*a, **k)
+
+    batch.change_set, batch.commit = logged_change_set, logged_commit
+
+
 def _journal_resets(batch: Any, log: list, watched: Path,
                     fault: BaseException | None = None) -> None:
     """Wrap the batch's claim reset (P3's `Batch.reset`, the P4 undo) so each call logs
     `("reset", "gone"|"kept")` — whether `watched` is absent from the draft after it. With
-    `fault`, the FIRST reset raises it instead (an undo fault, injected at the reset seam)
-    after logging `("reset", "faulted")`; later resets are the real one."""
+    `fault`, the FIRST reset raises it (an undo fault, injected at the reset seam) after the
+    real reset ran and after logging `("reset", "faulted")` — so what is under test is which
+    fault the drain lets win, not a draft left dirty for the next claim (OD15). Later resets
+    are the real one."""
     real = batch.reset
     pending = [fault] if fault is not None else []
 
     def reset() -> None:
         if pending:
+            real()
             log.append(("reset", "faulted"))
             raise pending.pop()
         real()
@@ -268,6 +288,7 @@ def test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box
     seen: list[Any] = []
     sc.cfg = dataclasses.replace(sc.cfg, gate=_seeing_box(sc.cfg.gate, seen),
                                  post_rotate=_seeing_box(sc.cfg.post_rotate, seen))
+    _journal_batch(sc.lane.batch, log)
     queued_before = _queued(sc.paths)
 
     assert sc.run(box=runs) == 0
@@ -280,10 +301,14 @@ def test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box
     segments = _after_each_spawn(log)
     before, after_spawn = segments
     assert "gate" in _kinds(before), _kinds(before)
-    stray = ("tree_for", str(sc.corpus / "stray.txt"))
-    assert stray in after_spawn, "the settle after the curator spawn was not seen"
+    # #1108 P4: the settle is the claim's change set (OD15) and the commit is P3's commit-maker
+    # (O7), both journalled at the batch (`_journal_batch`); a non-`.md` stray is dropped from
+    # the claim and removed by its reset, never placed.
+    assert ("change_set",) in after_spawn, "the settle after the curator spawn was not seen"
     assert {"report", "read"} <= set(_kinds(after_spawn)), _kinds(after_spawn)
-    assert ("tree_for", str(sc.corpus / "a.md")) in after_spawn, "the commit was not seen"
+    assert ("commit",) in after_spawn, "the commit was not seen"
+    assert _rel(sc, "stray.txt") not in sc.head_files()
+    assert not os.path.lexists(sc.corpus / "stray.txt"), "the stray outlived the claim"
     assert "post_rotate" in _kinds(after_spawn)
     assert sc.head_text(_rel(sc, "a.md")) == S.lesson("f1")
     assert sc.head_text(_rel(sc, "b.md")) == S.lesson("f2")

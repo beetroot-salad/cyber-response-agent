@@ -162,6 +162,13 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_ro
     assert isinstance(opened, FatalConfigError), f"open answered {opened!r}"
     assert str(root.resolve()) in str(opened), f"the error does not name the root: {opened}"
 
+    # The run's tenant (D9's, set up by `curation_run_dir` on a FRESH data root) is made before
+    # the drain stage publishes its second tenant under the same data root: set-up refuses a
+    # data root that already holds another tenant.
+    planted = S.curation_run_dir("case-r15")
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
+    scrub_mod.scrub(run_dir)
+
     caplog.set_level(logging.INFO)
     rc, escaped, tenant_root = _drain_stage(data_root, shape)
     assert escaped is None, f"the drain stage raised {escaped!r}"
@@ -170,9 +177,6 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_ro
         "the stage's CRITICAL line does not name the tenant's learning root"
 
     caplog.clear()
-    planted = S.curation_run_dir("case-r15")
-    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
-    scrub_mod.scrub(run_dir)
     # The run-end fault belongs to the run's tenant, independent of the scratch root above.
     run_state = run_dir.parent.parent / "learning"
     if run_state.exists():

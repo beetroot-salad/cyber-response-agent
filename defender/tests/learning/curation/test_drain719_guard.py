@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic_ai.exceptions import ModelRetry
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
@@ -138,11 +139,13 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
 
 def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp_path: Path):
     """Decision 1 path 4, and the second member an `except AuthorError` spelling drops."""
-    paths = h.make_paths(tmp_path)
+    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
 
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
-    ok = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=h.committing("live"))
+    ok = C.draft_author_cfg(lane, max_attempts=2, invoke_agent=h.committing("live"))
     assert drain.run_batch(cfg=ok) == 0
     assert h.pending(paths, ch) == []
     assert h.graveyard(paths, ch) == []
@@ -152,10 +155,7 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     # The control batch above authored a/0 and consumed it, so the ledger is not empty here
     # and never was: what this asserts is that the KILLED batch adds nothing to it.
     consumed_before = len(h.consumed(paths, ch))
-    killed = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=2,
+    killed = C.draft_author_cfg(lane, max_attempts=2,
         invoke_agent=h.raising(ModelRetry("command timed out after 120s")),
     )
     assert drain.run_batch(cfg=killed) != 0, "an absorbed kill is not a successful batch"

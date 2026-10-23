@@ -5,63 +5,19 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from pathlib import Path
 
-import pytest
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain  # noqa: F401 — the target; the shim keeps collection alive
-from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender._git import GitError  # type: ignore[import-not-found]
 
 
-def _break_index(repo: Path) -> None:
-    """Make `git status` fail for real while `git rev-parse HEAD` keeps working."""
-    (repo / ".git" / "index").unlink()
-    (repo / ".git" / "index").mkdir()
-
-
-def _repair_index(repo: Path) -> None:
-    (repo / ".git" / "index").rmdir()
-    h.git(repo, "reset", "-q")
-
-
-# A read-only git probe is repo contention, not a failing batch
-
-
-def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: Path):
-    """`GitError` is a member of the retire set for one reason — decision 1 path 3, the commit-time
-    failure."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    rows = [h.row_for("findings", "a/0")]
-    h.seed(paths, ch, rows)
-
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.committing("probe", also=lambda r, b, c: _break_index(c.repo_root)),
-    )
-    with pytest.raises(drain.GitProbeError):
-        drain.run_batch(cfg=cfg)
-
-    assert h.pending(paths, ch) == rows, "a read-only probe failure rewrote the queue"
-    assert h.attempts_of(paths, ch, "a/0") is None, (
-        "the batch was charged an attempt for a git failure that says nothing about it — "
-        "at max_attempts=1 that is real work deleted on the first index-lock collision"
-    )
-    assert h.graveyard(paths, ch) == []
-    assert h.stuck_records(paths, ch)[-1]["fault_class"] == "GitProbeError", (
-        "the probe failure left no operator signal, so the row is stuck and silent"
-    )
-
-    _repair_index(paths.repo_root)
-    author_shared.assert_clean_corpus_dir(paths.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel,
-                                          corpus=cfg.corpus)
-    recovered = h.cfg_for(
-        paths, "findings", max_attempts=1, invoke_agent=h.committing("after")
-    )
-    assert drain.run_batch(cfg=recovered) == 0, "the channel stayed wedged after the probe fault"
-    assert h.pending(paths, ch) == []
+# #1108 P4 OD12(i): `test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt` deleted.
+# It pinned only `git status` over a writable worktree's index (`GitProbeError`'s no-attempt
+# carve-out); a git-free draft has no index to probe. The claim is the draft against the batch
+# base's blobs: tests/tenancy/tenant_1108_delivery/test_changes.py::
+# test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files (the same
+# deletion as test_773_commit_list.py's GitProbeError cases).
 
 
 # The retire seam does not wait forever while holding the repo lock
@@ -110,15 +66,18 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
 def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tmp_path: Path):
     """The guard that refuses to commit when the agent touched anything outside the corpus compares
     against a baseline recomputed at the top of every tick."""
-    paths = h.make_paths(tmp_path)
+    # #1108 P4 (OD12 class ii): over a batch's git-free draft, the stray sits in the drain's
+    # other lane (the box writes only its lanes) — outside this channel's corpus, so the lane's
+    # scope gate refuses it (a path outside every lane is U10's refused claim instead).
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.seed(paths, ch, rows)
-    stray = paths.repo_root / "scratch.txt"
+    stray = lane.sibling_dir / "scratch.txt"
 
-    cfg = h.cfg_for(
-        paths,
-        "findings",
+    cfg = C.draft_author_cfg(
+        lane,
         max_attempts=5,
         invoke_agent=h.committing(
             "stray", also=lambda r, b, c: stray.write_text("written outside the corpus\n")

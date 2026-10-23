@@ -380,8 +380,11 @@ def test_attribution_asks_cfg_corpus_and_a_refused_read_cites_nothing(tmp_path, 
 @pytest.mark.parametrize("mode", ["same mode", "made executable"])
 def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, mode):
     """A base lesson the box hard-links to a host file holding its exact bytes (or those bytes
-    made executable) is no change: only the new lesson lands, the base lesson's blob and the host
-    file are unchanged (#1134, P4 O7; moved from test_1134_curator_git_compare)."""
+    made executable) is an aliased entry, which P3's ChangeSet refuses (owner ruling 2026-10-23:
+    no hard-linked lesson should exist; P3's refusal of aliased entries stands): the claim is
+    U10's refused claim — nothing lands, not even the new lesson; f1 counts one attempt and stays
+    queued; the draft is reset to plain base files; the host file is unchanged (#1134, P4 O7;
+    moved from test_1134_curator_git_compare)."""
     holder: dict = {}
 
     def alias_seeded(rows, batch_id, cfg):
@@ -396,8 +399,13 @@ def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, 
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")},
                                                 also=alias_seeded))
 
-    assert _run(sc) == ("rc", 0)
-    assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
+    got = _run(sc)
+    assert "target" in holder, "the box never planted the hard link (vacuous)"
+    _refused_claim_routed(sc, got, "f1")
     assert sc.head_text(f"{LESSONS}/{SEEDED}") == lesson_text("f0")
     assert holder["target"].read_text() == lesson_text("f0")
     assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")
+    assert not os.path.lexists(sc.corpus / PLANTED)
+    reset = os.stat(sc.corpus / SEEDED)
+    assert stat.S_ISREG(reset.st_mode) and reset.st_nlink == 1, "the reset left the alias"
+    assert reset.st_ino != os.stat(holder["target"]).st_ino, "the draft still shares the host inode"

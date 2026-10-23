@@ -15,11 +15,9 @@ import pytest
 
 from defender import _git
 from defender.records import _provenance
-from defender.episodes._episode_handle import Episode
 from defender.records._provenance import RunProvenance
-from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.shared.contracts._data_root_1078 import FIXTURE, set_up_tenant
+from defender.tests.support.shared.contracts._data_root_1078 import FIXTURE
 
 
 def _capture(knowledge_dir: Path) -> Any:
@@ -503,137 +501,16 @@ def test_1204_only_a_40_or_64_lowercase_hex_sha_is_a_commit(tmp_path, site):
         _assert_unavailable(_wire(repo))
 
 
-TENANT_ID = fixture_uuid("tenant:acme")
-
-
-def _tenant_with_knowledge(tmp_path: Path, monkeypatch, *, versioned: bool) -> tuple[Any, str]:
-    """A fresh data root holding one tenant set up from the committed fixture (#1120), its
-    knowledge folder either a real git CLONE of the tenant's repo (`versioned`) or the plain
-    copy every other suite uses (`_data_root_1078.set_up_tenant`, C11). The clone is placed
-    BEFORE the tenant is accepted, so the real `accept_tenant` admits it (C10: `.git` is a
-    permitted top-level name and is never walked). Returns the accepted `Tenant` and the
-    clone's HEAD (`""` for the plain copy)."""
-    data_root = tmp_path / "data"
-    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
-    knowledge = data_root / TENANT_ID / "knowledge"
-    head = ""
-    if versioned:
-        upstream = tmp_path / "tenant-repo"
-        shutil.copytree(FIXTURE, upstream, symlinks=True)
-        _repo(upstream)
-        head = _commit(upstream, "the tenant's own change")
-        knowledge.parent.mkdir(parents=True)
-        _g(tmp_path, "clone", "-q", str(upstream), str(knowledge))
-        # Uncommitted, as `scaffold` leaves it: the stamp names HEAD regardless (no dirty bit
-        # for knowledge, decision 1).
-        (knowledge / "agent" / ".tenant-id").write_text(f"{TENANT_ID}\n", encoding="utf-8")
-    tenant = set_up_tenant(data_root, TENANT_ID)
-    assert tenant.knowledge == knowledge
-    assert (knowledge / ".git").is_dir() is versioned
-    return tenant, head
-
-
-def _materialise(tmp_path: Path, tenant: Any, label: str) -> tuple[Path, dict]:
-    """One run through the real `materialize_run`, and its stamp as the JSON on disk. The run is
-    pinned at the uuid4 `label` names (#1187: a run id is a uuid4; `fixture_uuid`)."""
-    from defender import run_common
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
-    run_id = fixture_uuid(label)
-    alert = tmp_path / f"{run_id}.alert.json"
-    alert.write_text(json.dumps({"id": run_id}), encoding="utf-8")
-    run_dir = run_common.materialize_run(alert, run_id, tenant=tenant).run_dir
-    stamp = RunPaths(run_dir).provenance
-    assert stamp.is_file(), "the run was not stamped at all"
-    return run_dir, json.loads(stamp.read_text(encoding="utf-8"))
-
-
-def test_1204_a_run_on_a_versioned_tenant_stamps_its_knowledge_clones_commit(
-        tmp_path, monkeypatch):
-    """O1/D3 at the ONE place every executed run is stamped (`materialize_run` -> `_stamp`,
-    fork siblings included)."""
-    tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
-    run_dir, doc = _materialise(tmp_path, tenant, "1204-versioned")
-
-    assert doc["knowledge"] == {"commit": knowledge_head}
-    assert doc["commit"] != knowledge_head, "the knowledge commit is the PRODUCT's"
-    assert doc["tenant_id"] == TENANT_ID
-    record = _provenance.read(RunPaths(run_dir).provenance)
-    assert record is not None
-    assert record.knowledge == _revision().at(knowledge_head)
-
-
-def test_1204_a_run_on_a_plain_copy_tenant_stamps_unversioned(tmp_path, monkeypatch):
-    """O1/D3, the negative beside the positive above on the same entry point."""
-    tenant, _ = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=False)
-    _run_dir, doc = _materialise(tmp_path, tenant, "1204-plain")
-
-    assert doc["knowledge"] == "unversioned"
-    assert doc["tenant_id"] == TENANT_ID
-
-
-def test_1204_an_unreadable_knowledge_git_stamps_unavailable_and_the_run_goes_on(
-        tmp_path, monkeypatch):
-    tenant, _ = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
-    git_dir = tenant.knowledge / ".git"
-    shutil.rmtree(git_dir)
-    git_dir.write_text(f"gitdir: {tmp_path / 'nowhere'}\n", encoding="utf-8")
-
-    _run_dir, doc = _materialise(tmp_path, tenant, "1204-gitfile")
-    _assert_unavailable(doc["knowledge"])
-    assert doc["commit"] is not None or doc["unavailable"] is not None
-    assert doc["tenant_id"] == TENANT_ID
-
-
-@pytest.mark.parametrize("fault", ["undecodable", "directory"])
-def test_1204_a_read_fault_inside_the_knowledge_git_still_writes_the_whole_stamp(
-        tmp_path, monkeypatch, fault):
-    """O4 at the write site, for faults that are NOT a gitfile."""
-    from defender import run_common
-
-    tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
-    _plant_site_fault(tenant.knowledge, "loose-ref", fault, knowledge_head)
-    product = _provenance.capture_tree(run_common.REPO_ROOT)
-
-    _run_dir, doc = _materialise(tmp_path, tenant, f"1204-{fault}")
-    _assert_unavailable(doc["knowledge"], never=(knowledge_head,))
-    assert doc["commit"] == product.commit
-    assert doc["scope"] == _provenance.CODE_SCOPE
-    assert doc["tenant_id"] == TENANT_ID
-
-
-def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clones_commit(
-        tmp_path, monkeypatch):
-    from defender import run_common
-    from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
-
-    tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
-    data_root = tmp_path / "data"
-    _base, src = H.tenant_source(data_root, TENANT_ID, row=False)
-    # #1187 (Layout A): the episode is `<data root>/<T>/episodes/<uuid>`, as RUNS leaves it
-    # (its arm roster written); `family_for` builds it there.
-    manifest = H.family_for(src)
-    episode_dir = manifest.parent
-    with Episode.open(manifest.parent) as episode:
-        world = H.run_py().resume_world(
-            episode, "b", tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
-        # #1105 PR 2: the arm is made through the sibling's episode view, over the container
-        # RUNS made for the tenant (`family_for` plants it and the roster, #1187).
-        # #1187 (O4b): the sibling's form requires its UUID roster (`require_roster=True`, replacing
-        # PR 2's `container_required`): the view refuses unless the roster names the world.
-        view = tenant.runs_repository().episode(episode.dir.name, held=episode,
-                                                require_roster=True)
-        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
-        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
-        run_dir = run_common.materialize_run(
-            RunPaths(src).alert, T.roster_arm_id(episode_dir, world.world_id), tenant=tenant, world=world,
-            episode_runs=view).run_dir
-    assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
-    doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
-    assert doc["world_id"] is None
-    assert doc["parent_run_id"] is None
-    assert doc["fork_turn"] is None
-    assert doc["knowledge"] == {"commit": knowledge_head}
+# #1108 P4 OD12(i): five cases deleted that pinned `materialize_run` stamping the tenant clone's
+# working HEAD (versioned / plain copy `unversioned` / unreadable `.git` / a read fault in the
+# clone's git / a fork sibling materialised through the real path). After P4 a run's stamp names
+# the export it was copied from, never the clone's HEAD (O-B; the clone read is banned by the O4
+# census), and a branch sibling is pinned to its source's knowledge commit (O-PIN):
+# tenant_1108_p4/test_run_start.py::test_o_b_the_stamp_is_the_export_copied_never_the_clones_head,
+# ::test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_and_knowledge_from_its_copy_of_current,
+# tenant_1108_p4/test_branch_replay.py::test_flow7_siblings_are_pinned_to_the_source_knowledge_commit_materialised_first
+# and ::test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_publish.
+# The clone-reading revision reader itself is still pinned by the cases above.
 
 
 #: A record with EVERY field set to a non-default value, so "everything else intact" is a claim
