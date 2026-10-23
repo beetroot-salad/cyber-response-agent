@@ -4,6 +4,8 @@
 tick committed is read from the batch branch the commit-maker moved, spelled `agent/...`."""
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from defender.tests.support.learning.curation import _curator1134 as C
@@ -221,10 +223,9 @@ def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
         assert sc.commit_count() == 1
         return
     if fault == "ref-locked":
-        try:
+        # A system commit fault's routing is not designed: only #773 M5 is pinned.
+        with contextlib.suppress(Exception):
             sc.run()
-        except Exception:  # noqa: BLE001 — a system commit fault's routing is not designed
-            pass
         assert sc.commit_count() == 1
         assert sc.head_files() == []
         assert sc.consumed() == []
