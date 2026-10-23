@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     import httpx
 from defender import _git, _io
 
-from .auth import CLOCK_SKEW, TOKEN_TTL, ForgejoIdentity
+from .auth import CLOCK_SKEW, TOKEN_TTL, ForgeCredential
 from .forgejo import ForgejoForge, PullRequest
 from .model import _REGULAR_MODES, ChangeSet, DeliveryRefused
 from .transport import _NO_BACKGROUND_GIT, GitTransport
@@ -303,7 +303,7 @@ class GitRepository(LocalRepository):
 
     origin: str
     forge: ForgejoForge
-    identity: ForgejoIdentity
+    identity: ForgeCredential
     network_timeout: float = NETWORK_TIMEOUT
 
     @classmethod
@@ -313,7 +313,7 @@ class GitRepository(LocalRepository):
         *,
         tenant_id: str,
         origin: str,
-        identity: ForgejoIdentity,
+        identity: ForgeCredential,
         client: httpx.Client,
         network_timeout: float = NETWORK_TIMEOUT,
     ) -> GitRepository:
