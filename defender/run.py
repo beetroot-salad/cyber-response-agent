@@ -525,6 +525,15 @@ def _default_publish() -> Callable[..., object]:
     return real
 
 
+def __getattr__(name: str) -> Any:
+    """`run.launch_publish`, the real launcher, imported on first use so the run module does not
+    load the delivery stack until a launch publishes. The contract's seam for the publish child
+    (README section 2); nothing in production names it."""
+    if name == "launch_publish":
+        return _default_publish()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _knowledge_source(
     tenant: _tenant.Tenant, *, pin: str | None, publish: Callable[..., object] | None,
     data_root: DataRoot,
