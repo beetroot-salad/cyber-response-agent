@@ -360,7 +360,8 @@ def test_the_pre_state_is_captured_before_the_run_starts(tmp_path: Path, monkeyp
     sc = _channel_scene(tmp_path, channel, rows=rows, curator=curator,
                         agent_files={STRAY_REL.removeprefix("agent/"): "committed\n"})
     stray = sc.lane.root / STRAY_REL
-    assert stray.read_text() == "committed\n" and sc.head_text(STRAY_REL) == "committed\n"
+    assert stray.read_text() == "committed\n"
+    assert sc.head_text(STRAY_REL) == "committed\n"
     if when == "once-started":
         daemon.on_start(stray, STRAY_EDIT, at=1)
     sc.cfg = _wire(sc.cfg, [], curator=curator, journal=False)

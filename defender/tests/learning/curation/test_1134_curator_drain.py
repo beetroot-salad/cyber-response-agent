@@ -407,5 +407,6 @@ def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, 
     assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")
     assert not os.path.lexists(sc.corpus / PLANTED)
     reset = os.stat(sc.corpus / SEEDED)
-    assert stat.S_ISREG(reset.st_mode) and reset.st_nlink == 1, "the reset left the alias"
+    assert stat.S_ISREG(reset.st_mode), "the reset left a non-file"
+    assert reset.st_nlink == 1, "the reset left the alias"
     assert reset.st_ino != os.stat(holder["target"]).st_ino, "the draft still shares the host inode"
