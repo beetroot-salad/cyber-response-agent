@@ -2,6 +2,25 @@
 
 A design-and-tests pipeline from GitHub issue to merged PR, as a Claude Code plugin.
 
+## Quick start
+
+```bash
+# once per clone, from the repo that holds the plugin
+claude plugin marketplace add ./
+claude plugin install contract-first@contract-first-local --scope project
+```
+
+Then, in a Claude Code session, pick the command that matches your change:
+
+| Your change | Run |
+|---|---|
+| New or changed behavior | `/contract-first:discuss-issue <issue#>`, then each stage tells you the next |
+| A bug against behavior that's already settled | `/contract-first:proven-fix <issue#>` |
+| A restructure with no behavior change | `/contract-first:refactor <issue#>` |
+| Not sure, or picking up a run | `/contract-first:guide <issue#>` |
+
+## How it works
+
 The design records intended behavior, scope, data models, flows, architecture and trade-offs.
 **The tests are the executable contract between that design and code.** They are written before
 implementation and reviewed for fidelity. Then the code is written against them, and attackers try
