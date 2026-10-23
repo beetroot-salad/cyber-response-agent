@@ -146,6 +146,12 @@ package = false
 [tool.setuptools]
 py-modules = []
 
+[tool.pyrefly]
+# defender is a namespace package (no defender/__init__.py, this pyproject below the import
+# root), so without `..` on the search path `defender.x` imports silently resolve to Unknown.
+# Mirrors pytest's pythonpath = ['..']. Read by the contract-first symbol-refs helper.
+search-path = ["..", "."]
+
 [tool.mypy]
 # Type-check gate (issue #403). BLOCKING: mypy runs in CI's lint job with no
 # `|| true` — the tree is at zero errors under this config, so a new type error

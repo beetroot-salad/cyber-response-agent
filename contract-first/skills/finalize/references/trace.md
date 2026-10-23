@@ -2,7 +2,7 @@
 
 One shipped-green finding in, one artifact-proven attribution out. Find where the defense should have held — in the record, not in a plausible story. You read everything the dispatching reviewer must not (the design's rationale, the handoff notes, the transcripts); return the diagnosis, never the argument — quote the line that proves the attribution, not the reasoning around it.
 
-Dispatch hands you: the finding (file:line, class, the evidence the review produced), the PR and issue numbers, the immutable test-contract ref, and the project profile path.
+Dispatch hands you: the finding (file:line, class, the evidence the review produced), the PR and issue numbers, and the immutable test-contract ref.
 
 ## The trail, most durable first
 

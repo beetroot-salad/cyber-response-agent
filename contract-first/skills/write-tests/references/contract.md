@@ -6,7 +6,7 @@ Keep the smallest record that lets a cold agent pick up the work: what the contr
 
 Scratch state lives under `.contract-first/`, outside the committed diff. It holds:
 
-- the identities everything depends on: design revision, base commit, profile, current test ref, and the skill revision used;
+- the identities everything depends on: design revision, base commit, current test ref, and the skill revision used;
 - the **contract map**: design obligations, their scenarios and entry points, the enforcing tests by node ID, each row's fold outcome (already enforced, extended, new, or conflict updated), and verification status. A Markdown table is enough, for example `O-retry | same operation after uncertain result | import API | tests/test_import.py::test_retry_preserves_identity (extended): returned ID + row count | awaiting implementation`. A row is a claim to inspect, not proof. Because folded tests sit in many files, the map's node IDs, not a file list, define the contract;
 - findings and decisions by stable ID, with cause, disposition, evidence, the human's ruling where one was needed, and what they affect. Nothing gets silently dropped;
 - the claims inherited from discuss-issue plus new load-bearing observations, in its format. An ID does not make an unprobed fact settled;
@@ -16,7 +16,7 @@ Scratch state lives under `.contract-first/`, outside the committed diff. It hol
 
 Mark the boundaries a resume needs: sketch and spike checked (or skipped, and why; their findings, never the spike's code), candidate authored, reviewed, repaired, ready or blocked. A worker that hands back mid-slice writes its progress here so a fresh worker can continue without its history.
 
-Before reusing anything, compare its recorded identities with the current inputs. A changed design, shared fixture, base, profile or environment invalidates the work that depended on it, and nothing else. Missing or stale review evidence means not reviewed; timestamps and "complete" labels prove nothing. Migrate an old-format run by carrying over its validated evidence and decisions, not its scaffolding.
+Before reusing anything, compare its recorded identities with the current inputs. A changed design, shared fixture, base or environment invalidates the work that depended on it, and nothing else. Missing or stale review evidence means not reviewed; timestamps and "complete" labels prove nothing. Migrate an old-format run by carrying over its validated evidence and decisions, not its scaffolding.
 
 ## Commit
 

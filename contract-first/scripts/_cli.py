@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""CLI plumbing shared by the spec-graph checkers: argv parsing, stdio encoding, and graph
-loading. Exit-code contract: 0 clean, 1 findings, 2 could not look."""
+"""CLI plumbing shared by check_calls and check_stub: argv parsing and stdio encoding.
+Exit-code contract: 0 clean, 1 findings, 2 could not look."""
 from __future__ import annotations
 
 import sys
 from collections.abc import Iterable
-from pathlib import Path
-
-import yaml
 
 
 def utf8_stdio() -> None:
@@ -47,17 +44,3 @@ def parse_argv(
         else:
             positionals.append(a)
     return opts, positionals
-
-
-#: The libyaml C loader when available (same safe subset, ~8x faster; every checker parses the
-#: whole multi-MB graph corpus), else the pure-Python one.
-_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-
-
-def load_graph(path: Path) -> dict:
-    """A spec graph off disk, empty-tolerant, shape-guarded."""
-    graph = yaml.load(path.read_text(encoding="utf-8"), Loader=_LOADER) or {}
-    if not isinstance(graph, dict):
-        # Valid YAML, wrong shape: raise a type mains catch as "could not read" (exit 2).
-        raise TypeError(f"top level is a {type(graph).__name__}, not a mapping")
-    return graph

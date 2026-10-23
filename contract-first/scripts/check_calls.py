@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""spec-graph check #6 — every test calls the target (the phase-F AST check, mechanized).
+"""Every test calls the target, checked statically.
 
 A test that never drives the target symbol asserts around it — a fixture check, a
 re-implementation, an environmental probe — and stays green whatever the implementation
-does. The phase-F charge ("AST check: every test calls the target — directly, via a
-helper in the same file whose body does, or by driving an object a call to the target
-returned") is a static reachability question, so this script answers it.
+does. "Every test calls the target — directly, via a helper in the same file whose body
+does, or by driving an object a call to the target returned" is a static reachability
+question, so this script answers it.
 
 Target identification is `_suite.target_modules`: the suite's project-rooted imports
 that resolve to nothing are the not-yet-written target; `--target <dotted.module>` adds
@@ -17,7 +17,7 @@ clause is subsumed: an object a target call returned only exists in a body that 
 the target call.)
 
 Usage:
-    spec-graph calls [graph.yaml | suite-dir] [--target <dotted.module> ...] [--config <path>]
+    spec-graph calls <suite-dir> [--target <dotted.module> ...]
 Exit codes: 0 every test reaches the target; 1 a test doesn't; 2 no target could be
 identified (heuristic empty and no --target given) — could-not-look, never a pass.
 """
@@ -28,7 +28,6 @@ import sys
 from pathlib import Path
 
 import _cli
-import _config
 import _suite
 
 
@@ -129,61 +128,37 @@ def check(suite_dir: Path, targets: dict[str, set[str]]) -> list[str]:
 
 def main(argv: list[str]) -> int:
     _cli.utf8_stdio()
-    opts, args = _cli.parse_argv(argv, valued={"--config"}, multi={"--target"})
+    opts, args = _cli.parse_argv(argv, multi={"--target"})
     explicit: list[str] = opts["target"]
-    cfg = _config.load(opts["config"])
-    if args:
-        # Anchor the root at the argument: it may live in another repo than the cwd.
-        p = Path(args[0]).resolve()
-        suite_dirs = [_suite.suite_dir_from_arg(p)]
-        root: Path | None = _config.repo_root(suite_dirs[0])
-    else:
-        # No single root: each suite dir is anchored on its own checkout inside the loop.
-        root = None
-        suite_dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
-    if not suite_dirs:
-        print("check_calls: no suite directory (no graphs matched and none given)", file=sys.stderr)
+    if len(args) != 1:
+        print("usage: spec-graph calls <suite-dir> [--target <dotted.module> ...]", file=sys.stderr)
         return 2
-    all_findings: list[str] = []
-    blind: list[Path] = []
-    # A directory with no tests is could-not-look. Checked here because an explicit `--target`
-    # would get past the no-targets arm. Collected, not returned on, so other suites' findings
-    # still print.
-    no_tests: list[Path] = []
-    for d in suite_dirs:
-        if not _suite.has_tests(d):
-            no_tests.append(d)
-            continue
-        targets, floor = _suite.target_modules(d, root or _config.repo_root(d))
-        for t in explicit:
-            targets.setdefault(t, set())
-        for note in floor:
-            print(f"  WARN [check_calls] {note}", file=sys.stderr)
-        if not targets:
-            # Collected, not returned on, so other suites' findings still print.
-            blind.append(d)
-            continue
-        all_findings.extend(check(d, targets))
-    for f in all_findings:
-        print(f"  {f}")
-    # Summary only when something was scanned: over zero suites it would read as clean.
-    scanned = len(suite_dirs) - len(blind) - len(no_tests)
-    if scanned:
-        print(f"\n[check_calls] {len(all_findings)} test(s) that never reach the target "
-              f"over {scanned} suite dir(s).")
-    if no_tests:
-        print(_suite.no_tests_refusal("check_calls", no_tests), file=sys.stderr)
-    if blind:
+    suite_dir = Path(args[0]).resolve()
+    # A directory with no tests is could-not-look, checked before targets because an
+    # explicit `--target` would get past the no-targets arm.
+    if not _suite.has_tests(suite_dir):
+        print(_suite.no_tests_refusal("check_calls", suite_dir), file=sys.stderr)
+        return 2
+    # Anchor the root at the argument: it may live in another repo than the cwd.
+    targets, floor = _suite.target_modules(suite_dir, _suite.repo_root(suite_dir))
+    for t in explicit:
+        targets.setdefault(t, set())
+    for note in floor:
+        print(f"  WARN [check_calls] {note}", file=sys.stderr)
+    if not targets:
         print(
-            f"check_calls: no target identified for {[str(d) for d in blind]} — every suite "
-            f"import resolves or is indistinguishable from a dependency. A modify-existing "
-            f"spec's target is invisible to the import heuristic, and a brand-new TOP-LEVEL "
-            f"module reads as a third-party import; name it with --target <dotted.module>.",
+            f"check_calls: no target identified for {suite_dir} — every suite import resolves "
+            f"or is indistinguishable from a dependency. A modify-existing spec's target is "
+            f"invisible to the import heuristic, and a brand-new TOP-LEVEL module reads as a "
+            f"third-party import; name it with --target <dotted.module>.",
             file=sys.stderr,
         )
-    if no_tests or blind:
         return 2
-    return 1 if all_findings else 0
+    findings = check(suite_dir, targets)
+    for f in findings:
+        print(f"  {f}")
+    print(f"\n[check_calls] {len(findings)} test(s) that never reach the target.")
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

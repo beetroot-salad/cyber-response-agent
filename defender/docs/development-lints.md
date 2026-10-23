@@ -1,6 +1,6 @@
 # Development lint reference
 
-Read the relevant entry when changing a shared seam or resolving a lint finding. This is not an additional always-loaded instruction file. Historical spec-graph artifact checking is retired from CI.
+Read the relevant entry when changing a shared seam or resolving a lint finding. This is not an additional always-loaded instruction file.
 
 This reference describes lint expectations and existing seams. `.github/workflows/ci.yml` determines which checks currently block CI; each checker module defines its exact scope and suppression syntax. The checkers live at `tooling/lint/lint_*.py` (repo root). Almost all scope to `defender/` alone — the stale-reference scan works off the PR's whole diff. Run one directly: `defender/.venv/bin/python tooling/lint/<lint>.py`.
 

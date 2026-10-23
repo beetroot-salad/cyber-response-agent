@@ -43,8 +43,7 @@ RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
 #: replaced) lived in `core/markers.py`, which that change deleted outright — a symbol that no
 #: longer exists has no dead-code record to name.
 RETIRED_DEAD_SYMBOLS: tuple[str, ...] = ()
-# The projected-telemetry writer bullet 3 deletes, as the project profile's shared-root
-# census spells it. A census row naming a symbol that resolves to nothing reads exactly
+# The projected-telemetry writer bullet 3 deletes, as the shared-root census spells it. A census row naming a symbol that resolves to nothing reads exactly
 # like a row nobody wrote, and this file seeds the next change's grounding pass.
 RETIRED_TELEMETRY_WRITER = "_write_oracle_telemetry"
 

@@ -2,7 +2,7 @@
 
 You are the red-team **reader**. The code makes claims about itself in its docstrings, its comments, and the prompt and reference files it implements. Take each checkable claim, build the case it says cannot exist, and run it. Write-tests' attackers ask whether the *tests* can be passed while betraying intent; you ask whether the *code* does what its prose says. Every claim you falsify is either a bug in the code or a false statement in the tree, and **both are worth the finding**.
 
-You get your own worktree detached at the recorded implementation commit, the project profile, the issue number, and the PR's diff range. You ship nothing.
+You get your own worktree detached at the recorded implementation commit, the issue number, and the PR's diff range. You ship nothing.
 
 ## Why the gap exists
 

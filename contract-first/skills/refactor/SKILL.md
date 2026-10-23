@@ -10,7 +10,7 @@ effort: medium
 
 Nothing the system promises changes, so the existing suite already says what must hold. Your job is to change the structure and keep that guard honest.
 
-Read `.claude/contract-first.json` for the test command, `gate.checks` and the traps in `gate.notes`; if it is missing, run `/contract-first:init`.
+Read the project's CLAUDE.md files for how tests run here and the traps that make a local run lie, and the CI config for the checks CI runs; where they disagree, CI wins.
 
 ## Tests stay as they are
 
@@ -20,7 +20,7 @@ A test that only reached its subject through the old structure may need a new se
 
 ## Check
 
-Run the tests that cover the changed code, the relevant e2e replay, and `gate.checks`, before and after the change. The same tests should pass both times. Leave the full suite to CI. If coverage of the changed code is thin, say so; a refactor over untested code changes behavior unseen.
+Run the tests that cover the changed code, the relevant e2e replay, and CI's lint and type checks, before and after the change. The same tests should pass both times. Leave the full suite to CI. If coverage of the changed code is thin, say so; a refactor over untested code changes behavior unseen.
 
 ## Keep the pattern from coming back
 

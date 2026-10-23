@@ -23,7 +23,7 @@ Almost all of this skill's cost is agents re-sending what they have already read
 
 ## 1. Establish the candidate
 
-Start from the current discuss-issue design, its decisions, grounding claims and code map, and the project profile (`.claude/contract-first.json`). If there is only a bare report, the design work has not happened: use discuss-issue rather than invent intended behavior. Missing formatting is not a reason to restart; a missing fact that could change the contract is a reason to settle it or block that part.
+Start from the current discuss-issue design, its decisions, grounding claims and code map, and the project's CLAUDE.md files and CI config. If there is only a bare report, the design work has not happened: use discuss-issue rather than invent intended behavior. Missing formatting is not a reason to restart; a missing fact that could change the contract is a reason to settle it or block that part.
 
 Extend the code map with what tests need and grounding did not cover: harness entry points, shared fixtures, and the interface of any shared test machinery once written. If there is no map, build it now, before any author starts. Brief workers with the current design only; fold any still-applicable part of a superseded design into it rather than send workers through the history.
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import textwrap
 
-from test_mechanical_checks import run_script
+from conftest import run_script
 
 
 def test_explicit_target_on_existing_module_sees_symbol_imports(make_repo):
@@ -19,7 +19,6 @@ def test_explicit_target_on_existing_module_sees_symbol_imports(make_repo):
     # case), so the heuristic collected no symbols for it: a suite doing
     # `from app.mod import summarize` + summarize() was 100% falsely NO-CALL.
     r = make_repo()
-    r.config(code_roots=["app"])
     r.write("app/mod.py", "def summarize(path):\n    return 'the summary'\n")
     r.write("tests/spec/test_spec.py", textwrap.dedent("""\
         from app.mod import summarize
@@ -39,7 +38,6 @@ def test_module_level_alias_of_the_target_reaches_the_fixed_point(make_repo):
     # rebind) was invisible to the function-only harvest, so tests calling only the
     # alias were falsely NO-CALL. The genuinely vacuous test must STILL be flagged.
     r = make_repo()
-    r.config(code_roots=["appx"])
     r.write("appx/helper.py", "def existing():\n    return 1\n")
     r.write("tests/spec/test_spec.py", textwrap.dedent("""\
         import functools
@@ -74,7 +72,6 @@ def test_conftest_fixture_that_reaches_the_target_covers_its_users(make_repo):
     # charge's "driving an object a call to the target returned". A test that touches
     # neither the target nor the fixture must STILL be flagged.
     r = make_repo()
-    r.config(code_roots=["appx"])
     r.write("appx/helper.py", "def existing():\n    return 1\n")
     r.write("tests/spec/conftest.py", textwrap.dedent("""\
         import pytest
@@ -106,7 +103,6 @@ def test_greenfield_top_level_import_gets_a_floor_note(make_repo):
     # not look) AND name the ambiguous module in a floor note rather than claim that
     # every suite import resolves.
     r = make_repo()
-    r.config(code_roots=[])
     r.write("tests/spec/test_spec.py", textwrap.dedent("""\
         from foo import parse
 
@@ -124,7 +120,6 @@ def test_explicit_suite_path_is_judged_the_same_from_any_cwd(make_repo):
     # absolute suite path from an unrelated repo misclassified every import (nothing
     # project-rooted) and exited 2 with a false "every import resolves".
     r = make_repo()
-    r.config(code_roots=["appx"])
     r.write("appx/helper.py", "def existing():\n    return 1\n")
     r.write("tests/spec/test_spec.py", textwrap.dedent("""\
         from appx.summarize import summarize

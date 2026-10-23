@@ -300,7 +300,7 @@ def assert_verbatim(entry_text: str, owner: BaseException, *, entry: str) -> Non
 def setup_env(root: Path | str | None, **extra: str) -> dict[str, str]:
     """The environment a setup process runs in: this test's own, with the data root set (or
     removed, for `None`) and the WORKTREE's package on the path (the shared venv's editable
-    install points at the main checkout — the project profile's note)."""
+    install points at the main checkout — see defender/tests/CLAUDE.md)."""
     env = dict(os.environ)
     env.pop(DATA_ROOT_ENV, None)
     if root is not None:

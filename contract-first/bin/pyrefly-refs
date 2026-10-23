@@ -15,14 +15,13 @@ Usage:
     --defs          go to the definition(s) of the symbol instead of finding references
     --json          machine-readable output
 
-Config comes from <repo>/.claude/contract-first.json -> codeGraph.{configDir, searchPath}.
-Pyrefly SILENTLY under-resolves without a search-path on namespace-package layouts (no
-__init__.py, pyproject below the import root): it returns the declaration only and hover
-types read `Unknown`, with no error. This script therefore (a) writes a temporary
-pyrefly.toml at configDir (removed on exit; never clobbers a committed one) and (b) hard-fails
+Pyrefly reads its own config: the nearest `pyrefly.toml` or `[tool.pyrefly]` in a
+`pyproject.toml` above the file. It SILENTLY under-resolves without a search-path on
+namespace-package layouts (no __init__.py, pyproject below the import root): it returns the
+declaration only and hover types read `Unknown`, with no error. This script therefore hard-fails
 with exit 3 if resolution looks collapsed — so a census can never read empty-as-complete.
 """
-import json, os, re, shutil, subprocess, sys, threading, queue, time, atexit, urllib.parse
+import json, os, re, shutil, subprocess, sys, threading, queue, time, urllib.parse
 
 
 def die(msg, code=2):
@@ -47,41 +46,13 @@ target_file = os.path.abspath(target_file)
 if not os.path.exists(target_file):
     die("no such file: " + target_file)
 
-# ---- locate repo root + config ------------------------------------------
+# ---- locate repo root -------------------------------------------------
 try:
     repo = subprocess.check_output(
         ["git", "-C", os.path.dirname(target_file), "rev-parse", "--show-toplevel"],
         text=True).strip()
 except Exception:
-    die("not inside a git repo (need it to find .claude/contract-first.json)")
-
-profile_path = os.path.join(repo, ".claude", "contract-first.json")
-try:
-    profile = json.load(open(profile_path, encoding="utf-8"))
-except FileNotFoundError:
-    die("no .claude/contract-first.json — run /contract-first:init first")
-cg = profile.get("codeGraph") or {}
-config_dir = cg.get("configDir")
-search_path = cg.get("searchPath")
-if not config_dir or not search_path:
-    die("contract-first.json has no codeGraph.configDir / codeGraph.searchPath — "
-        "add e.g. \"codeGraph\": {\"configDir\": \"defender\", \"searchPath\": [\"..\", \".\"]}")
-
-# ---- ensure pyrefly search-path config (temp, cleaned up) ----------------
-cfg_path = os.path.join(repo, config_dir, "pyrefly.toml")
-wrote_cfg = False
-if not os.path.exists(cfg_path):
-    body = "search-path = [%s]\n" % ", ".join('"%s"' % p for p in search_path)
-    open(cfg_path, "w", encoding="utf-8").write(body)
-    wrote_cfg = True
-
-    def _cleanup():
-        try:
-            if wrote_cfg:
-                os.remove(cfg_path)
-        except OSError:
-            pass
-    atexit.register(_cleanup)
+    die("not inside a git repo")
 
 # ---- find the symbol's column on the line --------------------------------
 lines = open(target_file, encoding="utf-8").read().splitlines()
@@ -248,8 +219,8 @@ if guard_tripped:
         "\npyrefly-refs: RESOLUTION GUARD TRIPPED — the result is likely a silent "
         "under-resolution, not the truth.\n"
         "  hover resolved: %s%s\n"
-        "  Check codeGraph.searchPath in .claude/contract-first.json (pyrefly needs the import "
-        "root on its search path).\n" % (
+        "  Check the project's pyrefly config (`search-path` in pyrefly.toml or "
+        "[tool.pyrefly]): pyrefly needs the import root on its search path.\n" % (
             resolved,
             "" if resolved else "  (hover: %r)" % (hover_txt[:80] or "empty")))
     sys.exit(3)

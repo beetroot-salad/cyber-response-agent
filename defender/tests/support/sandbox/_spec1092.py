@@ -1,6 +1,5 @@
 """Shared machinery for #1092's executable spec — NOT a test module (the leading underscore
-keeps pytest from collecting it). Imported by the `test_1092_*.py` files, which live directly
-under `defender/tests/` because `spec-graph binds` scans that directory non-recursively."""
+keeps pytest from collecting it). Imported by the `test_1092_*.py` files."""
 from __future__ import annotations
 
 import contextlib

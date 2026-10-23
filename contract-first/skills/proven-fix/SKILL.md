@@ -10,7 +10,7 @@ effort: medium
 
 The code disagrees with intent that is already settled, so no test covers the case. The fix is usually the easy part. The point is a guarding test that actually discriminates: one that fails without the fix and catches its likely regressions.
 
-Read `.claude/contract-first.json` for the test command, `gate.checks` and the traps in `gate.notes`; if it is missing, run `/contract-first:init`. The intended behavior must fit in a sentence. If the work turns up a design question rather than a defect — a new verdict, refusal or model-visible surface, or two reasonable readings of the intent — stop and hand it back for `/contract-first:discuss-issue`. A decision made here has nowhere to be recorded.
+Read the project's CLAUDE.md files for how tests run here and the traps that make a local run lie, and the CI config for the checks CI runs; where they disagree, CI wins. The intended behavior must fit in a sentence. If the work turns up a design question rather than a defect — a new verdict, refusal or model-visible surface, or two reasonable readings of the intent — stop and hand it back for `/contract-first:discuss-issue`. A decision made here has nowhere to be recorded.
 
 ## 1. Red first
 
@@ -20,7 +20,7 @@ A test that passes before the fix is the finding, not a formality. Either it doe
 
 ## 2. Fix
 
-Make the smallest change that turns the test green. Run the touched test files, the tests that cover the changed code, the relevant e2e replay, and `gate.checks`. Leave the full suite to CI.
+Make the smallest change that turns the test green. Run the touched test files, the tests that cover the changed code, the relevant e2e replay, and CI's lint and type checks. Leave the full suite to CI.
 
 Never edit an existing test to make the fix pass. If one contradicts the fix, stop and say what it pins and why the fix disagrees: that is an intent question.
 
