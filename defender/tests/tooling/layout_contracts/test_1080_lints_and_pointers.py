@@ -646,7 +646,14 @@ def test_staying_commands_import_modules_that_have_moved(tmp_path):
     assert r.returncode == 0, f"box_image.py tag under the bare interpreter: {r.stderr!r}"
     assert r.stdout.decode().strip() == _image.image_tag(S.DEFENDER), (
         f"box_image.py tag printed {r.stdout!r}, not this tree's image tag")
-    r = S.run([sys.executable, "-m", "defender.cli.tacit_cli", "check"], cwd=tmp_path,
+    # #1108 P4 (O1, O-U5): the registry is tenant knowledge and the product tree ships none, so
+    # the staying command is run over the committed fixture tenant's agent half (`--defender-dir`
+    # names the tree whose `skills/tacit-knowledge/registry.yaml` it reads).
+    fixture_agent = S.DEFENDER.parent / "knowledge" / "tenant-fixture" / "agent"
+    assert (fixture_agent / "skills" / "tacit-knowledge" / "registry.yaml").is_file(), (
+        "the fixture tenant carries no tacit-knowledge registry to check")
+    r = S.run([sys.executable, "-m", "defender.cli.tacit_cli", "check",
+               "--defender-dir", str(fixture_agent)], cwd=tmp_path,
               env=S.child_env(PATH=f"{venv_bin}:/usr/bin:/bin"))
     assert r.returncode == 0, f"tacit_cli check: {r.stdout!r} {r.stderr!r}"
 
