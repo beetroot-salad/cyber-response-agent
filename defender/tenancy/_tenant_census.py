@@ -9,7 +9,6 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
-from defender import _git
 from defender.knowledge._corpus import QueryTemplate, is_established
 from defender._paths import adapters_under
 from defender.learning.leads.declared_systems import declared_systems_over, read_adapters
@@ -31,10 +30,9 @@ from defender.tenancy._tenants import AGENT_HALF
 
 
 class CensusUnavailable(Exception):
-    """The census could not be taken. Its message names the side that failed and what to fix:
-    this machine's git (absent from PATH, or not runnable), or the running checkout (its
-    adapters unreadable, one the cold verb read saw nothing in, or its committed system markers
-    unresolvable). A census that silently lacked a system would print "clean" over a system
+    """The census could not be taken. Its message names what failed and what to fix: the
+    running checkout's adapters are unreadable, or one of them is an adapter the cold verb read
+    saw nothing in. A census that silently lacked a system would print "clean" over a system
     nobody decided."""
 
 
@@ -46,26 +44,19 @@ class Census:
     walked: dict[str, frozenset[str]]
 
 
-def take_census(defender_dir: Path, repo_root: Path) -> Census:
-    """The census of the code tree at `defender_dir` (its adapters, read cold) and `repo_root`
-    (its committed system markers), or `CensusUnavailable`. One roster read serves both the
-    system set and the verb walk, so a tree changing between two reads cannot score one
-    read's systems against the other's verbs."""
+def take_census(defender_dir: Path) -> Census:
+    """The census of the code tree at `defender_dir` (its adapters, read cold), or
+    `CensusUnavailable`. The system set is the adapters alone: the committed system markers it
+    once also read were the product tree's system skills, which #1108 P4 moved into the tenant,
+    so taking it starts no git. One roster read serves both the system set and the verb walk, so
+    a tree changing between two reads cannot score one read's systems against the other's
+    verbs."""
     adapters = adapters_under(defender_dir)
     try:
         roster = read_adapters(adapters)
     except LeadAuthorError as e:
         raise CensusUnavailable(f"the running checkout's adapters cannot be read: {e}") from e
-    try:
-        systems = declared_systems_over(roster)
-    except LeadAuthorError as e:
-        raise CensusUnavailable(
-            f"the running checkout {repo_root} cannot resolve its declared systems: {e}") from e
-    except OSError as e:
-        # The marker half is a committed-tree read through git, and git did not start.
-        raise CensusUnavailable(
-            f"{_git.unstarted(e)} on this machine, so the running checkout's committed system markers cannot "
-            f"be read ({e})") from e
+    systems = declared_systems_over(roster)
     walked = {s: roster.declared_verbs(s) for s in sorted(systems)}
     blind = _unreadable_adapters(roster, walked)
     if blind:

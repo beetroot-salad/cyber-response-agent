@@ -361,7 +361,7 @@ def _findings(knowledge: Path) -> list[str]:
     table = dispositions_path(settings)
     census: _tenant_census.Census | None = None
     try:
-        census = _tenant_census.take_census(_DEFENDER_DIR, _REPO_ROOT)
+        census = _tenant_census.take_census(_DEFENDER_DIR)
     except _tenant_census.CensusUnavailable as blind:
         findings.append(
             f"{table} was not checked against the running checkout's adapters (for verbs nobody "

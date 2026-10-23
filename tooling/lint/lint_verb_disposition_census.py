@@ -66,7 +66,7 @@ def main(argv: list[str]) -> int:
 
     # Exit 2, not 1, when the census was never taken (unreadable source or table).
     try:
-        census = take_census(root / "defender", root)
+        census = take_census(root / "defender")
     except CensusUnavailable as blind:
         print(f"lint_verb_disposition_census: {blind}", file=sys.stderr)
         return 2
