@@ -9,6 +9,7 @@ from pathlib import Path
 from defender.cli import tacit_cli
 from defender.integrations import tacit_knowledge_adapter as tk
 
+from defender.tests.support.shared import _pre_p4_shipped
 from defender.tests.support.shared.contracts import _tacit983 as scene
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
@@ -16,7 +17,11 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-SHIPPED_REGISTRY = REPO_ROOT / "defender" / "skills" / "tacit-knowledge" / "registry.yaml"
+#: #1108 P4 (O1, O-U5): the registry is tenant knowledge and the product tree ships none. The
+#: registry this repo shipped before P4 (its authoring header and worked example) is kept byte
+#: for byte as a test fixture; the committed fixture tenant carries the tenant-side one.
+SHIPPED_REGISTRY = _pre_p4_shipped.TACIT_REGISTRY
+FIXTURE_AGENT = REPO_ROOT / "knowledge" / "tenant-fixture" / "agent"
 CONNECT_ROUTE = REPO_ROOT / "defender" / "skills" / "connect" / "tacit.md"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
@@ -161,8 +166,12 @@ def test_show_answers_what_is_in_force_rather_than_what_parses(tmp_path) -> None
 
 
 def test_the_shipped_registry_passes_its_own_gate() -> None:
-    rc, out = _run("check")
-    assert rc == 0, f"the shipped registry fails its own CI gate: {out}"
+    """Each committed registry — the fixture tenant's, and the pre-P4 shipped copy — passes
+    the gate, run on the tree that holds it (`--defender-dir` names that agent half)."""
+    for agent in (FIXTURE_AGENT, _pre_p4_shipped.SHIPPED_AGENT):
+        assert tk.registry_path(agent).is_file(), f"no registry under {agent}"
+        rc, out = _run("check", "--defender-dir", str(agent))
+        assert rc == 0, f"the shipped registry fails its own CI gate: {out}"
 
 
 def test_the_files_worked_example_actually_loads(tmp_path) -> None:
