@@ -6,10 +6,11 @@ commit".
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import functools
 import posixpath
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -17,20 +18,17 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.knowledge import _corpus
-from defender import _git
 from defender.knowledge import _scaffold_rules
 from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
 from defender.learning.core.lane_trees import KIND_ABSENT, TreeFor, kind_at, read_at, view_at
 from defender.learning.leads import lead_neighbors
-from defender._claim_git import ClaimGit
+from defender.learning.author.version_control import ChangeSet
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
-    CATALOG_DIR,
-    CATALOG_REL,
+    CATALOG_PREFIX,
     LEARNING_DIR,
     REPO_ROOT,
-    SKILLS_DIR,
-    SKILLS_REL,
+    SKILLS_PREFIX,
     _draft_twin,
     _is_catalog_path,
     _is_catalog_template,
@@ -62,14 +60,15 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
 from defender.learning.leads._lead_spine import (
     _loop_commit_body,
     _verify_corpus_scope,
+    committed_text,
 )
 
 
 def _membership_segment(path: str) -> str:
     """The segment the rule keys membership on: catalog paths key on the segment after
     `queries/`, hopping over `_draft`; system-skill and system-draft paths key on the
-    segment after `defender/skills/`."""
-    rest = path[len(CATALOG_REL):] if _is_catalog_path(path) else path[len(SKILLS_REL):]
+    segment after `agent/skills/`."""
+    rest = path[len(CATALOG_PREFIX):] if _is_catalog_path(path) else path[len(SKILLS_PREFIX):]
     return rest.split("/", 1)[0]
 
 
@@ -113,7 +112,7 @@ def _refuse(path: str, findings: list[_scaffold_rules.Finding]) -> None:
 
 
 def _check_promoted_template(
-    repo_root: Path, resolver: _scaffold_rules.VerbResolver, path: str, *, tree_for: TreeFor,
+    repo_root: Path, resolver: _scaffold_rules.VerbResolver | _ResolverOf, path: str, *, tree_for: TreeFor,
 ) -> None:
     """The content half of the promotion gate: `connect`'s invariants (e.g. every
     `${placeholder}` is a param its verb declares), which `validate_scaffold` doesn't reach
@@ -148,7 +147,7 @@ def _still_there(repo_root: Path, tree_for: TreeFor, path: str) -> bool:
 
 
 def _skills_content_rule(
-    repo_root: Path, resolver: _scaffold_rules.VerbResolver, xy: str, path: str,
+    repo_root: Path, resolver: _scaffold_rules.VerbResolver | _ResolverOf, xy: str, path: str,
     *, tree_for: TreeFor,
 ) -> None:
     """The content half of the gate: is what the agent wrote well-formed? Runs only on paths
@@ -225,7 +224,7 @@ def _skills_path_rule(
 
 def _skills_rule(
     repo_root: Path,
-    resolver: _scaffold_rules.VerbResolver,
+    resolver: _scaffold_rules.VerbResolver | _ResolverOf,
     xy: str,
     path: str,
     *,
@@ -237,12 +236,16 @@ def _skills_rule(
     _skills_content_rule(repo_root, resolver, xy, path, tree_for=tree_for)
 
 
-def _template_at_head(repo_root: Path, path: str) -> _corpus.QueryTemplate | None:
-    """The template `path` was at HEAD, or `None` if HEAD did not carry it or it did not parse.
+def _template_at_head(
+    repo_root: Path, path: str, *, base: Mapping[str, bytes] | None = None,
+) -> _corpus.QueryTemplate | None:
+    """The template `path` was at the batch's base (`base`, `Batch.base`'s blobs), or `None`
+    if the base did not carry it or it did not parse. With no base given, a `repo_root` that is
+    itself a git checkout answers from its HEAD; any other root has no pre-image.
 
     An unparseable pre-image fails open: no invariant held before this batch either, so
     refusing would punish the author for the tree they were handed."""
-    text = _git.git_show_head(repo_root, path)
+    text = committed_text(repo_root, path, base=base)
     if text is None:
         return None
     template, _reason = _corpus.parse_query_template(text, repo_root / path)
@@ -279,7 +282,7 @@ def _minted_identities(
 def _catalog_in_tree(repo_root: Path, tree_for: TreeFor) -> tuple[Bound | None, Path]:
     """The working copy's catalog: the view of it under the lane's held mount (`None` outside
     the lane's mounts, the box's read-only area, D3) and the Path it is spelled as."""
-    where = repo_root / CATALOG_REL
+    where = repo_root / CATALOG_PREFIX
     hit = tree_for(where)
     if hit is None:
         return None, where
@@ -349,11 +352,13 @@ def _departed_drafts(
     records: list[tuple[str, str]],
     *,
     tree_for: TreeFor,
+    base: Mapping[str, bytes] | None = None,
 ) -> list[tuple[str, tuple[str, ...]]]:
     """`(path, identities)` for every draft no longer in the tree.
 
-    A committed draft departs as a `D` record, with identities from its HEAD pre-image. A draft
-    this tick minted is untracked, so its identities come from `minted` instead.
+    A committed draft departs as a `D` record, with identities from its pre-image at the
+    batch's `base`. A draft this tick minted is in no base, so its identities come from
+    `minted` instead.
     """
     out: list[tuple[str, tuple[str, ...]]] = []
     for xy, path in records:
@@ -363,7 +368,7 @@ def _departed_drafts(
             continue
         if _is_draft_readme(path) or _is_schema_md(path):
             continue
-        draft = _template_at_head(repo_root, path)
+        draft = _template_at_head(repo_root, path, base=base)
         if draft is not None and draft.covers:
             out.append((path, draft.covers))
     # `draft_path` is the absolute `Path` the mint returned, not the repo-relative `str` git
@@ -387,6 +392,7 @@ def _covers_rule(
     records: list[tuple[str, str]],
     *,
     tree_for: TreeFor,
+    base: Mapping[str, bytes] | None = None,
 ) -> None:
     """The two whole-batch invariants on `covers:` — the identities a template accounts for."""
     # `_is_catalog_template` already excludes drafts.
@@ -399,12 +405,12 @@ def _covers_rule(
         if after is None:
             # Already refused by `_check_promoted_template` on the per-path pass.
             continue
-        before = _template_at_head(repo_root, path)
+        before = _template_at_head(repo_root, path, base=base)
         _refuse_lost_provenance(path, before, after)
         taken_over.update(set(after.covers) - set(before.covers if before is not None else ()))
 
     # `_answered_after_batch` parses the whole catalog, so only pay for it when a draft left.
-    if departed := _departed_drafts(repo_root, minted, records, tree_for=tree_for):
+    if departed := _departed_drafts(repo_root, minted, records, tree_for=tree_for, base=base):
         covered = _answered_after_batch(repo_root, tree_for=tree_for)
         for path, identities in departed:
             if orphaned := sorted(set(identities) - covered):
@@ -458,31 +464,69 @@ def _refuse_lost_provenance(
         )
 
 
-def _verify_skills_state(
-    repo_root: Path, baseline_stray: list[str], *, systems: frozenset[str],
-    tree_for: TreeFor, minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
-    git: ClaimGit,
-) -> list[str]:
-    # One resolver for the batch, built on the tree being committed rather than the process's
-    # own checkout: the drain runs this against a `lead-author/<id>` worktree, and
-    # `_load_adapter_module` caches by resolved absolute path.
-    #
-    # The resolver fails at construction over an unreadable adapters directory; re-raised as
-    # `LeadAuthorError`, the class every other refusal here dead-letters under.
+@contextlib.contextmanager
+def _no_bytecode() -> Iterator[None]:
+    """Import without writing bytecode: the gate reads the product checkout's adapters and
+    never writes into that tree (#1108 P4 O7: a tenant write touches the tenant's tree only)."""
+    before = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
-        resolver = _scaffold_rules.VerbResolver(repo_root / "defender")
-    except _scaffold_rules.ScaffoldRuleError as e:
-        raise LeadAuthorError(
-            f"the tree's systems could not be resolved ({e}); refusing to commit"
-        ) from e
+        yield
+    finally:
+        sys.dont_write_bytecode = before
+
+
+class _ResolverOf:
+    """The batch's one `VerbResolver` over the product adapters under `defender_dir`, its
+    adapters imported without bytecode. Built eagerly (`eager=True`: an unreadable adapters
+    directory then refuses here) or at its first use, so a claim whose every path the path half
+    refuses never reads the adapters; a failed lazy build is the `ScaffoldRuleError` each verb
+    lookup already turns into the content rule's refusal."""
+
+    def __init__(self, defender_dir: Path, *, eager: bool = False) -> None:
+        self._defender_dir = defender_dir
+        self._resolver: _scaffold_rules.VerbResolver | None = None
+        if eager:
+            self._resolver = _scaffold_rules.VerbResolver(defender_dir)
+
+    def verbs(self, system: str):  # noqa: ANN201 — `VerbResolver.verbs`' own return
+        with _no_bytecode():
+            if self._resolver is None:
+                self._resolver = _scaffold_rules.VerbResolver(self._defender_dir)
+            return self._resolver.verbs(system)
+
+
+def _verify_skills_state(  # noqa: PLR0913 — the claim, its base, the systems, and the two trees it reads
+    root: Path, *, change_set: ChangeSet, systems: frozenset[str],
+    tree_for: TreeFor, minted: Mapping[Path, tuple[str, ...]] = _NO_MINTED,
+    base: Mapping[str, bytes] | None = None, defender_dir: Path | None = None,
+) -> list[str]:
+    """The lane's gate over one claim (`change_set`, the batch's draft against its `base`),
+    its paths `agent/skills/...` under the draft's `root` (#1108 P4 O7, OD6). Returns the
+    admitted paths, in path order.
+
+    One resolver for the batch, over the PRODUCT adapters at `defender_dir` (adapters stay in
+    the product repo, #1172), built before the gate when given — an unreadable adapters
+    directory refuses the claim as a `LeadAuthorError`, the class every other refusal here
+    dead-letters under. With none given (a gate driven on its own), the resolver is
+    `root / "defender"`'s, built at the first template that needs one."""
+    if defender_dir is None:
+        resolver = _ResolverOf(root / "defender")
+    else:
+        try:
+            resolver = _ResolverOf(defender_dir, eager=True)
+        except _scaffold_rules.ScaffoldRuleError as e:
+            raise LeadAuthorError(
+                f"the tree's systems could not be resolved ({e}); refusing to commit"
+            ) from e
     return _verify_corpus_scope(
-        repo_root, baseline_stray, actor="agent",
+        root, change_set, actor="agent",
         rule=functools.partial(
-            _skills_rule, repo_root, resolver, systems=systems, tree_for=tree_for,
+            _skills_rule, root, resolver, systems=systems, tree_for=tree_for,
         ),
         tree_for=tree_for,
-        batch_rule=functools.partial(_covers_rule, repo_root, minted, tree_for=tree_for),
-        git=git,
+        base=base,
+        batch_rule=functools.partial(_covers_rule, root, minted, tree_for=tree_for, base=base),
     )
 
 

@@ -23,12 +23,10 @@ from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
-    CATALOG_DIR,
-    CATALOG_REL,
+    CATALOG_PREFIX,
     LEARNING_DIR,
     REPO_ROOT,
-    SKILLS_DIR,
-    SKILLS_REL,
+    SKILLS_PREFIX,
     _draft_twin,
     _is_catalog_path,
     _is_catalog_template,
@@ -264,6 +262,8 @@ def invoke_agent(
     salt: str | None = None,
     box: Any = None,
 ) -> int:
+    """Spawn the lead author over the lane's tree at `repo_root` (a batch draft's root, holding
+    the `agent/` its paths name, #1108 P4 OD6)."""
     pending_drafts = pending_drafts or []
     from defender.runtime.model_view import ModelView
 
@@ -271,8 +271,8 @@ def invoke_agent(
     stage_salt = salt if salt is not None else uuid4().hex
     context = (
         f"run_dir: {view.to_model(run_dir)}\n"
-        f"catalog_dir: {CATALOG_REL}\n"
-        f"skills_dir: {SKILLS_REL}"
+        f"catalog_dir: {CATALOG_PREFIX}\n"
+        f"skills_dir: {SKILLS_PREFIX}"
     )
     user_prompt = stage_user_message(
         stage_salt,

@@ -57,7 +57,7 @@ def take_census(defender_dir: Path, repo_root: Path) -> Census:
     except LeadAuthorError as e:
         raise CensusUnavailable(f"the running checkout's adapters cannot be read: {e}") from e
     try:
-        systems = declared_systems_over(roster, repo_root)
+        systems = declared_systems_over(roster)
     except LeadAuthorError as e:
         raise CensusUnavailable(
             f"the running checkout {repo_root} cannot resolve its declared systems: {e}") from e

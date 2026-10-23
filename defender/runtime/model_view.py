@@ -66,7 +66,13 @@ class ModelView:
     @classmethod
     def for_scope(cls, run_dir: Path, defender_dir: Path, cwd_anchor: Path,
                   tenant_agent: Path | None = None, *, extra_roots: RootPairs = ()) -> ModelView:
-        """Compile bind's run-anchored or checkout-anchored workspace geography."""
+        """Compile bind's run-anchored, checkout-anchored or draft-anchored workspace geography.
+        Anchored on a tenant agent root (a batch draft's `agent/`, #1108 P4), it is the drain
+        box's own geography (`for_draft`)."""
+        if tenant_agent is not None and cwd_anchor == tenant_agent and tenant_agent.name == "agent":
+            return cls(((MODEL_DEFENDER, Path(defender_dir)),
+                        (MODEL_DRAFT, Path(tenant_agent).parent), *extra_roots),
+                       MODEL_DRAFT / "agent")
         if cwd_anchor == defender_dir.parent:
             agent = ((MODEL_AGENT, tenant_agent),) if tenant_agent is not None else ()
             return cls.for_learning(run_dir, defender_dir.parent, extra_roots=(*agent, *extra_roots))

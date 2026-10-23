@@ -6,16 +6,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import CATALOG, SKILLS, KnowledgePaths
 from defender._model import model
-from defender._paths import adapters_under
+from defender._paths import adapters_under, process_defender_dir
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning.leads.declared_systems import adapter_systems_under
-from defender.learning.leads.path_validation import CATALOG_REL, SKILLS_REL
 from defender.learning._pydantic_stage import run_stage as _run_stage_fn
 from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
+from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission.grant import SEG, Grant, PathShapes
@@ -23,11 +22,11 @@ from defender.runtime.tools import AgentDeps
 
 _LEAD_AUTHOR_DENY_REASON = (
     "Blocked: the lead author curates the gather query catalog and the per-SYSTEM skill docs. "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-    "Its write scope is the catalog under defender/skills/gather/queries/{system}/, plus "
-    "defender/skills/{system}/SKILL.md and defender/skills/{system}/_draft/ — where {system} is "
-    "a system this tree declares an adapter for. Every OTHER directory under defender/skills/ "
-    "is an authored surface this lane does not write — including two that are agent system "
-    "prompts. It rm's a draft it promotes or discards "
+    "Its write scope is the catalog under skills/gather/queries/{system}/ of the tenant's agent "
+    "root, plus skills/{system}/SKILL.md and skills/{system}/_draft/ there — where {system} is "
+    "a system the product declares an adapter for. Every OTHER directory under skills/ "
+    "is a surface this lane does not write, and the product's own skills (two of them agent "
+    "system prompts) are never written. It rm's a draft it promotes or discards "
     "— no data-source adapters, no gather_raw reads, no shell beyond the scoped rm."
 )
 
@@ -58,7 +57,7 @@ def _systems_or_raise(defender_dir: Path) -> tuple[str, ...]:
 
 #: The catalog's tail under `<skills>/`, derived so the write and `rm` lanes name the same
 #: directory.
-_CATALOG_TAIL = CATALOG_REL[len(SKILLS_REL):]
+_CATALOG_TAIL = CATALOG[len(SKILLS):].lstrip("/") + "/"
 
 #: Basenames no variable lane segment may mint, because the commit gates refuse them by
 #: discarding the batch: `SCHEMA.md` (`_is_schema_md`) and `execution.md`
@@ -123,11 +122,11 @@ def _rm_skills_grant(skills_dir: Path, systems: tuple[str, ...]) -> Grant:
     a batch discard at the commit gate. `SEG` excludes spaces and newlines, matching the write
     side; `..` can't match since system names are `SEG`-shaped and `_draft` is literal.
     """
-    from defender.runtime.model_view import MODEL_WORKSPACE
+    from defender.runtime.model_view import MODEL_DRAFT
 
-    relative = SKILLS_REL.rstrip("/")
+    # Relative to the agent root (the drain box's workdir), as the box names it, and on the host.
     spellings = "|".join(re.escape(s) for s in (
-        relative, str(MODEL_WORKSPACE / relative), str(skills_dir),
+        SKILLS, str(MODEL_DRAFT / "agent" / SKILLS), str(skills_dir),
     ))
     sys_alt = "|".join(re.escape(s) for s in systems)
     lanes = "|".join((_draft_tail(_CATALOG_TAIL, sys_alt), _draft_tail("", sys_alt)))
@@ -140,20 +139,21 @@ def _rm_skills_grant(skills_dir: Path, systems: tuple[str, ...]) -> Grant:
     )
 
 
+def _lane_skills_dir(roots: ResolvedRoots) -> Path:
+    """The `skills/` the lane writes: the tenant agent root's the scope names (a batch draft's
+    `agent/`, #1108 P4 O7); a binding naming none anchors on its bound tree as an agent root."""
+    agent = roots.tenant_agent if roots.tenant_agent is not None else roots.defender_dir
+    return KnowledgePaths(agent_root=agent).skills_dir
+
+
 def _lead_author_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     return (
-        _rm_skills_grant(
-            KnowledgePaths.of_defender_dir(roots.defender_dir).skills_dir,
-            _systems_or_raise(roots.defender_dir),
-        ),
+        _rm_skills_grant(_lane_skills_dir(roots), _systems_or_raise(roots.defender_dir)),
     )
 
 
 def _lead_author_write_shape(roots: ResolvedRoots) -> tuple[re.Pattern[str], ...]:
-    return _skill_write_lanes(
-        KnowledgePaths.of_defender_dir(roots.defender_dir).skills_dir,
-        _systems_or_raise(roots.defender_dir),
-    )
+    return _skill_write_lanes(_lane_skills_dir(roots), _systems_or_raise(roots.defender_dir))
 
 
 @model(frozen=True)
@@ -186,16 +186,20 @@ def _run_lead_author_pydantic(
     """Both limits vary per spawn here, so the caller owns the whole context."""
     # Required here, though optional on the shared context. A raise, not an assert, since
     # `python -O` strips asserts.
-    repo_root = ctx.repo_root
-    if repo_root is None:
+    agent_root = ctx.repo_root
+    if agent_root is None:
         raise ValueError(
-            "lead-author stage needs ctx.repo_root: it binds the skills tree off the repo"
+            "lead-author stage needs ctx.repo_root: the agent root (a batch draft's agent/) it "
+            "writes"
         )
+    # The product code tree (adapters, product skills) is read; the tenant agent root is
+    # written (#1108 P4 O7). The box's `code` mount is this same tree.
     deps = bind(
         LEAD_AUTHOR_DEF, ctx.learning_run_dir,
         # `ctx.salt` isn't bound: it scopes the prompt frames, while tool returns are framed
         # by `wrap_fresh` with their own salt.
-        defender_dir=repo_root / "defender", box=ctx.box,
+        defender_dir=process_defender_dir(), scope=RunScope(tenant_agent=agent_root),
+        box=ctx.box,
     )
     return run_stage(
         stage="lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
