@@ -4,14 +4,20 @@ forge), never the product repo.
 
 Writers and how each row reaches it:
   - lessons author, questioner author: behavioural, through the real drain
-    (`author_drain`) with the real curator and only its model spawn faked (test_drains.py's
+    (`author_drain`) with the real curator and only its model spawn faked (`_drain_support`'s
     `CuratorTrigger`); the lesson lands under `agent/lessons/` / `agent/lessons-questioner/`.
-  - curators' corpus repair (the post-spawn restore of unapproved files), lead author, draft
-    synthesis, pitfalls: today each commits through the product worktree (`ClaimGit`,
-    `commit_corpus_paths`, `git checkout --` in the batch worktree). Their behavioural rows need
-    the lead lane's run/adapter scaffolding and are left to the implementation check (reported);
-    here they are held by the census below: no production module references the legacy commit
-    and delivery machinery any more, so none of them can commit or push but through P3.
+  - curators' corpus repair (the post-spawn restore of unapproved files): behavioural, through
+    `author_drain`; only the approved lesson is committed and recorded, never the repaired file.
+  - lead author, draft synthesis, pitfalls: behavioural, through the real `lead_author_drain`
+    with the real lead author / pitfalls curation and only their model spawn and the run's
+    extraction faked (`_drain_support.LeadStep` / `PitfallsStep`, handed the tick's batch per
+    OD16); they land under `agent/skills/` on a `lead-author/` branch. Row queue state after the
+    commit, and a retained batch delivered once on the next tick, are asserted here too.
+  - every writer row also asserts its delivery-record rows in `<T>/learning/commit-maker.jsonl`
+    (O7-PATH), and a composed case drives drain -> human merge -> `revert_lesson.main`.
+  - the census below backs all of them: no production module references the legacy commit and
+    delivery machinery (`ClaimGit`, `commit_corpus_paths`, ...) any more, so no writer can commit
+    or push but through P3.
   - revert: test_revert_cli.py. Connect's tenant half: test_connect_propose.py.
   - the evals harness: drives the author against a draft with the drain tests' fake forge, no
     issuer, no network (`evaluations/harness.py`, tested from here, never edited).

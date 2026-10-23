@@ -63,16 +63,17 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
     agent_mounts = [m for m in docker.mounts() if m["target"] == str(MODEL_AGENT)]
     assert len(agent_mounts) <= 1, docker.mounts()
     inside = docker._through_binds(Path(MODEL_AGENT) / B.LESSON_REL)
-    assert inside.resolve().is_relative_to((copy_root / "agent").resolve()), (
+    assert inside.resolve().is_relative_to((copy_root / "stage" / "agent").resolve()), (
         f"the box's {MODEL_AGENT} is not this run's copy of its own tenant: {inside}")
     assert all(m["readonly"] for m in docker.mounts()
                if Path(m["source"]).resolve().is_relative_to(copy_root.resolve())), docker.mounts()
     sources = [Path(m["source"]) for m in docker.mounts()]
-    for forbidden in (copy_root / "settings", B.clone_dir(mine), root / other):
+    for forbidden in (copy_root / "settings", copy_root / "owner", B.clone_dir(mine),
+                      root / other):
         assert not T.exposes(sources, forbidden), (
             f"a box mount exposes {forbidden}: {docker.mounts()}")
     # The control on the same predicate: the copy's agent half is what is exposed.
-    assert T.exposes(sources, copy_root / "agent")
+    assert T.exposes(sources, copy_root / "stage" / "agent")
 
 
 def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path):

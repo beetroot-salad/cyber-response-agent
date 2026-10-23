@@ -372,7 +372,7 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     assert page.is_file(), "control: the run page was saved"
     assert B.leaks(
         secrets, env=out.seen[0].environ, handed=out.publish_calls, report_line=lines,
-        stamp=out.stamp_after, page=page.read_text(encoding="utf-8") if page.is_file() else "",
+        stamp=out.stamp_after, host_record=out.host_after, page=page.read_text(encoding="utf-8") if page.is_file() else "",
         comment=[str(c.body) for c in store.calls],
     ) == [], "O8: login material left the publish child"
     monkeypatch.setenv("S_B_CONTROL_PROBE", secrets[1])
@@ -380,7 +380,7 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     assert out.rc == 0, out.text()
     assert B.MERGED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
     assert B.stamped_commit(out.stamp_after) == {"commit": merged}
-    source = B.knowledge_source(out.stamp_after)
+    source = B.knowledge_source(out)
     assert (source.get("kind"), source.get("commit")) == ("fresh", merged), source
 
 
@@ -393,7 +393,7 @@ def test_o7b_a_run_launched_while_a_drain_holds_the_lock_runs_stale_on_current(
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert B.SEEDED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
-    source = B.knowledge_source(out.stamp_after)
+    source = B.knowledge_source(out)
     assert (source.get("kind"), source.get("stale_kind"), source.get("commit")) == (
         "stale", "transient", tenant.commit), source
 
@@ -547,7 +547,7 @@ def test_o_budget_a_run_whose_publish_ran_out_of_budget_proceeds_stale_on_the_la
     assert out.reached, out.text()
     assert time.monotonic() - started < BUDGET + 2 * SLACK
     assert B.SEEDED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
-    source = B.knowledge_source(out.stamp_after)
+    source = B.knowledge_source(out)
     assert (source.get("kind"), source.get("stale_kind"), source.get("commit")) == (
         "stale", "transient", tenant.commit), source
 
@@ -582,20 +582,96 @@ def test_o8_the_default_child_command_carries_identifiers_only_and_no_issuer_env
         tenant, operator_env):
     """O8/O11 (parent half, DEFAULT launch — no `command=`): the parent starts the real child
     with the tenant id and data root, and neither its argv nor its environment carries an
-    issuer-named variable or any planted secret. (What the harmless stand-in reports back is
-    D3's, pending; not asserted.)"""
-    import contextlib
-
+    issuer-named variable or any planted secret. U11: the harmless stand-in prints no report
+    line, so the parent reports `stale:operator publish child failed: ...` — never fresh."""
     spawn = _RecordingSpawn()
-    launch = B.launcher()  # resolved first: a missing launcher is red, not "no child"
-    with contextlib.suppress(Exception):
-        launch(tenant.tenant_id, data_root=tenant.data_root, budget=5.0, spawn=spawn)
+    launch = B.launcher()
+    line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=5.0, spawn=spawn)
     assert len(spawn.calls) == 1, f"the parent did not start exactly one child: {spawn.calls}"
     argv, env = spawn.calls[0]
     assert tenant.tenant_id in argv, argv
     assert B.leaks(operator_env, argv=argv, env=env) == []
     assert [k for k in env if B.ISSUER_ENV.search(k)] == [], sorted(env)
     assert env.get("S_B_ORDINARY") == "s-b-ordinary-value", "control: the env channel is read"
+    _child_failed(line)
+
+
+# --- U11: a child with no valid report line ---------------------------------------------------
+#
+# ASSUMED (U11 wording): the parent's line is `stale:operator publish child failed: <summary>`.
+# `command=` replaces the child's argv prefix; the parent appends its own arguments (ignored by
+# these `python -c` children: they land in `sys.argv`).
+
+#: Children that end without a valid report line. `fresh-then-exit-1` prints a VALID fresh line
+#: and exits non-zero: the exit decides (never fresh).
+BAD_CHILDREN = {
+    "exit-1": "import sys; sys.exit(1)",
+    "crash": "raise RuntimeError('s-b child crashed')",
+    "empty-stdout": "pass",
+    "junk-stdout": "print('the child had a bad day')",
+    "unknown-prefix": "print('published 0123456789abcdef0123456789abcdef01234567')",
+    "fresh-then-exit-1": "import sys; print('fresh ' + sys.argv[1]); sys.exit(1)",
+}
+
+
+def _bad_child(case: str, t, tmp_path: Path) -> list[str]:
+    import sys
+
+    if case == "missing-executable":
+        return [str(tmp_path / "no-such-dir-s-b" / "publish-child")]
+    return [sys.executable, "-c", BAD_CHILDREN[case], t.commit]
+
+
+def _child_failed(line: object) -> None:
+    assert B.outcome_class(line) == "stale:operator", (
+        f"U11: a child with no valid report line must be stale:operator: {line!r}")
+    assert B.outcome_detail(str(line)).startswith("publish child failed"), line
+
+
+@pytest.mark.parametrize("case", [*BAD_CHILDREN, "missing-executable"])
+def test_u11_a_child_with_no_valid_report_line_is_stale_operator(tenant, tmp_path, case):
+    """U11: crash, non-zero exit, empty or junk stdout, an unknown prefix, a spawn failure — the
+    parent reports `stale:operator ("publish child failed: <summary>")`, never fresh, and
+    `current` is untouched. Control: `test_o_budget_a_child_holding_the_lock_is_allowed_to_
+    finish` (a real child's valid line is passed through)."""
+    line = B.launcher()(tenant.tenant_id, data_root=tenant.data_root, budget=BUDGET,
+                        command=_bad_child(case, tenant, tmp_path))
+    _child_failed(line)
+    _unchanged(tenant)
+
+
+@pytest.mark.parametrize("case", ["exit-1", "missing-executable"])
+def test_u11_a_failed_child_with_a_snapshot_runs_stale_operator_on_it(tenant, tmp_path, case):
+    """U11 through `run.main`: with `current`, the run proceeds on the snapshot, its host record
+    `stale`/`operator` at `current` with the failure as its reason."""
+    import functools
+
+    publish = functools.partial(B.launcher(), budget=BUDGET,
+                                command=_bad_child(case, tenant, tmp_path))
+    out = B.launch(tenant, tmp_path, publish=publish)
+    assert out.reached, out.text()
+    assert out.rc == 0, out.text()
+    assert B.SEEDED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
+    source = B.knowledge_source(out)
+    assert (source.get("kind"), source.get("stale_kind"), source.get("commit")) == (
+        "stale", "operator", tenant.commit), source
+    assert "publish child failed" in str(source.get("reason")), source
+
+
+@pytest.mark.parametrize("case", ["exit-1", "missing-executable"])
+def test_u11_a_failed_child_without_a_snapshot_refuses_before_message_zero(tenant, tmp_path,
+                                                                           case):
+    """U11/O-A: no `current`, the child failed — the run refuses before its lifecycle, by a
+    refusal (not a crash). Control: the snapshot case above runs."""
+    import functools
+
+    (export_dir(tenant.tenant, tenant.commit).parent / "current").unlink()
+    publish = functools.partial(B.launcher(), budget=BUDGET,
+                                command=_bad_child(case, tenant, tmp_path))
+    out = B.launch(tenant, tmp_path, publish=publish)
+    assert not out.reached, "U11: a failed child with no snapshot reached the box"
+    assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
+    assert out.rc not in (0, None) or out.refusal is not None, out.text()
 
 
 def test_r_s7_a_first_ever_publish_through_the_real_child_is_fresh_and_the_run_proceeds(
@@ -611,5 +687,5 @@ def test_r_s7_a_first_ever_publish_through_the_real_child_is_fresh_and_the_run_p
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert current_commit(tenant.tenant) == tenant.commit
-    source = B.knowledge_source(out.stamp_after)
+    source = B.knowledge_source(out)
     assert (source.get("kind"), source.get("commit")) == ("fresh", tenant.commit), source

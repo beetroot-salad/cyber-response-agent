@@ -159,6 +159,13 @@ def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(
         (DEFENDER, Path("/defender"), False, "code"), (draft, Path("/draft"), False, "staged"),
         (draft / "agent/lessons", Path("/draft/agent/lessons"), True, None)}
     assert request.env["DEFENDER_AGENT_DIR"] == "/draft/agent"
+    # Amendment A / U9: `draft` is the draft's `stage/`; the owner record beside it is in no
+    # mount (control: it exists, and the containment check sees the stage itself mounted).
+    owner = draft.parent / "owner"
+    assert draft.name == "stage"
+    assert owner.is_file(), "the draft has no owner record"
+    assert any(draft.is_relative_to(Path(m.source)) for m in request.mounts), "control: containment"
+    assert not any(owner.is_relative_to(Path(m.source)) for m in request.mounts), request.mounts
     host_only = (tenant.knowledge, location_path(tenant.worktrees), location_path(tenant.tenant_root) / "exports", location_path(tenant.tenant_root) / "forge")
     for mount in request.mounts:
         source = Path(mount.source)
@@ -220,7 +227,7 @@ def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tm
     """C3 / R5 / O-D: the tenant drain's start requires a sandbox."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     d, batch = _batch(repo, "no-box")
-    drafts = batch.draft_root.parent
+    drafts = batch.draft_root.parent.parent  # amendment A / U9: <T>/drafts/<id>/stage
     request = replace(batch.box_request(), spec=_PINNED)
     if fault == "code-check-missing":
         from defender.runtime.model_view import ModelView
@@ -242,7 +249,7 @@ def test_a_drain_box_started_and_stopped_leaves_the_drafts_as_they_were(repo, tm
     """C3 / R5: box start and teardown leave nothing under `<T>/drafts/`."""
     from defender.tests.support.sandbox._box1195 import FakeDaemon
     d, batch = _batch(repo, "started")
-    drafts = batch.draft_root.parent
+    drafts = batch.draft_root.parent.parent  # amendment A / U9: <T>/drafts/<id>/stage
     before = _snapshot(drafts)
     daemon = FakeDaemon(tmp_path)
     executor = d.start_box(replace(batch.box_request(), spec=_PINNED), docker=daemon)
@@ -805,7 +812,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     reads = []
     agent_before = files_under(root / "agent")
     status_before = git(repo[0].knowledge, "status", "--porcelain")
-    drafts_before = _snapshot(root.parent)
+    drafts_before = _snapshot(root.parent.parent)  # amendment A / U9: root is <T>/drafts/<id>/stage
 
     def boundary(argv, **kwargs):
         argv = [str(a) for a in argv]
@@ -818,7 +825,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
         with pytest.raises(box.BoxFault):
             d.start_box(request, docker=boundary)
         assert daemon.names() == []
-        assert _snapshot(root.parent) == drafts_before, "a refused start left something under drafts/"
+        assert _snapshot(root.parent.parent) == drafts_before, "a refused start left something under drafts/"
     else:
         executor = d.start_box(request, docker=boundary)
         assert executor.sandboxed

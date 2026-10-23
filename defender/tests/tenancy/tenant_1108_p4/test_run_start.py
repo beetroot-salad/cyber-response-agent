@@ -57,11 +57,17 @@ def test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_an
     assert out.rc == 0, out.text()
     assert len(out.publish_calls) == 1, f"the launch published {len(out.publish_calls)} times"
     seen = out.seen[0]
-    copy_root = B.run_copies(tenant) / seen.run_dir.name
+    copy_root = B.copy_root(tenant, seen.run_dir)
     assert _under(seen.agent, copy_root), (
         f"O-B: the run's agent half {seen.agent} is not its run copy under {copy_root}")
     assert _under(seen.settings, copy_root), (
         f"O-B: the run's settings half {seen.settings} is not its run copy under {copy_root}")
+    # U9: `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`.
+    assert Path(seen.agent).resolve() == (copy_root / "stage" / "agent").resolve(), (
+        f"U9: the run's agent half is not the copy's `stage/agent/`: {seen.agent}")
+    assert Path(seen.settings).resolve() == (copy_root / "settings").resolve(), (
+        f"U9: the run's settings half is not the copy's `settings/` (beside `stage/`): "
+        f"{seen.settings}")
     assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent"), (
         "O2/O-B: the run copy's agent/ is not byte-equal to the export `current` names")
     assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
@@ -94,7 +100,7 @@ def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_pa
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
         f"O-B: the run's knowledge stamp is not the export it copied ({tenant.commit}); the "
         f"clone's HEAD is {head}: {B.stamped_commit(out.stamp_after)!r}")
-    assert B.knowledge_source(out.stamp_after)["commit"] == tenant.commit
+    assert B.knowledge_source(out)["commit"] == tenant.commit
 
 
 # --- O-STALE: the run record and continuing on a snapshot -------------------------------------
@@ -102,20 +108,31 @@ def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_pa
 @pytest.mark.parametrize("report", ["fresh", "stale:transient", "stale:operator"])
 def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_knowledge_source(
         tenant, tmp_path, report):
-    """O-STALE: fresh and both stale kinds each run to the end on `current`; the run record's
-    `knowledge_source` names the kind, the commit actually copied, and (stale) a reason and
-    the stale kind (orchestrator decision: `stale_kind` mirrors the API, null unless stale)."""
-    reason = "issuer unreachable: s-b reason text"
+    """O-STALE/U12/OD17: fresh and both stale kinds each run to the end on `current`; the
+    HOST-HELD record beside the run dir names the kind, the commit actually copied, and (stale)
+    the stale kind and the child's reason (R-S8). The box-readable stamp may mirror kind, commit
+    and stale kind, never the reason: no file the box can read (the run dir, the copy's
+    `stage/`) holds the raw reason text while the run is live."""
+    reason = "issuer unreachable: s-b reason text 4c1e"
     line = (B.fresh(tenant.commit) if report == "fresh"
             else B.stale(report.split(":")[1], reason))
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: line)
+
+    def box_readable_hits(seen: B.Seen) -> dict[str, list[str]]:
+        return {"run dir": B.files_holding(seen.run_dir, reason),
+                "stage": B.files_holding(B.copy_stage(tenant, seen.run_dir), reason)}
+
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: line, during=box_readable_hits)
 
     assert out.reached, out.text()
     assert out.rc == 0, (
         f"O-STALE: a {report} launch with a snapshot must run (both stale kinds keep the run "
         f"going): {out.text()}")
-    source = B.knowledge_source(out.stamp_after)
+    source = B.knowledge_source(out)
     assert source.get("commit") == tenant.commit, source
+    assert out.seen[0].during == {"run dir": [], "stage": []}, (
+        f"OD17/U12: the raw publish reason is in a box-readable file: {out.seen[0].during}")
+    assert B.files_holding(out.run_dir, reason) == [], (
+        "OD17/U12: the raw publish reason was written into the run dir after the lifecycle")
     if report == "fresh":
         assert source.get("kind") == "fresh", source
         assert source.get("stale_kind") is None, source
@@ -124,24 +141,45 @@ def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_know
         assert source.get("stale_kind") == report.split(":")[1], source
         assert isinstance(source.get("reason"), str), source
         assert reason in source["reason"], (
-            f"R-S8: the stale record does not carry the child's reason ({reason!r}): {source}")
-        assert source["reason"].strip(), (
-            f"O-STALE: a stale record must say why: {source}")
+            f"R-S8: the host record does not carry the child's reason ({reason!r}): {source}")
+        # Positive control for the box-readable scan: the same text IS in the host file.
+        assert reason in B.host_record_path(out.run_dir).read_text(encoding="utf-8")
 
 
-def test_o_stale_the_commit_recorded_is_the_export_copied_even_when_the_child_reports_another(
+def _is_ancestor(t: Any, older: str, newer: str) -> bool:
+    """The test's own oracle: git on the tenant's clone (the run process has none)."""
+    import subprocess
+
+    return subprocess.run(  # noqa: S603 — the test's oracle
+        ["git", "-C", str(B.clone_dir(t)), "merge-base", "--is-ancestor", older, newer],
+        check=False, capture_output=True).returncode == 0
+
+
+def test_a_mismatch_a_copied_commit_descending_from_the_reported_one_is_fresh_at_the_copy(
         tenant, tmp_path):
-    """O-STALE: `commit` is the export actually copied. The child reports `fresh <M>` (M merged
-    on origin) while `current` still names the seeded commit; the run copies and records the
-    seeded commit. (Where the mismatch itself is recorded is a reported gap: not asserted.)"""
+    """A-MISMATCH: the child reports `fresh <S>` (the seeded commit) but `current` has since
+    fast-forwarded to M (merged and published by another launch), which descends from S. The run
+    copies M, the host record says fresh at M — the commit actually copied — and records the
+    reported S as well. (Field name for the reported commit not frozen: any other field.) Every
+    writer of `current` fast-forwards it under the tenant lock, so the copy is the reported
+    commit or a descendant by construction; the run (no git, P-3) records fresh at the copy.
+    The oracle's `_is_ancestor` only checks the premise."""
     merged = tenant.merge(B.MERGE_FILES)
-    assert merged != tenant.commit
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(merged))
+    tenant.publish()
+    assert current_commit(tenant.tenant) == merged
+    assert _is_ancestor(tenant, tenant.commit, merged), "premise: M descends from S"
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
 
     assert out.reached, out.text()
-    assert B.SEEDED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
-    assert B.knowledge_source(out.stamp_after)["commit"] == tenant.commit
-    assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}
+    assert out.rc == 0, out.text()
+    assert B.MERGED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
+    assert B.stamped_commit(out.stamp_after) == {"commit": merged}
+    source = B.knowledge_source(out)
+    assert (source.get("kind"), source.get("commit")) == ("fresh", merged), source
+    others = B.flat_values({k: v for k, v in source.items() if k != "commit"})
+    assert any(tenant.commit in str(v) for v in others), (
+        f"A-MISMATCH: the record does not keep the child's reported commit {tenant.commit}: "
+        f"{source}")
 
 
 def test_o_stale_knowledge_source_is_informational_in_branch_preflights_stamp_table():
@@ -213,7 +251,7 @@ def test_o_pin_a_pinned_launch_reads_that_export_skips_publish_and_records_pinne
     assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
         "O-B: a pinned run's stamp is not the pinned export (it read the clone's HEAD?)")
-    source = B.knowledge_source(out.stamp_after)
+    source = B.knowledge_source(out)
     assert source.get("kind") == "pinned", source
     assert source.get("commit") == tenant.commit, source
     assert source.get("stale_kind") is None, source

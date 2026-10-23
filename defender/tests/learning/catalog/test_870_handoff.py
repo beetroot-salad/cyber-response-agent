@@ -119,7 +119,7 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
 
     def agent(handoffs, **_kw):
         assert [h.get("surface") for h in handoffs] == ["reducer"]
-        write(Path(lane.batch.draft_root) / REDUCER_REL, text)
+        write(lane.root / REDUCER_REL, text)
         return 0
 
     try:

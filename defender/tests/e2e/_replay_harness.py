@@ -472,9 +472,10 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
 
 
 def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
-    """The tenant a replay that names none runs as, and the agent root the run reads: the
-    agent half of that tenant's PUBLISHED export (#1108 P4, P-1/O11: every reader of tenant
-    knowledge reads an export, made by the one real helper), never the clone's working tree.
+    """The tenant a replay that names none runs as, and the PUBLISHED export the run reads
+    (`<T>/exports/<commit>/`: its `agent/` and its `settings/`, one commit, O-B; #1108 P4,
+    P-1/O11: every reader of tenant knowledge reads an export, made by the one real helper),
+    never the clone's working tree.
 
     Without `agent`: the committed fixture tenant, set up under the current data root (#1120
     H2) — the test's own, or, for a module-scoped drive that runs before it, the session's
@@ -499,7 +500,7 @@ def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
             place_fixture(root, tenant_id, agent=Path(agent))
     published = publish_once(root.with_name(f"{root.name}-p4-forge"), root=root,
                              tenant_id=tenant_id)
-    return published.tenant, export_dir(published.tenant, published.commit) / "agent"
+    return published.tenant, export_dir(published.tenant, published.commit)
 
 
 def _no_docker_daemon(argv: list[str], **_kw: Any) -> Any:
@@ -623,11 +624,12 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     # scenario that will dispatch the lead (an injected registry, no resume), exactly the runs
     # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
     # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
-    agent_root = None
+    roots: dict[str, Path] = {}
     if tenant is None:
-        tenant, agent_root = _default_tenant(agent)
+        tenant, export = _default_tenant(agent)
+        roots = {"agent_root": export / "agent", "settings_root": export / "settings"}
     run_tenant = _tenants1106.run_tenant(
-        tenant, defender_dir=tree, agent_root=agent_root,
+        tenant, defender_dir=tree, **roots,
         dispatches_lead_zero=resume is None and verbs is not None,
     )
     seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)

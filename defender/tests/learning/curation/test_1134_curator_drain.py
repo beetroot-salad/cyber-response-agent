@@ -88,6 +88,24 @@ def _stuck_classes(sc) -> list[str]:
     return [r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)]
 
 
+#: The lane's counted-attempt classes (`drain.RETIRE_SET`'s `AuthorError`) plus P3's claim
+#: refusal: a stuck record of either is the attempt's bookkeeping, never an unhandled crash.
+_COUNTED = {"AuthorError", "DeliveryRefused"}
+
+
+def _refused_claim_routed(sc, got, fid: str) -> None:
+    """U10 (human, 2026-10-23): a refused claim returns (no unhandled crash), lands nothing,
+    leaves the draft back at the batch base, and holds its row queued with ONE attempt counted —
+    not consumed, not graveyarded, not stuck as a crash — for a retry until #952's ceiling."""
+    assert got[0] == "rc", got
+    assert sc.head_files() == []
+    assert sc.draft_drift() == []
+    assert sc.pending_by_id()[fid].get("attempts") == 1
+    assert fid not in sc.consumed_by_id()
+    assert all(r.get(sc.channel.id_key) != fid for r in sc.graveyard())
+    assert set(_stuck_classes(sc)) <= _COUNTED
+
+
 def _plain_single(at: Path, text: str) -> bool:
     """`at` is a plain, single-linked regular file holding exactly `text` (the base's bytes)."""
     st = os.lstat(at)
@@ -166,8 +184,28 @@ def test_a_non_md_alias_in_the_lane_never_lands_and_its_target_is_never_written(
     assert f"{LESSONS}/notes.txt" not in sc.head_files()
     assert target.read_text() == f"host notes {OUT_MARK}\n"
     if kind == "symlink":
-        assert got != ("rc", 0), got
-        assert sc.head_files() == []
+        _refused_claim_routed(sc, got, "f1")
+        assert not os.path.lexists(sc.corpus / "notes.txt")
+
+
+def test_control_an_unrelated_fault_beside_a_link_is_not_routed_as_a_refused_claim(tmp_path):
+    """Control for U10: the same symlink plant, but the curator raises an unrelated fault (outside
+    `RETIRE_SET`). The lane's existing rule (#773 O5.3 / #952) holds, not U10's: the fault
+    propagates unchanged and sticks, and the row is NOT charged an attempt (P4 O7)."""
+    target = _outside(tmp_path, "secret.txt", f"host notes {OUT_MARK}\n")
+    fault = RuntimeError("unrelated, after the plant")
+
+    def plant(rows, batch_id, cfg):
+        plant_link(cfg.corpus_dir / "notes.txt", target)
+        raise fault
+
+    sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}, also=plant))
+
+    assert _run(sc) == ("raised", fault)
+    assert _stuck_classes(sc) == ["RuntimeError"]
+    assert sc.pending_by_id()["f1"].get("attempts") is None
+    assert sc.head_files() == []
+    assert target.read_text() == f"host notes {OUT_MARK}\n"
 
 
 def test_control_a_non_md_plain_stray_never_lands_and_the_tick_commits(tmp_path):

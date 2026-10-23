@@ -56,7 +56,7 @@ def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkey
         "skills/elastic/_draft/lift-me.md":
             "---\nid: elastic.lift-me\nstatus: draft\n---\n\n## Goal\n\nx\n",
     })
-    root = Path(lane.batch.draft_root)
+    root = lane.root
     skills = lane.skills_dir
     catalog = skills / "gather" / "queries"
     tree_for = DrainTrees.open((skills,)).tree_for

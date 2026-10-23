@@ -133,6 +133,16 @@ def run_copies(t: Any) -> Path:
     return tenant_root(t) / "run-knowledge"
 
 
+def copy_root(t: Any, run_dir: Path) -> Path:
+    """U9: the run copy `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`."""
+    return run_copies(t) / Path(run_dir).name
+
+
+def copy_stage(t: Any, run_dir: Path) -> Path:
+    """U9: the copy's `stage/` — the only part of it the box mounts (agent/ + the token)."""
+    return copy_root(t, run_dir) / "stage"
+
+
 def clone_dir(t: Any) -> Path:
     return Path(t.clone)
 
@@ -259,6 +269,7 @@ class Launch:
     publish_calls: list[tuple[tuple, dict]] = field(default_factory=list)
     seen: list[Seen] = field(default_factory=list)
     stamp_after: dict[str, Any] | None = None
+    host_after: dict[str, Any] | None = None
     run_dir: Path | None = None
 
     @property
@@ -331,15 +342,68 @@ def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None,
     if out.seen:
         out.run_dir = out.seen[0].run_dir
         out.stamp_after = read_stamp(out.run_dir)
+        out.host_after = read_host_record(out.run_dir)
     return out
 
 
-def knowledge_source(stamp: dict[str, Any] | None) -> dict[str, Any]:
-    assert stamp is not None, "the run has no provenance stamp"
-    source = stamp.get("knowledge_source")
+# --- the run's knowledge source (U12/OD17) ----------------------------------------------------
+#
+# ASSUMED SEAM (shared with slice S-C, `test_stale_visibility.host_record_path`): the HOST-HELD
+# record is `RunPaths(run_dir).knowledge_source()` -> `<runs base>/<run_id>.knowledge-source.json`
+# beside the run dir (like the ticket receipt), JSON `{kind, commit, stale_kind?, reason?}`. Run
+# start (this slice) writes it; page, API and ticket read it. The box-readable provenance stamp
+# MAY carry `knowledge_source` {kind, commit, stale_kind} (informational), never the reason.
+
+#: The keys the box-readable stamp's `knowledge_source` may carry (OD17).
+STAMP_SOURCE_KEYS = frozenset({"kind", "commit", "stale_kind"})
+
+
+def host_record_path(run_dir: Path) -> Path:
+    from defender.run_repository import RunPaths
+
+    return Path(RunPaths(run_dir).knowledge_source())
+
+
+def read_host_record(run_dir: Path) -> dict[str, Any] | None:
+    path = host_record_path(run_dir)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def knowledge_source(out: Launch) -> dict[str, Any]:
+    """The run's knowledge source as every reader reads it: the HOST record (U12). Also checks
+    the record lies outside the run dir (the box's rw bind) and that the stamp's informational
+    copy, when present, carries only kind/commit/stale_kind and agrees with it (OD17)."""
+    assert out.run_dir is not None, "the run never started"
+    path = host_record_path(out.run_dir)
+    assert not path.resolve().is_relative_to(out.run_dir.resolve()), (
+        f"U12: the host-held knowledge-source record {path} is inside the box-writable run dir")
+    source = out.host_after
     assert isinstance(source, dict), (
-        f"O-STALE: the run record carries no `knowledge_source`: {sorted(stamp)}")
+        f"O-STALE/U12: run start wrote no host-held knowledge-source record at {path}")
+    view = stamp_source(out.stamp_after)
+    if view is not None:
+        assert set(view) <= STAMP_SOURCE_KEYS, (
+            f"OD17: the box-readable stamp's knowledge_source carries {sorted(view)}")
+        assert view == {k: source.get(k) for k in view}, (
+            f"OD17: the stamp's informational knowledge_source disagrees with the host record: "
+            f"{view} vs {source}")
     return source
+
+
+def stamp_source(stamp: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The stamp's informational `knowledge_source`, or None when it carries none (allowed)."""
+    assert stamp is not None, "the run has no provenance stamp"
+    view = stamp.get("knowledge_source")
+    assert view is None or isinstance(view, dict), view
+    return view
+
+
+def files_holding(root: Path, text: str) -> list[str]:
+    """Every file under `root` whose bytes contain `text`."""
+    needle = text.encode()
+    return sorted(rel for rel, data in tree_bytes(root).items() if needle in data)
 
 
 def stamped_commit(stamp: dict[str, Any] | None) -> Any:

@@ -97,7 +97,8 @@ def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
 
 
 def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
-               dispatches_lead_zero: bool = False, agent_root: Path | None = None) -> Any:
+               dispatches_lead_zero: bool = False, agent_root: Path | None = None,
+               settings_root: Path | None = None) -> Any:
     """The driver's `RunTenant` for `tenant` (an accepted `Tenant`), built from the real
     pieces and nothing else (#1107): run start's readiness function (`resolve_run_tenant`: the
     same grants, the lead-zero dispatch identity checked over the run's agent root's catalog,
@@ -108,19 +109,24 @@ def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
 
     #1108 P4 (O2, O4, flow 3; P-1): the run's knowledge is an agent root — for a run, the agent
     half of an export (or a run copy of one) — and both the lead-zero catalog and the run's
-    tenant record take it. ASSUMED SEAMS (S0, review round 1): `resolve_run_tenant(settings, *,
-    agent_root=..., dispatches_lead_zero=...)` and `RunTenant(..., agent_root=...)` (whose
-    `.agent` is then that root). `agent_root` defaults to the accepted tenant's own `agent/` for
-    a caller that hands its own tenant; the replay harness hands an export's. Red until P4:
+    tenant record take it; and (O-B) the settings the run reads come from the SAME export, as
+    `settings_root`. ASSUMED SEAMS (S0, review round 1): `resolve_run_tenant(settings, *,
+    agent_root=..., dispatches_lead_zero=...)` (its settings argument is `settings_root`),
+    `resolved_settings(tenant, *, settings_root=...)`, and `RunTenant(..., agent_root=...,
+    settings_root=...)` (whose `.agent` / `.settings` are then those roots). Both roots default
+    to the accepted tenant's own `agent/` / `settings/` for a caller that hands its own tenant;
+    the replay harness hands one export's `agent/` and `settings/`. Red until P4:
     there is no pre-P4 fallback (OD13). `defender_dir` is kept only so existing callers keep
     their call shape; the catalog no longer comes from it (O1: the checkout holds none)."""
     del defender_dir
     rt = mod("runtime.run_tenant")
     root = Path(agent_root) if agent_root is not None else Path(tenant.agent)
+    settings = Path(settings_root) if settings_root is not None else Path(tenant.settings)
     ready = rt.resolve_run_tenant(
-        tenant.settings, agent_root=root, dispatches_lead_zero=dispatches_lead_zero)
+        settings, agent_root=root, dispatches_lead_zero=dispatches_lead_zero)
     return rt.RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
-                        agent_root=root, **rt.resolved_settings(tenant))
+                        agent_root=root, settings_root=settings,
+                        **rt.resolved_settings(tenant, settings_root=settings))
 
 
 def fixture_run_tenant(**kw: Any) -> Any:

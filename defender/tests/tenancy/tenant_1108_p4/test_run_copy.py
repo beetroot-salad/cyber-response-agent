@@ -5,16 +5,20 @@ Entry: the REAL `run.main` (real `materialize`), its lifecycle production's own
 `_run_investigation_lifecycle` with `start_box` = production `start_box` over P3/P2's recording
 Docker double (`RecordingDocker`: records the create argv, answers `cat` through the captured
 bind table, so a planted token is read back exactly as a daemon bind would serve it), and a
-stub investigation. Nothing here decides geometry: assertions resolve in-box paths through the
-captured bind table, so whether the copy's `agent/` is bound alone or under a root is the
-implementer's choice.
+stub investigation. Assertions resolve in-box paths through the captured bind table, so how
+`stage/` is bound (one mount or several under it) is the implementer's choice.
 
-Obligations: O-A (the box mounts the run copy's `agent/` + the staged token only — not
-`settings/`, not the clone, not an export; startup reads the token back; P2's in-box
-`.tenant-id` check is retired; a bind to another copy refuses before message 0), O8 (the issuer
-client config path lies under no box mount source), O2 (`current` advanced mid-run changes
-nothing the run reads), O-SWEEP run-copy half (owner record; removed in `finally`; a dead
-owner's copy is swept by publish, a live one's is not).
+Layout (U9): `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`; the box
+mounts only `stage/`. Owner record shape is the drafts' (`_drain_support`, ASSUMED: JSON
+`{"pid", "start"}`, start = `/proc/<pid>/stat` field 22).
+
+Obligations: O-A (the box mounts the run copy's `stage/` = `agent/` + the staged token only —
+not `settings/`, not `owner`, not the clone, not an export; startup reads the token back; P2's
+in-box `.tenant-id` check is retired; a bind to another copy refuses before message 0), O8 (the
+issuer client config path lies under no box mount source), O2 (`current` advanced mid-run
+changes nothing the run reads), O-SWEEP run-copy half (owner = pid + start time; removed in
+`finally`; a dead owner's copy or half-built dot-named temporary is swept by publish, a live
+one's is not; a reused pid counts as dead).
 """
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +39,11 @@ from defender.tests.e2e._box665 import RecordingDocker, _cp
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1108_p2._support import start_with
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    owner_record,
+    process_start,
+    write_owner,
+)
 from defender.tests.tenancy.tenant_1108_p4._support import current_commit, export_dir
 
 pytestmark = pytest.mark.e2e
@@ -75,7 +85,27 @@ def _boxed_lifecycle(docker: RecordingDocker, investigation: _Investigation):
 
 
 def _copy_root(t, out: B.Launch) -> Path:
-    return B.run_copies(t) / out.seen[0].run_dir.name
+    return B.copy_root(t, out.seen[0].run_dir)
+
+
+class _StageSnapshotDocker(RecordingDocker):
+    """`RecordingDocker` that, at `docker run` (create), lists every run copy's root and its
+    `stage/` — what the box is handed, as the daemon would see it. It judges nothing."""
+
+    def __init__(self, copies: Path) -> None:
+        super().__init__()
+        self.copies = copies
+        self.at_create: dict[str, dict[str, list[str]]] = {}
+
+    def __call__(self, argv, **kw):
+        argv = list(argv)
+        if len(argv) > 1 and argv[1] == "run" and self.copies.is_dir():
+            for root in self.copies.iterdir():
+                stage = root / "stage"
+                self.at_create[root.name] = {
+                    "root": sorted(os.listdir(root)) if root.is_dir() else [],
+                    "stage": sorted(os.listdir(stage)) if stage.is_dir() else []}
+        return super().__call__(argv, **kw)
 
 
 def _exec_cats(docker: RecordingDocker) -> list[Path]:
@@ -88,38 +118,55 @@ def _exec_cats(docker: RecordingDocker) -> list[Path]:
 
 def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_token_back(
         tenant, tmp_path, boxed_only, monkeypatch):
-    """O-A: in the box, `/agent` (DEFENDER_AGENT_DIR) resolves into the run copy's `agent/`
-    with the export's bytes; no mount source exposes the copy's `settings/`, the clone, or the
-    exports; startup read back a token planted in the copy outside `agent/`; nothing reads a
+    """O-A/U9: in the box, `/agent` (DEFENDER_AGENT_DIR) resolves into the run copy's
+    `stage/agent/` with the export's bytes; the only part of the copy any mount source exposes
+    is `stage/`, which at box create holds exactly `agent/` and one token; no source exposes the
+    copy's `settings/` or `owner` record, the clone, the exports or the host-held
+    knowledge-source record; startup read back the token from `stage/`; nothing reads a
     `.tenant-id` in the box (P2's check retired)."""
     from defender.runtime.model_view import MODEL_AGENT
 
     monkeypatch.setenv("BAO_TOKEN", "s-b-operator-bao-token-77e1")
     monkeypatch.setenv("VAULT_TOKEN", "s-b-operator-vault-token-91a4")
-    docker, investigation = RecordingDocker(), _Investigation()
+    docker, investigation = _StageSnapshotDocker(B.run_copies(tenant)), _Investigation()
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    lifecycle=_boxed_lifecycle(docker, investigation))
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert investigation.calls == 1, out.text()
     copy_root = _copy_root(tenant, out)
+    stage = copy_root / "stage"
 
     assert docker.env().get("DEFENDER_AGENT_DIR") == str(MODEL_AGENT)
     inside = docker._through_binds(Path(MODEL_AGENT) / B.LESSON_REL)
     assert inside.resolve().is_relative_to(copy_root.resolve()), (
         f"O-A: the box's {MODEL_AGENT} is bound to {inside}, not the run copy {copy_root}")
-    assert inside.relative_to(copy_root).parts[0] == "agent", inside
+    assert inside.relative_to(copy_root).parts[:2] == ("stage", "agent"), inside
     sources = [Path(m["source"]) for m in docker.mounts()]
-    for forbidden in (copy_root / "settings", B.clone_dir(tenant),
-                      export_dir(tenant.tenant, tenant.commit).parent):
+    for forbidden in (copy_root / "settings", copy_root / "owner", B.clone_dir(tenant),
+                      export_dir(tenant.tenant, tenant.commit).parent,
+                      B.host_record_path(out.run_dir)):
         assert not T.exposes(sources, forbidden), (
-            f"O-A: a box mount exposes {forbidden}: {docker.mounts()}")
-    assert T.exposes(sources, copy_root / "agent"), "control: the copy's agent/ is mounted"
+            f"O-A/U9: a box mount exposes {forbidden}: {docker.mounts()}")
+    in_copy = [src for src in sources if src.resolve().is_relative_to(copy_root.resolve())]
+    assert [src for src in in_copy if not src.resolve().is_relative_to(stage.resolve())] == [], (
+        f"U9: the box mounts a part of the run copy outside `stage/`: {in_copy}")
+    assert T.exposes(sources, stage / "agent"), "control: the copy's stage/agent/ is mounted"
+
+    listed = docker.at_create.get(copy_root.name)
+    assert listed is not None, f"premise: the copy existed at box create: {docker.at_create}"
+    assert listed["root"] == ["owner", "settings", "stage"], (
+        f"U9: the run copy is not {{owner, settings/, stage/}}: {listed['root']}")
+    tokens_staged = [name for name in listed["stage"] if name != "agent"]
+    assert "agent" in listed["stage"], listed
+    assert len(tokens_staged) == 1, (
+        f"U9: the box's `stage/` holds more (or less) than agent/ and one token: {listed['stage']}")
 
     cats = _exec_cats(docker)
-    tokens = [p for p in cats if p.resolve().is_relative_to(copy_root.resolve())
-              and not p.resolve().is_relative_to((copy_root / "agent").resolve())]
-    assert tokens, f"O-A: startup never read a token back from the run copy: {cats}"
+    tokens = [p for p in cats if p.resolve().is_relative_to(stage.resolve())
+              and not p.resolve().is_relative_to((stage / "agent").resolve())]
+    assert sorted({p.name for p in tokens}) == tokens_staged, (
+        f"O-A: startup did not read back the token staged in the copy's stage/: {cats}")
     assert not [c for c in docker.calls if any(".tenant-id" in part for part in c)], (
         "O-A: the retired in-box `.tenant-id` check still runs")
     # O8/P-4: operator issuer variables never reach the box (control: the env is read above).
@@ -128,8 +175,9 @@ def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_tok
 
 
 class _OtherCopyDocker(RecordingDocker):
-    """A daemon that bound the run copy's root to ANOTHER folder: every read the box makes
-    inside the copy but outside `agent/` finds nothing there. It judges nothing."""
+    """A daemon that bound the run copy's stage to ANOTHER folder: every read the box makes
+    inside the copy but outside `stage/agent/` (the token) finds nothing there. It judges
+    nothing."""
 
     def __init__(self, copies: Path) -> None:
         super().__init__()
@@ -139,8 +187,8 @@ class _OtherCopyDocker(RecordingDocker):
         if "cat" in argv and self.create_argv is not None:
             host = self._through_binds(Path(argv[-1]))
             under = host.resolve()
-            if under.is_relative_to(self.copies.resolve()) and "agent" not in (
-                    under.relative_to(self.copies.resolve()).parts[1:2]):
+            if under.is_relative_to(self.copies.resolve()) and (
+                    under.relative_to(self.copies.resolve()).parts[1:3] != ("stage", "agent")):
                 return _cp(1, "", "cat: No such file or directory\n")
         return super()._exec(argv)
 
@@ -221,12 +269,12 @@ def test_f_hardlink_the_run_copy_shares_no_inode_with_its_export(tenant, tmp_pat
 
 def test_o_sweep_the_run_copy_records_its_owner_and_is_removed_when_the_run_ends(
         tenant, tmp_path):
-    """O-SWEEP: while live, `<T>/run-knowledge/<run_id>/` exists and records its owner (this
-    process's pid, outside the model-visible `agent/`); after the run it is gone."""
-    def owner(seen: B.Seen) -> list[str]:
-        root = B.run_copies(tenant) / seen.run_dir.name
-        return [rel for rel, data in B.tree_bytes(root).items()
-                if not rel.startswith("agent/") and str(os.getpid()).encode() in data]
+    """O-SWEEP/U9: while live, `<T>/run-knowledge/<run_id>/` exists and its `owner` record (beside
+    `stage/`, outside what the box mounts) names this process: its pid AND its start time. After
+    the run it is gone. (Owner shape shared with the drafts: `_drain_support.owner_record`.)"""
+    def owner(seen: B.Seen) -> Any:
+        root = B.copy_root(tenant, seen.run_dir)
+        return owner_record(root) if (root / "owner").is_file() else None
 
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    during=owner)
@@ -235,8 +283,57 @@ def test_o_sweep_the_run_copy_records_its_owner_and_is_removed_when_the_run_ends
     copy_root = _copy_root(tenant, out)
     assert out.seen[0].copies_listing == [copy_root.name], (
         f"the run copy is not `<T>/run-knowledge/<run_id>/`: {out.seen[0].copies_listing}")
-    assert out.seen[0].during, f"O-SWEEP: the run copy records no owner pid {os.getpid()}"
+    record = out.seen[0].during
+    assert record is not None, "U9: the run copy has no `owner` record beside `stage/`"
+    assert record.get("pid") == os.getpid(), record
+    assert str(record.get("start")) == process_start(os.getpid()), (
+        f"U9: the owner record does not name this process's start time: {record}")
     assert not copy_root.exists(), "O-SWEEP: the run copy outlived its run"
+
+
+def _plant_copy(t, name: str, pid: int, start: Any) -> Path:
+    """A run copy (or half-built temporary) in the U9 layout with a planted owner."""
+    root = B.run_copies(t) / name
+    (root / "stage" / "agent" / "lessons").mkdir(parents=True)
+    (root / "stage" / "agent" / "lessons" / "half.md").write_text("half\n", encoding="utf-8")
+    write_owner(root, pid, start)
+    return root
+
+
+def _dead_process() -> tuple[int, str]:
+    """`(pid, start time)` of a process that has exited (it reports its own start time)."""
+    out = subprocess.run(  # noqa: S603 — a test's own short-lived process
+        [sys.executable, "-c", "import os\ns=open('/proc/self/stat').read()\n"
+         "print(os.getpid(), s[s.rindex(')') + 2:].split()[19])"],
+        capture_output=True, text=True, check=True, timeout=60).stdout.split()
+    return int(out[0]), out[1]
+
+
+def test_o_sweep_an_owner_naming_this_pid_with_another_start_time_is_dead(tenant):
+    """O-SWEEP/U9: an owner is pid AND start time. A run copy whose record names this RUNNING
+    pid with another start time (the pid was reused) is swept by the next publish; a copy whose
+    record names this pid with its true start time survives the same publish (control)."""
+    true_start = process_start(os.getpid())
+    reused = _plant_copy(tenant, str(uuid.uuid4()), os.getpid(), str(int(true_start) + 1))
+    kept = _plant_copy(tenant, str(uuid.uuid4()), os.getpid(), true_start)
+
+    tenant.publish()
+
+    assert kept.is_dir(), "O-SWEEP: a live owner's run copy was swept"
+    assert not reused.exists(), "O-SWEEP: a record naming a reused pid kept its copy"
+
+
+def test_o_sweep_a_dead_owners_half_built_temporary_is_swept_by_the_next_publish(tenant):
+    """O-SWEEP/U9: a copy is built as a dot-named temporary holding its owner, then renamed. A
+    build cut off before the rename leaves the temporary; its owner is dead, so the next publish
+    sweeps it. A dot-named temporary whose owner is live (this process) survives (control)."""
+    dead = _plant_copy(tenant, ".s-b-halfbuilt-0a1b", *_dead_process())
+    live = _plant_copy(tenant, ".s-b-building-9f8e", os.getpid(), process_start(os.getpid()))
+
+    tenant.publish()
+
+    assert live.is_dir(), "O-SWEEP: a live build's temporary was swept"
+    assert not dead.exists(), "O-SWEEP: a dead owner's half-built temporary was not swept"
 
 
 def test_o_sweep_the_run_copy_is_removed_when_the_run_fails(tenant, tmp_path):
@@ -254,7 +351,7 @@ def test_o_sweep_a_publish_never_sweeps_a_live_runs_copy(tenant, tmp_path):
     """O-SWEEP (control for the sweep below): publish sweeps only dead owners."""
     def publish_now(seen: B.Seen) -> bool:
         tenant.publish()
-        return (B.run_copies(tenant) / seen.run_dir.name / "agent").is_dir()
+        return (B.copy_stage(tenant, seen.run_dir) / "agent").is_dir()
 
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    during=publish_now)

@@ -328,7 +328,7 @@ def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded ra
     # The draft builders' one funnel resolves the fake here; a fresh one per scene (it is
     # mutated below), so it cannot be a signature default.
     fake = curator if curator is not None else FakeCurator()
-    fake.outside_root = Path(lane.batch.draft_root)
+    fake.outside_root = lane.root
     base = build(lane, state=LearningState.open(lane.paths))
     wiring: dict[str, Any] = {"invoke_agent": fake}
     wiring.update(cfg_overrides)

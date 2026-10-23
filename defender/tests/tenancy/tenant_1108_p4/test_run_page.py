@@ -1,14 +1,17 @@
 """#1108 P4 slice S-C — the run page.
 
-- O-WARN (U8): a stale run's page carries a banner naming the kind, the reason and the commit
-  used; fresh and pinned runs carry none.
+- O-WARN (U8, U12): a stale run's page carries a banner naming the kind, the reason and the
+  commit used, read from the HOST record beside the run dir; fresh and pinned runs carry none;
+  a stamp the box rewrites (suppress or forge) changes nothing on the page.
 - O-U6: the run page has no lesson-history section and no table-of-contents entry for one.
   (The structural half, "nothing in `presentation/` runs git", is slice S-A's.)
 
 Entry: a real hermetic run driven through the replay harness (`test_922_renderer.driven_run`), its
 page saved by the real post-run step (`run_common.visualize` over the tenant-bound handle), read
-back from the run dir. The run's knowledge source is planted in its run record (the provenance
-stamp; see `test_stale_visibility.knowledge_source` for the one place its shape is spelled).
+back from the run dir. The run's knowledge source is planted as the host record
+(`test_stale_visibility.write_host_record`, assumed seam `RunPaths.knowledge_source()`), and the
+box-readable provenance stamp carries its informational view (OD17: no reason) unless a test
+plays the box rewriting it.
 """
 from __future__ import annotations
 
@@ -24,15 +27,18 @@ from defender.tests.tenancy.tenant_1108_p4.test_stale_visibility import (
     RAW_REASON,
     STALE_COMMIT,
     STALE_KINDS,
+    SHORT_COMMIT,
     knowledge_source,
     names_commit,
     stamp_knowledge_source,
+    stamp_view,
+    write_host_record,
 )
 
 pytestmark = pytest.mark.e2e
 
-#: A reason as hostile as the run record (box-writable) can carry: markup and quotes that a page
-#: printing it raw would execute or break on.
+#: A reason as hostile as a publish refusal can quote (a merged commit's path, a forge's error
+#: body): markup and quotes that a page printing it raw would execute or break on.
 HOSTILE_REASON = 'forge said <img src=x onerror="alert(1)"> & left "main" unprotected'
 
 
@@ -71,16 +77,26 @@ def run_dir(tmp_path):
     return driven
 
 
+def _record(run_dir: Path, source: dict) -> None:
+    """Run start's two writes: the host record (authoritative) and the stamp's informational view."""
+    write_host_record(run_dir, source)
+    stamp_knowledge_source(run_dir, stamp_view(source))
+
+
+def _normalized(page: str) -> str:
+    return re.sub(r"\d{4}-\d{2}-\d{2}[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?", "<TS>", _visible(page))
+
+
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
 def test_o_warn_a_stale_runs_page_carries_a_banner_naming_kind_reason_and_commit(
         run_dir, stale_kind):
-    """O-WARN: the page of a run recorded stale names its kind, its reason (operator-facing, so
-    the raw reason is shown) and the commit the run used; the same run recorded fresh shows none
-    of them."""
+    """O-WARN: the page of a run whose host record is stale names its kind, its raw reason
+    (operator-facing; the host record is the only place it is kept) and the commit the run used;
+    the same run recorded fresh shows none of them."""
     reason = RAW_REASON[stale_kind]
-    stamp_knowledge_source(run_dir, knowledge_source("fresh"))
+    _record(run_dir, knowledge_source("fresh"))
     fresh = _visible(_page(run_dir))
-    stamp_knowledge_source(run_dir, knowledge_source("stale", stale_kind=stale_kind))
+    _record(run_dir, knowledge_source("stale", stale_kind=stale_kind))
     stale = _visible(_page(run_dir))
 
     assert html.escape(reason) not in fresh, "positive control"
@@ -97,16 +113,53 @@ def test_o_warn_a_stale_runs_page_carries_a_banner_naming_kind_reason_and_commit
         f"O-WARN: a fresh run's page names a stale kind ({stale_kind})")
 
 
-def test_o_warn_the_banner_shows_a_box_written_reason_escaped(run_dir):
-    """O-WARN, danger lens: the run record sits in the box's rw bind, so its reason is shown as
-    text — escaped, never as markup."""
-    stamp_knowledge_source(run_dir, knowledge_source("stale", stale_kind="operator",
-                                                     reason=HOSTILE_REASON))
+#: What a tampering box writes into the stamp: a commit and a reason of its own.
+TAMPERED_COMMIT = "0ddba110ddba110ddba110ddba110ddba110ddba"
+TAMPERED_REASON = "box says: open https://evil.invalid/ to fix"
+
+
+@pytest.mark.parametrize("tamper", ["suppress", "forge"])
+def test_o_warn_a_box_rewritten_stamp_changes_nothing_on_the_page(run_dir, tamper):
+    """O-WARN, danger lens (U12, OD17): the stamp sits in the box's rw bind, so the page reads the
+    host record only. The box rewriting the stamp changes nothing on the page, both ways:
+    - suppress: host record stale, stamp rewritten to fresh -> the banner is still there;
+    - forge: host record fresh, stamp rewritten to stale with the box's own commit and reason ->
+      still no banner, and neither the planted commit nor reason appears."""
+    if tamper == "suppress":
+        host = knowledge_source("stale", stale_kind="transient")
+        planted = knowledge_source("fresh", commit=STALE_COMMIT)
+    else:
+        host = knowledge_source("fresh")
+        planted = knowledge_source("stale", stale_kind="operator", commit=TAMPERED_COMMIT,
+                                   reason=TAMPERED_REASON)
+    _record(run_dir, host)
+    honest = _page(run_dir)
+    stamp_knowledge_source(run_dir, planted)
+    tampered = _page(run_dir)
+
+    assert _normalized(tampered) == _normalized(honest), (
+        f"O-WARN: a box-rewritten stamp ({tamper}) changed the run page — the page must read "
+        "the host record only")
+    visible = _visible(tampered).lower()
+    if tamper == "suppress":
+        assert "stale" in visible, (
+            "O-WARN: the box suppressed the stale banner by rewriting the stamp to fresh")
+        assert names_commit(visible, STALE_COMMIT), "O-WARN: the banner lost the host's commit"
+    else:
+        assert "stale" not in visible, "O-WARN: the box forged a stale banner through the stamp"
+        assert TAMPERED_COMMIT[:SHORT_COMMIT] not in visible, "the planted commit is on the page"
+        assert "evil.invalid" not in visible, "the planted reason is on the page"
+
+
+def test_o_warn_the_banner_shows_a_hostile_reason_escaped(run_dir):
+    """O-WARN, danger lens: a reason quoting attacker-influenced text (a merged path, a forge's
+    error body) is shown as text — escaped, never as markup."""
+    _record(run_dir, knowledge_source("stale", stale_kind="operator", reason=HOSTILE_REASON))
     page = _page(run_dir)
     assert html.escape(HOSTILE_REASON, quote=False) in page or html.escape(HOSTILE_REASON) in page, (
         "O-WARN: the banner does not show the stale reason (escaped)")
     assert '<img src=x onerror="alert(1)">' not in page, (
-        "the box-written stale reason reached the page as markup")
+        "the stale reason reached the page as markup")
 
 
 @pytest.mark.parametrize(("kind", "commit"), [("fresh", FRESH_COMMIT), ("pinned", PINNED_COMMIT)],
@@ -114,13 +167,13 @@ def test_o_warn_the_banner_shows_a_box_written_reason_escaped(run_dir):
 def test_o_warn_fresh_and_pinned_runs_pages_carry_no_stale_banner(run_dir, kind, commit):
     """O-WARN: a fresh or pinned run's page says nothing about stale knowledge; the same run
     recorded stale does (positive control on the same page)."""
-    stamp_knowledge_source(run_dir, knowledge_source(kind, commit=commit))
+    _record(run_dir, knowledge_source(kind, commit=commit))
     page = _visible(_page(run_dir))
     assert "stale" not in page.lower(), f"O-WARN: a {kind} run's page carries a stale banner"
     for stale_kind in STALE_KINDS:
         assert stale_kind not in page.lower(), f"O-WARN: a {kind} run's page names {stale_kind}"
 
-    stamp_knowledge_source(run_dir, knowledge_source("stale", stale_kind="transient"))
+    _record(run_dir, knowledge_source("stale", stale_kind="transient"))
     assert "stale" in _visible(_page(run_dir)).lower(), (
         "positive control: the same run recorded stale shows a banner on the same page")
 

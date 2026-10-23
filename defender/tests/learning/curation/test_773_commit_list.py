@@ -4,10 +4,8 @@
 tick committed is read from the batch branch the commit-maker moved, spelled `agent/...`."""
 from __future__ import annotations
 
-import shutil
+import pytest
 
-
-from defender._git import GitError
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _spec773 as S
 
@@ -29,8 +27,11 @@ def test_the_draft_lane_observation_channel_sees_a_commit_and_a_reset(tmp_path):
     lane.batch.commit(ChangeSet(tuple(change)), "hand claim")
     assert lane.landed() == ["agent/lessons/x.md"]
     assert lane.text_at_tip("agent/lessons/x.md") == "x\n"
+    assert lane.drift() == ["agent/lessons/stray.md"]  # the drift channel sees the stray
     lane.batch.reset()
     assert sorted(p.name for p in lane.lessons_dir.iterdir()) == [".gitkeep", "x.md"]
+    assert lane.drift() == []
+    assert lane.root / "agent" == lane.agent  # the repo-shaped root the helpers spell from
 
 
 def test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773(tmp_path):
@@ -184,31 +185,52 @@ def test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_con
     assert sc.pending_by_id()["b"]["deferrals"] == 1
 
 
-def test_disk_runs_out_of_space_partway_through_gits_own_commit_write_773(tmp_path):
-    """If the commit does not land (the clone's objects are gone mid-tick), the branch does not
-    move and no row rotates as `consumed_committed`. #773 M5, O7."""
+@pytest.mark.parametrize("fault", ["refused-commit", "control", "unrelated"])
+def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
+    """U10 (human, 2026-10-23): when the commit-maker refuses the claim (the batch branch's ref is
+    locked, so `update-ref` fails; objects stay readable) the tick returns, nothing lands, the
+    draft is back at the base and the row stays queued with one attempt. Controls: the same tick
+    unlocked lands and consumes it; an unrelated curator fault keeps the lane's existing rule
+    (#773 O5.3: propagates, row not charged). #773 M5, O7."""
     holder: dict = {}
 
-    def hide_the_git_dir(rows, batch_id, cfg):
-        shutil.move(str(holder["sc"].repo / ".git"), str(holder["sc"].repo / ".git-gone"))
+    def act(rows, batch_id, cfg):
+        sc = holder["sc"]
+        if fault == "refused-commit":
+            lock = sc.repo / ".git" / "refs" / "heads" / f"{sc.lane.batch.branch}.lock"
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            lock.write_text("held by another writer\n")
+        elif fault == "unrelated":
+            raise RuntimeError("unrelated curator fault")
 
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}, also=hide_the_git_dir),
+        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}, also=act),
     )
     holder["sc"] = sc
-    from defender.learning.author.version_control import DeliveryRefused
 
-    # The fault's surface (a raise or a failed tick) is not frozen; its outcome is.
-    try:
-        rc = sc.run()
-    except (GitError, S.drain.GitProbeError, DeliveryRefused):
-        rc = None
-    shutil.move(str(sc.repo / ".git-gone"), str(sc.repo / ".git"))
-    assert rc != 0
-    assert sc.consumed() == []
+    if fault == "unrelated":
+        with pytest.raises(RuntimeError, match="unrelated curator fault"):
+            sc.run()
+        assert sc.pending_by_id()["f1"].get("attempts") is None
+        assert sc.commit_count() == 1
+        return
+
+    rc = sc.run()  # a refused claim is routed, never an unhandled crash
+    if fault == "control":
+        assert rc == 0
+        assert sc.head_files() == [LESSON]
+        assert sc.category_of("f1") == "consumed_committed"
+        return
     assert sc.commit_count() == 1
+    assert sc.head_files() == []
+    assert sc.draft_drift() == []
+    assert sc.pending_by_id()["f1"].get("attempts") == 1
+    assert sc.consumed() == []
+    assert all(r.get("finding_id") != "f1" for r in sc.graveyard())
+    stuck = {r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)}
+    assert stuck <= {"AuthorError", "DeliveryRefused"}, stuck
 
 
 def test_the_commit_step_reads_author_result_only_for_skip_reasons_and_commit_message_773(

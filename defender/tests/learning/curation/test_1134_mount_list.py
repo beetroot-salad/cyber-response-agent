@@ -338,7 +338,7 @@ def _o4_step(label: DrainLabel, swap: str, outside: Path, seen: dict[str, Any]):
         [request] = box.requests
         [staged] = [Path(m.source) for m in request.mounts if m.kind == "staged"]
         rw = [Path(m.source) for m in request.mounts if m.writable]
-        drafts = staged.parent
+        drafts = staged.parent.parent  # amendment A / U9: <T>/drafts/<id>/stage
         seen.update(staged=staged, rw=rw, held_before=held_roots(drafts),
                     draft_root=Path(batch.draft_root), repo_root=Path(step_paths.repo_root))
         others = [staged / rel for rel in ALL_DRAFT_LANES if rel not in DRAFT_LANES[label]]

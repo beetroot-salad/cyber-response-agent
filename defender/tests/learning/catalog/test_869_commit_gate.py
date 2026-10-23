@@ -78,7 +78,7 @@ def _tree_for(lane: C.DraftLane):
 
 
 def _root(lane: C.DraftLane) -> Path:
-    return Path(lane.batch.draft_root)
+    return lane.root
 
 
 def _write(lane: C.DraftLane, rel: str, text: str) -> Path:

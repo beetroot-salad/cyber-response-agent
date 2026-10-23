@@ -233,6 +233,39 @@ def draft_entries(t: Any) -> list[str]:
     return sorted(p.name for p in d.iterdir()) if d.is_dir() else []
 
 
+# Amendment A / U9: a draft is `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`.
+# ASSUMED SEAM: `batch.draft_root` is the draft's `stage/` (the root the box mounts as `staged`,
+# holding `agent/`), so its parent is the draft folder `<T>/drafts/<id>` holding `owner`.
+# ASSUMED SHAPE: `owner` is JSON `{"pid": <int>, "start": <process start time>}`, the start time
+# being the kernel's (`/proc/<pid>/stat` field 22, clock ticks since boot), compared as text.
+
+
+def draft_folder(batch: Any) -> Path:
+    """The draft folder `<T>/drafts/<id>` of `batch` (its stage's parent). Refuses a batch
+    whose `draft_root` is not a `stage/` (the pre-U9 layout), so no case reads or plants an
+    owner record in `<T>/drafts/` itself."""
+    stage = Path(batch.draft_root)
+    assert stage.name == "stage", f"the draft is not in the U9 layout: {stage}"
+    return stage.parent
+
+
+def owner_record(folder: Path) -> dict:
+    """The owner record a draft folder (or a dot-named temporary) holds."""
+    return json.loads((Path(folder) / "owner").read_text(encoding="utf-8"))
+
+
+def process_start(pid: int) -> str:
+    """`pid`'s start time as the kernel records it (`/proc/<pid>/stat` field 22)."""
+    stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    return stat[stat.rindex(")") + 2:].split()[19]
+
+
+def write_owner(folder: Path, pid: int, start: Any) -> None:
+    """Write an owner record in the assumed shape (a fixture's planted owner)."""
+    (Path(folder) / "owner").write_text(json.dumps({"pid": pid, "start": start}) + "\n",
+                                        encoding="utf-8")
+
+
 def under(path: Path, root: Path) -> bool:
     """`path` is `root` or below it (both resolved)."""
     return Path(path).resolve().is_relative_to(Path(root).resolve())

@@ -321,10 +321,10 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             copy_root = B.run_copies(own) / Path(driven[0]["run"].run_dir).name
             own_settings = copy_root / "settings"
 
-            # O1/O-A — the box: this tenant's run copy's agent half, no settings, no clone, nothing
+            # O1/O-A/U9 — the box: this tenant's run copy's stage/agent, no settings, no clone, nothing
             # of the other tenant.
             assert len(start.calls) == 1, start.calls
-            assert T.reaches(start.calls, copy_root / "agent"), start.calls
+            assert T.reaches(start.calls, copy_root / "stage" / "agent"), start.calls
             assert not T.exposes(start.calls, own_settings), start.calls
             assert not T.exposes(start.calls, B.clone_dir(own)), start.calls
             assert not T.reaches(start.calls, root / other)

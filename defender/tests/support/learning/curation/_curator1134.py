@@ -486,7 +486,7 @@ def world(tmp_path: Path) -> World:
 #   pitfalls_curator.run_pitfalls(*, paths, state, trees, batch, ...)
 #   lead_author.run(run, *, label, paths, batch, ...)   (the no-deps path opens its trees over the draft)
 # `batch` is P3's `version_control.Batch`: the lane's corpus dirs are
-# `KnowledgePaths(agent_root=batch.draft_root / "agent")`'s, its claim is `batch.change_set()`
+# `KnowledgePaths(agent_root=<the draft's agent/>)`'s (U9: `<T>/drafts/<id>/stage/agent`), its claim is `batch.change_set()`
 # judged by the lane's gates, its commit is `batch.commit(<admitted ChangeSet>, message)`, and its
 # per-claim reset is `batch.reset()`. `paths` keeps the learning state (queues, locks) and the
 # product checkout (`repo_root`: adapters stay in the product repo, #1172), never a corpus.
@@ -523,7 +523,16 @@ class DraftLane:
 
     @property
     def agent(self) -> Path:
-        return Path(self.batch.draft_root) / "agent"
+        """The draft's `agent/`, as the batch itself names it (its box's workdir and
+        `DEFENDER_AGENT_DIR` source): `<T>/drafts/<id>/stage/agent` under U9's layout. Asked of
+        P3, never re-derived from `draft_root`, so the helpers follow the layout's one owner."""
+        return Path(self.batch.box_request().workdir)
+
+    @property
+    def root(self) -> Path:
+        """The repo-shaped root holding the draft's `agent/` (U9: the box-mounted `stage/`):
+        what repo-relative `agent/...` names are relative to, and where a lane's spawn runs."""
+        return self.agent.parent
 
     @property
     def lessons_dir(self) -> Path:
@@ -570,6 +579,22 @@ class DraftLane:
     def text_at_tip(self, rel: str) -> str | None:
         proc = self.git("cat-file", "-p", f"{self.tip()}:{rel}", check=False)
         return proc.stdout if proc.returncode == 0 else None
+
+    def drift(self) -> list[str]:
+        """Every `agent/...` path whose bytes or presence differ between the draft and the batch
+        tip, links and non-files included as present (never followed): `[]` is "the draft is
+        back at what the batch holds" (a reset claim, U10)."""
+        listed = self.git("ls-tree", "-r", "--name-only", self.tip(), "--", "agent").stdout
+        tip = {rel: self.git("cat-file", "-p", f"{self.tip()}:{rel}").stdout.encode(
+                   "utf-8", "surrogateescape")
+               for rel in listed.splitlines() if rel.strip()}
+        draft: dict[str, bytes | None] = {}
+        for dirpath, dirnames, filenames in os.walk(self.agent):
+            for name in (*filenames, *(d for d in dirnames if os.path.islink(os.path.join(dirpath, d)))):
+                at = Path(dirpath) / name
+                rel = f"agent/{at.relative_to(self.agent).as_posix()}"
+                draft[rel] = at.read_bytes() if at.is_file() and not at.is_symlink() else None
+        return sorted(rel for rel in tip.keys() | draft.keys() if tip.get(rel) != draft.get(rel))
 
     def mode_at_tip(self, rel: str) -> str | None:
         out = self.git("ls-tree", self.tip(), "--", rel).stdout.split()

@@ -34,6 +34,7 @@ TenantDelivery.open's own keywords):
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,7 @@ from defender.tests.tenancy.tenant_1108_delivery._scenarios import _AnswerLost
 from defender.tests.tenancy.tenant_1108_delivery._support import (
     FORK,
     OURS,
+    LockAudit,
     close_on_remote,
     pr_row,
     fresh_process_env,
@@ -63,11 +65,14 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     author_drain,
     critical_text,
     draft_entries,
+    draft_folder,
     drafts_dir,
     drain_paths,
     drains,
     executed_lead,
     lead_author_drain,
+    owner_record,
+    process_start,
     product_repo,
     product_state,
     queue,
@@ -76,6 +81,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     run_stage,
     touched,
     under,
+    write_owner,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
@@ -147,6 +153,9 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     staged = [m for m in mounts if m.kind == "staged"]
     assert len(staged) == 1, mounts
     assert under(staged[0].source, drafts_dir(t)), mounts
+    # Amendment A / U9: the box mounts the draft's `stage/`, never the folder holding `owner`.
+    assert Path(staged[0].source).name == "stage", mounts
+    assert Path(staged[0].source).parent.parent == drafts_dir(t), mounts
     assert not [m for m in mounts if under(m.source, t.clone) or under(t.clone, m.source)], mounts
     writable = sorted(Path(m.source).relative_to(staged[0].source).as_posix()
                       for m in mounts if m.writable)
@@ -392,27 +401,74 @@ def _owner_process(t: Any, tmp_path: Path, batch_id: str, *, hold: bool) -> subp
     return proc
 
 
+def _sweeps_under(folder: Path):
+    """`pick` for P3's `LockAudit`: labels `sweep` the first removal of anything under
+    `folder`, or rename of something out of it (a name relative to a folder descriptor is
+    resolved through `/proc/self/fd`)."""
+    top = os.path.realpath(folder)
+    seen: set[str] = set()
+
+    def pick(event: str, args: tuple) -> str | None:
+        if event not in {"os.remove", "os.rmdir", "shutil.rmtree", "os.rename"} or "sweep" in seen:
+            return None
+        path = args[0]
+        dir_fd = args[2] if event == "os.rename" else (args[1] if len(args) > 1 else None)
+        if not isinstance(path, (str, bytes, os.PathLike)):
+            return None
+        path = os.fsdecode(path)
+        if isinstance(dir_fd, int) and dir_fd >= 0 and not os.path.isabs(path):
+            path = os.path.join(os.readlink(f"/proc/self/fd/{dir_fd}"), path)
+        path = os.path.abspath(path)
+        if path != top and not path.startswith(top + os.sep):
+            return None
+        seen.add("sweep")
+        return "sweep"
+    return pick
+
+
+def _dead_process() -> tuple[int, str]:
+    """`(pid, start time)` of a process that has exited (it reports its own start time)."""
+    out = subprocess.run(
+        [sys.executable, "-c", "import os\ns=open('/proc/self/stat').read()\n"
+         "print(os.getpid(), s[s.rindex(')') + 2:].split()[19])"],
+        capture_output=True, text=True, check=True, timeout=60).stdout.split()
+    return int(out[0]), out[1]
+
+
 def test_o_sweep_publish_sweeps_a_draft_whose_owner_died_and_keeps_a_live_owners(
         p4_tenant, tmp_path):
-    """O-SWEEP: a draft records its owner; the next publish (under the tenant lock) sweeps a
+    """O-SWEEP: a draft records its owner; the next publish sweeps, UNDER THE TENANT LOCK, a
     draft whose owner process is dead. A draft this live process built survives the same
-    publish (positive control on the same observation)."""
+    publish (positive control on the same observation), and its owner record names this
+    process: its pid and its start time. (Red today: P3 sweeps only dot-named temporaries.)"""
     t = p4_tenant
     _owner_process(t, tmp_path, "orphan", hold=False)
     mine = t.open_delivery().start_batch("mine", lanes=("lessons",))
+    assert draft_entries(t) == ["mine", "orphan"], "control: both drafts stand before the publish"
+    audit = LockAudit(t.tenant, _sweeps_under(drafts_dir(t)))
 
-    t.publish()
+    with audit:
+        t.publish()
 
     assert draft_entries(t) == ["mine"], draft_entries(t)
     assert mine.draft_root.is_dir()
+    assert [label for label, _ in audit.probes] == ["sweep"], audit.probes
+    assert all("busy" in verdict for _, verdict in audit.probes), "the sweep ran outside the lock"
+    record = owner_record(draft_folder(mine))
+    assert record["pid"] == os.getpid(), record
+    assert str(record["start"]) == process_start(os.getpid()), record
 
 
 def test_o_sweep_a_live_owners_draft_survives_publish_until_its_owner_exits(p4_tenant, tmp_path):
-    """O-SWEEP: liveness is the owner's, not the draft's age: while the owner process runs, a
-    publish keeps its draft; once it has exited, the next publish sweeps it."""
+    """O-SWEEP: liveness is the owner's, not the draft's age: while ANOTHER live process owns a
+    draft (its owner record names that process's pid and start time), a publish keeps it; once
+    it has exited, the next publish sweeps it."""
     t = p4_tenant
     owner = _owner_process(t, tmp_path, "held", hold=True)
     try:
+        record = owner_record(drafts_dir(t) / "held")
+        assert record["pid"] == owner.pid, record
+        assert str(record["start"]) == process_start(owner.pid), record
         t.publish()
         assert draft_entries(t) == ["held"], "a live owner's draft was swept"
     finally:
@@ -425,11 +481,52 @@ def test_o_sweep_a_live_owners_draft_survives_publish_until_its_owner_exits(p4_t
     assert draft_entries(t) == [], draft_entries(t)
 
 
-def test_o_sweep_a_draft_never_shows_an_unowned_moment_to_a_publisher(p4_tenant):
-    """O-SWEEP: a draft is built as a dot-named temporary with its owner record inside and only
-    then renamed into place, so a draft present under its batch id always names a live owner: a
-    publish right after `start_batch` in this (live) process keeps it, and no dot-named entry is
-    left beside it."""
+def test_o_sweep_an_owner_record_naming_a_live_pid_with_another_start_time_is_dead(p4_tenant):
+    """O-SWEEP: an owner is its pid AND its start time: a record naming a running pid (this
+    one) with a different start time names a process that is gone (the pid was reused), so the
+    next publish sweeps that draft. Positive control: an untouched draft of this process, its
+    record naming the true start time, survives the same publish."""
+    t = p4_tenant
+    d = t.open_delivery()
+    reused = d.start_batch("reused", lanes=("lessons",))
+    kept = d.start_batch("kept", lanes=("lessons",))
+    true_start = process_start(os.getpid())
+    write_owner(draft_folder(reused), os.getpid(), str(int(true_start) + 1))
+    assert owner_record(draft_folder(kept))["pid"] == os.getpid()
+
+    t.publish()
+
+    assert draft_entries(t) == ["kept"], draft_entries(t)
+    assert kept.draft_root.is_dir()
+
+
+def test_o_sweep_a_dead_owners_half_built_temporary_is_swept_under_the_lock(p4_tenant):
+    """O-SWEEP: a build cut off before its rename leaves a dot-named temporary holding its
+    owner record and part of its stage; its owner is dead, so the next publish sweeps it under
+    the tenant lock. A live draft survives the same publish (positive control)."""
+    t = p4_tenant
+    kept = t.open_delivery().start_batch("kept", lanes=("lessons",))
+    temp = drafts_dir(t) / ".halfbuilt-0a1b2c"
+    (temp / "stage" / "agent" / "lessons").mkdir(parents=True)
+    (temp / "stage" / "agent" / "lessons" / "seed.md").write_text("half\n", encoding="utf-8")
+    write_owner(temp, *_dead_process())
+    assert draft_entries(t) == [".halfbuilt-0a1b2c", "kept"], "control: the temporary is seen"
+    audit = LockAudit(t.tenant, _sweeps_under(drafts_dir(t)))
+
+    with audit:
+        t.publish()
+
+    assert draft_entries(t) == ["kept"], draft_entries(t)
+    assert kept.draft_root.is_dir()
+    assert [label for label, _ in audit.probes] == ["sweep"], audit.probes
+    assert all("busy" in verdict for _, verdict in audit.probes), "the sweep ran outside the lock"
+
+
+def test_control_o_sweep_a_publish_right_after_start_batch_keeps_the_fresh_draft(p4_tenant):
+    """CONTROL (passes today; relabelled from `test_o_sweep_a_draft_never_shows_an_unowned_
+    moment_to_a_publisher`, which pinned nothing a sweep could break): a publish right after
+    `start_batch` in this live process keeps the fresh draft, and no dot-named entry is left
+    beside it. The sweep's own promises are the cases above."""
     t = p4_tenant
     batch = t.open_delivery().start_batch("fresh", lanes=("lessons",))
 
@@ -471,7 +568,9 @@ def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_ro
     assert trigger.calls == ["author", "questioner_curator"], trigger.calls
     batch = _one_batch(trigger.batches)
     draft = Path(batch.draft_root)
-    assert draft.parent == drafts_dir(t), draft
+    # Amendment A / U9: draft_root is `<T>/drafts/<id>/stage`, the folder beside `owner`.
+    assert draft.name == "stage", draft
+    assert draft_folder(batch).parent == drafts_dir(t), draft
     [staged] = [Path(m.source) for m in box.requests[0].mounts if m.kind == "staged"]
     assert staged == draft, (staged, draft)
     assert list(remote_branches(t.remote)) == [batch.branch]
@@ -504,7 +603,9 @@ def test_od16_the_lead_drain_hands_both_steps_the_ticks_batch_and_product_rooted
     batch = _one_batch(step.batches + pitfalls.batches)
     assert pitfalls.batches, "the pitfalls step was never called"
     draft = Path(batch.draft_root)
-    assert draft.parent == drafts_dir(t), draft
+    # Amendment A / U9: draft_root is `<T>/drafts/<id>/stage`, the folder beside `owner`.
+    assert draft.name == "stage", draft
+    assert draft_folder(batch).parent == drafts_dir(t), draft
     [staged] = [Path(m.source) for m in box.requests[0].mounts if m.kind == "staged"]
     assert staged == draft
     assert list(remote_branches(t.remote, LEAD_PREFIX)) == [batch.branch]

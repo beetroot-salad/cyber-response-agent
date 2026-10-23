@@ -16,6 +16,7 @@ branch, names the commit and the kind, leaks no reason).
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
@@ -95,9 +96,33 @@ def knowledge_source(kind: str, *, stale_kind: str | None = None, commit: str | 
     return source
 
 
+def host_record_path(run_dir: Path) -> Path:
+    """The HOST-HELD knowledge-source record (U12): a sidecar beside the run dir, keyed by the
+    run's id, like the ticket receipt (`RunPaths.ticket_write`, `<run_id>.ticket-write.json`).
+    ASSUMED SEAM (reported): `RunPaths(run_dir).knowledge_source(runs_base=None)` ->
+    `<runs base>/<run_id>.knowledge-source.json`, JSON `{kind, commit, stale_kind?, reason}`."""
+    from defender.run_repository import RunPaths
+
+    return Path(RunPaths(run_dir).knowledge_source())
+
+
+def write_host_record(run_dir: Path, source: dict[str, Any]) -> Path:
+    """Plant the host record as run start leaves it (slice S-B writes it; every reader reads it)."""
+    path = host_record_path(run_dir)
+    path.write_text(json.dumps(source, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def stamp_view(source: dict[str, Any]) -> dict[str, Any]:
+    """What the box-readable provenance stamp may carry of a knowledge source (OD17): kind,
+    commit, stale kind — never the raw reason."""
+    return {k: v for k, v in source.items() if k != "reason"}
+
+
 def stamp_knowledge_source(run_dir: Path, source: dict[str, Any] | None) -> None:
-    """Write `source` as the `knowledge_source` field of the run's provenance stamp (the run
-    record preflight's stamp table classes it in), keeping every other field; `None` removes it."""
+    """Write `source` as the `knowledge_source` field of the run's provenance stamp, keeping every
+    other field; `None` removes it. The stamp sits in the box's rw bind (OD17: informational,
+    authoritative for no reader), so the tests use this to play the BOX rewriting it."""
     from defender.run_repository import RunPaths
 
     path = RunPaths(run_dir).provenance
@@ -123,10 +148,9 @@ def _ws(text: str) -> str:
 # ---------------------------------------------------------------------------------------------
 #
 # Entry: the REAL `ticket_writer.record_case_ticket` through its one store seam
-# (`TicketWriterDeps.request` = `FakeStore`, which records every call it is handed). ASSUMED SEAM
-# (reported): `record_case_ticket(..., knowledge_source=<the run record's knowledge_source>)` —
-# handed in-process by `run.py`, as `truncated_by`/`closed_before_cut` already are, never read
-# back from the box-writable run dir. `test_run_main_hands_*` below drives that wiring.
+# (`TicketWriterDeps.request` = `FakeStore`, which records every call it is handed). The run's
+# knowledge source is the HOST record beside the run dir (U12, `write_host_record`), never the
+# box-writable stamp. `test_run_main_*` below drive the run-start wiring that writes it.
 
 #: The three branches a posted comment can take (`ticket_writer._build_comment_payload` and the
 #: aborted arm of `record_case_ticket`): run-dir report text (None: a readable verdict) and the
@@ -151,8 +175,9 @@ def _posted(tmp_path: Path, branch: str, source: dict[str, Any], *, label: str,
     elif body is not None:
         report_kw["body"] = body
     run_dir = make_run(tmp_path, name=f"s-c-{branch}-{label}", **report_kw)
+    write_host_record(run_dir, source)
     store = FakeStore()
-    record(run_dir, store, truncated_by=spec["truncated_by"], knowledge_source=source)
+    record(run_dir, store, truncated_by=spec["truncated_by"])
     return store.comment_body(), store.wire_body()
 
 
@@ -298,11 +323,10 @@ def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
 
 def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
         tmp_path, monkeypatch):
-    """O-WARN, danger lens (principles §1): the run record sits in the box's rw bind, so the
-    customer-facing comment takes the knowledge source the host hands in, never the stamp. A
-    fresh run whose box planted a stale record (with a commit and reason of its choosing) posts
-    exactly today's fresh comment; the same planted run handed a stale outcome posts the host's
-    commit, not the planted one."""
+    """O-WARN, danger lens (principles §1, U12): the stamp sits in the box's rw bind, so the
+    customer-facing comment reads the host record, never the stamp. A fresh run whose box planted
+    a stale stamp (with a commit and reason of its choosing) posts exactly today's fresh comment;
+    the same planted run whose host record is stale posts the host's commit, not the planted one."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     planted_commit = "badc0debadc0debadc0debadc0debadc0debadc0"
     planted = knowledge_source("stale", stale_kind="operator", commit=planted_commit,
@@ -311,8 +335,9 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
     def posted(label: str, handed: dict[str, Any]) -> str:
         run_dir = make_run(tmp_path, name=f"s-c-planted-{label}")
         stamp_knowledge_source(run_dir, planted)
+        write_host_record(run_dir, handed)
         store = FakeStore()
-        record(run_dir, store, knowledge_source=handed)
+        record(run_dir, store)
         return store.comment_body()
 
     fresh = posted("fresh", knowledge_source("fresh"))
@@ -340,10 +365,13 @@ def _stale_outcome(stale_kind: str, reason: str) -> str:
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
 def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_record(
         tmp_path, monkeypatch, p4_tenant, stale_kind):
-    """O-WARN through `run.main`: a launch whose publish reports stale runs on `current`, and
-    the comment the run posts (captured by the store fake), the run page and the run record each
-    say so, naming the commit actually used. Seams: `publish=` (design O11), `ticket_writer=`
-    (the real writer bound to the fake store), `lifecycle`/`preflight`/`enqueue` recorders."""
+    """O-WARN through `run.main`: a launch whose publish reports stale runs on `current`; run
+    start writes the HOST record beside the run dir (U12) carrying kind, commit and raw reason;
+    the comment the run posts (captured by the store fake) and the saved run page say so, naming
+    the commit actually used; the page shows the raw reason to operators while NO file the box
+    can read (the run dir while the box runs: stamp, run copy, everything) carries it.
+    Seams: `publish=` (design O11), `ticket_writer=` (the real writer bound to the fake store),
+    `lifecycle`/`preflight`/`enqueue` recorders."""
     from functools import partial
 
     from defender.integrations import ticket_writer
@@ -362,7 +390,16 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
         publish_calls.append((args, kwargs))
         return _stale_outcome(stale_kind, RAW_REASON[stale_kind])
 
+    box_readable: dict[str, bytes] = {}
+
     def before_lifecycle(run_dir: Path) -> None:
+        # The box window: everything under the run dir is what the box can read (and write).
+        from defender.tests.tenancy.tenant_1108_p4._s_b_support import run_copies
+
+        for root in (Path(run_dir), run_copies(p4_tenant)):
+            for path in sorted(root.rglob("*")) if root.is_dir() else ():
+                if path.is_file() and not path.is_symlink():
+                    box_readable[str(path)] = path.read_bytes()
         write_report(run_dir)
         S1107.seed_session_store(run_dir)
 
@@ -387,17 +424,29 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     assert [f for f in REASON_FRAGMENTS if f.lower() in body.lower()] == [], body
 
     run_dir = Path(rec.lifecycle_calls[0]["run"].run_dir)
+    host = json.loads(host_record_path(run_dir).read_text(encoding="utf-8"))
+    assert host.get("kind") == "stale", host
+    assert host.get("stale_kind") == stale_kind, host
+    assert host.get("commit") == commit, host
+    assert host.get("reason") == RAW_REASON[stale_kind], (
+        f"the host record does not keep the child's raw reason for operators: {host}")
     stamp = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
-    source = stamp.get("knowledge_source")
-    assert isinstance(source, dict), stamp
-    assert source.get("kind") == "stale", stamp
-    assert source.get("commit") == commit, source
+    if "knowledge_source" in stamp:  # OD17: optional, informational, never the reason
+        assert "reason" not in stamp["knowledge_source"], stamp
+
+    assert box_readable, "fixture: the box window saw no run-dir files"
+    leaked = [(name, f) for name, data in box_readable.items() for f in REASON_FRAGMENTS
+              if f.encode() in data]
+    assert leaked == [], (
+        f"U12: the raw publish reason sits in files the box can read: {leaked}")
 
     page = (run_dir / "runtime.html").read_text(encoding="utf-8")
     assert names_commit(page, commit), (
         "O-WARN: the saved run page of a stale run carries no banner naming its commit")
     assert stale_kind in page.lower(), (
         "O-WARN: the saved run page of a stale run carries no banner naming its kind")
+    assert html.escape(RAW_REASON[stale_kind]) in page or RAW_REASON[stale_kind] in page, (
+        "O-WARN: the run page does not show operators the raw reason from the host record")
 
 
 @pytest.mark.e2e
@@ -598,19 +647,23 @@ RECORD_TO_WIRE = [
 @pytest.mark.parametrize(("record", "wire"), RECORD_TO_WIRE,
                          ids=["fresh", "stale-transient", "stale-operator", "pinned"])
 def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_the_store(
-        record, wire):
+        tmp_path, record, wire):
     """O-WARN (API): the store turns the run record's `knowledge_source` into the API's
     `knowledge` — fresh -> current, stale -> stale + its kind, pinned -> pinned, the commit
     carried, the raw reason dropped — and the route serves it. Exercised on the stub store.
 
     ASSUMED SEAM (reported): `InMemoryStore.add_run_knowledge(tenant_id, investigation_id,
     knowledge_source)` — the stub's seeding entry for a run's record (the `add_*` family; not a
-    port method), applying the store's record->wire rule the port states."""
+    port method), applying the store's record->wire rule the port states. It is handed the HOST
+    record (U12) as it lies beside the run dir, raw reason included."""
     # A placeholder the mapping must replace (whatever `knowledge`'s nullability turns out to be).
     inv = _investigation("inv-mapped", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
     client = _client(inv)
     store = client.app.state.deps.investigations
-    store.add_run_knowledge(_TENANT, inv.investigation_id, record)
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    host = json.loads(write_host_record(run_dir, record).read_text(encoding="utf-8"))
+    store.add_run_knowledge(_TENANT, inv.investigation_id, host)
 
     served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge") == wire, (

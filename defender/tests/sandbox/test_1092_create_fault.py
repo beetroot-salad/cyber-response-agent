@@ -255,7 +255,8 @@ def test_the_tenant_drains_missing_image_fault_names_the_build_command_and_no_cu
     defender_dir = plant_tree(tmp_path / "product tree", copy_code=False)
     expected = image_tag(defender_dir)
     with _tenant_batch(tmp_path, defender_dir) as (delivery, batch):
-        drafts = batch.draft_root.parent
+        # `<T>/drafts`, whichever depth the staged root sits at (#1108 P4 amendment A / U9).
+        drafts = next(p for p in batch.draft_root.parents if p.name == "drafts")
         before = _tree(drafts)
 
         def fault(docker: RecordingDocker) -> str:

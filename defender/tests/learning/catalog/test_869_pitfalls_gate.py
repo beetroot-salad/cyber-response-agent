@@ -79,6 +79,6 @@ def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
     C.put(lane.skills_dir / "fakesys" / "execution.md", "# fakesys\n")
     with pytest.raises(LeadAuthorError):
         pitfalls_curator._verify_pitfalls_state(
-            Path(lane.batch.draft_root), change_set=lane.batch.change_set(), systems=DECLARED,
+            lane.root, change_set=lane.batch.change_set(), systems=DECLARED,
             reducer_offered=False, tree_for=DrainTrees.open((lane.skills_dir,)).tree_for)
     assert lane.landed() == []

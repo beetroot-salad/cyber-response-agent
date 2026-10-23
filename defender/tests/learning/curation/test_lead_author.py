@@ -436,13 +436,69 @@ def test_verify_skills_state_accepts_in_scope_edits(tmp_path: Path):
 
 
 def test_verify_skills_state_rejects_stray_outside_skills(tmp_path: Path):
-    """An edit outside the lane's `skills/` refuses the claim, naming it outside, and nothing
-    lands (#1175; after P4 the ChangeSet's lane check may be the refuser: either refusal type)."""
+    """An edit outside the lane's `skills/` refuses the claim, naming it outside: nothing lands
+    and the draft is back at its base (#1175, U10). The refuser may be the lane gate or the
+    ChangeSet's lane check — both are a refused claim; how the drain routes it is below."""
     from defender.learning.author.version_control import DeliveryRefused
 
     lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
     _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("stray"), "outside",
              errors=(lead_author.LeadAuthorError, DeliveryRefused))
+    assert lane.drift() == []
+
+
+def _queue_entry(paths, where: str, name: str) -> dict | None:
+    """The lead-author queue's request `name` in `where` (`""` queued, `"failed"`,
+    `"inflight"`), or `None`."""
+    at = location_path(paths.state_root) / "author-queue" / where / f"{name}.json"
+    return json.loads(at.read_text(encoding="utf-8")) if at.is_file() else None
+
+
+@pytest.mark.parametrize("fault", ["refused-claim", "unrelated"])
+def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
+        tmp_path: Path, fault: str, monkeypatch):
+    """U10 (human, 2026-10-23): the lead-author claim loop serving a run whose claim is refused
+    (a stray outside `skills/`) keeps the request queued with ONE attempt — not dead-lettered,
+    not left in flight — nothing lands and the draft is back at its base. Control: an unrelated
+    fault (the spawn raises) keeps the lane's existing rule, an immediate dead letter
+    (`lead-author-error`, #952), and is not counted as a refused claim (#1175, P4 O7)."""
+    from defender.learning.core import drains
+    from defender.tests.support.learning.core._state1135 import enqueue_run, state_for_paths
+
+    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
+    lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
+    run_dir = curation_run_dir("lead-u10")
+    state = state_for_paths(lane.paths)
+    enqueue_run(state, run_dir)
+
+    def agent(rd, handoffs, pending, *, box=None):
+        if fault == "unrelated":
+            raise RuntimeError("unrelated spawn fault")
+        (lane.skills_dir.parent / "other" / "stray.md").write_text("stray")
+        return 0
+
+    def serve(paths, st, run, *, box=None, on_done, **_kw):
+        deps = _deps(lane, extract=lambda rd: ([], [_executed_lead()]),
+                     synthesize=lambda executed, **_kw: [], invoke_agent=agent,
+                     build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
+                     discover_system_drafts=lambda: [])
+        lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps, box=box, on_done=on_done)
+
+    drains._drain_lead_author_markers(lane.paths, state, serve,
+                                      accept_tenant=drains._tenant_acceptor(None))
+
+    name = run_dir.name
+    assert lane.landed() == []
+    assert lane.drift() == []
+    assert _queue_entry(lane.paths, "inflight", name) is None
+    if fault == "unrelated":
+        assert _queue_entry(lane.paths, "", name) is None
+        assert _queue_entry(lane.paths, "failed", name) is not None
+        return
+    assert _queue_entry(lane.paths, "failed", name) is None, "a refused claim was dead-lettered"
+    queued = _queue_entry(lane.paths, "", name)
+    assert queued is not None, "the refused claim's request was lost"
+    assert queued.get("attempts") == 1
 
 
 @pytest.mark.parametrize(("case", "mutate", "match"), [
@@ -712,6 +768,7 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_path: Path):
     lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
     _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("stray"), "",
              errors=(lead_author.LeadAuthorError, DeliveryRefused))
+    assert lane.drift() == []
 
 
 def test_run_returns_rc2_on_nonzero_agent_exit(tmp_path: Path):

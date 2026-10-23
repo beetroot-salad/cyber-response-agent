@@ -254,25 +254,68 @@ def test_o2_the_tacit_adapter_answers_from_the_run_copys_registry_and_not_anothe
 
 # --- R-I6: traversal at the copy's geometry ---------------------------------------------------
 
+class StageClimbReplay(R.ReplayFn):
+    """`ReplayFn` whose climb turns are built at its first request, once the live run copy
+    exists: it lists the copy's `stage/` on the host to learn the staged token's name (only one
+    run copy exists), then scripts reads of `/agent/../<token>` and `/agent/../../owner`."""
+
+    __name__ = "StageClimbReplay"
+
+    def __init__(self, turns: list[R.Turn], tenant: Any, surface: str) -> None:
+        super().__init__(turns)
+        self.tenant = tenant
+        self.surface = surface
+        self.token: str | None = None
+        self.token_bytes: bytes = b""
+        self.owner_bytes: bytes = b""
+
+    def __call__(self, messages, info):
+        if self.calls == 0:
+            (root,) = list(B.run_copies(self.tenant).iterdir())
+            stage = root / "stage"
+            others = sorted(p.name for p in stage.iterdir() if p.name != "agent")
+            # The token climb: the staged token's own name when one is staged (U9); a placeholder
+            # name otherwise (the read gate must refuse the climb either way).
+            self.token = others[0] if others else "s-b-no-token-staged"
+            if others and (stage / self.token).is_file():
+                self.token_bytes = (stage / self.token).read_bytes()
+            if (root / "owner").is_file():
+                self.owner_bytes = (root / "owner").read_bytes()
+            self._turns[2:2] = [_read(self.surface, f"/agent/../{self.token}"),
+                                _read(self.surface, "/agent/../../owner")]
+        return super().__call__(messages, info)
+
+
 @pytest.mark.parametrize("surface", ["typed", "bash"])
 def test_r_i6_reads_climbing_out_of_the_agent_half_are_refused(tenants, tmp_path, monkeypatch,
                                                                 surface):
-    """R-I6: `/agent/..` climbs to whatever sits beside the copy's `agent/` (its `settings/`, the
-    staged token, an owner record). A read of the copy's `settings/` through it is refused and
-    its bytes never reach the model; a listing of `/agent/..` shows the model neither
-    `settings/` nor any other sibling of `agent/`. Positive control: the own-copy lesson read in
-    the same run returns its bytes."""
+    """R-I6/U9: `/agent/..` is the copy's `stage/` (the staged token) and `/agent/../..` the copy
+    root (its `settings/`, its `owner` record). Reads of the copy's settings, the token and the
+    owner record through those climbs are each refused and their bytes never reach the model; a
+    listing of `/agent/..` shows the model neither the token nor any copy sibling. Positive
+    control: the own-copy lesson read in the same run returns its bytes."""
     t, _other = tenants
-    climb = f"/agent/../{B.CMDB_ENV}"
-    listing = R.Turn(tool_calls=[("bash", {"command": "ls -a /agent/.."})])
-    main = R.ReplayFn([_read(surface, LESSON_IN_BOX), _read(surface, climb), listing,
-                       R.Turn(text="done")])
+    climb = f"/agent/../../{B.CMDB_ENV}"
+    listing = R.Turn(tool_calls=[("bash", {"command": "ls -a /agent/.. /agent/../.."})])
+    main = StageClimbReplay([_read(surface, LESSON_IN_BOX), _read(surface, climb), listing,
+                             R.Turn(text="done")], t, surface)
     out = B.drive_main(t, tmp_path, monkeypatch, main=main)
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
+    assert main.calls == 6, f"the model did not finish its script: {main.calls}"
     assert B.SEEDED_MARK in main.seen[1], "control: the own-copy read returned its bytes"
-    assert main.seen[2].count("Blocked") == main.seen[1].count("Blocked") + 1, (
-        f"R-I6: {climb} was not refused: {main.seen[2][-400:]}")
-    assert B.MARK_KEY not in "\n".join(main.seen), "R-I6: the copy's settings reached the model"
-    shown = main.seen[3][len(main.seen[2]):]
-    assert "settings" not in shown, f"R-I6: `/agent/..` lists the copy's siblings: {shown[-400:]}"
+    for i, what in ((2, climb), (3, f"/agent/../{main.token}"), (4, "/agent/../../owner")):
+        assert main.seen[i].count("Blocked") == main.seen[i - 1].count("Blocked") + 1, (
+            f"R-I6: {what} was not refused: {main.seen[i][-400:]}")
+    everything = "\n".join(main.seen)
+    assert B.MARK_KEY not in everything, "R-I6: the copy's settings reached the model"
+    assert main.owner_bytes, "premise (U9): the live run copy has an `owner` record"
+    assert main.owner_bytes.decode(errors="replace").strip() not in everything, (
+        "R-I6: the copy's owner record reached the model")
+    if main.token_bytes.strip():
+        assert main.token_bytes.decode(errors="replace").strip() not in everything, (
+            "R-I6: the staged token's bytes reached the model")
+    shown = main.seen[5][len(main.seen[4]):]
+    for sibling in ("settings", "owner", main.token):
+        assert sibling not in shown, (
+            f"R-I6: a listing above `/agent` shows the copy's {sibling}: {shown[-400:]}")
