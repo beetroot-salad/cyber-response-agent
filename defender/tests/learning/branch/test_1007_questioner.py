@@ -163,7 +163,8 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
                              tenant_agent=agent)
     section = orient._build_lessons_section(env, signature, orient._shim)
 
-    assert section and "DEFENDER-LESSON-DESCRIPTION" in section, (
+    assert section, "the lessons shim produced nothing at all"
+    assert "DEFENDER-LESSON-DESCRIPTION" in section, (
         "control: the defender's own lesson for this signature did not reach the section, so "
         f"the absences below would hold vacuously: {section!r}")
     assert "QUESTIONER-ONLY-DESCRIPTION" not in section, (
