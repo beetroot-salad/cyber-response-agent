@@ -730,15 +730,24 @@ def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
 
 
 # ---------------------------------------------------------------------------------------------
-# OD22 (fail closed): a missing or unparseable host record is never read as fresh
+# OD22' (fail closed where a record should exist)
+#   (1) an investigation with no run yet: API `knowledge: null`;
+#   (2) a run with no host record AND no `knowledge_source` in its stamp (a pre-P4 run, never
+#       rewritten): no banner, API null, ticket unchanged;
+#   (3) host record missing while the stamp carries `knowledge_source`, or the record is
+#       unparseable: unreadable -> stale / operator, no commit.
 # ---------------------------------------------------------------------------------------------
 
-#: The two ways a host record can fail to speak: absent, or bytes that are not a record.
-UNREADABLE_RECORDS = {"missing": None, "corrupt": '{"kind": "fresh", "commit": '}
+#: Case (3): how the host record fails while a record should exist (the stamp names a source).
+UNREADABLE_RECORDS = {"missing-with-stamp": None, "corrupt": '{"kind": "fresh", "commit": '}
+TODAYS_VERDICT_BODY = (f"benign — {HOST_CAUSE}\n\n"
+                       "The account is a decommissioned service identity; no egress followed.")
 
 
 def plant_unreadable_host_record(run_dir: Path, how: str) -> None:
-    """Leave the host record missing, or write a truncated one (JSON that does not parse)."""
+    """Case (3): the stamp carries a (fresh) `knowledge_source` — so a host record should exist —
+    and the host record is missing, or holds a truncated record (JSON that does not parse)."""
+    stamp_knowledge_source(run_dir, stamp_view(knowledge_source("fresh")))
     path = host_record_path(run_dir)
     path.unlink(missing_ok=True)
     text = UNREADABLE_RECORDS[how]
@@ -746,19 +755,23 @@ def plant_unreadable_host_record(run_dir: Path, how: str) -> None:
         path.write_text(text, encoding="utf-8")
 
 
+def plant_pre_p4_run(run_dir: Path) -> None:
+    """Case (2): a run from before P4 — no host record, and no `knowledge_source` in its stamp."""
+    host_record_path(run_dir).unlink(missing_ok=True)
+    stamp_knowledge_source(run_dir, None)
+
+
 @pytest.mark.parametrize("how", list(UNREADABLE_RECORDS))
 def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_commit_on_the_ticket(
         tmp_path, monkeypatch, how):
-    """OD22: with the host record missing or corrupt the ticket claims no freshness: the comment
-    adds the operator-kind sentence (customer words: awaiting operator action) and names no commit
-    id. Control: the same run with a fresh record posts today's comment."""
+    """OD22' (3): where a host record should exist but is missing or corrupt, the ticket claims
+    no freshness: the comment adds the operator-kind sentence (awaiting operator action) and names
+    no commit id. Control: the same run with a fresh record posts today's comment."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     fresh, _ = _posted(tmp_path, "verdict", knowledge_source("fresh"), label=f"od22-fresh-{how}")
-    assert fresh == (f"benign — {HOST_CAUSE}\n\n"
-                     "The account is a decommissioned service identity; no egress followed."), fresh
+    assert fresh == TODAYS_VERDICT_BODY, fresh
 
     run_dir = make_run(tmp_path, name=f"s-c-od22-{how}")
-    stamp_knowledge_source(run_dir, stamp_view(knowledge_source("fresh")))  # the box says fresh
     plant_unreadable_host_record(run_dir, how)
     store = FakeStore()
     record(run_dir, store)
@@ -777,27 +790,80 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
         f"OD22: the {how}-record sentence carries something shaped like a commit id: {sentence!r}")
 
 
-@pytest.mark.parametrize("how", list(UNREADABLE_RECORDS))
-def test_od22_the_api_serves_an_unreadable_host_record_as_stale_operator_with_no_commit(
-        tmp_path, how):
-    """OD22: the store maps a missing or corrupt host record to `knowledge: {status: stale,
-    stale_kind: operator, commit: null}`; control: a fresh record on the same path is `current`."""
-    inv = _investigation("inv-od22", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
-    client = _client(inv)
-    store = client.app.state.deps.investigations
-    run_dir = tmp_path / "runs" / "run-od22"
-    run_dir.mkdir(parents=True)
+def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
+    """OD22' (2): a run with no host record and no `knowledge_source` in its stamp (pre-P4; old
+    runs are not rewritten) posts exactly today's comment. Control on the same channel: the same
+    shape of run whose stamp DOES name a source (case 3) gets the operator sentence."""
+    use_mapping(monkeypatch, tmp_path / "dfn")
+    old = make_run(tmp_path, name="s-c-od22-pre-p4")
+    plant_pre_p4_run(old)
+    store = FakeStore()
+    record(old, store)
+    assert store.comment_body() == TODAYS_VERDICT_BODY, (
+        f"OD22': a pre-P4 run's comment changed: {store.comment_body()!r}")
 
-    text = write_host_record(run_dir, knowledge_source("fresh")).read_text(encoding="utf-8")
-    store.add_run_knowledge(_TENANT, inv.investigation_id, text)
+    control = make_run(tmp_path, name="s-c-od22-pre-p4-control")
+    plant_unreadable_host_record(control, "missing-with-stamp")
+    store = FakeStore()
+    record(control, store)
+    assert store.comment_body() != TODAYS_VERDICT_BODY, (
+        "positive control: a missing record where one should exist adds the operator sentence")
+
+
+def test_od22_an_investigation_with_no_run_serves_null_knowledge():
+    """OD22' (1): an investigation with no run yet serves `knowledge: null` — seeded without
+    knowledge, and through `add_run_knowledge(..., None)` (no record, no stamp). Control: a
+    fresh record's text on the same investigation is served `current`."""
+    inv = _investigation("inv-no-run", None)
+    client = _client(inv)
+    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    assert "knowledge" in served, served
+    assert served["knowledge"] is None, served
+
+    store = client.app.state.deps.investigations
+    store.add_run_knowledge(_TENANT, inv.investigation_id, None)
+    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    assert served.get("knowledge", "absent") is None, (
+        f"OD22': an investigation with no run is served {served.get('knowledge', 'absent')!r}")
+
+    store.add_run_knowledge(_TENANT, inv.investigation_id,
+                            json.dumps(knowledge_source("fresh")))
     served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge") == _knowledge("current"), served
 
-    plant_unreadable_host_record(run_dir, how)
-    path = host_record_path(run_dir)
-    store.add_run_knowledge(_TENANT, inv.investigation_id,
-                            path.read_text(encoding="utf-8") if path.exists() else None)
+
+#: The API seam's inputs for each OD22' run case: (host record text, the stamp's source).
+API_RUN_CASES = {
+    "pre-p4": (None, None, None),
+    "missing-with-stamp": (None, stamp_view(knowledge_source("fresh")),
+                           {"status": "stale", "commit": None, "stale_kind": "operator"}),
+    "corrupt": (UNREADABLE_RECORDS["corrupt"], stamp_view(knowledge_source("fresh")),
+                {"status": "stale", "commit": None, "stale_kind": "operator"}),
+}
+
+
+@pytest.mark.parametrize("case", list(API_RUN_CASES))
+def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case):
+    """OD22' through the store: a pre-P4 run (no record, no stamp source) serves null; a missing
+    record whose stamp names a source, or a corrupt record, serves `{status: stale, stale_kind:
+    operator, commit: null}`. Control: a fresh record's text on the same path is `current`.
+
+    ASSUMED SEAM (reported): `InMemoryStore.add_run_knowledge(tenant_id, investigation_id,
+    record_text: str | None, *, stamp_knowledge_source: Mapping | None = None)` — the host
+    record's text (`None`: no file) and the run stamp's `knowledge_source` (`None`: the stamp has
+    none, or there is no run). Both `None` -> `knowledge: null`."""
+    text, stamp_source, expected = API_RUN_CASES[case]
+    inv = _investigation(f"inv-od22-{case}", None)
+    client = _client(inv)
+    store = client.app.state.deps.investigations
+
+    store.add_run_knowledge(_TENANT, inv.investigation_id, json.dumps(knowledge_source("fresh")),
+                            stamp_knowledge_source=stamp_view(knowledge_source("fresh")))
     served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
-    assert served.get("knowledge") == {"status": "stale", "commit": None,
-                                       "stale_kind": "operator"}, (
-        f"OD22: a {how} host record is served as {served.get('knowledge')}")
+    assert served.get("knowledge") == _knowledge("current"), served
+
+    store.add_run_knowledge(_TENANT, inv.investigation_id, text,
+                            stamp_knowledge_source=stamp_source)
+    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    assert served.get("knowledge", "absent") == expected, (
+        f"OD22': the {case} run is served {served.get('knowledge', 'absent')!r}, not {expected!r}")

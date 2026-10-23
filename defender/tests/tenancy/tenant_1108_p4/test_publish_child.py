@@ -606,17 +606,21 @@ def _child_reported(line: object) -> str:
     return text
 
 
-@pytest.mark.parametrize("case", ["dirty-clone", "lock-held"])
+@pytest.mark.parametrize("case", ["dirty-clone", "lock-held", "misconfigured"])
 def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passed_through(
         tenant, issuer_config, tmp_path, child_env, case):
     """OD20: the REAL child process (through `CHILD_WRAPPER`) exits 0 for an outcome it reports,
     and the parent's line is the child's own: a dirty clone → `stale:operator <reason>`; a drain
-    holding the tenant lock with origin ahead → `stale:transient` naming the lock. Neither is
-    U11's "publish child failed". `current` is unchanged."""
+    holding the tenant lock with origin ahead → `stale:transient` naming the lock; no forge
+    binding → `misconfigured <reason>`, and through `run.main` that run refuses before message 0
+    although a snapshot exists (O9). None is U11's "publish child failed". `current` is
+    unchanged."""
     tenant.merge(B.MERGE_FILES)
     if case == "dirty-clone":
         (B.clone_dir(tenant) / "agent" / "lessons" / "stray-untracked.md").write_text(
             "an operator's stray edit\n", encoding="utf-8")
+    if case == "misconfigured":
+        unbind_forge(tenant)
     command, _spec, marks = B.child_command(tenant, tmp_path, issuer_config,
                                             network_timeout=30.0, locked_sleep=0)
     launch = B.launcher()
@@ -630,11 +634,24 @@ def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passe
     _child_reported(line)
     if case == "dirty-clone":
         _stale(line, "operator")
-    else:
+    elif case == "lock-held":
         _stale(line, "transient")
         assert "lock" in B.outcome_detail(line).lower(), (
             f"OD20: the lock-busy report does not name the lock: {line!r}")
+    else:
+        assert B.outcome_class(line) == "misconfigured", line
+        assert B.outcome_detail(line), f"a misconfiguration names its reason: {line!r}"
     _unchanged(tenant)
+    if case == "misconfigured":
+        import functools
+
+        out = B.launch(tenant, tmp_path, publish=functools.partial(launch, budget=30.0,
+                                                                   command=command))
+        assert _child_rc(marks) == 0, "OD20: the misconfigured child exited non-zero"
+        assert not out.reached, f"O9: a misconfigured launch reached its box: {out.text()}"
+        assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
+        assert out.refusal is not None, out.text()
+        _unchanged(tenant)
 
 
 def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proceeds_on_it(
@@ -670,6 +687,9 @@ def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proce
     assert "\n" not in reason, f"OD20: the recorded reason spans lines: {reason!r}"
     assert reason == B.outcome_detail(line), (
         f"OD20: the recorded reason is not the child's one-line reason: {reason!r} vs {line!r}")
+    for later in ("S-B-ERR-2", "S-B-ERR-3"):
+        assert later in reason, (
+            f"OD20: the forge error's later lines were truncated, not collapsed: {reason!r}")
 
 
 def test_o_budget_the_parents_default_budget_is_sixty_seconds():

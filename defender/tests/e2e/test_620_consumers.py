@@ -51,7 +51,8 @@ from defender.runtime.verbs import (  # noqa: E402
     verb,
 )
 from defender.tests.support.learning.curation._lead_author_1134 import held_skills, lead_trees, skills_view  # noqa: E402
-from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT  # noqa: E402
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT, place_tenant  # noqa: E402
+from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -615,19 +616,35 @@ _SPELLING_SPLIT = ["change-mgmt", "host-state", "threat-intel"]
 #: #1108 P4 flow 6: connect stages the tenant half (system skill, seed queries) in a host
 #: directory, and `validate_scaffold` checks THAT staged half — the product tree holds no
 #: system skill and no catalog (O1); only the adapter stays in the product (#1172).
-#: ASSUMED SEAM (S-G2): `validate_scaffold.py <system> --agent-dir <staged agent root>`, the
-#: staged root laid out as a tenant `agent/` is (`skills/<system>/{SKILL.md,execution.md}`,
-#: `skills/gather/queries/<system>/*.md`). A scaffold's staged half sits beside its code tree.
+#: ASSUMED SEAM (owner ruling 2026-10-23, one spelling with `tenant_1108_p4/test_connect_propose.py`):
+#: `validate_scaffold.py <system> --tenant <T> --staged <dir>`, the staged directory laid out as a
+#: tenant `agent/` is (`skills/<system>/{SKILL.md,execution.md}`,
+#: `skills/gather/queries/<system>/*.md`). A scaffold's staged half sits beside its code tree;
+#: the adapter checks still read the code tree `DEFENDER_DIR` names. `<T>` is a set-up tenant
+#: under a data root of the scaffold's own (its config check is advisory, as before).
 def _staged_agent(defender_dir: Path) -> Path:
     return defender_dir.with_name(defender_dir.name + "-agent")
+
+
+#: The tenant every scaffold validation names (`--tenant`), set up beside the staged half.
+SCAFFOLD_TENANT = D9_TENANT_ID
+
+
+def _scaffold_data_root(staged: Path) -> Path:
+    """A data root beside the staged half holding `SCAFFOLD_TENANT`, set up once."""
+    root = staged.with_name(staged.name + "-data-root")
+    if not (root / SCAFFOLD_TENANT).exists():
+        place_tenant(root, SCAFFOLD_TENANT)
+    return root
 
 
 def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER,
                            agent_dir: Path | None = None):
     staged = agent_dir if agent_dir is not None else _staged_agent(defender_dir)
-    env = {"DEFENDER_DIR": str(defender_dir), "PATH": os.environ.get("PATH", "")}
+    env = {"DEFENDER_DIR": str(defender_dir), "PATH": os.environ.get("PATH", ""),
+           "DEFENDER_DATA_ROOT": str(_scaffold_data_root(staged))}
     return subprocess.run([sys.executable, str(VALIDATE_SCAFFOLD), system,
-                           "--agent-dir", str(staged)],
+                           "--tenant", SCAFFOLD_TENANT, "--staged", str(staged)],
                           capture_output=True, text=True, env=env, timeout=60)
 
 

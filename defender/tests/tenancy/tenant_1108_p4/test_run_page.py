@@ -178,11 +178,12 @@ def test_o_warn_fresh_and_pinned_runs_pages_carry_no_stale_banner(run_dir, kind,
         "positive control: the same run recorded stale shows a banner on the same page")
 
 
-@pytest.mark.parametrize("how", ["missing", "corrupt"])
+@pytest.mark.parametrize("how", ["missing-with-stamp", "corrupt"])
 def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, how):
-    """OD22 (fail closed): with the host record missing or corrupt, the page claims no freshness
-    whatever the box-readable stamp says: a stale banner of kind operator saying the knowledge
-    record is unreadable. Control: the same run with a fresh host record shows no banner."""
+    """OD22' (3): where a host record should exist (the stamp names a source) but is missing, or
+    the record is corrupt, the page claims no freshness: a stale banner of kind operator saying
+    the knowledge record is unreadable. Control: the same run with a fresh host record shows no
+    banner."""
     from defender.tests.tenancy.tenant_1108_p4.test_stale_visibility import (
         plant_unreadable_host_record,
     )
@@ -190,12 +191,31 @@ def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, h
     _record(run_dir, knowledge_source("fresh"))
     assert "stale" not in _visible(_page(run_dir)).lower(), "positive control"
 
-    plant_unreadable_host_record(run_dir, how)  # the stamp still says fresh
+    plant_unreadable_host_record(run_dir, how)  # the stamp says fresh
     page = _visible(_page(run_dir)).lower()
     assert "stale" in page, f"OD22: a {how} host record left the page claiming fresh"
     assert "operator" in page, f"OD22: the {how}-record banner is not of kind operator"
     assert "knowledge record unreadable" in page, (
         f"OD22: the {how}-record banner does not say the knowledge record is unreadable")
+
+
+def test_od22_a_pre_p4_run_page_shows_no_banner(run_dir):
+    """OD22' (2): a run with no host record and no `knowledge_source` in its stamp (pre-P4; old
+    runs are not rewritten) shows no banner. Control on the same page: the same run whose stamp
+    names a source with the record missing (case 3) shows the unreadable banner."""
+    from defender.tests.tenancy.tenant_1108_p4.test_stale_visibility import (
+        plant_pre_p4_run,
+        plant_unreadable_host_record,
+    )
+
+    plant_pre_p4_run(run_dir)
+    page = _visible(_page(run_dir)).lower()
+    assert "stale" not in page, "OD22': a pre-P4 run's page carries a stale banner"
+    assert "knowledge record unreadable" not in page, "OD22': a pre-P4 run is called unreadable"
+
+    plant_unreadable_host_record(run_dir, "missing-with-stamp")
+    assert "knowledge record unreadable" in _visible(_page(run_dir)).lower(), (
+        "positive control: a missing record where one should exist shows the unreadable banner")
 
 
 def test_o_u6_the_run_page_has_no_lesson_history_section_or_toc_entry(run_dir):
