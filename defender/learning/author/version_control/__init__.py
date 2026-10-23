@@ -3,7 +3,7 @@
 from .auth import ForgejoAuthError, ForgejoIdentity
 from .batch import Batch
 from .delivery import TenantDelivery
-from .exports import TenantExport, current_export, tenant_lock
+from .exports import TenantExport, current_export, materialise_export, tenant_lock
 from .model import (
     AgentChange,
     ChangeSet,
@@ -28,5 +28,6 @@ __all__ = [
     "TenantDelivery",
     "TenantExport",
     "current_export",
+    "materialise_export",
     "tenant_lock",
 ]

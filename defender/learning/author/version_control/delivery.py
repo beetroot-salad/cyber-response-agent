@@ -25,6 +25,7 @@ from .auth import ForgejoIdentity
 from .batch import Batch
 from .commits import CommitMaker, _Line
 from .exports import (
+    DRAFT_STAGE,
     draft_path,
     TenantExport,
     build_draft,
@@ -109,7 +110,9 @@ class TenantDelivery:
             self._refuse_taken(batch_id, branch)
             self.repository.fetch()
             with tenant_lock(self.tenant):
-                export = publish_locked(self.tenant, self.repository)
+                export = publish_locked(
+                    self.tenant, self.repository, temporaries_only=True
+                )
                 self._refuse_taken(batch_id, branch)
                 build_draft(
                     self.tenant, self.repository, batch_id, export.commit, declared
@@ -124,7 +127,7 @@ class TenantDelivery:
                 id=batch_id,
                 branch=branch,
                 export=export,
-                draft_root=draft_path(self.tenant, batch_id),
+                draft_root=draft_path(self.tenant, batch_id) / DRAFT_STAGE,
                 lanes=declared,
                 tenant=self.tenant,
                 defender_dir=self.defender_dir,

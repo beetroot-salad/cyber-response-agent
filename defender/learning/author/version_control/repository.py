@@ -83,58 +83,26 @@ NETWORK_TIMEOUT = 120.0
 _FILTERS_OFF = "* -filter"
 
 
+def _require_own_repository(path: Path, env: dict[str, str]) -> None:
+    top = _git.git(["rev-parse", "--show-toplevel"], cwd=path, env=env)
+    if Path(top).resolve() != path.resolve():
+        raise DeliveryRefused(
+            f"tenant knowledge is not its own versioned git repository: {path}"
+        )
+
+
 @dataclass(frozen=True, repr=False)
-class GitRepository:
-    """Git semantics for one tenant clone, with an explicit Forgejo client and identity.
-    Raw git syntax and remote authentication stay here; delivery coordinates domain steps.
-    """
+class LocalRepository:
+    """Git's local semantics for one tenant clone: its objects, refs, index and checkout, with
+    no forge, no identity and no network (flow 2's materialise reads through this alone)."""
 
     path: Path
-    origin: str
-    forge: ForgejoForge
-    identity: ForgejoIdentity
-    network_timeout: float = NETWORK_TIMEOUT
 
     @classmethod
-    def open(
-        cls,
-        path: Path,
-        *,
-        tenant_id: str,
-        origin: str,
-        identity: ForgejoIdentity,
-        client: httpx.Client,
-        network_timeout: float = NETWORK_TIMEOUT,
-    ) -> GitRepository:
-        if (
-            isinstance(network_timeout, bool)
-            or not isinstance(network_timeout, (int, float))
-            or not math.isfinite(network_timeout)
-            or network_timeout <= 0
-            or network_timeout + CLOCK_SKEW >= TOKEN_TTL
-        ):
-            raise DeliveryRefused(
-                "Network timeout must fit within the short-lived token budget"
-            )
-        if identity.tenant_id != tenant_id:
-            raise DeliveryRefused("The Forgejo identity belongs to a different tenant")
-        env = _local_env()
-        top = _git.git(["rev-parse", "--show-toplevel"], cwd=path, env=env)
-        if Path(top).resolve() != path.resolve():
-            raise DeliveryRefused(
-                f"tenant knowledge is not its own versioned git repository: {path}"
-            )
-        for ref in ("refs/heads/main", "refs/remotes/origin/main"):
-            if not _git.git_ok(
-                ["show-ref", "--verify", "--quiet", ref], cwd=path, env=env
-            ):
-                raise DeliveryRefused(
-                    f"tenant repository is missing its main ref {ref}"
-                )
-        forge = ForgejoForge(origin=origin, identity=identity, client=client)
-        forge.repository_id()
-        forge.verify_main_protection()
-        return cls(path, origin, forge, identity, float(network_timeout))
+    def open_local(cls, path: Path) -> LocalRepository:
+        """The clone at `path`, refused unless it is its own git repository."""
+        _require_own_repository(path, _local_env())
+        return cls(path)
 
     def _git(
         self,
@@ -153,6 +121,12 @@ class GitRepository:
     def revision(self, rev: str) -> str:
         return self._git(["rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"])
 
+    def holds_commit(self, commit: str) -> bool:
+        """Whether the clone's objects hold `commit` as a commit (no fetch is made)."""
+        return _git.git_ok(
+            ["cat-file", "-e", f"{commit}^{{commit}}"], cwd=self.path, env=_local_env()
+        )
+
     def branch_tip(self, branch: str) -> str | None:
         """The commit `refs/heads/<branch>` names, or `None` when the clone has no such
         branch."""
@@ -164,15 +138,6 @@ class GitRepository:
         )
         return tip or None
 
-    def _transport(self) -> GitTransport:
-        return GitTransport(self.path, self.origin, self.identity, self.network_timeout)
-
-    def fetch(self) -> None:
-        self._transport().fetch()
-
-    def push(self, commit: str, branch: str) -> None:
-        self._transport().push(commit, branch)
-
     def entries(self, rev: str, paths: Sequence[str], *, recursive: bool):
         return _tree_entries(self.path, rev, paths, _local_env(), recursive=recursive)
 
@@ -181,13 +146,6 @@ class GitRepository:
 
     def commits_since(self, base: str, tip: str) -> list[str]:
         return self._git(["rev-list", f"{base}..{tip}"]).split()
-
-    def pull_requests(self, commits: Iterable[str]) -> list[PullRequest]:
-        wanted = frozenset(commits)
-        return [pr for pr in self.forge.pull_requests() if pr.head_sha in wanted]
-
-    def open_pr(self, *, branch: str, title: str, body: str) -> str:
-        return self.forge.open_pr(base="main", head=branch, title=title, body=body)
 
     def prepare_publish(self) -> str:
         """Validate the clone under its tenant lock, without performing a checkout yet."""
@@ -329,3 +287,68 @@ class GitRepository:
             return self._git(["write-tree"], env=staged), after
         finally:
             index.unlink(missing_ok=True)
+
+
+@dataclass(frozen=True, repr=False)
+class GitRepository(LocalRepository):
+    """Git semantics for one tenant clone, with an explicit Forgejo client and identity.
+    Raw git syntax and remote authentication stay here; delivery coordinates domain steps.
+    """
+
+    origin: str
+    forge: ForgejoForge
+    identity: ForgejoIdentity
+    network_timeout: float = NETWORK_TIMEOUT
+
+    @classmethod
+    def open(
+        cls,
+        path: Path,
+        *,
+        tenant_id: str,
+        origin: str,
+        identity: ForgejoIdentity,
+        client: httpx.Client,
+        network_timeout: float = NETWORK_TIMEOUT,
+    ) -> GitRepository:
+        if (
+            isinstance(network_timeout, bool)
+            or not isinstance(network_timeout, (int, float))
+            or not math.isfinite(network_timeout)
+            or network_timeout <= 0
+            or network_timeout + CLOCK_SKEW >= TOKEN_TTL
+        ):
+            raise DeliveryRefused(
+                "Network timeout must fit within the short-lived token budget"
+            )
+        if identity.tenant_id != tenant_id:
+            raise DeliveryRefused("The Forgejo identity belongs to a different tenant")
+        env = _local_env()
+        _require_own_repository(path, env)
+        for ref in ("refs/heads/main", "refs/remotes/origin/main"):
+            if not _git.git_ok(
+                ["show-ref", "--verify", "--quiet", ref], cwd=path, env=env
+            ):
+                raise DeliveryRefused(
+                    f"tenant repository is missing its main ref {ref}"
+                )
+        forge = ForgejoForge(origin=origin, identity=identity, client=client)
+        forge.repository_id()
+        forge.verify_main_protection()
+        return cls(path, origin, forge, identity, float(network_timeout))
+
+    def _transport(self) -> GitTransport:
+        return GitTransport(self.path, self.origin, self.identity, self.network_timeout)
+
+    def fetch(self) -> None:
+        self._transport().fetch()
+
+    def push(self, commit: str, branch: str) -> None:
+        self._transport().push(commit, branch)
+
+    def pull_requests(self, commits: Iterable[str]) -> list[PullRequest]:
+        wanted = frozenset(commits)
+        return [pr for pr in self.forge.pull_requests() if pr.head_sha in wanted]
+
+    def open_pr(self, *, branch: str, title: str, body: str) -> str:
+        return self.forge.open_pr(base="main", head=branch, title=title, body=body)

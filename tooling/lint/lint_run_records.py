@@ -220,6 +220,8 @@ _LOCATION_MODULE = "defender.records._locations"
 _LOCATION_FILE = "records/_locations.py"
 _EXPORT_OWNER = "learning/author/version_control/exports.py"
 _RECORD_OWNER = "learning/author/version_control/record.py"
+#: The run-safe reader of published knowledge (#1108 P4: a run never imports the delivery package).
+_EXPORT_READER = "tenancy/_exports.py"
 RECORD_LOCATION_NAMES = frozenset({
     "tenant_root", "row_path", "runs", "sessions", "episodes", "learning", "worktrees",
     "data_root", "runs_base", "trust_root", "sessions_dir", "runs_legacy", "episodes_legacy",
@@ -230,9 +232,11 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("learning_root", "learning/core/state.py"): frozenset({"LearningState.open", "LearningAdoption.__init__"}),
     ("data_root", "learning/core/state.py"): frozenset({"LearningAdoption.__init__"}),
     ("session_trust_root", "runtime/session_store/_write.py"): frozenset({"open_store"}),
-    ("exports_root", _EXPORT_OWNER): frozenset({"current_export", "publish_locked", "write_export"}),
-    ("drafts_root", _EXPORT_OWNER): frozenset({"publish_locked", "build_draft", "draft_path"}),
+    ("exports_root", _EXPORT_OWNER): frozenset({"materialise_export", "publish_locked", "write_export"}),
+    ("drafts_root", _EXPORT_OWNER): frozenset({"sweep_dead_owners", "build_draft", "draft_path"}),
     ("knowledge_lock", _EXPORT_OWNER): frozenset({"tenant_lock"}),
+    ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
+    ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
     ("commit_record", _RECORD_OWNER): frozenset({"_record_made", "_Record.read"}),
 }
 _ATTRIBUTE_ROLES = {

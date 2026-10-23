@@ -11,11 +11,12 @@ import shutil
 import stat
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
 from defender import _flock, _io
+from defender.tenancy._exports import POINTER as _POINTER
+from defender.tenancy._exports import TenantExport, current_export
 from defender.tenancy._tenant import Tenant, parse_tenant_id_bytes
 
 from .files import _remove_entry, _rename_new, _sweep_temporaries
@@ -26,56 +27,16 @@ from .model import (
     DeliveryRefused,
     LockBusy,
     _plain_component,
+    _refusals,
 )
-from .repository import GitRepository
+from .owner import owner_alive, write_owner
+from .repository import GitRepository, LocalRepository
 
-#: The pointer file in `<T>/exports/` naming the latest published export.
-_POINTER = "current"
 #: The name an export is written under before it is renamed into place.
 _PUBLISHING_PREFIX = ".publishing-"
 #: What a draft is built under (`.<id>-<rand>`) before it is renamed into place: a leading dot
 #: is outside the batch-id grammar, so no draft is ever named so.
 _DRAFT_TEMPORARY = "."
-
-
-@dataclass(frozen=True)
-class TenantExport:
-    """The tenant's knowledge at one commit: `path` (`<T>/exports/<commit>/`) holds exactly that
-    commit's `agent/` and `settings/` regular blobs, written from git objects by the host and
-    never changed once published."""
-
-    commit: str
-    path: Path
-
-
-def current_export(tenant: Tenant) -> TenantExport:
-    """The export `<T>/exports/current` names, read from the files alone: no git and no process
-    (P4's runs have neither). An absent or empty pointer, one that is not an object id (one
-    leading out of `exports/` included), or one naming a missing export is `DeliveryRefused`."""
-    exports = _unwrap_exports_root(tenant.exports)
-    with _io.bind(exports) as folder:
-        # Text, decoded with replacement: an oid is ASCII, so any byte that is not fails the
-        # match below rather than the read.
-        pointer = folder.read(_POINTER, errors="replace")
-        if pointer.text is None:
-            why = "it is absent" if pointer.absent else pointer.refusal
-            raise DeliveryRefused(
-                f"no export is published for tenant {tenant.id}: "
-                f"{exports / _POINTER}: {why}"
-            )
-        commit = pointer.text.removesuffix("\n")
-        if not _OID.fullmatch(commit):
-            raise DeliveryRefused(
-                f"the export pointer {exports / _POINTER} names no published "
-                f"export: {pointer.text[:80]!r}"
-            )
-        found = _io.stat_entry(folder, commit)
-    if found.st is None or not stat.S_ISDIR(found.st.st_mode):
-        raise DeliveryRefused(
-            f"the export pointer {exports / _POINTER} names {commit}, which is "
-            "not a published export folder"
-        )
-    return TenantExport(commit=commit, path=exports / commit)
 
 
 def _lock_holder(handle: IO[str]) -> str:
@@ -124,10 +85,31 @@ def _pointed_at(tenant: Tenant) -> str | None:
         return None
 
 
-def publish_locked(tenant: Tenant, repository: GitRepository) -> TenantExport:
-    """Sweep dead draft builds, turn tenant-named filters off, fast-forward, export, point
-    `current`: the caller holds the tenant's lock."""
-    _sweep_temporaries(_unwrap_drafts_root(tenant.drafts), _DRAFT_TEMPORARY)
+def sweep_dead_owners(tenant: Tenant, *, temporaries_only: bool = False) -> None:
+    """O-SWEEP: remove every draft and run copy (`<T>/drafts/*`, `<T>/run-knowledge/*`,
+    dot-named temporaries included) whose owner record names no running process (absent,
+    unreadable, or a pid now running with another start time all count as dead), as the entry
+    it is, no link below it followed. `temporaries_only`: the dot-named ones alone (a batch
+    start's sweep; a finished draft or copy waits for a publish). The caller holds the tenant's
+    lock. A live owner's folder is kept however old it is: a builder writes its owner record
+    inside its dot-named temporary before anything else, so a folder mid-build is owned."""
+    for root in (_unwrap_drafts_root(tenant.drafts), tenant.run_knowledge):
+        if not _io.entry_present(root):
+            continue
+        for name in sorted(os.listdir(root)):
+            if temporaries_only and not name.startswith(_DRAFT_TEMPORARY):
+                continue
+            if not owner_alive(root / name):
+                _remove_entry(root, name)
+
+
+def publish_locked(
+    tenant: Tenant, repository: GitRepository, *, temporaries_only: bool = False
+) -> TenantExport:
+    """Sweep dead owners' drafts and run copies (`temporaries_only`: their dot-named builds
+    alone), turn tenant-named filters off, fast-forward, export, point `current`: the caller
+    holds the tenant's lock."""
+    sweep_dead_owners(tenant, temporaries_only=temporaries_only)
     upstream = repository.prepare_publish()
     files = knowledge_at(tenant, repository, upstream)
     repository.fast_forward(upstream)
@@ -137,8 +119,44 @@ def publish_locked(tenant: Tenant, repository: GitRepository) -> TenantExport:
     return export
 
 
+#: How long materialise waits out a held tenant lock before giving up (flow 2's "short
+#: bounded retry"), and how often it tries again meanwhile.
+MATERIALISE_LOCK_WAIT = 10.0
+_LOCK_RETRY = 0.1
+
+
+def materialise_export(tenant: Tenant, commit: str) -> TenantExport:
+    """Flow 2: `<T>/exports/<commit>/` for a commit the clone already holds, written from its
+    git objects if absent, with publish's validation; an existing export is kept as it is.
+    Local only: no fetch, no forge, no issuer, and `current` is never touched. A commit the
+    clone does not hold is refused naming it. The tenant lock is taken with a short bounded
+    retry (`LockBusy` once it is still held after `MATERIALISE_LOCK_WAIT`); every write to
+    `exports/`, its temporaries' sweep included, happens under it."""
+    with _refusals():
+        if not isinstance(commit, str) or not _OID.fullmatch(commit):
+            raise DeliveryRefused(f"{commit!r} is not a full commit id")
+        repository = LocalRepository.open_local(tenant.knowledge)
+        if not repository.holds_commit(commit):
+            raise DeliveryRefused(
+                f"the tenant clone holds no commit {commit}: only a commit in the clone "
+                "can be materialised (nothing is fetched to find it)"
+            )
+        deadline = time.monotonic() + MATERIALISE_LOCK_WAIT
+        while True:
+            try:
+                with tenant_lock(tenant):
+                    existing = _unwrap_exports_root(tenant.exports) / commit
+                    if _io.entry_present(existing):
+                        return write_export(tenant, commit, {})
+                    return write_export(tenant, commit, knowledge_at(tenant, repository, commit))
+            except LockBusy:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(_LOCK_RETRY)
+
+
 def knowledge_at(
-    tenant: Tenant, repository: GitRepository, commit: str
+    tenant: Tenant, repository: LocalRepository, commit: str
 ) -> dict[str, bytes]:
     """`agent/` and `settings/` at `commit`, from git objects: every entry a regular blob
     at a plain path, `agent/.tenant-id` naming this tenant through `_tenant`'s parser."""
@@ -190,30 +208,37 @@ def write_export(tenant: Tenant, commit: str, files: dict[str, bytes]) -> Tenant
     return TenantExport(commit=commit, path=final)
 
 
+#: The folder inside a draft (U9) the box mounts: `agent/` and the box's start token only. The
+#: owner record sits beside it, in no mount.
+DRAFT_STAGE = "stage"
+
+
 def build_draft(
     tenant: Tenant,
-    repository: GitRepository,
+    repository: LocalRepository,
     batch_id: str,
     commit: str,
     lanes: tuple[str, ...],
 ) -> None:
-    """The draft of `commit`'s `agent/` (and each lane's folder), built whole in a fresh
-    `<T>/drafts/.<id>-<rand>` and renamed to `<T>/drafts/<id>`, refusing any entry already
+    """The draft (U9) `<T>/drafts/<id>/{owner, stage/agent/...}` of `commit`'s `agent/` (and
+    each lane's folder), built whole in a fresh `<T>/drafts/.<id>-<rand>` whose owner record
+    (this process) is written first, then renamed into place, refusing any entry already
     there. A build that fails removes its temporary; one killed leaves only that temporary,
-    which the next publish or batch start sweeps. The caller holds the lock."""
+    whose dead owner the next publish or batch start sweeps. The caller holds the lock."""
     files = agent_blobs(repository, commit)
     drafts = _unwrap_drafts_root(tenant.drafts)
     temporary = f"{_DRAFT_TEMPORARY}{batch_id}-{secrets.token_hex(4)}"
     try:
         with _io.hold_new(drafts, temporary, exclusive=True) as draft:
+            write_owner(drafts / temporary)
             draft.mkdir(
-                "agent"
+                f"{DRAFT_STAGE}/agent"
             )  # lint-unguarded-tree-write: ok — `Held.mkdir`, the rooted core's no-follow walk off the held temporary, not a `Path.mkdir`
             for rel, data in files.items():
-                draft.write(f"agent/{rel}", data, mode="create")
+                draft.write(f"{DRAFT_STAGE}/agent/{rel}", data, mode="create")
             for lane in lanes:
                 draft.mkdir(
-                    f"agent/{lane}"
+                    f"{DRAFT_STAGE}/agent/{lane}"
                 )  # lint-unguarded-tree-write: ok — `Held.mkdir` below the held temporary, no link followed
         _rename_new(drafts, temporary, batch_id)
     except BaseException:
@@ -221,7 +246,7 @@ def build_draft(
         raise
 
 
-def agent_blobs(repository: GitRepository, commit: str) -> dict[str, bytes]:
+def agent_blobs(repository: LocalRepository, commit: str) -> dict[str, bytes]:
     """`agent/` at `commit`, by path below it, each file's exact stored bytes, from git's
     objects: what the draft is copied from, derived against and reset to. An entry that is
     not a regular blob refuses (publish refused it already for an export commit)."""
@@ -237,7 +262,8 @@ def agent_blobs(repository: GitRepository, commit: str) -> dict[str, bytes]:
 
 
 def draft_path(tenant: Tenant, batch_id: str) -> Path:
-    """One batch's content folder; the tenant's drafts root stays with this owner."""
+    """One batch's draft folder `<T>/drafts/<id>` (its owner record and `stage/`); the tenant's
+    drafts root stays with this owner."""
     if not _plain_component(batch_id):
         raise DeliveryRefused(f"{batch_id!r} is not a plain batch id")
     return _unwrap_drafts_root(tenant.drafts) / batch_id
