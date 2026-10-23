@@ -78,10 +78,7 @@ def _revert_unlocked(
 def _has_state_root(paths) -> bool:
     """Whether the tenant's learning state root exists: without one no drain has run or can
     run (nothing but `tenant.py setup` creates it), so there is no lock to wait out."""
-    from defender.records._locations import _unwrap_learning_root
-
-    root = _unwrap_learning_root(paths.state_root)
-    return root.is_symlink() or root.exists()
+    return paths.tenant.learning_state_exists()
 
 
 def main(

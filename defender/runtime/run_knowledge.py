@@ -19,10 +19,9 @@ from pathlib import Path
 from typing import Any
 
 from defender import _io
-from defender.records._locations import _unwrap_exports_root, _unwrap_run_knowledge_root
 from defender.tenancy._exports import DeliveryRefused, current_export, regular_files
 from defender.tenancy._owner import owner_alive, write_owner
-from defender.tenancy._tenant import Tenant
+from defender.tenancy._tenant import Tenant, TenantRefused
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
 
 #: A full commit id, as an export is named: SHA-1 (40) or SHA-256 (64) lowercase hex.
@@ -134,16 +133,19 @@ def pinned_commit(raw: str) -> str:
 
 def _export_of(tenant: Tenant, commit: str) -> Path:
     """`<T>/exports/<commit>/`, judged without following it, or `KnowledgeRefused`."""
-    exports = _unwrap_exports_root(tenant.exports)
-    with _io.bind(exports) as folder:
-        found = _io.stat_entry(folder, commit)
+    try:
+        export = tenant.export_folder(commit)
+    except TenantRefused as refused:
+        raise KnowledgeRefused(f"tenant {tenant.id}'s knowledge at {commit!r}: {refused}") from refused
+    with _io.bind(export.parent) as folder:
+        found = _io.stat_entry(folder, export.name)
     if found.st is None or not stat.S_ISDIR(found.st.st_mode):
         why = "no export is published for it" if found.absent else (found.reason or "not a folder")
         raise KnowledgeRefused(
             f"tenant {tenant.id}'s knowledge at {commit} cannot be read: {why} "
-            f"({exports / commit}) — a run never materialises one (it has no git); publish or "
+            f"({export}) — a run never materialises one (it has no git); publish or "
             "materialise it first")
-    return exports / commit
+    return export
 
 
 def _current_commit(tenant: Tenant) -> str | None:
@@ -247,7 +249,7 @@ def copy_for_run(tenant: Tenant, source: KnowledgeSource, run_id: str) -> RunCop
     export = _export_of(tenant, source.commit)
     agent_files = _files_of(export / AGENT_HALF)
     settings_files = _files_of(export / SETTINGS_HALF)
-    copies = _unwrap_run_knowledge_root(tenant.run_knowledge)
+    copies = tenant.run_knowledge
     final = copies / run_id
     if _io.entry_present(final):
         if owner_alive(final):

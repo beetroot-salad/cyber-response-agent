@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from pydantic_core import core_schema
 
 from defender.records._locations import (
-    DataRoot, TenantRoot, TenantRecord, RunsBase, SessionsRoot, EpisodesRoot, LearningRoot, WorktreesRoot, ExportsRoot, DraftsRoot, RunKnowledgeRoot, KnowledgeLock, CommitRecord, LegacyRunsRoot, LegacyEpisodesRoot, _unwrap_data_root, _unwrap_tenant_root, _unwrap_runs_base, _unwrap_episodes_root,
+    DataRoot, TenantRoot, TenantRecord, RunsBase, SessionsRoot, EpisodesRoot, LearningRoot, WorktreesRoot, ExportsRoot, DraftsRoot, KnowledgeLock, CommitRecord, LegacyRunsRoot, LegacyEpisodesRoot, _unwrap_data_root, _unwrap_tenant_root, _unwrap_runs_base, _unwrap_episodes_root,
 )
 from defender.records import _alert_input
 from defender.records._run_id import mint_uuid, uuid_id_fault
@@ -351,11 +351,19 @@ class Tenant:
         return DraftsRoot(self._layout.drafts)
 
     @property
-    def run_knowledge(self) -> RunKnowledgeRoot:
+    def run_knowledge(self) -> Path:
         """Host-made per-run copies of one export (`<run_id>/{owner, settings/, stage/}`,
         #1108 P4 U9): what a run reads, removed when the run ends and swept by a publish once
         their owner is dead."""
-        return RunKnowledgeRoot(self._layout.run_knowledge)
+        return self._layout.run_knowledge
+
+    def export_folder(self, commit: str) -> Path:
+        """`<T>/exports/<commit>/`, the published export of one commit, for a reader that judges
+        it itself (a run's copy, a map of what a run read). `commit` must be one path segment:
+        anything else is `TenantRefused`, never joined (callers hold it to a commit id first)."""
+        if not commit or "/" in commit or commit in (".", ".."):
+            raise TenantRefused(f"{commit!r} does not name an export (one commit id, no path)")
+        return self._layout.exports / commit
 
     @property
     def publish_status(self) -> Path:
@@ -404,6 +412,11 @@ class Tenant:
 
         return RunsRepository(self)
 
+    def learning_state_exists(self) -> bool:
+        """Whether the tenant's learning state root is there (any entry, a link included):
+        without one no drain has run or can run (only `tenant.py setup` creates it)."""
+        return self._layout.learning.is_symlink() or self._layout.learning.exists()
+
     def learning_paths(self, paths_type: type[LoopPaths], *, repo_root: Path) -> LoopPaths:
         """Build learning configuration where the tenant's record root is owned."""
         return paths_type(repo_root=repo_root, state_dir=self.learning, tenant=self)
@@ -422,6 +435,14 @@ def clone_halves(tenant: Tenant) -> tuple[Path, Path]:
     run start hands its run copy's roots); they are the default roots of a tenant record resolved
     over the tenant's own folder by a caller that names no export (REPLAY-WT)."""
     return tenant.agent, tenant.settings
+
+
+def exports_folder_of(data_root: DataRoot, tenant_id: str) -> Path:
+    """`<T>/exports/` of the tenant `tenant_id` names under `data_root`, before (or without)
+    accepting it: a launcher that pins its runs to one commit reads the pointer there, and each
+    run it starts accepts the tenant itself (#1108 P4 OD10). The data root and the tenant id
+    meet the layout's own guards."""
+    return _TenantPaths(data_root, tenant_id).exports
 
 
 def requested_tenant_id(raw: object) -> TenantId:
@@ -956,6 +977,12 @@ def data_root_contains(root: DataRoot, path: Path) -> bool:
     """Whether an already absolute candidate is at or below the configured root."""
     location = _unwrap_data_root(root)
     return path == location or location in path.parents
+
+
+def data_root_for_child(root: DataRoot) -> Path:
+    """Explicit owner export of a configured root to a child process, which is handed
+    identifiers only (the tenant id and this root, #1108 P4 O8) and accepts the tenant itself."""
+    return _unwrap_data_root(root)
 
 
 def data_root_description(root: DataRoot) -> str:

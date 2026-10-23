@@ -48,7 +48,6 @@ def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
     gone: the map then says it has no tenant knowledge to show."""
     import json
 
-    from defender.records._locations import _unwrap_exports_root
     from defender.run_repository import RunPaths
     from defender.tenancy import _tenant
 
@@ -63,7 +62,7 @@ def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
         tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
     except _tenant.TenantRefused:
         return None
-    agent = _unwrap_exports_root(tenant.exports) / commit / "agent"
+    agent = tenant.export_folder(commit) / "agent"
     return agent if agent.is_dir() else None
 
 

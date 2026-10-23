@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from defender.records._locations import (_unwrap_exports_root, _unwrap_drafts_root, _unwrap_knowledge_lock, _unwrap_run_knowledge_root)
+from defender.records._locations import (_unwrap_exports_root, _unwrap_drafts_root, _unwrap_knowledge_lock)
 
 import contextlib
 import os
@@ -93,7 +93,7 @@ def sweep_dead_owners(tenant: Tenant, *, temporaries_only: bool = False) -> None
     start's sweep; a finished draft or copy waits for a publish). The caller holds the tenant's
     lock. A live owner's folder is kept however old it is: a builder writes its owner record
     inside its dot-named temporary before anything else, so a folder mid-build is owned."""
-    for root in (_unwrap_drafts_root(tenant.drafts), _unwrap_run_knowledge_root(tenant.run_knowledge)):
+    for root in (_unwrap_drafts_root(tenant.drafts), tenant.run_knowledge):
         if not _io.entry_present(root):
             continue
         for name in sorted(os.listdir(root)):

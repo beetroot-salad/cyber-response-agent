@@ -12,7 +12,7 @@ from pathlib import Path
 
 from defender import _io
 from defender.records._locations import DataRoot, _unwrap_exports_root, _unwrap_knowledge_lock
-from defender.tenancy._tenant import Tenant
+from defender.tenancy._tenant import Tenant, exports_folder_of
 
 
 class DeliveryRefused(Exception):
@@ -57,10 +57,7 @@ def current_export_of(data_root: DataRoot, tenant_id: str) -> TenantExport:
     before (or without) accepting it: a launcher that pins the runs it starts to one commit
     (`evaluations/held_out`, #1108 P4 OD10) reads the pointer, and each run it starts accepts
     the tenant itself. The data root and the tenant's folder meet the layout's own guards."""
-    from defender.tenancy._tenant import _TenantPaths
-
-    paths = _TenantPaths(data_root, tenant_id)
-    return _current_at(paths.exports, paths.tenant_id)
+    return _current_at(exports_folder_of(data_root, tenant_id), tenant_id)
 
 
 def _current_at(exports: Path, tenant_id: object) -> TenantExport:
