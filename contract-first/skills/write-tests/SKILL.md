@@ -17,7 +17,7 @@ The flow is **sketch and spike → design check → author thoroughly → review
 Almost all of this skill's cost is agents re-sending what they have already read: every step carries the whole context, and context grows with each file read. So spend on fewer steps over smaller histories.
 
 - **Share facts, not judgments.** Facts about the code (where entry points, seams, fixtures and owners are) are gathered once and shared through the code map. Each worker still derives from the design, on its own, what must hold. Workers open raw files to check a map entry they rely on or to read what they change, and report wrong entries so they are fixed once.
-- **Read narrowly.** Read the design once, whole: it is the shared language. For tests and source, outline first (`py-outline <file-or-dir>`, `--tests` for tests and fixtures) and read only the line ranges needed. Check an edit through its diff.
+- **Read narrowly.** Read the design once, whole: it is the shared language. For tests and source, outline first (the `LSP` tool's document symbols, or a grep for definitions where no language server is installed) and read only the line ranges needed. Check an edit through its diff.
 - **Dispatch fresh workers with a short brief** rather than resuming an idle one, whose cached history has expired and must be paid for again. Give each worker one slice and one return; one that has grown large (roughly a hundred tool calls) records its progress and hands back.
 - **Set the model on every dispatch**, as named per role below. Workers never inherit the orchestrator's model. Deterministic checks (collection, targeted test runs, lint, `spec-graph calls` and `spec-graph nullstub` for Python suites) need no agent; run them directly and read the results, not just the exit codes.
 

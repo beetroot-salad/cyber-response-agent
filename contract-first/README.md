@@ -38,7 +38,8 @@ traces escaped bugs back to the stage that missed them and feeds the attack deck
 is the lighter pass.
 
 Human attention goes to consequential design choices. Agents resolve the technical details those
-choices determine, and the merge stays human-approved.
+choices determine, and the merge stays human-approved. For why the pipeline is built this way,
+with diagrams, see [docs/design.md](docs/design.md).
 
 ## The skills
 
@@ -51,6 +52,7 @@ choices determine, and the merge stays human-approved.
 | `/contract-first:proven-fix` | Fixes a bug against settled intent: a test written red first, the smallest fix, then up to five hand-written mutants of the fix's deciding lines. |
 | `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the stages above; useful on its own. |
+| `/contract-first:guide` | Answers which lane fits a change, where a run stands and what comes next, and why the pipeline works as it does. Runs only when you type it. |
 | `/contract-first:handoff` | Writes the terse note that lets a cold session resume the work. |
 | `/contract-first:symbol-refs` | Resolves a symbol's cross-file references or definitions through Claude Code's `LSP` tool, checked against grep, where grep alone would also match comments and unrelated same-name symbols. |
 
