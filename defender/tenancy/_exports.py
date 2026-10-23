@@ -1,0 +1,75 @@
+"""A tenant's published knowledge, read from files alone: what a run (which has no git, no
+network and never imports the delivery package, #1108 P4 P-3) needs to find the export it
+copies, and who holds the tenant's knowledge lock. Writing exports is the delivery package's
+(`learning/author/version_control/exports.py`); this module only reads."""
+from __future__ import annotations
+
+import re
+import stat
+from dataclasses import dataclass
+from pathlib import Path
+
+from defender import _io
+from defender.records._locations import _unwrap_exports_root, _unwrap_knowledge_lock
+from defender.tenancy._tenant import Tenant
+
+
+class DeliveryRefused(Exception):
+    """The tenant cannot safely author or deliver this; the message names why."""
+
+
+#: The pointer file in `<T>/exports/` naming the latest published export.
+POINTER = "current"
+#: A full git object id (SHA-1 or SHA-256).
+OID = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+
+
+@dataclass(frozen=True)
+class TenantExport:
+    """The tenant's knowledge at one commit: `path` (`<T>/exports/<commit>/`) holds exactly that
+    commit's `agent/` and `settings/` regular blobs, written from git objects by the host and
+    never changed once published."""
+
+    commit: str
+    path: Path
+
+
+def current_export(tenant: Tenant) -> TenantExport:
+    """The export `<T>/exports/current` names, read from the files alone: no git and no process
+    (P4's runs have neither). An absent or empty pointer, one that is not an object id (one
+    leading out of `exports/` included), or one naming a missing export is `DeliveryRefused`."""
+    exports = _unwrap_exports_root(tenant.exports)
+    with _io.bind(exports) as folder:
+        # Text, decoded with replacement: an oid is ASCII, so any byte that is not fails the
+        # match below rather than the read.
+        pointer = folder.read(POINTER, errors="replace")
+        if pointer.text is None:
+            why = "it is absent" if pointer.absent else pointer.refusal
+            raise DeliveryRefused(
+                f"no export is published for tenant {tenant.id}: "
+                f"{exports / POINTER}: {why}"
+            )
+        commit = pointer.text.removesuffix("\n")
+        if not OID.fullmatch(commit):
+            raise DeliveryRefused(
+                f"the export pointer {exports / POINTER} names no published "
+                f"export: {pointer.text[:80]!r}"
+            )
+        found = _io.stat_entry(folder, commit)
+    if found.st is None or not stat.S_ISDIR(found.st.st_mode):
+        raise DeliveryRefused(
+            f"the export pointer {exports / POINTER} names {commit}, which is "
+            "not a published export folder"
+        )
+    return TenantExport(commit=commit, path=exports / commit)
+
+
+def knowledge_lock_holder(tenant: Tenant) -> int | None:
+    """The pid the tenant's knowledge lock file names (its holder writes it on taking the lock),
+    or `None` when it names none. Reads the file only: it says who took the lock last, not that
+    the lock is held now, so a caller pairs it with whether that process is still running."""
+    path = _unwrap_knowledge_lock(tenant.knowledge_lock)
+    with _io.bind(path.parent) as folder:
+        read = folder.read(path.name, errors="replace")
+    written = (read.text or "").strip()
+    return int(written) if written.isdigit() else None

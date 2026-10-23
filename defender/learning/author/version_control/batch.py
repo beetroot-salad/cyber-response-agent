@@ -93,4 +93,5 @@ class Batch:
         """Remove the draft (no link below it followed). The branch and its commits stay:
         a branch with commits is `deliver`'s to pick up."""
         with _refusals():
-            _remove_entry(self.draft_root.parent, self.id)
+            folder = self.draft_root.parent
+            _remove_entry(folder.parent, folder.name)

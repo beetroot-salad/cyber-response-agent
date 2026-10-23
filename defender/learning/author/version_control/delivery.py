@@ -25,6 +25,7 @@ from .auth import ForgejoIdentity
 from .batch import Batch
 from .commits import CommitMaker, _Line
 from .exports import (
+    DRAFT_STAGE,
     draft_path,
     TenantExport,
     build_draft,
@@ -47,6 +48,7 @@ from .model import (
 )
 from .record import _BatchKey, _NetChange, _Record
 from .repository import NETWORK_TIMEOUT, GitRepository
+from .status import record_published, recording
 
 
 @dataclass(frozen=True, eq=False)
@@ -73,7 +75,7 @@ class TenantDelivery:
         origin: str,
         network_timeout: float = NETWORK_TIMEOUT,
     ) -> TenantDelivery:
-        with _refusals():
+        with recording(accepted_tenant, by="delivery"), _refusals():
             repository = GitRepository.open(
                 accepted_tenant.knowledge,
                 tenant_id=str(accepted_tenant.id),
@@ -91,10 +93,12 @@ class TenantDelivery:
         and publish its export. Refuses, publishing nothing, a dirty, untracked or diverged
         clone, a tree entry under `agent/` or `settings/` that is not a regular blob, and an
         `agent/.tenant-id` not naming this tenant."""
-        with _refusals():
+        with recording(self.tenant, by="delivery"), _refusals():
             self.repository.fetch()
             with tenant_lock(self.tenant):
-                return publish_locked(self.tenant, self.repository)
+                export = publish_locked(self.tenant, self.repository)
+        record_published(self.tenant, export.commit, by="delivery")
+        return export
 
     def start_batch(self, batch_id: str, *, lanes: Sequence[str]) -> Batch:
         """Flow 3: refuse at once an id whose draft or branch exists (ids are never retried, so
@@ -107,9 +111,14 @@ class TenantDelivery:
             declared = _lanes(lanes)
             branch = f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
-            self.repository.fetch()
+            with recording(self.tenant, by="delivery"), _refusals():
+                self.repository.fetch()
             with tenant_lock(self.tenant):
-                export = publish_locked(self.tenant, self.repository)
+                with recording(self.tenant, by="delivery"), _refusals():
+                    export = publish_locked(
+                        self.tenant, self.repository, temporaries_only=True
+                    )
+                record_published(self.tenant, export.commit, by="delivery")
                 self._refuse_taken(batch_id, branch)
                 build_draft(
                     self.tenant, self.repository, batch_id, export.commit, declared
@@ -124,7 +133,7 @@ class TenantDelivery:
                 id=batch_id,
                 branch=branch,
                 export=export,
-                draft_root=draft_path(self.tenant, batch_id),
+                draft_root=draft_path(self.tenant, batch_id) / DRAFT_STAGE,
                 lanes=declared,
                 tenant=self.tenant,
                 defender_dir=self.defender_dir,

@@ -190,6 +190,14 @@ class _TenantLayout:
         return self.tenant_root / "drafts"
 
     @property
+    def run_knowledge(self) -> Path:
+        return self.tenant_root / "run-knowledge"
+
+    @property
+    def publish_status(self) -> Path:
+        return self.tenant_root / "publish-status.json"
+
+    @property
     def knowledge_lock(self) -> Path:
         return self.tenant_root / "knowledge.lock"
 
@@ -341,6 +349,19 @@ class Tenant:
     def drafts(self) -> DraftsRoot:
         """Host-made, git-free copies of `agent/` a drain box writes into, one per batch."""
         return DraftsRoot(self._layout.drafts)
+
+    @property
+    def run_knowledge(self) -> Path:
+        """Host-made per-run copies of an export (`<run_id>/{owner, settings/, stage/}`), each
+        removed when its run ends and swept by a publish once its owner is dead (#1108 P4)."""
+        return self._layout.run_knowledge
+
+    @property
+    def publish_status(self) -> Path:
+        """The outcome of the tenant's last publish attempt, by any trigger (a run launch, a
+        drain start, `tenant.py update`): its refusal, or the commit it published. What
+        `tenant.py check` reports a stalled publish from (#1108 P4 O-SEE)."""
+        return self._layout.publish_status
 
     @property
     def knowledge_lock(self) -> KnowledgeLock:
@@ -710,6 +731,55 @@ def tenant_id_file_text(tenant_id: TenantId) -> str:
     """What `agent/.tenant-id` holds for `tenant_id`, as `read_tenant_id_file` reads it back:
     the id and one newline."""
     return f"{TenantId(tenant_id)}\n"
+
+
+# ==========================================================================================
+# The forge binding (#1108 P4): operator configuration in the row, never tenant content.
+# ==========================================================================================
+
+#: The row field holding the binding.
+_FORGE_FIELD = "forge"
+_FORGE_KEYS = ("origin", "audience", "issuer_role")
+
+
+@dataclasses.dataclass(frozen=True)
+class ForgeBinding:
+    """Where the tenant's repository is served and how its delivery identity is minted: the
+    repository's network `origin`, the Forgejo integration's `audience`, and the issuer role
+    that signs the tenant's tokens. Not secret; no login material."""
+
+    origin: str
+    audience: str
+    issuer_role: str
+
+
+def read_forge_binding(tenant: Tenant) -> ForgeBinding:
+    """The tenant row's `forge: {origin, audience, issuer_role}`, read from the row file NOW
+    (an operator may bind or re-bind after the tenant was accepted). Absent, or any of the
+    three missing or not a non-empty string, is `TenantRefused` naming the row."""
+    path = _unwrap_tenant_root(tenant.tenant_root) / ROW_NAME
+    try:
+        with _real_io.bind(path.parent) as bound:
+            answer = bound.read(ROW_NAME)
+    except OSError as unreadable:
+        raise TenantRefused(f"{path}: {unreadable}") from unreadable
+    if answer.text is None:
+        raise TenantRefused(f"{path}: {'absent' if answer.absent else answer.reason}")
+    obj, bad_json = _real_io.load_json_artifact(answer.text)
+    if bad_json is not None or not isinstance(obj, dict):
+        raise TenantRefused(f"{path} is not a JSON object")
+    forge = obj.get(_FORGE_FIELD)
+    if forge is None:
+        raise TenantRefused(
+            f"{path} has no forge binding (`forge: {{origin, audience, issuer_role}}`): "
+            "the tenant's repository is not bound to a forge")
+    fields = forge if isinstance(forge, dict) else {}
+    found = {key: fields.get(key) for key in _FORGE_KEYS}
+    bad = [key for key, value in found.items() if not isinstance(value, str) or not value]
+    if bad:
+        raise TenantRefused(f"{path}'s forge binding lacks {', '.join(bad)}")
+    return ForgeBinding(origin=str(found["origin"]), audience=str(found["audience"]),
+                        issuer_role=str(found["issuer_role"]))
 
 
 # ==========================================================================================
