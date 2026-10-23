@@ -366,7 +366,9 @@ def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
     [
         "spec-flow/specs/archive/575-pre-graph/brief.md",
         "defender/tests/fixtures/e2e/golden-x/investigation.md",
-        "defender/lessons-environment/l-01.md",
+        # `defender/lessons-environment/` (and the other product-tree corpora) left the
+        # exclusion list with the corpora: #1108 P4 (O1, U5) deletes them from the product tree
+        # (`tenant_1108_p4/test_layout.py`), so the row pinned an exclusion for a deleted tree.
         "spec-flow/specs/spec_graph_551.yaml",
         "docs/design.md",
     ],

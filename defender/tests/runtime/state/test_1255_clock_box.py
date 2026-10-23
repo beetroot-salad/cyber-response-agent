@@ -57,8 +57,25 @@ class Captured:
 
     def clock_mounts(self) -> list[dict]:
         """Read-only mounts outside the model roots; only the clock belongs there."""
-        return [m for m in self.docker.mounts()
-                if m["readonly"] and not V.under_model_root(m["target"])]
+        return _clock_candidates(self.docker)
+
+
+def _is_run_copy_stage(mount: dict) -> bool:
+    """#1108 P4 (U9, O-A): the run copy's `stage/` — `agent/` plus one token — is the one
+    other read-only bind outside the model roots a run's box carries by design (the token is
+    read back at startup; `/agent` resolves into `stage/agent/`). It is told apart by where the
+    design's data model puts it, `<T>/run-knowledge/<run id>/stage` (the copy is gone once the
+    run ends, so its shape cannot be read afterwards)."""
+    source = Path(mount["source"])
+    return source.name == "stage" and source.parent.parent.name == "run-knowledge"
+
+
+def _clock_candidates(docker: RecordingDocker) -> list[dict]:
+    """Read-only mounts outside the model roots, the run copy's `stage/` aside; only the clock
+    belongs there."""
+    return [m for m in docker.mounts()
+            if m["readonly"] and not V.under_model_root(m["target"])
+            and not _is_run_copy_stage(m)]
 
 
 def _within(path: Path, tree: Path) -> bool:
@@ -178,8 +195,7 @@ def _clock_file_probe(docker: RecordingDocker, seen: dict[str, Any]) -> Any:
     """Read the captured clock mount from a model turn after the box has run a command."""
 
     def probe(_text: str) -> Any:
-        mounts = [m for m in docker.mounts()
-                  if m["readonly"] and not V.under_model_root(m["target"])]
+        mounts = _clock_candidates(docker)
         seen["mounts"] = mounts
         seen["wall"] = dt.datetime.now(dt.UTC)
         if len(mounts) == 1:

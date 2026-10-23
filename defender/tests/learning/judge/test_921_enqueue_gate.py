@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.learning.core.config import LoopPaths
@@ -63,11 +64,16 @@ def _graded(tmp_path, **kw):
     return ep, J.judge_record(ep)
 
 
+# #1108 P4 (OD12 class ii): the gate rows drive the REAL lessons tick over a batch's git-free
+# draft (`_curator1134.draft_lane` / `draft_author_cfg`); their assertions are the queue's.
+
+
 def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
-    paths = D.make_paths(tmp_path)
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     channel = D.channel_of("findings")
     D.seed(paths, channel, [_family_row()])
-    cfg = D.cfg_for(paths, "findings", invoke_agent=D.committing("family-lesson"))
+    cfg = C.draft_author_cfg(lane, invoke_agent=D.committing("family-lesson"))
 
     assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
     assert D.pending(paths, channel) == [], (
@@ -77,7 +83,8 @@ def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
 
 
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
-    paths = D.make_paths(tmp_path)
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     channel = D.channel_of("findings")
     D.seed(paths, channel, [
         D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial"),
@@ -85,7 +92,7 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
         D.finding_row("run-held/0", run_id="run-held", direction="adversarial"),
     ])
     agent = D.recording(D.committing("mixed"))
-    cfg = D.cfg_for(paths, "findings", invoke_agent=agent)
+    cfg = C.draft_author_cfg(lane, invoke_agent=agent)
 
     assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
     authored = {r["finding_id"] for r in agent.calls[0]["rows"]}
@@ -98,19 +105,21 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
 
 
 def test_921_gate_family_authors_a_survived_row(tmp_path):
-    paths = D.make_paths(tmp_path)
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     channel = D.channel_of("findings")
     D.seed(paths, channel, [_family_row()])
     agent = D.recording(D.committing("survived"))
 
     assert J.mod("learning.author.drain").run_batch(
-        cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
+        cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
     assert agent.calls, "the new-shape row authored nothing; it was held, not admitted"
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/0"]
 
 
 def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
-    paths = D.make_paths(tmp_path)
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     channel = D.channel_of("findings")
     missing = _family_row("ep-1/c/0/1")
     del missing["world_label_doubted"]
@@ -123,7 +132,7 @@ def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
     agent = D.recording(D.committing("hold-vs-author"))
 
     assert J.mod("learning.author.drain").run_batch(
-        cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
+        cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
     assert agent.calls, "the positive control failed: the new-shape row authored nothing"
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/1"]
     held = {r["finding_id"] for r in D.pending(paths, channel)}
@@ -133,17 +142,18 @@ def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
 
 
 def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
-    paths = D.make_paths(tmp_path)
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     channel = D.channel_of("findings")
     drain = J.mod("learning.author.drain")
 
     D.seed(paths, channel, [_family_row("ep-1/b/0/0")])
     first = D.recording(D.committing("once"))
-    assert drain.run_batch(cfg=D.cfg_for(paths, "findings", invoke_agent=first)) == 0
+    assert drain.run_batch(cfg=C.draft_author_cfg(lane, invoke_agent=first)) == 0
 
     D.seed(paths, channel, [_family_row("ep-1/b/0/0"), _family_row("ep-1/b/0/1")])
     second = D.recording(D.committing("twice"))
-    assert drain.run_batch(cfg=D.cfg_for(paths, "findings", invoke_agent=second)) == 0
+    assert drain.run_batch(cfg=C.draft_author_cfg(lane, invoke_agent=second)) == 0
     assert second.calls, "the positive control failed: the NEW row authored nothing either"
     assert [r["finding_id"] for r in second.calls[0]["rows"]] == ["ep-1/b/0/1"], (
         "the replayed row authored a second lesson, or the new row stopped authoring")
@@ -308,7 +318,8 @@ def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path
 def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tmp_path):
     from defender._io import read_jsonl_rows_report
 
-    paths = D.make_paths(tmp_path)
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     channel = D.channel_of("findings")
     D.seed(paths, channel, [_family_row("ep-0/b/0/0")])
     queue = location_path(paths.state_root) / channel.queue
@@ -348,7 +359,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     # drains the queue rather than stuck-recording the whole batch behind one torn line.
     agent = D.recording(D.committing("torn-tail"))
     assert J.mod("learning.author.drain").run_batch(
-        cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
+        cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
     assert D.stuck_records(paths, channel) == [], (
         "a torn trailing row stuck-recorded the batch; P6's blast radius is every direction "
         "riding in that tick, which is the whole reason the reader must skip it")

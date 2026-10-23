@@ -136,6 +136,25 @@ def agent_dir(root: Path, tenant_id: str = TID) -> Path:
     return knowledge_dir(root, tenant_id) / "agent"
 
 
+#: #1108 P4 (U9, design data model): each run reads its OWN copy of the export it was handed,
+#: `<T>/run-knowledge/<run id>/{owner, settings/, stage/{agent/, <token>}}` — never the tenant's
+#: clone (`<T>/knowledge/`) and never the checkout.
+RUN_COPIES = "run-knowledge"
+
+
+def run_copy_part(path: Path | str, root: Path, tenant_id: str = TID) -> tuple[str, ...] | None:
+    """The parts of `path` below ITS run copy (`<root>/<tenant_id>/run-knowledge/<run id>/`):
+    `("settings",)` for a run copy's settings half, `("stage", "agent")` for its agent half —
+    or `None` when `path` is not inside any of that tenant's run copies. Lexical: a copy is
+    removed when its run ends, so the path may no longer exist."""
+    p = Path(os.path.abspath(path))
+    copies = Path(os.path.abspath(tenant_folder(root, tenant_id) / RUN_COPIES))
+    if not p.is_relative_to(copies):
+        return None
+    rel = p.relative_to(copies).parts
+    return rel[1:] if len(rel) >= 2 else None
+
+
 def row_path(root: Path, tenant_id: str = TID) -> Path:
     return Path(root) / tenant_id / ROW_NAME
 
@@ -502,7 +521,10 @@ def drive_run(run_module: Any, argv: list[str], rec: RunRecorder,
     """The REAL `run.main(argv)` (`run_module` is the imported `defender/run.py`) with every
     seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`."""
     try:
-        return run_module.main(list(argv), **rec.seams()), None
+        # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+        from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
+        return run_module.main(list(argv), **with_publish(dict(rec.seams()))), None
     except SystemExit as refused:
         return None, refused
 

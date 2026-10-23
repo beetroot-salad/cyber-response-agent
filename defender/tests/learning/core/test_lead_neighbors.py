@@ -32,9 +32,13 @@ def test_tokenize_query_preserves_hyphenated_index_name():
 
 @pytest.fixture(scope="module")
 def catalog():
-    cat = ln.load_catalog()
-    if not cat:
-        pytest.skip("catalog not present in this checkout")
+    """The fixture tenant's committed catalog. #1108 P4 (O1): a catalog is a tenant's
+    (`<agent root>/skills/gather/queries`); the product checkout holds none, so `load_catalog`
+    takes it explicitly (no product default to skip on)."""
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
+
+    cat = ln.load_catalog(FIXTURE_AGENT / "skills" / "gather" / "queries")
+    assert cat, "the fixture tenant's catalog is empty, so the lookup below is vacuous"
     return cat
 
 

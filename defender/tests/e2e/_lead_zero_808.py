@@ -430,8 +430,10 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     before: Callable[[Path], None] | None = None,
     defender_dir: Path | None = None,
     tenant: Any = None,
+    agent: Path | None = None,
 ) -> Res:
-    """Drive a REAL `run_investigation` over a synthesized alert."""
+    """Drive a REAL `run_investigation` over a synthesized alert. `agent` runs it as a tenant
+    whose agent half is that tree (`drive(agent=...)`, #1108 P4: the catalog is the tenant's)."""
     doc = alert if alert is not None else alert_doc()
     run_dir = materialize_alert(root, doc)
     rec = VerbRecorder()
@@ -461,6 +463,8 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         kw["defender_dir"] = defender_dir
     if tenant is not None:
         kw["tenant"] = tenant
+    if agent is not None:
+        kw["agent"] = agent
     out = drive(run_dir, run_id=run_id, main=main, gather=gather, **kw)
     return Res(run_dir, main, gather, rec, out or {}, sink, doc.get("alert_id"))
 

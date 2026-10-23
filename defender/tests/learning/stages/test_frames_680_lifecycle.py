@@ -1,10 +1,8 @@
 """The stage frame across a stage's lifetime: successive curator batches, cross-agent reads, learning Bash result envelopes."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import logging
-from types import SimpleNamespace
 
 
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
@@ -19,6 +17,7 @@ from defender.tests.support.learning.curation._frames680 import (
     _drive_learning_read,
     assert_one_frame,
     _lead_author_deps_scene,
+    _lead_author_draft_scene,
 )
 
 
@@ -139,7 +138,8 @@ def test_learning_bash_returns_success_stdout_and_hostile_stderr_on_a_nonzero_ex
 def test_lead_author_bash_reads_cross_agent_artifact(tmp_path):
     """An actual LEAD_AUTHOR dependency's admitted scoped result is wrapped once under its salt."""
     result = BoxResult(0, b"lead-author cross-agent bytes", b"")
-    deps, _, command = _lead_author_deps_scene(tmp_path, result)
+    # #1108 P4: the lane's admitted rm is under a batch draft's agent root, not the product tree.
+    deps, _, command = _lead_author_draft_scene(tmp_path, result)
     out = _tool_bash(deps, command)
     assert_one_frame(
         out, _format_bash_result(0, "lead-author cross-agent bytes", ""), "untrusted"
@@ -157,32 +157,9 @@ def test_corpus_author_bash_reads_cross_agent_artifact(tmp_path):
     )
 
 
-def test_revert_lesson_driver_holds_shared_author_lock_and_calls_through(
-    tmp_path,
-):
-    """The operator driver still crosses the shared author lock before reverting."""
-    from defender.learning.core.config import LoopPaths
-    from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
-    from defender.cli.learning import revert_lesson
-
-    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
-    location_path(paths.state_root).mkdir(parents=True)
-    seen = []
-
-    def fake_revert(rel, lesson_name):
-        # Observed from a SECOND handle on the same root: the driver holds the lock now.
-        with LearningState.open(paths) as other, other.lock(AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
-            seen.append(("lock-held", not taken))
-        seen.append(("revert", rel, lesson_name))
-        return "https://example.invalid/pr/680"
-
-    branch = SimpleNamespace(revert_lesson_pr=fake_revert)
-    with LearningState.open(paths) as state:
-        assert revert_lesson.revert("bad", state=state, branch=branch) == 0
-    assert seen == [
-        ("lock-held", True),
-        ("revert", "defender/lessons/bad.md", "bad"),
-    ]
-    # ...and released again once the driver returns.
-    with LearningState.open(paths) as after, after.lock(AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
-        assert taken
+# `test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (the driver calling
+# `revert(branch=)`'s `revert_lesson_pr` under the lock) is deleted with that seam (#1108 P4,
+# OD12 class (i): the revert goes through `TenantDelivery.revert`). Its two halves are pinned on
+# the real CLI: `tenancy/tenant_1108_p4/test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_
+# pr_on_the_tenant_forge_deleting_the_agent_lesson` (lock held at the PR create, released after)
+# and `::test_flow5_revert_cli_waits_out_a_running_author_drain`.

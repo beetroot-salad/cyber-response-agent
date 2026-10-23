@@ -386,7 +386,9 @@ def test_census_and_pointer_scans_run_in_a_checkout_holding_nested_checkouts(tmp
     assert not [e for e in verdicts[0][0] if any(j in e[0] for j in junk)]
 
 
-ALLOWED_DROPS = {"defender/scripts/lessons/lessons_frontier.py": {"REPO_ROOT"}}
+#: `DEFAULT_CORPUS` (the checkout's import-time corpus) vanishes with #1108 P4 (O4): S-A's census
+#: bans it (`tenant_1108_p4/test_census.py` BANNED), so it may not be defined anywhere.
+ALLOWED_DROPS = {"defender/scripts/lessons/lessons_frontier.py": {"REPO_ROOT", "DEFAULT_CORPUS"}}
 #: Remainder names a later issue deleted outright, so they are defined nowhere: #1235 moved the
 #: per-lead row read onto the run's `RunState.lead_rows`, and the file reader `lead_rows` left.
 RETIRED_REMAINDER = {"defender/scripts/gather_tools/record_query.py": {"lead_rows"}}

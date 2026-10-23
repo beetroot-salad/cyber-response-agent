@@ -67,6 +67,20 @@ def test_control_the_product_refs_channel_sees_a_lesson_branch(tmp_path):
     assert "refs/remotes/origin/lessons/revert-p4" in _product_refs(repo)
 
 
+def _lock_is_held(lock: Path) -> bool:
+    """Whether another open file description holds `lock` (flock is per open file, so a second
+    open in this process contends like another process would). A missing file is not held."""
+    if not lock.is_file():
+        return False
+    with lock.open("a+") as probe:
+        try:
+            fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(probe.fileno(), fcntl.LOCK_UN)
+        return False
+
+
 def test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson(
         p4_tenant, capsys, caplog):
     """Flow 5 / O7: reverting a lesson the commit-maker created (and a human merged) opens a PR on
@@ -80,11 +94,26 @@ def test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_age
     before = set(remote_branches(t.remote, prefix=""))
     product_before = _product_refs()
     capsys.readouterr()
+    # The drain lock is held while the revert asks the forge for its PR (moved here from
+    # `learning/stages/test_frames_680_lifecycle.py`'s driver case when P4 deleted `revert(branch=)`):
+    # observed from a second open of the lock file at the PR's create request.
+    from defender.learning.core.state import AUTHOR_DRAIN_LOCK
+
+    lock = location_path(t.tenant.learning) / AUTHOR_DRAIN_LOCK.file
+    held_at_create: list[bool] = []
+
+    def probe(request: Any) -> None:
+        if request.method == "POST" and request.url.path.endswith("/pulls"):
+            held_at_create.append(_lock_is_held(lock))
+
+    t.forge.on_request = probe
 
     with caplog.at_level(logging.INFO):
         rc = _revert(t, LESSON)
 
     assert rc == 0, critical_text(caplog)
+    assert held_at_create == [True], "the revert asked for its PR without the drain lock held"
+    assert not _lock_is_held(lock), "the revert kept the drain lock after it returned"
     new = {b: tip for b, tip in remote_branches(t.remote, prefix="").items() if b not in before}
     assert len(new) == 1, new
     (branch, tip), = new.items()
@@ -122,6 +151,7 @@ def test_flow5_revert_cli_waits_out_a_running_author_drain(p4_tenant):
     bind_forge(t)
     lock = location_path(t.tenant.learning) / AUTHOR_DRAIN_LOCK.file
     lock.parent.mkdir(parents=True, exist_ok=True)
+    t.forge.requests.clear()  # the fixture's own publish asked the forge; only the revert counts
     with lock.open("a+") as holder:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:

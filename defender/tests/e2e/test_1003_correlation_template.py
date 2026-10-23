@@ -34,14 +34,15 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 TEMPLATE_REL = Path("skills") / "gather" / "queries" / "elastic" / "correlate-alerts-by-entity.md"
-#: The shipped id, transcribed (the unit module holds the same literal for the same reason).
+#: The fixture tenant's correlation id, transcribed (the unit module holds the same literal).
 SHIPPED_TEMPLATE_ID = "elastic.correlate-alerts-by-entity"
 RULE_ID = "v2-sshd-success-after-failures"
 
-#: Not mirrored into the planted tree: the venv, caches, this suite, the replay goldens —
-#: nothing a run reads, and the first two are large.
-_NOT_MIRRORED = frozenset({".venv", "__pycache__", "tests", "fixtures-e2e"})
-_COPIED = frozenset({"skills"})
+#: #1108 P4 (O1, O2): the catalog a run reads is its TENANT's (`agent/skills/gather/queries/`,
+#: in the export it runs on), never the checkout's — the checkout holds none. So the editable
+#: catalog these scenarios need is a tenant agent half: a copy of the committed fixture
+#: tenant's `agent/`, run through `drive(agent=...)` (published for real, its export read).
+FIXTURE_AGENT = DEFENDER.parent / "knowledge" / "tenant-fixture" / "agent"
 
 ANCESTORS = [
     hit(ts="2026-05-25T15:26:10.000Z", user="dev.dana", ip="172.18.0.15", host="office-ws-1"),
@@ -49,22 +50,18 @@ ANCESTORS = [
 ]
 
 
-def planted_defender(root: Path) -> Path:
-    """A defender tree the run can be pointed at whose CATALOG and CONFIG are editable:"""
-    tree = root / "repo" / "defender"
-    tree.mkdir(parents=True)
-    for entry in DEFENDER.iterdir():
-        if entry.name in _NOT_MIRRORED or entry.name in _COPIED:
-            continue
-        (tree / entry.name).symlink_to(entry)
-    for name in _COPIED:
-        shutil.copytree(DEFENDER / name, tree / name)
+def planted_agent(root: Path) -> Path:
+    """A tenant agent half the run can be pointed at whose CATALOG is editable: a copy of the
+    fixture tenant's `agent/` at `root/agent` (each `root` names its own tenant)."""
+    tree = root / "agent"
+    tree.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(FIXTURE_AGENT, tree, symlinks=True)
     return tree
 
 
 def _mismatched(root: Path) -> Path:
-    """The reproduced silent burn as a tree:"""
-    tree = planted_defender(root)
+    """The reproduced silent burn as a tenant catalog: the template's verb rebound."""
+    tree = planted_agent(root)
     _rebind_verb(tree, "query")
     return tree
 
@@ -73,15 +70,15 @@ def _rebind_verb(tree: Path, verb: str) -> None:
     """Edit the planted template's ONE `verb:` line — the same-vendor edit the grounding reproduced (`alerts` ->..."""
     path = tree / TEMPLATE_REL
     text = path.read_text(encoding="utf-8")
-    assert text.count("\nverb: alerts\n") == 1, "the shipped template's front matter moved"
+    assert text.count("\nverb: alerts\n") == 1, "the fixture template's front matter moved"
     path.write_text(text.replace("\nverb: alerts\n", f"\nverb: {verb}\n"), encoding="utf-8")
 
 
 def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_before_anything_is_spent(tmp_path):
     """The reproduced silent burn, closed where the design puts the check."""
-    tree = planted_defender(tmp_path / "ok")
-    res = run(tmp_path / "ok", run_id="lz1003-ok", answer=answer_hits(ANCESTORS), defender_dir=tree)
-    assert res.has_sidecar(L3), f"positive control: the planted tree did not dispatch l-00c ({res.gather_raw_names()})"
+    tree = planted_agent(tmp_path / "ok")
+    res = run(tmp_path / "ok", run_id="lz1003-ok", answer=answer_hits(ANCESTORS), agent=tree)
+    assert res.has_sidecar(L3), f"positive control: the planted catalog did not dispatch l-00c ({res.gather_raw_names()})"
     assert res.gather is not None
     assert len(res.gather.seen) == 1, "positive control: item 3 was not dispatched"
     assert re.search(rf"^defender_dir: {re.escape(MODEL_DEFENDER)}$", res.gather.seen[0],
@@ -100,7 +97,7 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
 
     with pytest.raises(CorrelationDispatchError) as caught:
         drive(run_dir, run_id="lz1003-bad", main=main, gather=gather,
-              verbs=elastic_backend(rec, answer_hits(ANCESTORS)), defender_dir=tree)
+              verbs=elastic_backend(rec, answer_hits(ANCESTORS)), agent=tree)
     message = str(caught.value)
     assert SHIPPED_TEMPLATE_ID in message, message
     assert "elastic.query" in message, f"the template's pair is not named:\n{message}"
@@ -121,15 +118,18 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
 
     # (a) no registry injected: the K12 state, 61 of 96 `drive()` sites.
     tree = _mismatched(tmp_path / "noreg")
-    res = run(tmp_path / "noreg", run_id="lz1003-noreg", verbs=None, defender_dir=tree)
+    res = run(tmp_path / "noreg", run_id="lz1003-noreg", verbs=None, agent=tree)
     assert not res.has_sidecar(L3), "a run with no registry claimed l-00c"
     assert res.summary_dict.get("truncated_by") is None, res.summary_dict
 
-    # (b) a resume: a real source run on this checkout, then a sibling driven over the
-    # mismatched tree with a registry whose recorder catches every call lead-0 would make.
+    # (b) a resume: a real source run on the fixture's (agreeing) catalog, then a sibling
+    # driven over the mismatched catalog with a registry whose recorder catches every call
+    # lead-0 would make. (#1108 P4: the source runs as a planted agent tenant too — the data
+    # root already holds (a)'s, and the fixture tenant is set up only into a fresh one.)
     sink: list = []
     source = run(
         tmp_path / "source", run_id="lz1003-source", answer=answer_hits(ANCESTORS),
+        agent=planted_agent(tmp_path / "source"),
         stores=sink, store_factory=store_factory(tmp_path, sink=sink),
         # one real call by `l-00c`: a branch needs a query that reached a system (#1222)
         gather_turns=[
@@ -155,7 +155,7 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
     rec = VerbRecorder()
     sibling = ReplayFn([Turn(text="Resumed and stopping.")])
     summary = drive(sibling_dir, run_id="lz1003-sibling", main=sibling, resume=spec,
-                    verbs=elastic_backend(rec, answer_hits(ANCESTORS)), defender_dir=tree)
+                    verbs=elastic_backend(rec, answer_hits(ANCESTORS)), agent=tree)
     assert summary.get("truncated_by") is None, summary
     assert sibling.seen, "the resumed run never reached its model"
     assert rec.calls == [], f"a resumed run issued a backend call: {rec.verbs}"
@@ -169,26 +169,30 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     from defender.tests.support.tenancy import _tenants1106 as T1106
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
-    tree = planted_defender(tmp_path / "second")
-    shipped = tree / TEMPLATE_REL
     planted_id = "elastic.correlate-alerts-by-entity-second"
+    # #1106: the config is the RUN's tenant's, handed in — a tenant planted outside the tree
+    # whose table grants the lead `elastic.alerts` and whose config names the planted id.
+    # #1108 P4 (O1, O2): the catalog is that tenant's too, so the planted template sits in ITS
+    # agent half (`place_tenant` writes the fixture correlation template there; the second is a
+    # copy under the planted id). The checkout holds neither.
+    knowledge = T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"),
+                                   configs=S1107.config_texts("acme"),
+                                   lead_zero=f"correlation_template: {planted_id}\n")
+    shipped = knowledge / "agent" / TEMPLATE_REL
     second = shipped.with_name("correlate-alerts-by-entity-second.md")
     second.write_text(
         shipped.read_text(encoding="utf-8").replace(f"id: {SHIPPED_TEMPLATE_ID}\n", f"id: {planted_id}\n", 1),
         encoding="utf-8",
     )
-    # #1106: the config is the RUN's tenant's, handed in — a tenant planted outside the tree
-    # whose table grants the lead `elastic.alerts` and whose config names the planted id.
-    T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"), configs=S1107.config_texts("acme"),
-                       lead_zero=f"correlation_template: {planted_id}\n")
+    assert second.read_text(encoding="utf-8") != shipped.read_text(encoding="utf-8")
     tenant = T1106.accept(tmp_path / "tenants", fixture_uuid("tenant:acme"))
     config = lead_zero_config_path(tenant.settings)
     assert config.is_file(), "the planted tenant carries no config"
     assert not config.is_symlink(), "the config must be the tenant's own copy"
 
     res = run(tmp_path / "second", run_id="lz1003-second", answer=answer_hits(ANCESTORS),
-              defender_dir=tree, tenant=tenant)
-    assert res.has_sidecar(L3), f"the planted tree did not dispatch l-00c ({res.gather_raw_names()})"
+              tenant=tenant)
+    assert res.has_sidecar(L3), f"the planted tenant did not dispatch l-00c ({res.gather_raw_names()})"
     goal = res.sidecar(L3)["goal"]
     assert f"`{planted_id}`" in goal, goal
     assert f"`{SHIPPED_TEMPLATE_ID}`" not in goal, (
@@ -202,8 +206,7 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     with pytest.raises(LeadZeroConfigError) as caught:
         drive(run_dir, run_id="lz1003-noconfig", main=ReplayFn([Turn(text="never")]),
               gather=ReplayFn([Turn(text=CORRELATION_SUMMARY)]),
-              verbs=elastic_backend(VerbRecorder(), answer_hits(ANCESTORS)), defender_dir=tree,
-              tenant=tenant)
+              verbs=elastic_backend(VerbRecorder(), answer_hits(ANCESTORS)), tenant=tenant)
     assert str(config) in str(caught.value), str(caught.value)
     # #1235 round 2: the run's budget lives on a `RunState` a raising run hands back to no
     # one, so "nothing was spent before the config was read" is read off the run dir instead.

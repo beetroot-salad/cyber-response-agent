@@ -8,11 +8,10 @@ import pytest
 
 
 def _load(tmp_lessons: Path):
-    """A FRESH module per call — each test rebinds the two corpus constants."""
-    mod = load_module(DEFENDER / "runtime" / "lessons_engine" / "lessons_fm.py")
-    mod.REPO_ROOT = tmp_lessons.parent
-    mod.LESSONS_DIR = tmp_lessons
-    return mod
+    """A FRESH module per call. The corpus is the one the `corpus` fixture's agent root names
+    (#1108 P4, O2: a lessons tool reads `$DEFENDER_AGENT_DIR/lessons` and no other corpus)."""
+    assert tmp_lessons.parent.name == "agent", "fixture: the corpus sits in an agent root"
+    return load_module(DEFENDER / "runtime" / "lessons_engine" / "lessons_fm.py")
 
 
 def _write(d: Path, name: str, fm: str, body: str = "body text") -> None:
@@ -20,9 +19,11 @@ def _write(d: Path, name: str, fm: str, body: str = "body text") -> None:
 
 
 @pytest.fixture
-def corpus(tmp_path):
-    d = tmp_path / "lessons"
-    d.mkdir()
+def corpus(tmp_path, monkeypatch):
+    agent = tmp_path / "agent"
+    d = agent / "lessons"
+    d.mkdir(parents=True)
+    monkeypatch.setenv("DEFENDER_AGENT_DIR", str(agent))
     _write(
         d, "falco-one.md",
         "name: falco-one\n"

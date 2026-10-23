@@ -738,8 +738,16 @@ def _invoke_lesson_load(run_dir: Path) -> None:
 
     from dataclasses import replace
 
-    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=fixture_run(run_dir))
-    runtime_tools._record_lesson_load(deps, DEFENDER / "lessons" / "spec-771.md", kind="read")
+    from defender.tests.support.tenancy import _tenants1106
+
+    # #1108 P4 (O1, O4): a lesson is the run TENANT's (`<agent root>/lessons/`), never the
+    # checkout's — the role is bound with the fixture tenant's run record, and the lesson it
+    # loads lies in that tenant's agent half.
+    run_tenant = _tenants1106.fixture_run_tenant()
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=fixture_run(run_dir),
+                   tenant=run_tenant)
+    runtime_tools._record_lesson_load(deps, Path(run_tenant.agent) / "lessons" / "spec-771.md",
+                                      kind="read")
 
 
 def _invoke_queries_table(run_dir: Path) -> Any:
@@ -1078,21 +1086,3 @@ def quarantine_a_tainted_tree(
     manifest = quarantine_dir / f"{batch_id}.json"
     doc = json.loads(manifest.read_text(encoding="utf-8")) if manifest.is_file() else {}
     return archive, doc
-
-
-def drive_drain_restore(worktree: Path, corpus: Path, snapshot: dict[str, bytes]) -> None:
-    """Drive the drain lane's fault-path corpus restore — a REAL second-root production writer.
-
-    X9's shape, executed here rather than described: `mkdir(parents=True, exist_ok=True)` then
-    `write_bytes`, over paths composed from snapshot keys, from an `except` around the agent
-    call. Both halves redirect at HEAD — a symlink at a snapshot leaf truncates the outside
-    file, and a symlink-to-directory at a snapshot key's parent component lands the restored
-    blob inside the outside directory."""
-    from defender._io import hold
-    from defender.learning.author import drain
-
-    # The second positional is the corpus's spelling (git pathspec); `corpus=` is its held mount;
-    # `head_before` names the commit the snapshot was taken at (the worktree here is no
-    # repository, so git answers nothing and every snapshot file is written back).
-    with hold(corpus) as held:
-        drain._restore_corpus(worktree, corpus, snapshot, corpus=held, head_before="HEAD")

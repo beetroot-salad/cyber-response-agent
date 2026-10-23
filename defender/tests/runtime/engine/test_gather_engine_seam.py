@@ -23,18 +23,22 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 
-def _deps() -> tools.AgentDeps:
+def _deps(**kw) -> tools.AgentDeps:
     return tools.AgentDeps(
         run_dir=Path("/tmp/x"), defender_dir=_DEFENDER, run_id="r",
         policy=compile_policy_for(MAIN_DEF, run_dir=Path("/tmp/x"), defender_dir=_DEFENDER),
-        cwd_anchor=Path("/tmp/x"),
+        cwd_anchor=Path("/tmp/x"), **kw,
     )
 
 
 def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
     """Section ORDER is the cache prefix (#835). The descriptor index and the template index vary
-    only with the dispatched system and the tree; the Dispatch YAML varies with every lead."""
-    deps = _deps()
+    only with the dispatched system and the tree; the Dispatch YAML varies with every lead.
+
+    #1108 P4 (O1, O2): the template index is read from the run's agent root — the tenant's
+    catalog, never the checkout's — so the deps carry the fixture tenant's run tenant, whose
+    `agent/skills/gather/queries/elastic/` holds `elastic.correlate-alerts-by-entity`."""
+    deps = _deps(tenant=T1106.fixture_run_tenant())
     cat = "- `elastic`: desc"
     a = tools._gather_prompt(deps, tools.GatherRequest("l-001", "elastic", "g1", ("d",)), cat)
     b = tools._gather_prompt(deps, tools.GatherRequest("l-002", "elastic", "g2", ("e",)), cat)
@@ -47,7 +51,8 @@ def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
     shared = a.split("## Dispatch")[0]
     assert b.startswith(shared), "two leads on one system no longer share a prompt prefix"
     assert "## Query templates" in shared
-    assert "elastic.sshd-auth-history" in shared
+    assert "elastic.correlate-alerts-by-entity" in shared, (
+        "the shared prefix does not carry the run tenant's elastic template index")
     assert not other.startswith(shared), "the prefix stopped varying with the dispatched system"
 
     assert "lead_id: l-001" in a.split("## Dispatch")[1]

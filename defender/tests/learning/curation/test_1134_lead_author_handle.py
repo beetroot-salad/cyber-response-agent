@@ -35,21 +35,24 @@ from defender.learning.leads.lead_extraction import (
 )
 from defender.learning.leads.path_validation import SKILLS_REL
 from defender.runtime.verbs import engine_for
-from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, head_files, seed_executed_query, seed_tree
+from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, seed_executed_query, seed_tree
 from defender.tests.support.learning.curation._lead_author_1134 import (
     OUT_ID,
     OUT_MARK,
     Scene,
     ancestors,
     clear,
+    draft_lead_deps,
     draft_scene_over,
     errors,
+    lane_scene,
     lead_trees,
     logged,
     outcome,
     place,
     plant_folder,
     plant_state,
+    product_lane,
     raised,
     scene_over,
     write,
@@ -767,27 +770,30 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
 def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
     tmp_path: Path, site: str | None, caplog,
 ):
-    repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    # #1108 P4 (O7, OD6, OD16): the run serves one claim of a real batch over its git-free draft
+    # (`product_lane`); handoff and commit paths are repo-relative `agent/skills/...` (the test's
+    # own spelling), and what landed is read from the batch branch.
+    lane = product_lane(tmp_path, _worktree(tmp_path))
     run_dir = _run_dir()
     spawn = LeadAuthorSpawn()
     names = {lead.query_id: draft_of(lead) for lead in (WAZUH_LEAD, ELASTIC_LEAD)}
-    with scene_over(tmp_path, repo) as s:
+    with lane_scene(tmp_path, lane) as s:
         if site is not None:
             plant_folder(s, site, "link")
         planted = plant_state(s.at(site)) if site is not None else None
         before = census(s.outside)
-        deps = _deps(paths, s.trees, spawn, [WAZUH_LEAD, ELASTIC_LEAD])
-        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps)
+        deps = draft_lead_deps(lane, invoke_agent=spawn,
+                               extract=lambda _run_dir: ([], [WAZUH_LEAD, ELASTIC_LEAD]))
+        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=lane.paths, deps=deps)
 
     assert rc == 0
     if site is None:
         assert len(spawn.calls) == 1
         assert {h["executed_template_path"] for h in spawn.handoffs} == {
-            f"{SKILLS_REL}{name}" for name, _ in names.values()}
+            f"agent/skills/{name}" for name, _ in names.values()}
         for name, text in names.values():
-            assert (paths.skills_dir / name).read_text(encoding="utf-8") == text
-        assert {f"{SKILLS_REL}{name}" for name, _ in names.values()} <= set(head_files(repo))
+            assert lane.text_at_tip(f"agent/skills/{name}") == text
+        assert {f"agent/skills/{name}" for name, _ in names.values()} <= set(lane.landed())
         return
     assert spawn.calls == [], "the agent was handed drafts written behind the link"
     assert census(s.outside) == before, "a draft was written outside skills/"

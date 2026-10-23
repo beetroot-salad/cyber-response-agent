@@ -235,18 +235,28 @@ def test_1204_a_live_capture_whose_knowledge_is_unprovable_is_waivable(tmp_path,
     assert stamp["allow_dirty"] is True
 
 
-@pytest.mark.parametrize("shape", sorted(UNPROVABLE))
+#: #1108 P4 (OD9, fail closed): a SOURCE stamp that says `unversioned` or `unavailable` names
+#: no knowledge commit for the launch to materialise and pin its siblings to, so it is refused
+#: even under `--allow-dirty` — the waiver this case pinned for those two shapes is a mechanism
+#: P4 removes (OD12 class i). Covered by
+#: `tests/tenancy/tenant_1108_p4/test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
+#: The stamp-predates-#1204 shapes (no key, or null) stay waivable here.
+SOURCE_WAIVABLE: dict[str, Any] = {k: v for k, v in UNPROVABLE.items()
+                                   if k not in ("unversioned", "unavailable")}
+
+
+@pytest.mark.parametrize("shape", sorted(SOURCE_WAIVABLE))
 def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unless_waived(
         tmp_path, shape):
-    """O2/A2 at preflight, the source side."""
+    """O2/A2 at preflight, the source side (the shapes OD9 leaves waivable)."""
     launch = A._prepare(tmp_path)
-    A._restamp(launch.src, knowledge=UNPROVABLE[shape])
+    A._restamp(launch.src, knowledge=SOURCE_WAIVABLE[shape])
     message = A._refused_before_spending(launch)
     A._waivable(message, "source", "knowledge")
     _never_called_dirt(message)
 
     waived = A._prepare(tmp_path)
-    A._restamp(waived.src, knowledge=UNPROVABLE[shape])
+    A._restamp(waived.src, knowledge=SOURCE_WAIVABLE[shape])
     stamp = A._accepted(waived, "--allow-dirty")
     assert stamp["allow_dirty"] is True
 

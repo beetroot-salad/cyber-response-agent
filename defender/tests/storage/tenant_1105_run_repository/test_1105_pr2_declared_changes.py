@@ -339,7 +339,9 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
     seams["lifecycle"] = scrubbed_lifecycle
     from defender import run as run_py
 
-    rc = run_py.main([str(alert), "--tenant", d9_tenant], **seams)
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
+    rc = run_py.main([str(alert), "--tenant", d9_tenant], **with_publish(seams))  # #1108 P4
     assert rc == 0
     run_dir = rec.run_dir
     assert run_dir is not None

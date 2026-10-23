@@ -15,9 +15,8 @@ import httpx
 import pytest
 from pydantic_ai.exceptions import ModelRetry
 
-from defender import _git, _io
+from defender import _git
 from defender._git import GitError
-from defender._io import NotPlainEntry
 from defender.learning.author.curator_engine import CuratorDeps
 from defender.learning.author.drain import RETIRE_SET
 from defender.learning.core import drains
@@ -33,8 +32,8 @@ from defender.tests.support.learning.curation._curator1134 import (
     JournalHeld,
     move_out_and_link,
     plant_link,
+    draft_questioner_cfg,
     put,
-    questioner_cfg,
 )
 from defender.tests.support.sandbox._spec791 import loop_paths
 
@@ -126,15 +125,20 @@ def _rows(channel: str, *ids: str) -> list[dict]:
 
 
 def _channel_scene(tmp_path: Path, channel: str, *, rows: list[dict], curator: S.FakeCurator,
-                   seed_corpus: dict[str, str] | None = None) -> S.Scene:
+                   seed_corpus: dict[str, str] | None = None,
+                   agent_files: dict[str, str] | None = None) -> S.DraftScene:
+    """The channel's tick over a draft lane (#1108 P4, OD12 class ii): its corpus is the
+    batch's draft lane, its commits land on the batch branch."""
     if channel == "lessons":
-        return S.build_scene(tmp_path, rows=rows, curator=curator, seed_corpus=seed_corpus)
-    return S.build_questioner_scene(tmp_path, rows=rows, curator=curator,
-                                    seed_corpus=seed_corpus)
+        return S.build_draft_scene(tmp_path, rows=rows, curator=curator,
+                                   seed_corpus=seed_corpus, agent_files=agent_files)
+    return S.build_questioner_draft_scene(tmp_path, rows=rows, curator=curator,
+                                          seed_corpus=seed_corpus, agent_files=agent_files)
 
 
-def _rel(sc: S.Scene, name: str) -> str:
-    return (sc.corpus / name).relative_to(sc.repo).as_posix()
+def _rel(sc: S.DraftScene, name: str) -> str:
+    """`name` in the scene's corpus, repo-relative as the batch branch names it (`agent/...`)."""
+    return (sc.corpus / name).relative_to(sc.lane.root).as_posix()
 
 
 def _wire(  # noqa: PLR0913 — one config, every seam a row varies
@@ -168,7 +172,7 @@ class Tick:
     `drains._maybe_trigger_author` does, handing it the box the drain handed down (the batch's
     handle). `start_box`: the `start_box=` an `author_drain` over the tick is given."""
 
-    sc: S.Scene
+    sc: S.DraftScene
     log: list
     cfgs: dict[str, Any]
     triggered: list[tuple[str, Any]] = dataclasses.field(default_factory=list)
@@ -205,15 +209,54 @@ def _tick(  # noqa: PLR0913 — one tick's two curators, every seam a row varies
 ) -> Tick:
     """The lessons curator over `f1` (`curator`) and the questioner curator over `q_rows`
     (`q_curator`), in one worktree."""
-    sc = S.build_scene(tmp_path, curator=curator, seed_corpus=seed_corpus)
+    sc = S.build_draft_scene(tmp_path, curator=curator, seed_corpus=seed_corpus)
     S.seed(sc.paths, QUESTIONER_FINDINGS, [S.world_row(i) for i in q_rows])
     lessons = _wire(sc.cfg, log, curator=curator, journal=journal, on_place=on_place)
-    questioner = _wire(questioner_cfg(sc.paths), log, curator=q_curator, journal=journal)
+    questioner = _wire(draft_questioner_cfg(sc.lane), log, curator=q_curator, journal=journal)
     return Tick(sc=sc, log=log, cfgs={"author": lessons, "questioner_curator": questioner})
 
 
 def _questioner_rel(t: Tick, name: str) -> str:
-    return (t.paths.lessons_questioner_dir / name).relative_to(t.sc.repo).as_posix()
+    return (t.sc.lane.sibling_dir / name).relative_to(t.sc.lane.root).as_posix()
+
+
+def _journal_batch(batch: Any, log: list) -> None:
+    """Wrap the batch's change set and commit (P3's `Batch.change_set` / `Batch.commit`) so each
+    call logs `("change_set",)` / `("commit",)`: the host's read of the box's output and its
+    commit, journalled beside the spawns."""
+    change_set, commit = batch.change_set, batch.commit
+
+    def logged_change_set() -> Any:
+        log.append(("change_set",))
+        return change_set()
+
+    def logged_commit(*a: Any, **k: Any) -> Any:
+        log.append(("commit",))
+        return commit(*a, **k)
+
+    batch.change_set, batch.commit = logged_change_set, logged_commit
+
+
+def _journal_resets(batch: Any, log: list, watched: Path,
+                    fault: BaseException | None = None) -> None:
+    """Wrap the batch's claim reset (P3's `Batch.reset`, the P4 undo) so each call logs
+    `("reset", "gone"|"kept")` — whether `watched` is absent from the draft after it. With
+    `fault`, the FIRST reset raises it (an undo fault, injected at the reset seam) after the
+    real reset ran and after logging `("reset", "faulted")` — so what is under test is which
+    fault the drain lets win, not a draft left dirty for the next claim (OD15). Later resets
+    are the real one."""
+    real = batch.reset
+    pending = [fault] if fault is not None else []
+
+    def reset() -> None:
+        if pending:
+            real()
+            log.append(("reset", "faulted"))
+            raise pending.pop()
+        real()
+        log.append(("reset", "kept" if os.path.lexists(watched) else "gone"))
+
+    batch.reset = reset
 
 
 def _stuck_classes(paths: LoopPaths, channel: str) -> list[str]:
@@ -245,6 +288,7 @@ def test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box
     seen: list[Any] = []
     sc.cfg = dataclasses.replace(sc.cfg, gate=_seeing_box(sc.cfg.gate, seen),
                                  post_rotate=_seeing_box(sc.cfg.post_rotate, seen))
+    _journal_batch(sc.lane.batch, log)
     queued_before = _queued(sc.paths)
 
     assert sc.run(box=runs) == 0
@@ -257,10 +301,14 @@ def test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box
     segments = _after_each_spawn(log)
     before, after_spawn = segments
     assert "gate" in _kinds(before), _kinds(before)
-    stray = ("tree_for", str(sc.corpus / "stray.txt"))
-    assert stray in after_spawn, "the settle after the curator spawn was not seen"
+    # #1108 P4: the settle is the claim's change set (OD15) and the commit is P3's commit-maker
+    # (O7), both journalled at the batch (`_journal_batch`); a non-`.md` stray is dropped from
+    # the claim and removed by its reset, never placed.
+    assert ("change_set",) in after_spawn, "the settle after the curator spawn was not seen"
     assert {"report", "read"} <= set(_kinds(after_spawn)), _kinds(after_spawn)
-    assert ("tree_for", str(sc.corpus / "a.md")) in after_spawn, "the commit was not seen"
+    assert ("commit",) in after_spawn, "the commit was not seen"
+    assert _rel(sc, "stray.txt") not in sc.head_files()
+    assert not os.path.lexists(sc.corpus / "stray.txt"), "the stray outlived the claim"
     assert "post_rotate" in _kinds(after_spawn)
     assert sc.head_text(_rel(sc, "a.md")) == S.lesson("f1")
     assert sc.head_text(_rel(sc, "b.md")) == S.lesson("f2")
@@ -288,40 +336,51 @@ def test_one_tick_runs_one_window_per_spawn_across_both_curators(tmp_path: Path,
 
 #: A committed file outside both corpora: the box's write there once started is a stray only if
 #: the tick took its baseline of strays before the start.
-STRAY_REL = "defender/notes/stray1195.md"
+STRAY_REL = "agent/notes/stray1195.md"
 STRAY_EDIT = "rewritten by the box\n"
 
 
-@pytest.mark.parametrize("when", ["once-started", "before-the-run"])
+# #1108 P4, OD15: a claim's ChangeSet is its draft against the batch base, the draft re-synced
+# per claim, so there is no "pre-run stray tolerated" baseline. The legacy `before-the-run` rows
+# (a stray edited before the run is tolerated and the tick commits) are deleted (OD12 class i);
+# the derivation is pinned by P3's `tenant_1108_delivery/test_changes.py::
+# test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files` and
+# `::test_claims_commit_and_reset_one_after_another_within_one_batch`. A write outside the lanes
+# is a ChangeSet refusal (OD18): the claim is U10's refused claim, not the lane's rc 2 stray.
+# `untouched` is the positive control: the file left as the base holds it, the tick commits.
+@pytest.mark.parametrize("when", ["once-started", "untouched"])
 @pytest.mark.parametrize("channel", CHANNELS)
-def test_the_pre_state_is_captured_before_the_run_starts(tmp_path: Path, monkeypatch,
-                                                         channel: str, when: str):
+def test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_claim(
+        tmp_path: Path, monkeypatch,
+        channel: str, when: str):
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
-    curator = S.FakeCurator(writes={"a.md": S.lesson("f1")})
-    sc = _channel_scene(tmp_path, channel, rows=_rows(channel, "f1"), curator=curator)
-    stray = sc.repo / STRAY_REL
-    put(stray, "committed\n")
-    S.git(sc.repo, "add", "--", STRAY_REL)
-    S.git(sc.repo, "commit", "-q", "-m", "a file outside both corpora")
-    sc.base_sha = sc.head_sha()
-    if when == "before-the-run":
-        put(stray, STRAY_EDIT)
-    else:
+    fid = "f1"
+    curator = S.FakeCurator(writes={"a.md": S.lesson(fid)})
+    rows = _rows(channel, fid)
+    # Published in the export, so the draft starts holding it (#1108 P4: no checkout to commit to).
+    sc = _channel_scene(tmp_path, channel, rows=rows, curator=curator,
+                        agent_files={STRAY_REL.removeprefix("agent/"): "committed\n"})
+    stray = sc.lane.root / STRAY_REL
+    assert stray.read_text() == "committed\n"
+    assert sc.head_text(STRAY_REL) == "committed\n"
+    if when == "once-started":
         daemon.on_start(stray, STRAY_EDIT, at=1)
     sc.cfg = _wire(sc.cfg, [], curator=curator, journal=False)
 
     rc = sc.run(box=runs)
 
-    assert curator.calls, "the curator never ran, so the baseline was never compared"
-    if when == "before-the-run":
+    assert curator.calls, "the curator never ran, so the change set was never taken"
+    if when == "untouched":
         assert rc == 0
-        assert sc.head_text(_rel(sc, "a.md")) == S.lesson("f1")
+        assert sc.head_text(_rel(sc, "a.md")) == S.lesson(fid)
         assert sc.head_text(STRAY_REL) == "committed\n"
         return
-    assert rc == 2
+    # U10 (OD18/OD19): rc 0, nothing lands, one attempt, the row held, the draft back at base.
+    assert rc == 0, rc
     assert sc.head_files() == []
-    assert sc.pending_by_id()["f1"].get("attempts") == 1
-    assert any(STRAY_REL in str(r.get("reason")) for r in S.stuck_records(sc.paths, sc.channel))
+    assert sc.pending_by_id()[fid].get("attempts") == 1
+    assert fid not in sc.consumed_by_id()
+    assert sc.draft_drift() == []
     assert stray.read_text() == "committed\n"
 
 
@@ -335,14 +394,19 @@ def test_a_failing_spawns_box_is_stopped_before_the_undo_runs(tmp_path: Path, mo
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=boom)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, journal=True)
+    # #1108 P4: the undo is the claim's reset (P3's `Batch.reset`, amendment 3 C2), not a
+    # per-file unlink through the corpus mount; it is journalled with the draft it left.
+    _journal_resets(t.sc.lane.batch, log, t.sc.corpus / "a.md")
 
     drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     log.assert_runs_hold_exactly(["agent", "agent"], SPAWN_KINDS)
-    undo = [i for i, e in enumerate(log) if e == ("unlink", "a.md")]
     spawns = [i for i, e in enumerate(log) if e[0] == "agent"]
-    assert undo, "the undo never removed the failed spawn's lesson through the corpus mount"
-    assert all(spawns[0] < i < spawns[1] for i in undo), "the undo was not between the runs"
+    undo = [i for i, e in enumerate(log) if e == ("reset", "gone")]
+    assert undo, "the reset never removed the failed spawn's lesson from the draft"
+    assert any(spawns[0] < i < spawns[1] for i in undo), "the undo was not between the runs"
+    assert not (t.sc.corpus / "a.md").exists()
+    assert t.sc.head_text(_rel(t.sc, "a.md")) is None
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
 
 
@@ -501,7 +565,7 @@ def _assert_halted_in_the_second_curator(t: Tick) -> None:
     assert t.modules() == ["author", "questioner_curator"]
     assert t.sc.head_text(_rel(t.sc, "a.md")) == S.lesson("f1"), "the first curator never committed"
     assert t.sc.head_text(_questioner_rel(t, "q.md")) is None, "a commit landed after a box fault"
-    assert not (t.paths.lessons_questioner_dir / "q.md").exists(), "the lesson was not undone"
+    assert not (t.sc.lane.sibling_dir / "q.md").exists(), "the lesson was not undone"
     assert S.pending_by_id(t.paths, QUESTIONER_FINDINGS)["w1"].get("attempts") is None
     assert _stuck_classes(t.paths, "questioner_findings") == ["BoxFault"]
     assert _stuck_classes(t.paths, "findings") == []
@@ -568,31 +632,32 @@ def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_secon
     assert t.sc.pending_by_id()["f1"].get("attempts") == (1 if fault is GitError else None)
 
 
-#: The holding folder the box swaps for a link before its run ends: the undo's write-back of
-#: `sub/lesson.md` then meets a linked holding folder, a plain `OSError(ELOOP)`.
-SEEDED_SUB = {"sub/lesson.md": S.lesson("f0")}
-
-
+# #1108 P4 (OD12 class ii): the undo is the claim's reset (P3's `Batch.reset`), which removes a
+# box-planted link without following it (amendment 3 C2), so the legacy plant — a holding folder
+# swapped for a link, meeting the per-file write-back as `OSError(ELOOP)` — no longer faults the
+# undo; that it does not is P3's `tenant_1108_delivery/test_changes.py::
+# test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`. The #1195 precedence
+# promise stands over an undo fault injected at the reset seam (a real `OSError`, EIO).
 def _swap_sub_for_a_link(moved: Path) -> Callable[..., None]:
+    """The box swaps the seeded holding folder `sub/` for a link (the tenant-drain row's plant)."""
     def plant(_rows: Any, _batch_id: str, cfg: Any) -> None:
         move_out_and_link(cfg.corpus_dir / "sub", moved)
 
     return plant
 
 
-def _undo_fault_logged(caplog: Any) -> bool:
-    """A WARNING-or-worse record carries the undo's own fault, the core's plain `OSError(ELOOP)`
-    for a linked holding folder: as the record's exception, or in its text (the core's
-    refusal, or `ELOOP`'s own words). The leaf refusal (`NotPlainEntry`) the undo passes over
-    for the link itself is not it."""
-    said = (_io._LINKED_FOLDER, os.strerror(errno.ELOOP))
+def _undo_fault() -> OSError:
+    return OSError(errno.EIO, "the claim reset failed (injected)")
+
+
+def _undo_fault_logged(caplog: Any, fault: BaseException) -> bool:
+    """A WARNING-or-worse record carries the undo's own fault: as the record's exception, or in
+    its text."""
     for r in caplog.records:
         if r.levelno < logging.WARNING:
             continue
         exc = r.exc_info[1] if r.exc_info else None
-        if isinstance(exc, OSError) and type(exc) is not NotPlainEntry and exc.errno == errno.ELOOP:
-            return True
-        if any(text in r.getMessage() for text in said):
+        if exc is fault or str(fault) in r.getMessage():
             return True
     return False
 
@@ -601,15 +666,17 @@ def _undo_fault_logged(caplog: Any) -> bool:
 def test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs(
         tmp_path: Path, monkeypatch, caplog, source: str):
     caplog.set_level(logging.WARNING)
-    f = _box_fault_scene(tmp_path, monkeypatch, source, seed_corpus=SEEDED_SUB,
-                         plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub"))
+    f = _box_fault_scene(tmp_path, monkeypatch, source)
+    undo, resets = _undo_fault(), []
+    _journal_resets(f.t.sc.lane.batch, resets, f.t.sc.corpus / "a.md", fault=undo)
     q_queued = _queued(f.t.paths)[1]
 
     got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.state, f.t.trigger, box=location_path(f.runs)))
 
+    assert resets[:1] == [("reset", "faulted")], f"the undo never ran (vacuous): {resets}"
     _assert_is_the_box_fault(got, f)
     _assert_halted_after_the_first_curator(f.t, f.q_curator, q_queued)
-    assert _undo_fault_logged(caplog), "the undo's own fault was swallowed without a trace"
+    assert _undo_fault_logged(caplog, undo), "the undo's own fault was swallowed without a trace"
 
 
 #: In-flight faults that are not box faults, over the same undo fault: the retiring
@@ -624,18 +691,20 @@ def test_control_an_undo_fault_still_replaces_a_non_box_fault(
         tmp_path: Path, monkeypatch, in_flight: Callable[[str], Exception]):
     _daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
 
-    def plant_then_fail(rows: Any, batch_id: str, cfg: Any) -> None:
-        _swap_sub_for_a_link(tmp_path / "outside" / "moved-sub")(rows, batch_id, cfg)
+    def fail(rows: Any, batch_id: str, cfg: Any) -> None:
         if in_flight is S.author_error:
-            raise S.author_error("refused after the swap")
-        raise _not_a_box_fault(in_flight, "failed after the swap")
+            raise S.author_error("refused before the undo")
+        raise _not_a_box_fault(in_flight, "failed before the undo")
 
-    curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=plant_then_fail)
+    curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=fail)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
-    t = _tick(tmp_path, [], curator=curator, q_curator=q_curator, seed_corpus=SEEDED_SUB)
+    t = _tick(tmp_path, [], curator=curator, q_curator=q_curator)
+    resets: list = []
+    _journal_resets(t.sc.lane.batch, resets, t.sc.corpus / "a.md", fault=_undo_fault())
 
     drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
+    assert resets[:1] == [("reset", "faulted")], f"the undo never ran (vacuous): {resets}"
     assert _stuck_classes(t.paths, "findings") == ["OSError"]
     assert t.sc.pending_by_id()["f1"].get("attempts") is None
     assert t.modules() == ["author", "questioner_curator"]
@@ -717,10 +786,22 @@ def _leave_a_writer(process: LeftProcess, writes: str, outside: Path) -> Callabl
 
 
 def _o1_tick(tmp_path: Path, process: LeftProcess, writes: str | None) -> Tick:
+    """#1108 P4: the host reads the box's output once, as the claim's change set (OD15, the one
+    truth every later step is computed from), so the left process gets its turn as each change
+    set is taken — the first host read after the run, where a surviving process could still
+    change what is committed (the legacy turn was the commit's per-path placement)."""
     leave = _leave_a_writer(process, writes, tmp_path / "outside") if writes else None
     curator = S.FakeCurator(writes={"a.md": SPAWNED}, also=leave)
-    return _tick(tmp_path, [], curator=curator, q_curator=S.FakeCurator(), q_rows=(),
-                 on_place=process.turn)
+    t = _tick(tmp_path, [], curator=curator, q_curator=S.FakeCurator(), q_rows=())
+    batch = t.sc.lane.batch
+    real = batch.change_set
+
+    def change_set() -> Any:
+        process.turn()
+        return real()
+
+    batch.change_set = change_set
+    return t
 
 
 @pytest.mark.parametrize("writes", ["rewrite", "symlink"])
@@ -736,8 +817,7 @@ def test_a_process_left_in_the_box_cannot_change_a_read_lesson(tmp_path: Path, m
     assert process.turns >= 1, "the process never had a turn after its run, so the row is vacuous"
     assert process.acts == [], "a process outlived its run's stop"
     assert t.sc.head_text(_rel(t.sc, "a.md")) == SPAWNED
-    assert _git.git(["ls-tree", "HEAD", "--", _rel(t.sc, "a.md")],  # lint-oracle: ok — reads HEAD as a git user would
-                    cwd=t.sc.repo).split(" ", 1)[0] == "100644"
+    assert t.sc.lane.mode_at_tip(_rel(t.sc, "a.md")) == "100644"
 
 
 @pytest.mark.parametrize("writes", ["rewrite", "symlink"])
@@ -752,10 +832,11 @@ def test_control_a_process_that_outlived_its_run_would_race_the_commit(
     drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert process.acts == [writes]
-    mode = _git.git(["ls-tree", "HEAD", "--", _rel(t.sc, "a.md")],  # lint-oracle: ok — reads HEAD as a git user would
-                    cwd=t.sc.repo).split(" ", 1)[0]
     if writes == "symlink":
-        assert mode == "120000"
+        # #1108 P4: a link in the lane is a ChangeSet refusal (OD18/OD23), never committed as
+        # one: the surviving process's act is seen as a refused claim, nothing lands.
+        assert t.sc.head_text(_rel(t.sc, "a.md")) is None
+        assert t.sc.pending_by_id()["f1"].get("attempts") == 1
     else:
         assert t.sc.head_text(_rel(t.sc, "a.md")) == EVIL
 
@@ -775,7 +856,7 @@ def test_what_the_box_writes_during_its_own_run_is_what_is_committed(tmp_path: P
 
 #: A new file outside both corpora: a stray only a settle that lists the tree after the stop
 #: sees.
-NEW_STRAY = "defender/notes/new1195.md"
+NEW_STRAY = "agent/notes/new1195.md"
 #: A new lesson the box leaves in the corpus as it stops, citing the batch's own finding.
 NEW_LESSON = S.lesson("f1", body="a second lesson, written as the box stopped")
 
@@ -789,7 +870,7 @@ def test_a_path_the_box_first_writes_as_its_run_stops_is_settled_and_committed(
     sc = _channel_scene(tmp_path, channel, rows=_rows(channel, "f1"), curator=curator)
     sc.cfg = _wire(sc.cfg, [], curator=curator, journal=False)
     if what == "new-stray":
-        daemon.on_stop(sc.repo / NEW_STRAY, "left by the box as it stopped\n", at=1)
+        daemon.on_stop(sc.lane.root / NEW_STRAY, "left by the box as it stopped\n", at=1)
     else:
         daemon.on_stop(sc.corpus / "b.md", NEW_LESSON, at=1)
 
@@ -801,10 +882,15 @@ def test_a_path_the_box_first_writes_as_its_run_stops_is_settled_and_committed(
         assert sc.head_text(_rel(sc, "b.md")) == NEW_LESSON, "the stop-time lesson was missed"
         assert sc.head_text(_rel(sc, "a.md")) == S.lesson("f1")
         return
-    assert rc == 2, rc
+    # #1108 P4: a path outside the lanes is a ChangeSet refusal (OD18), so the stray the
+    # stop-time listing sees refuses the claim as U10 (rc 0, OD19): nothing lands, f1 counts one
+    # attempt and stays queued, the draft is reset.
+    assert rc == 0, rc
     assert sc.head_files() == [], "a commit landed beside a stray the box left as it stopped"
-    assert any(NEW_STRAY in str(r.get("reason")) for r in S.stuck_records(sc.paths, sc.channel)), (
-        S.stuck_records(sc.paths, sc.channel))
+    assert sc.pending_by_id()["f1"].get("attempts") == 1
+    assert "f1" not in sc.consumed_by_id()
+    assert not (sc.lane.root / NEW_STRAY).exists()
+    assert sc.draft_drift() == []
 
 
 @pytest.mark.parametrize("docker", ["seam-OSError", "seam-TimeoutExpired", "holds"])
@@ -852,9 +938,9 @@ def test_a_seam_fault_at_the_runs_stop_halts_the_lessons_drain(tmp_path: Path, m
 import contextlib  # noqa: E402 — the P4 section's own imports
 import importlib  # noqa: E402
 
-from defender.learning.core.config import AUTHOR_DRAIN_LABEL  # noqa: E402
-from defender.learning.core.lane_trees import open_drain_trees  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
+    AUTHOR_DRAFT_LANES,
+    draft_lane_trees,
     _p4_caught,
     drain_paths,
     product_repo,
@@ -913,7 +999,9 @@ class TenantTick:
             self.daemon.mark(f"trigger:{module_name}")
         module, builder = _CURATOR_BUILDERS[module_name]
         mod = importlib.import_module(module)
-        with open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
+        # The lane's held mounts over the draft of the batch the drain handed down (OD16), as
+        # `_drain_support.CuratorTrigger` holds them — never `paths`' product-checkout corpus.
+        with draft_lane_trees(kw["batch"], AUTHOR_DRAFT_LANES) as trees:
             cfg = getattr(mod, builder)(paths, state=state, trees=trees, box=box, **kw)
             cfg = _wire(cfg, self.log, curator=self.curators[module_name], journal=self.journal)
             drains._run_curator_module(

@@ -510,53 +510,10 @@ dispositions:
 """
 LEAD_ZERO_NON_ELASTIC = T6.lead_zero_text(NON_ELASTIC_TEMPLATE)
 
-#: The made-up catalog templates a planted tenant's lead-zero config names, written into the
-#: tenant's OWN catalog (`agent/skills/gather/queries/<system>/<name>.md`). #1108 P4 (flow 3,
-#: O1, O2): run start resolves `lead-zero.yaml` against the run copy's catalog — the checkout
-#: holds none — so a tenant that grants the correlation lead carries the template it names.
-#: Front matter mirrors the template schema (id agreeing with the path, established, the verb
-#: the holder's grant binds); the bodies are made up (decision 4: no copy of lab content).
-TENANT_CATALOG: dict[str, str] = {
-    "elastic/correlate-alerts-by-entity.md": """\
----
-id: elastic.correlate-alerts-by-entity
-status: established
-verb: alerts
-params: [end, start]
-body_substitutions: [entity_filter]
----
-
-## Goal
-
-Fixture template (#1222 suite, #1108 P4): alerts naming one entity over a window, counted
-across every rule (correlate alerts, same host, prior alert).
-
-## Query
-
-```
-${entity_filter}
-```
-""",
-    "cmdb/list-all-hosts.md": """\
----
-id: cmdb.list-all-hosts
-status: established
-verb: list-hosts
-params: []
----
-
-## Goal
-
-Fixture template (#1222 suite, #1108 P4): the whole host inventory, to find the registered
-name of a host a lookup did not recognise.
-
-## Query
-
-```query
-verb: list-hosts
-```
-""",
-}
+#: The made-up catalog templates a planted tenant's lead-zero config names (#1108 P4: the
+#: catalog is the tenant's). Defined once beside `T6.plant_tenant`, which writes them into
+#: every planted tenant's own `agent/skills/gather/queries/`; re-exported here by name.
+TENANT_CATALOG: dict[str, str] = T6.TENANT_CATALOG
 
 
 @dataclass(frozen=True)

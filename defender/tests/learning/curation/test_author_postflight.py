@@ -292,7 +292,11 @@ def test_agent_writes_outside_lessons_aborts(draft_repo, helpers, monkeypatch):
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
     rc = a.run_batch(cfg=cfg)
-    assert rc == 2
+    # A path outside the lanes is a ChangeSet refusal (OD18), so the claim is U10's refused
+    # claim: rc 0 (OD19), one attempt, the row held, nothing lands, the draft reset.
+    assert rc == 0
     assert _rows_without_attempts((location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text()) == pre_pending
     assert _attempts((location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text()) == [1] * len(pre_pending)
+    assert not (location_path(draft_repo.paths.state_root) / FINDINGS.consumed).exists()
     assert draft_repo.lane.landed() == [], "an out-of-lane change refuses the claim whole"
+    assert draft_repo.lane.drift() == [], "the refused claim's draft was not reset"

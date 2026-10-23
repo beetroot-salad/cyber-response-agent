@@ -23,7 +23,6 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads.draft_synthesis import _draft_basename  # noqa: E402
 from defender.learning.core import persist as _persist  # noqa: E402
-from defender.learning.core.config import LoopPaths  # noqa: E402
 from defender.learning.core.state import LearningState  # noqa: E402
 from defender.learning.leads import (  # noqa: E402
     draft_synthesis,
@@ -50,7 +49,7 @@ from defender.runtime.verbs import (  # noqa: E402
     engine_of,
     verb,
 )
-from defender.tests.support.learning.curation._lead_author_1134 import held_skills, lead_trees, skills_view  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import held_skills, skills_view  # noqa: E402
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT, place_tenant  # noqa: E402
 from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID  # noqa: E402
 
@@ -538,52 +537,53 @@ def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
-def _seed_repo_no_execution_md(tmp_path: Path) -> Path:
-    """A clean git repo whose host-state system has a SKILL.md but NO execution.md — the
-    4-of-7 'no execution.md' dead-end member."""
-    repo = tmp_path / "repo"
-    hs = repo / "defender" / "skills" / "host-state"
-    hs.mkdir(parents=True)
-    (hs / "SKILL.md").write_text("---\nname: defender-host-state\n---\n# host-state\n")
-    (repo / "defender" / "skills" / "gather" / "queries").mkdir(parents=True)
-    adapters = repo / "defender" / "integrations"
-    adapters.mkdir(parents=True)
-    (adapters / "host_state_adapter.py").write_text("VERBS = {}\n")
-    _git(repo, "init", "-q", "-b", "main")
-    _git(repo, "config", "user.email", "t@example.com")
-    _git(repo, "config", "user.name", "T")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "seed")
-    return repo
+def _seed_lane_no_execution_md(tmp_path: Path):
+    """#1108 P4 (O7, OD12 class ii): the lead lane's batch draft of a tenant whose host-state
+    system has a SKILL.md but NO execution.md — the 4-of-7 'no execution.md' dead-end member —
+    over a product checkout holding the host-state adapter (adapters stay in the product,
+    #1172)."""
+    from defender.tests.support.learning.curation import _curator1134 as C
+    from defender.tests.support.runtime.engine._declared869 import seed_product
+
+    product = seed_product(tmp_path, adapters=("host-state",))
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files={
+        "skills/host-state/SKILL.md": "---\nname: defender-host-state\n---\n# host-state\n",
+    })
 
 
 def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, monkeypatch):
+    """The lane runs over the batch draft (ASSUMED SEAM S-H `run_pitfalls(..., batch=)`); the
+    curator is handed the draft root; what landed is read from the batch branch."""
+    from defender.tests.support.learning.curation import _curator1134 as C
+
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    repo = _seed_repo_no_execution_md(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    lane = _seed_lane_no_execution_md(tmp_path)
+    paths = lane.paths
     _seed_pitfalls(paths, system="host-state", digest="exit=64; unknown param 'proc'", n=2)
 
-    exec_md = repo / "defender" / "skills" / "host-state" / "execution.md"
+    rel = "agent/skills/host-state/execution.md"
+    exec_md = lane.root / rel
     assert not exec_md.exists(), "precondition: host-state has no execution.md"
+    assert lane.text_at_tip(rel) is None, "precondition: the batch base holds no execution.md"
 
     def synthesizing_curator(handoffs, *, state, repo_root, box=None):
         assert handoffs[0]["system"] == "host-state"
-        assert handoffs[0]["path"] == "defender/skills/host-state/execution.md"
-        p = repo_root / "defender" / "skills" / "host-state" / "execution.md"
+        assert handoffs[0]["path"] == rel
+        p = Path(repo_root) / rel
         p.write_text("# host-state — execution\n\n## Verbs\n\n- processes\n\n"
                      "## Exit codes\n\n- 64: a param mistake\n\n## Common pitfalls\n\n- proc\n")
         return 0
 
-    rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=synthesizing_curator,
-                                       trees=lead_trees(paths))
+    with C.draft_trees(lane) as trees:
+        rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=synthesizing_curator,
+                                           trees=trees, batch=lane.batch)
     assert rc == 0
-    assert exec_md.is_file(), "the curator's created execution.md was rejected — dead-end"
-    text = exec_md.read_text(encoding="utf-8")
+    text = lane.text_at_tip(rel)
+    assert text is not None, "the curator's created execution.md was rejected — dead-end"
     assert "## Verbs" in text, "not a valid execution.md"
     assert "## Exit codes" in text, "not a valid execution.md"
-    log = subprocess.run(["git", "log", "--oneline", "-1"], cwd=repo,
-                         capture_output=True, text=True, check=True).stdout
-    assert "execution.md pitfalls" in log, "the created execution.md was not committed"
+    assert rel in lane.landed()
+    assert "execution.md pitfalls" in lane.message(), "the created execution.md was not committed"
 
 
 def _exit_class_html(run_dir: Path) -> str:

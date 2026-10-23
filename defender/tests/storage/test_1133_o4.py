@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -761,7 +762,7 @@ def _sibling_episode(tmp_path: Path, src: Path) -> Path:
 @pytest.mark.parametrize("spelling", ["path", "case", "separator"])
 def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
         tmp_path, monkeypatch, spelling):
-    run = T.mod("run")
+    run = RunWithPublish(T.mod("run"))  # #1108 P4 (OD14, O11): plus the in-process publish
     _base, src = location_path(T.runs_base)(tmp_path)
     ep = _sibling_episode(tmp_path, src)
     bad = {"path": str(ep / LAYOUT.family), "case": ep.name.upper(),
@@ -791,7 +792,7 @@ def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
 
 def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(tmp_path,
                                                                               monkeypatch):
-    run = T.mod("run")
+    run = RunWithPublish(T.mod("run"))  # #1108 P4 (OD14, O11): plus the in-process publish
     _base, src = location_path(T.runs_base)(tmp_path)
     ep = _sibling_episode(tmp_path, src)
     seen: dict[str, Any] = {}

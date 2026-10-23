@@ -723,15 +723,19 @@ def test_p020_correlation_lead_coins_a_query_that_becomes_a_ca(tmp_path: Path) -
     _assert_no_hostile(v.draft_goal(), alert, "the catalog draft's Goal")
     for g in v.handoff_goals():
         _assert_no_hostile(g, alert, "the lead-author handoff")
-    # Promote the draft, then run again on the lane's tree.
-    promoted = draft_path.parent.parent / draft_path.name
+    # Promote the draft, then run again. #1108 P4 (O1, O2): a run reads its TENANT's catalog
+    # (the export published at its launch), never a checkout's, so the promoted template lands
+    # where an approved draft lands — the tenant's own `agent/skills/gather/queries/<system>/`
+    # — and the later run's launch publishes it (`run_alert` publishes the folder as it is).
+    system = draft_path.parent.parent.name
+    promoted = tenant.agent / "skills" / "gather" / "queries" / system / draft_path.name
+    promoted.parent.mkdir(parents=True, exist_ok=True)
     promoted.write_text(draft.replace("status: draft", "status: established", 1),
                         encoding="utf-8")
     draft_path.unlink()
     draft_id = re.search(r"(?m)^id: (\S+)$", draft)
     assert draft_id is not None
     later = _run(tmp_path, alert=S.kibana_alert(), tenant=tenant, sub="later",
-                 defender_dir=v.lane.defender,
                  main=[S.gather("l-001", "elastic"), S.text("Investigation complete.")])
     prompt = later.router.first_prompt("l-001")
     assert draft_id.group(1) in prompt, "control: the promoted template is not in the index"

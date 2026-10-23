@@ -25,7 +25,7 @@ from defender.tests.support.shared.contracts._fold_936 import (
     WRITE_RETURN_HEADER,
     _rows,
 )
-from defender.tests.support.learning.retrieval._lessons_corpus import _main_deps, _write_lesson
+from defender.tests.support.learning.retrieval._lessons_corpus import _run_copy_main_deps, _write_lesson
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -56,17 +56,21 @@ def _tenant_runs() -> Path:
 
 def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
     """O5: a lesson opened through the real `_gated_read` (MAIN's `read_file`) leaves a row with `kind == "read"` and the reader's role"""
-    from defender.runtime.agent_definition import bind
+    from defender.runtime.agent_definition import RunScope, bind
     from defender.tests.support.tenancy import _tenants1106
     from defender.runtime.tools import _tool_read_file
 
-    main, run, dfn = _main_deps(tmp_path)
-    corpus = dfn / "lessons"
+    # #1108 P4 (O2, O5): the corpus is the run copy's `agent/lessons`, the root both roles serve.
+    main, run, agent, dfn = _run_copy_main_deps(tmp_path)
+    corpus = agent / "lessons"
     corpus.mkdir()
     lesson = _write_lesson(corpus, "read-936", nodes=CLASS_SELECTOR)
-    gather = _with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run, defender_dir=dfn), run=_live_run_1165(run))
+    gather = _with_live_run_1165(
+        bind(_tenants1106.fixture_gather_def(), run, defender_dir=dfn,
+             scope=RunScope(tenant_agent=agent)),
+        run=_live_run_1165(run))
 
-    m_lesson = model_path(lesson, run_dir=run, defender_dir=dfn)   # `/defender/lessons/…`
+    m_lesson = model_path(lesson, run_dir=run, defender_dir=dfn, agent=agent)  # `/agent/lessons/…`
     assert "lesson body" in _tool_read_file(main, m_lesson)
     assert "lesson body" in _tool_read_file(gather, m_lesson)
     rows = _rows(run)
@@ -84,16 +88,19 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
     from defender.tests.support.learning.curation._curator_scene import curator_deps, curator_scene
 
     scene = curator_scene(tmp_path)
-    (scene.corpus / "curated-936.md").write_text(
+    # #1108 P4 (OD6): the curator works over a batch draft's agent root, `<draft>/agent/lessons`.
+    corpus = scene.repo / "agent" / "lessons"
+    corpus.mkdir(parents=True)
+    (corpus / "curated-936.md").write_text(
         "---\nname: curated-936\n---\nlesson body\n", encoding="utf-8")
     # This telemetry case explicitly supplies a record owner; ordinary curators need none.
     from defender.run_repository import Run
 
-    deps = curator_deps(scene)
+    deps = curator_deps(scene, corpus=corpus)
     deps = _with_live_run_1165(deps, run=Run.at(deps.run_dir))
     assert deps.role is AgentRole.CORPUS_AUTHOR, "control: the deps are the curator's"
 
-    assert "lesson body" in _tool_lesson_read(deps, "defender/lessons/curated-936.md")
+    assert "lesson body" in _tool_lesson_read(deps, "agent/lessons/curated-936.md")
     rows = _rows(deps.run_dir)
     assert [(r["lesson_name"], r["kind"], r["role"]) for r in rows] == [
         ("curated-936", "read", "corpus_author")], rows
@@ -102,8 +109,8 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
 def test_a_push_row_names_the_push_and_the_main_role(tmp_path):
     from defender.runtime.tools import _tool_append_block
 
-    deps, run, dfn = _main_deps(tmp_path)
-    corpus = dfn / "lessons"
+    deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
+    corpus = agent / "lessons"
     corpus.mkdir()
     _write_lesson(corpus, "pushed-936", nodes=CLASS_SELECTOR)
 
@@ -134,8 +141,8 @@ def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compacti
         monkeypatch.setenv("DEFENDER_COMPACTION", "1" if compaction_on else "0")
         root = tmp_path / ("on" if compaction_on else "off")
         root.mkdir()
-        deps, run_dir, dfn = _main_deps(root)
-        corpus = dfn / "lessons"
+        deps, run_dir, agent, _dfn = _run_copy_main_deps(root)
+        corpus = agent / "lessons"
         corpus.mkdir()
         _write_lesson(corpus, CLASS_LESSON, nodes=CLASS_SELECTOR)
         _write_lesson(corpus, LOGINUID_LESSON, nodes=LOGINUID_SELECTOR)

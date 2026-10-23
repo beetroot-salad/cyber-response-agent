@@ -264,8 +264,11 @@ def _main(**seams: Callable[..., Any]) -> int:
 
     from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
 
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
+    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
     return run_py.main([str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"],
-                       preflight=lambda _model: 0, **seams)
+                       preflight=lambda _model: 0, **with_publish(dict(seams)))
 
 
 def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(

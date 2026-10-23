@@ -280,6 +280,26 @@ def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
     return deps, skills, "rm defender/skills/system/_draft/lesson.md"
 
 
+def _lead_author_draft_scene(tmp_path: Path, result: BoxResult):
+    """A real LEAD_AUTHOR binding over a batch draft's agent root (#1108 P4, O7/OD6: the lane
+    writes `<draft>/agent/skills/`, compiled under `RunScope(tenant_agent=)` as
+    `test_hardening_772` binds it). Returns `(deps, the draft's skills dir, an admitted rm)` —
+    the rm `_lead_author_deps_scene` spelled under the product tree, which P4 no longer grants."""
+    defender_dir = tmp_path / "tree" / "defender"
+    agent = tmp_path / "draft" / "agent"
+    skills = agent / "skills"
+    run = tmp_path / "run"
+    (skills / "system").mkdir(parents=True)
+    run.mkdir(parents=True)
+    # `system` has to BE one since #772: the grant is compiled per system the product declares
+    # an adapter for, not over an anonymous `<name>/_draft/` shape.
+    seed_adapter_stubs(defender_dir, ("system",))
+    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result),
+                scope=RunScope(tenant_agent=agent))
+    target = deps.view.to_model(skills / "system" / "_draft" / "lesson.md")
+    return deps, skills, f"rm {target}"
+
+
 def _learning_read_deps(tmp_path: Path, *, box=None):
     """A bound learning-stage scene with a real cross-stage add-dir — the shape `_drive_learning_read`
     and `_drive_learning_bash` need.
