@@ -10,6 +10,7 @@ loopback by default.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 from collections.abc import Callable, Sequence
 from functools import partial
 
@@ -23,7 +24,7 @@ from .fakes import (
     StubSystemChecker,
     TokenAuthenticator,
 )
-from .models import Alert, Investigation, InvestigationKnowledge, LearningJob, Lesson, SystemSettings
+from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
 from .ports import ApiDeps, Principal
 
 #: The users each tenant gets; a token is `<tenant>-<role>`.
@@ -112,15 +113,22 @@ def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.
         started_at=now - 29 * hour, finished_at=now - 29 * hour + _dt.timedelta(minutes=11),
         artifacts=[RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name,
                    RUN_LAYOUT.runtime_html.name],
-        knowledge=InvestigationKnowledge(status="current", commit=_DEMO_COMMITS[0]),
     ))
-    # Its run started on the last published knowledge: the newer could not be loaded (O-WARN).
-    store.add_investigation(tenant, Investigation(
+    running = store.add_investigation(tenant, Investigation(
         investigation_id=f"{tenant}-inv-running", alert_id=shell.alert_id, status="running",
         cost_usd=0.42, created_at=now - 2 * hour, started_at=now - 2 * hour,
-        knowledge=InvestigationKnowledge(status="stale", commit=_DEMO_COMMITS[1],
-                                         stale_kind="transient"),
     ))
+    # Each run's knowledge record as run start writes it (#1108 P4, O-WARN): the completed run
+    # read the latest approved knowledge; the running one started on the last published
+    # snapshot because the newer could not be loaded.
+    for investigation, record in (
+        (done, {"kind": "fresh", "commit": _DEMO_COMMITS[0], "stale_kind": None, "reason": None}),
+        (running, {"kind": "stale", "commit": _DEMO_COMMITS[1], "stale_kind": "transient",
+                   "reason": "the issuer did not answer in time"}),
+    ):
+        store.add_run_knowledge(
+            tenant, investigation.investigation_id, json.dumps(record),
+            stamp_knowledge_source={k: record[k] for k in ("kind", "commit", "stale_kind")})
     store.add_learning_job(tenant, LearningJob(
         learning_job_id=f"{tenant}-lj-auto", investigation_id=done.investigation_id,
         alert_id=done.alert_id, status="completed", trigger="auto", stage="judge",

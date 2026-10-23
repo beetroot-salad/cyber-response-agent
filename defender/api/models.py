@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import (
-    AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator,
-    model_validator,
-)
+from pydantic import AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from defender._clock import as_utc
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
@@ -91,12 +88,6 @@ class InvestigationKnowledge(BaseModel):
         default=None,
         description="Set iff `status` is `stale`: `transient` (a temporary outage) or `operator` "
                     "(awaiting operator action).")
-
-    @model_validator(mode="after")
-    def _stale_kind_iff_stale(self) -> InvestigationKnowledge:
-        if (self.status == "stale") != (self.stale_kind is not None):
-            raise ValueError("stale_kind is set exactly when status is stale")
-        return self
 
 
 class Investigation(BaseModel):

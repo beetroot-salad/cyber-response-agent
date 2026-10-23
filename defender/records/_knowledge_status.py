@@ -55,7 +55,7 @@ UNREADABLE = KnowledgeStatus(kind=STALE, commit=None, stale_kind=OPERATOR,
                              reason=UNREADABLE_REASON)
 
 
-def _parsed(record_text: str) -> KnowledgeStatus | None:
+def _record_status(record_text: str) -> KnowledgeStatus | None:
     """The record's status, or `None` when it is not a record run start could have written."""
     obj, unreadable = load_json_artifact(record_text)
     if unreadable is not None or not isinstance(obj, dict):
@@ -78,7 +78,7 @@ def knowledge_status(record_text: str | None, *, stamp_names_source: bool) -> Kn
     knowledge source. `None` means no status to show (no run, or a run from before P4)."""
     if record_text is None:
         return UNREADABLE if stamp_names_source else None
-    return _parsed(record_text) or UNREADABLE
+    return _record_status(record_text) or UNREADABLE
 
 
 def _stamp_names_source(stamp: Path) -> bool:
