@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator,
+    model_validator,
+)
 
 from defender._clock import as_utc
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
@@ -72,6 +75,30 @@ class Alert(AlertSummary):
     raw: dict[str, Any] = Field(description="The alert exactly as the vendor sent it.")
 
 
+KnowledgeStatus = Literal["current", "stale", "pinned"]
+StaleKind = Literal["transient", "operator"]
+
+
+class InvestigationKnowledge(BaseModel):
+    """Which revision of the tenant's knowledge the investigation's run read (#1108 P4, O-WARN):
+    the latest approved one (`current`), an earlier one because the newer could not be loaded
+    (`stale`, with why in two words), or one named at launch (`pinned`)."""
+
+    status: KnowledgeStatus
+    commit: str | None = Field(
+        description="The knowledge commit the run read; null only when its record is unreadable.")
+    stale_kind: StaleKind | None = Field(
+        default=None,
+        description="Set iff `status` is `stale`: `transient` (a temporary outage) or `operator` "
+                    "(awaiting operator action).")
+
+    @model_validator(mode="after")
+    def _stale_kind_iff_stale(self) -> InvestigationKnowledge:
+        if (self.status == "stale") != (self.stale_kind is not None):
+            raise ValueError("stale_kind is set exactly when status is stale")
+        return self
+
+
 class Investigation(BaseModel):
     investigation_id: RecordId
     alert_id: RecordId
@@ -88,6 +115,11 @@ class Investigation(BaseModel):
     artifacts: list[str] = Field(
         default_factory=list,
         description="Keys readable at `/investigations/{id}/artifacts/{key}`; empty until upload.",
+    )
+    knowledge: InvestigationKnowledge | None = Field(
+        default=None,
+        description="The tenant knowledge the run read; null when there is no run record to say "
+                    "(no run yet, or a run from before knowledge was recorded).",
     )
 
     @field_validator("disposition")

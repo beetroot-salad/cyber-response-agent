@@ -23,11 +23,13 @@ from .fakes import (
     StubSystemChecker,
     TokenAuthenticator,
 )
-from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
+from .models import Alert, Investigation, InvestigationKnowledge, LearningJob, Lesson, SystemSettings
 from .ports import ApiDeps, Principal
 
 #: The users each tenant gets; a token is `<tenant>-<role>`.
 DEMO_ROLES = ("analyst", "engineer")
+#: Made-up knowledge commits the demo investigations name (the latest and an earlier one).
+_DEMO_COMMITS = ("d3a0c0de" * 5, "e4a1c0de" * 5)
 
 #: The wall clock, as a value so `demo_deps` can default to it.
 UTC_NOW: Callable[[], _dt.datetime] = partial(_dt.datetime.now, _dt.UTC)
@@ -110,10 +112,14 @@ def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.
         started_at=now - 29 * hour, finished_at=now - 29 * hour + _dt.timedelta(minutes=11),
         artifacts=[RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name,
                    RUN_LAYOUT.runtime_html.name],
+        knowledge=InvestigationKnowledge(status="current", commit=_DEMO_COMMITS[0]),
     ))
+    # Its run started on the last published knowledge: the newer could not be loaded (O-WARN).
     store.add_investigation(tenant, Investigation(
         investigation_id=f"{tenant}-inv-running", alert_id=shell.alert_id, status="running",
         cost_usd=0.42, created_at=now - 2 * hour, started_at=now - 2 * hour,
+        knowledge=InvestigationKnowledge(status="stale", commit=_DEMO_COMMITS[1],
+                                         stale_kind="transient"),
     ))
     store.add_learning_job(tenant, LearningJob(
         learning_job_id=f"{tenant}-lj-auto", investigation_id=done.investigation_id,
