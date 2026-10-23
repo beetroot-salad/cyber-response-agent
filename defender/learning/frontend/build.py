@@ -25,7 +25,7 @@ from defender.presentation.visualize_primitives import (  # noqa: E402
 )
 from defender.presentation.visualize_run import CSS as RUN_CSS  # noqa: E402
 
-GROUP_STAGE = {"defender": "stage-defender", "actor": "stage-actor", "environment": "stage-oracle"}
+GROUP_STAGE = {"defender": "stage-defender"}
 
 #: The header link each page carries to the other — one rule, both pages.
 NAV_CSS = "header.top nav.views { margin-left: auto; font-size: 12px; }\n"
@@ -519,8 +519,15 @@ def render(view: dict) -> str:
 
 def main(paths: LoopPaths) -> int:
     """Both pages, into this directory, for the explicitly selected tenant."""
+    from defender.tenancy._exports import DeliveryRefused
+
+    try:
+        agent_root = serialize.published_agent_root(paths.tenant)
+    except DeliveryRefused as refused:
+        print(f"error: the tenant's lessons cannot be shown: {refused}", file=sys.stderr)
+        return 1
     queues = serialize_queues.stamped_view(paths)
-    view = serialize.stamped_view()
+    view = serialize.stamped_view(agent_root)
 
     json_out = HERE.parent / "lessons.json"
     json_out.write_text(serialize.dump_contract(view), encoding="utf-8")

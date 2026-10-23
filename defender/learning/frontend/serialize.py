@@ -9,7 +9,6 @@ from typing import TypedDict
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
-DEFENDER = REPO_ROOT / "defender"
 
 if (_root := str(REPO_ROOT)) not in sys.path:
     sys.path.insert(0, _root)
@@ -22,9 +21,7 @@ if __name__ == "__main__":
 from defender._clock import z_seconds
 from defender.knowledge._corpus import iter_lessons
 from defender._io import json_safe, use_utf8_stdio
-from defender.knowledge._knowledge import (
-    LESSONS, LESSONS_ACTOR, LESSONS_ENVIRONMENT, LESSONS_QUESTIONER, KnowledgePaths,
-)
+from defender.knowledge._knowledge import LESSONS, LESSONS_QUESTIONER, KnowledgePaths
 
 
 def _json_safe(obj):
@@ -92,45 +89,6 @@ GROUPS: dict[str, GroupSpec] = {
             {"label": "Created", "key": "created_at", "kind": "date"},
         ],
     },
-    "actor": {
-        "label": "Actor lessons",
-        "dir": LESSONS_ACTOR,
-        "blurb": "Pattern/tradecraft lessons the adversarial actor learned — what cover held "
-                 "and what tripped the defender.",
-        "retired": True,
-        "retired_note": "Frozen archive. The adversarial actor that authored these, and the "
-                        "curator that folded them, were deleted with the four-role pipeline "
-                        "(#922). Nothing writes this corpus and nothing reads it; the lessons "
-                        "are kept so what was learned stays findable.",
-        "title_keys": ["subject"],
-        "desc_key": "relevance_criteria",
-        "fields": [
-            {"label": "Techniques", "key": "techniques", "kind": "chips"},
-            {"label": "Alert rules", "key": "alert_rule_ids", "kind": "chips"},
-            {"label": "Lead tags", "key": "defender_lead_tags", "kind": "chips"},
-            {"label": "Recorded", "key": "recorded_at", "kind": "text"},
-        ],
-    },
-    "environment": {
-        "label": "Environment lessons",
-        "dir": LESSONS_ENVIRONMENT,
-        "blurb": "Standing deployment facts the two actors retrieved to ground their stories, "
-                 "fed by the benign and adversarial directions alike (issue #298).",
-        "retired": True,
-        "retired_note": "Frozen archive. Both directions that fed it were deleted with the "
-                        "four-role pipeline (#922), and no live role retrieves it. Kept "
-                        "readable; environment knowledge the runtime uses lives in "
-                        "defender/skills/ instead.",
-        "title_keys": ["subject"],
-        "desc_key": "relevance_criteria",
-        "fields": [
-            {"label": "Alert rules", "key": "alert_rule_ids", "kind": "chips"},
-            # The label for the lessons' `entities` frontmatter key, unrelated to the retired
-            # `Entities` dataclass. The suppression must sit on the referencing line itself.
-            {"label": "Entities", "key": "entities", "kind": "chips"},  # lint-stale-ref: ok — display label, not the retired dataclass
-            {"label": "Recorded", "key": "recorded_at", "kind": "text"},
-        ],
-    },
     "questioner": {
         "label": "Questioner lessons",
         "dir": LESSONS_QUESTIONER,
@@ -153,19 +111,22 @@ GROUPS: dict[str, GroupSpec] = {
 }
 
 
-def build_view(defender_dir: Path = DEFENDER) -> dict:
+def build_view(*, agent_root: Path) -> dict:
+    """The posture page's contract over the tenant knowledge at `agent_root` (an export's
+    `agent/`, #1108 P4): each group's lessons, spelled relative to the tenant repo."""
     groups: dict[str, dict] = {}
-    knowledge = KnowledgePaths.of_defender_dir(defender_dir)
+    knowledge = KnowledgePaths(Path(agent_root))
+    root = knowledge.agent_root.parent
     for name, spec in GROUPS.items():
         skipped: list[Path] = []
         lessons = [
             _normalize(lesson.path, lesson.fm, lesson.body, group=name,  # lint-lesson-text: ok — the HTML view escapes every value it renders (build.py escHtml)
                        title_keys=spec["title_keys"], desc_key=spec["desc_key"],
-                       root=defender_dir.parent)
+                       root=root)
             for lesson in iter_lessons(knowledge.corpus_dir(spec["dir"]), on_skip=skipped.append)
         ]
         lessons += [
-            _skipped_record(path, group=name, root=defender_dir.parent) for path in skipped
+            _skipped_record(path, group=name, root=root) for path in skipped
         ]
         lessons.sort(key=lambda rec: rec["title"].lower())
         groups[name] = {
@@ -179,8 +140,16 @@ def build_view(defender_dir: Path = DEFENDER) -> dict:
     return {"groups": groups}
 
 
-def stamped_view() -> dict:
-    view = build_view()
+def published_agent_root(tenant) -> Path:
+    """The `agent/` of the export the tenant's `current` names: the knowledge the page shows.
+    `DeliveryRefused` when nothing is published for the tenant."""
+    from defender.tenancy._exports import current_export
+
+    return current_export(tenant).path / "agent"
+
+
+def stamped_view(agent_root: Path) -> dict:
+    view = build_view(agent_root=agent_root)
     view["generated_at"] = z_seconds(_dt.datetime.now(_dt.UTC))
     return view
 
@@ -190,9 +159,28 @@ def dump_contract(view: dict) -> str:
 
 
 def main(argv: list[str]) -> int:
+    import argparse
+
     use_utf8_stdio()
-    view = stamped_view()
-    if "--stdout" in argv[1:]:
+    parser = argparse.ArgumentParser(description="The lessons posture page's contract")
+    parser.add_argument("--stdout", action="store_true")
+    where = parser.add_mutually_exclusive_group(required=True)
+    where.add_argument("--tenant", help="show the tenant's published knowledge")
+    where.add_argument("--agent-root", type=Path, help="show the knowledge at this agent root")
+    args = parser.parse_args(argv[1:])
+    if args.agent_root is not None:
+        agent_root = args.agent_root
+    else:
+        from defender.tenancy import _tenant
+        from defender.tenancy._exports import DeliveryRefused
+
+        try:
+            tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), args.tenant)
+            agent_root = published_agent_root(tenant)
+        except (_tenant.TenantRefused, DeliveryRefused) as refused:
+            parser.error(str(refused))
+    view = stamped_view(agent_root)
+    if args.stdout:
         sys.stdout.write(dump_contract(view))
     else:
         out = HERE.parent / "lessons.json"

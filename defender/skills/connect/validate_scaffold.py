@@ -227,8 +227,9 @@ def check_config(report: Report, settings_dir: Path, system: str) -> None:
     _check_values(report, assignments(text))
 
 
-def check_skill(report: Report, defender: Path, system: str) -> None:
-    skill_dir = KnowledgePaths.of_defender_dir(defender).system_skill_dir(system)
+def check_skill(report: Report, staged: KnowledgePaths, system: str) -> None:
+    """The per-system skill of the staged tenant half (`staged`, agent-root-shaped)."""
+    skill_dir = staged.system_skill_dir(system)
     skill = skill_dir / "SKILL.md"
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
@@ -254,12 +255,12 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
         report.add(WARN, "no execution.md and no inline ## Execution section")
 
 
-def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
-    """Every template of `system`, drafts included, since `_draft/` is where the
-    lead-authoring lane writes. The rules are `_scaffold_rules`, shared with the loop's
-    commit gate.
+def check_templates(report: Report, staged: KnowledgePaths, system: str, verbs) -> None:
+    """Every template of `system` in the staged tenant half, drafts included, since `_draft/`
+    is where the lead-authoring lane writes. The rules are `_scaffold_rules`, shared with the
+    loop's commit gate.
     """
-    qdir = KnowledgePaths.of_defender_dir(defender).catalog_dir / system
+    qdir = staged.catalog_dir / system
     templates = [t for t in iter_query_templates(qdir.parent) if t.system == system]
     if not templates:
         report.add(WARN, f"no seed query templates under skills/gather/queries/{system}/ (they grow post-merge)")
@@ -294,6 +295,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
     ap.add_argument("system")
     add_tenant_arguments(ap, reads="holds the connected system's config.env")
+    ap.add_argument(
+        "--staged", type=Path, default=None,
+        help="the staged tenant half, laid out as the tenant's agent/ "
+             "(skills/<system>/, skills/gather/queries/<system>/); without it the skill and "
+             "template checks fail as unchecked")
     args = ap.parse_args()
     system = args.system
     defender = process_defender_dir()
@@ -313,8 +319,15 @@ def main() -> None:
                          f"resolved: {refusal}")
     else:
         check_config(report, settings_dir, system)
-    check_skill(report, defender, system)
-    check_templates(report, defender, system, verbs)
+    # The tenant half (system skill, seed queries) is judged where connect staged it, for
+    # `tenant.py propose`; the adapter checks above read the code tree (#1108 P4 flow 6).
+    if args.staged is None:
+        report.add(FAIL, f"skills/{system}/ and its seed templates not checked — give the "
+                         "staged tenant half with --staged <dir>")
+    else:
+        staged = KnowledgePaths(args.staged.resolve())
+        check_skill(report, staged, system)
+        check_templates(report, staged, system, verbs)
     report.render_and_exit()
 
 

@@ -7,13 +7,14 @@ tacit-knowledge system is already connected.
 This is **not** the onboarding workflow. `SKILL.md`'s six steps connect a
 new system of record; this adds *data* to one that is already connected.
 Two different jobs in the same skill because the shape of the work is the
-same — interview a maintainer, write files, validate, leave a branch — and
+same — interview a maintainer, write files, validate, propose them for review — and
 because a maintainer who has run `/connect` once already knows where to
 look. Nothing here touches an adapter, a config, or a query template.
 
 ## Why the skill does this at all
 
-The registry is a version-controlled file, `skills/tacit-knowledge/registry.yaml`.
+The registry is a version-controlled file of the tenant's own repository,
+`agent/skills/tacit-knowledge/registry.yaml` (tenant knowledge, never this repo's).
 There is no service, no API, and no admin UI — a human edits YAML and
 commits it, and **the commit is the sign-off**. That is the entire safety
 argument for the system, and it is deliberate: nothing an investigation
@@ -22,7 +23,7 @@ the agent's own conclusions.
 
 What you add is a **transcription** step, not an approval one. The human
 still decides that the pattern is sanctioned; you turn what they say into
-eight well-formed fields, check it, and hand them a branch. Every property
+eight well-formed fields, check it, and hand them a review PR. Every property
 that makes the file trustworthy survives, because the thing that makes it
 trustworthy is the reviewed commit, not the keystrokes.
 
@@ -71,10 +72,13 @@ across an edited `pattern` silently re-points every existing citation.
 
 ## What you do
 
-1. **Check the current file first.**
+1. **Stage the current file, and check it first.** Copy the tenant's current
+   `agent/skills/tacit-knowledge/registry.yaml` into a staging directory laid out as the
+   tenant's `agent/` — call it `{staged}` (for example `/tmp/tacit-{id}`), so the file is
+   `{staged}/skills/tacit-knowledge/registry.yaml` — and check that copy:
 
    ```bash
-   defender/.venv/bin/python -m defender.cli.tacit_cli check
+   defender/.venv/bin/python -m defender.cli.tacit_cli check --defender-dir {staged}
    ```
 
    If it is already failing, say so before you add anything — an entry
@@ -94,7 +98,7 @@ across an edited `pattern` silently re-points every existing citation.
 4. **Show what is now in force.**
 
    ```bash
-   defender/.venv/bin/python -m defender.cli.tacit_cli show
+   defender/.venv/bin/python -m defender.cli.tacit_cli show --defender-dir {staged}
    ```
 
    Read the new entry back to them in their own terms — "uid-0 may
@@ -102,16 +106,16 @@ across an edited `pattern` silently re-points every existing citation.
    [name]'s sign-off" — and get a yes. This is the last point at which a
    misheard scope is cheap to fix.
 
-5. **Branch and stage. Do not merge or push.**
+5. **Propose it to the tenant. Do not merge.**
 
    ```bash
-   git checkout -b tacit/{id}
-   git add defender/skills/tacit-knowledge/registry.yaml
+   python3 defender/cli/tenant.py propose {tenant} {staged}
    ```
 
-   Present: the entry, the check output, and who must review it. The
-   review of that commit is the sign-off — say so, so nobody treats the
-   branch as the end of the process. `/ship` can open the PR.
+   This opens one review PR on the tenant's forge touching
+   `agent/skills/tacit-knowledge/registry.yaml` only. Present: the entry, the
+   check output, the PR, and who must review it. The review of that PR is the
+   sign-off — say so, so nobody treats the proposal as the end of the process.
 
 ## Refreshing or removing one
 
@@ -130,7 +134,7 @@ flags it for exactly that reason.
 
 - Write any file but `registry.yaml`.
 - Author an entry the human did not state in full.
-- Merge, push, or treat its own branch as approval.
+- Merge, or treat its own proposal as approval.
 - Add an entry because an investigation concluded something. A run's own
   finding is not a sanction, and a registry populated from closes is the
   system authorizing itself — the failure this whole design is shaped

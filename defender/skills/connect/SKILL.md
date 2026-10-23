@@ -60,7 +60,7 @@ Read the doc you need; don't duplicate it into what you scaffold.
 - `decisions.md` — why the skill is shaped this way (for grounding a call).
 - `defender/docs/system-skill-shape.md` — the per-system `SKILL.md` /
   `execution.md` split and its fields.
-- `defender/skills/gather/queries/SCHEMA.md` — the query-template format.
+- `defender/skills/gather/query-schema.md` — the query-template format.
 - `defender/integrations/faults.py` + `defender/runtime/verbs.py` — the
   fault taxonomy and the `VerbContext` / `VERBS` contract an adapter implements.
 - `defender/skills/handbook/` — runtime loop and run-dir reference, on demand.
@@ -73,11 +73,15 @@ Sequential; if a step blocks, diagnose and fix before moving on.
 ### 1. Orient
 
 ```bash
-ls defender/integrations/ defender/skills/
+ls defender/integrations/
 ```
 
+The per-system knowledge is not in this repo: it is the tenant's, in the tenant's own
+repository (`agent/skills/`), and a run reads it from its published copy. To see what a
+tenant already has, list `agent/skills/` of its repo.
+
 If the system already has a `{system}_adapter.py` adapter and a
-`skills/{system}/` dir, stop and ask: replace it, or did they mean a
+`skills/{system}/` dir in the tenant's `agent/`, stop and ask: replace it, or did they mean a
 different system? A re-run
 on an existing system is a deliberate update — branch
 `connect/{system}-update` first so the diff stays clean. If this is a
@@ -150,7 +154,13 @@ Both paths produce the same per-system skill. Read
 system already exists, mirror the closest one. The bar is **lean** —
 everything here grows post-merge.
 
-`defender/skills/{system}/`:
+The per-system knowledge is the **tenant half**: it belongs to the tenant's own repository
+(`agent/`), never to this one. Write it into a **staging directory** outside this repo,
+laid out as the tenant's `agent/` is — call it `{staged}` (for example
+`/tmp/connect-{system}`). Step 6 validates it there and proposes it to the tenant with
+`tenant.py propose`.
+
+`{staged}/skills/{system}/`:
 
 - **`SKILL.md`** — the **Visibility surface**, frontmatter
   `name: defender-{system}` + a one-line `description`. Read by the
@@ -180,9 +190,9 @@ config (endpoint, timeout, `AUTH_TYPE`). Also add a `CHANGE-ME` placeholder copy
 scaffolded from the template knows the keys.
 Track it in the tenant's repo when it holds no secrets. A secret is never in this file.
 
-`defender/skills/gather/queries/{system}/` — write only the **couple of
+`{staged}/skills/gather/queries/{system}/` — write only the **couple of
 seed templates you're certain of** (an entry-point measurement, a by-key
-lookup), per `queries/SCHEMA.md` (`id: {system}.{template-id}`, `verb:`,
+lookup), per `defender/skills/gather/query-schema.md` (`id: {system}.{template-id}`, `verb:`,
 `params:`, Goal, What to summarize, a parameterized Query body, Common
 pitfalls). `verb:` is **required**; `id:` and `params:` are **checked** in
 step 6 against the directory and the adapter's live signature — the `{system}`
@@ -243,9 +253,10 @@ For a **generated-adapter** integration, run the scaffold validator and fix
 every FAIL:
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant}
+python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged {staged}
 ```
 
+The adapter checks read this repo; the skill and template checks read `{staged}`.
 Skip it on the **MCP** path — it checks the adapter module an MCP system
 doesn't have, so it would FAIL on things that aren't yours to fix.
 Either way, walk `${CLAUDE_SKILL_DIR}/checklist.md` for the judgment items
@@ -256,12 +267,18 @@ the branch and just leave the files in place for review:
 ```bash
 git checkout -b connect/{system}
 git add defender/integrations/{system}_adapter.py \
-        defender/skills/{system}/ \
         knowledge/tenant-template/settings/systems/{system}/config.env \
         knowledge/tenant-template/settings/verb-grants.yaml \
-        knowledge/tenant-fixture/settings/verb-grants.yaml \
-        defender/skills/gather/queries/{system}/
+        knowledge/tenant-fixture/settings/verb-grants.yaml
 # add pyproject.toml / uv.lock only if a dependency was added
+```
+
+The tenant half — the system skill and its seed templates in `{staged}` — goes to the
+tenant's repository, not this branch. Propose it there; it becomes one review PR on the
+tenant's forge touching `agent/` only (files are added or replaced, nothing is deleted):
+
+```bash
+python3 defender/cli/tenant.py propose {tenant} {staged}
 ```
 
 The connected tenant's `config.env` and table live in ITS repo, not this one: branch and
@@ -283,7 +300,7 @@ Then stop. `/ship` can open the PR.
   `config.env` holds no secret and no reference to one: credential delivery is
   #1163, and the skill never sees a value.
 - **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
-  `skills/{system}/`, that system's `config.env`, its seed templates, and
+  `{staged}/skills/{system}/`, that system's `config.env`, its seed templates, and
   its rows in every tenant's and the template's `settings/verb-grants.yaml`
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `lessons/`, the runtime `defender/SKILL.md`, the invlang

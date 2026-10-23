@@ -28,8 +28,8 @@ Runs scanned: the natural runs of the tenant ``--tenant`` names (required, no de
 J8), listed and opened through its run repository — every case's ``report.md`` +
 ``lessons_loaded.jsonl``. The listing rule applies (rev 4.1 H4): an entry in the runs folder
 that is not a run (a stray file, an off-rule name) fails the trace loudly, naming it, rather
-than being skipped. Lessons: ``defender/lessons/``,
-overridable with ``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``
+than being skipped. Lessons: the tenant's published knowledge (``agent/lessons/`` of the
+export ``current`` names, #1108 P4), overridable with ``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``
 and so inherits the corpus discovery rules (underscore-skip, warn on a malformed lesson).
 A lesson the walk skips still gets a marker row with an unwindowed count — the audit index
 must not silently lose a lesson that has in-context cases.
@@ -54,12 +54,22 @@ from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
 from defender.records._report import UNKNOWN_DISPOSITION, read_report
-from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import KnowledgePaths
 from defender._text import one_line
 from defender.run_repository import Run, RunPaths
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-LESSONS_DIR = CHECKOUT_KNOWLEDGE.lessons_dir
+
+
+def published_lessons_dir(raw_tenant: str) -> Path:
+    """The lessons of the export the tenant's `current` names (`<export>/agent/lessons`).
+    `TenantRefused` when the tenant cannot be accepted; `DeliveryRefused` when nothing is
+    published for it."""
+    from defender.tenancy import _tenant
+    from defender.tenancy._exports import current_export
+
+    tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
+    return KnowledgePaths(current_export(tenant).path / "agent").lessons_dir
 
 
 def _echo_value(raw: object) -> str:
@@ -192,6 +202,19 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
         return None
 
 
+def _published_or_none(raw_tenant: str) -> Path | None:
+    """`published_lessons_dir`, or `None` with the refusal on stderr (one line)."""
+    from defender.tenancy import _tenant
+    from defender.tenancy._exports import DeliveryRefused
+
+    try:
+        return published_lessons_dir(raw_tenant)
+    except (_tenant.TenantRefused, DeliveryRefused) as refused:
+        print(f"error: the lessons of tenant {one_line(raw_tenant)} cannot be found: "
+              f"{one_line(str(refused))}", file=sys.stderr)
+        return None
+
+
 def main(argv: list[str]) -> int:
     use_utf8_stdio()
     p = argparse.ArgumentParser(
@@ -202,14 +225,18 @@ def main(argv: list[str]) -> int:
     p.add_argument("lesson_name", nargs="?", help="lesson slug to trace")
     p.add_argument("--all", action="store_true",
                    help="list every lesson with its in-context case count (cheap scan)")
-    p.add_argument("--lessons-dir", type=Path, default=LESSONS_DIR,
-                   help="Corpus directory (default: defender/lessons)")
+    p.add_argument("--lessons-dir", type=Path, default=None,
+                   help="Corpus directory (default: the tenant's published agent/lessons)")
     ns = p.parse_args(argv)
-    lessons_dir = ns.lessons_dir
 
     if ns.all and ns.lesson_name:
         print("give a <lesson_name> or --all, not both", file=sys.stderr)
         return 1
+    lessons_dir = ns.lessons_dir
+    if lessons_dir is None:
+        lessons_dir = _published_or_none(ns.tenant)
+        if lessons_dir is None:
+            return 1
 
     if not lessons_dir.is_dir():
         print(f"no lessons dir: {lessons_dir}", file=sys.stderr)

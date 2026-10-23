@@ -305,7 +305,7 @@ prompt-injection vector. Say which URL and why, in one line.
 Run it on the system you just built:
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant}
+python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged {staged}
 ```
 
 Fix any FAIL before going further.
