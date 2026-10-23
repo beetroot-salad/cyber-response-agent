@@ -256,9 +256,14 @@ bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, is
 check_main_protected() {  # check_main_protected token repo: the bot, through the issuer, cannot push main
   local t=$1 repo=$2 jwt branch
   # A token for the role as the AppRole would get it: the root token has no entity, so log in.
-  local secret token
-  secret=$(bao "$t" write -f -field=secret_id auth/approle/role/"$APPROLE"/secret-id)
+  # Its own short-lived secret_id, destroyed after the one login (secret_ids do not expire).
+  local minted secret accessor token
+  minted=$(bao "$t" write -f -format=json auth/approle/role/"$APPROLE"/secret-id)
+  secret=$(jq -r .data.secret_id <<<"$minted")
+  accessor=$(jq -r .data.secret_id_accessor <<<"$minted")
   token=$(bao "" write -field=token auth/approle/login role_id="$ROLE_ID" secret_id="$secret")
+  bao "$t" write auth/approle/role/"$APPROLE"/secret-id-accessor/destroy \
+    secret_id_accessor="$accessor" >/dev/null
   jwt=$(bao "$token" read -field=token identity/oidc/token/"$ROLE")
   bao "$token" token revoke -self >/dev/null
   branch=$(fj sh -c "curl -s -H 'Authorization: Bearer $jwt' $FORGEJO/api/v1/repos/$repo/branches/main")
