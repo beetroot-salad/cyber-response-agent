@@ -66,7 +66,7 @@ def load_trace_lesson(name: str) -> ModuleType:
     ``name`` is required and deliberately not defaulted. The suites that load this CLI
     want *separate* module objects, because each rebinds or exercises module state the
     others must not see; ``test_corpus_fold_584`` documents the rejected alternative
-    (rebinding ``mod.LESSONS_DIR`` on a shared module) at length. What they did not want,
+    (rebinding the CLI's corpus-directory constant on a shared module) at length. What they did not want,
     and had, was three different derivations of where the file is.
     """
     return load_module(DEFENDER / "cli" / "learning" / "trace_lesson.py", name=name)

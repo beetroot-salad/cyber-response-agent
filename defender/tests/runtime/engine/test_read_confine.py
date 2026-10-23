@@ -40,7 +40,7 @@ def _policy(*, read_confine=(), bash_allow=(), read_roots=()):
 
 @pytest.mark.parametrize("path", [_CONFINE_A / "T1078.md", _CONFINE_B / "svc-monitoring.md"])
 def test_malicious_reads_within_confine_allowed(tmp_path, path):
-    """read under lessons-actor / lessons-environment (malicious confine) -> allow."""
+    """read under either directory of the two-directory confine -> allow."""
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     assert permission.decide_read(path, run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow, path
 
@@ -57,7 +57,7 @@ def test_malicious_reads_outside_confine_denied(tmp_path, path):
 
 
 def test_benign_confined_to_environment(tmp_path):
-    """benign leg: lessons-environment allowed; lessons-actor (tradecraft) AND rubric denied — the gray-box split."""
+    """one-directory confine: its directory allowed; the other directory AND a file outside both denied — the gray-box split."""
     pol = _policy(read_confine=_BENIGN_CONFINE)
     assert permission.decide_read(_CONFINE_B / "x.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
     assert not permission.decide_read(_CONFINE_A / "x.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
@@ -115,7 +115,7 @@ def test_confined_actor_cannot_reach_gather_raw(tmp_path):
 def _tmp_tree(tmp_path):
     """A tmp defender-like tree: a confine dir + an out-of-confine 'rubric'. Returns (defender_dir, confine, rubric)."""
     dfn = tmp_path / "defender"
-    conf = dfn / "lessons-environment"
+    conf = dfn / "confined-corpus"
     conf.mkdir(parents=True)
     (conf / "ok.md").write_text("lesson\n")
     judge = dfn / "judge"
@@ -146,11 +146,11 @@ def test_resolve_error_fails_closed(tmp_path):
 
 
 @pytest.mark.parametrize("cmd", [
-    "cat defender/lessons-actor/x.md",
-    "grep foo defender/lessons-environment/y.md",
-    "head -5 defender/lessons-actor/x.md",
-    "tail -5 defender/lessons-actor/x.md",
-    "ls defender/lessons-actor",
+    "cat defender/confined-a/x.md",
+    "grep foo defender/confined-b/y.md",
+    "head -5 defender/confined-a/x.md",
+    "tail -5 defender/confined-a/x.md",
+    "ls defender/confined-a",
 ])
 def test_actor_all_generic_readers_denied(cmd):
     assert not permission.decide_bash(cmd, policy=_policy(bash_allow=())).allow, cmd

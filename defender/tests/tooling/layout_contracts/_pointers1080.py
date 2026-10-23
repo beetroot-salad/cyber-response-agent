@@ -17,8 +17,8 @@ EXCLUDED_DIRS: tuple[str, ...] = (
     # archival: frozen records of their moment
     "experiments/", "docs/decisions/", "docs/archive/", "defender/docs/decisions/", "defender/docs/archive/", "playground-v2/docs/archive/", "spec-flow/specs/", ".claude/worktrees/",
     # recorded data that quotes the code of its moment (lint_stale_refs.EXCLUDED_GREP_DIRS)
-    "playground-v2/examples/alerts/", "defender/tests/fixtures/e2e/", "defender/lessons/", "defender/lessons-actor/",
-    "defender/lessons-environment/", "defender/lessons-questioner/",
+    "playground-v2/examples/alerts/", "defender/tests/fixtures/e2e/", "defender/lessons/", "defender/lessons-actor/",  # lint-stale-ref: ok — base-era exclusions this suite records on purpose
+    "defender/lessons-environment/", "defender/lessons-questioner/",  # lint-stale-ref: ok — base-era exclusions this suite records on purpose
     "evaluations/judge_alignment/", "evaluations/oracle_golden/cases/",
     # this suite: it records the base on purpose
     "defender/tests/tooling/layout_contracts/",

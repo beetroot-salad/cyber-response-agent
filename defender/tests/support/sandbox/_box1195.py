@@ -33,7 +33,8 @@ DEFENDER = Path(__file__).resolve().parents[3]
 #: from these under `<wt>/defender`.
 IMAGE_INPUTS = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 
-#: The pointer main's batch-start unwind appends to a `BoxFault` (`_unwind_worktree_start_fault`).
+#: The build pointer the retired worktree batch start appended to a `BoxFault` (#1195; that unwind
+#: went with the worktree drains, #1108 P4): a mid-batch box fault must never carry it.
 POINTER = "origin/main @ "
 
 #: A batch box's docker calls from its post-create stop on (`FakeDaemon.calls_from_the_first_stop`)

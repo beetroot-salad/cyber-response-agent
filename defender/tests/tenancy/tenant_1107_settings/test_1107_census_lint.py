@@ -240,11 +240,8 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
 
 
 #: G34's homonyms of "override": (file, a phrase on the listed line). They stay.
+#: #1108 P4 (O1): the other five homonym docs were the system skills, the catalog and the tacit
+#: registry's, which moved to each tenant; the product tree keeps only `connect`'s.
 HOMONYMS: tuple[tuple[str, str], ...] = (
-    ("defender/skills/identity/SKILL.md", 'via: "override"'),
-    ("defender/skills/cmdb/SKILL.md", "per-host override"),
-    ("defender/skills/elastic/execution.md", "verb overrides the"),
-    ("defender/skills/gather/queries/identity/user-authorization.md", "per-host override"),
     ("defender/skills/connect/SKILL.md", "overrideable with cause"),
-    ("defender/skills/tacit-knowledge/execution.md", "no environment variable to resolve"),
 )

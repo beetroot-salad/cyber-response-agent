@@ -53,13 +53,10 @@ MODEL_DOCS: tuple[str, ...] = (
 )
 
 #: G34's domain homonyms of "override" — lines that stay (they are not about the environment).
+#: #1108 P4 (O1): the system skills, the catalog and the tacit registry's docs are tenant knowledge
+#: now, so the product tree keeps only `connect`'s homonym.
 HOMONYM_DOCS: tuple[str, ...] = (
-    "defender/skills/identity/SKILL.md",
-    "defender/skills/cmdb/SKILL.md",
-    "defender/skills/elastic/execution.md",
-    "defender/skills/gather/queries/identity/user-authorization.md",
     "defender/skills/connect/SKILL.md",
-    "defender/skills/tacit-knowledge/execution.md",
 )
 
 _ELASTIC_KEY = re.compile(r"^(ELASTICSEARCH_URL|ELASTIC_[A-Z0-9_]+)$")
