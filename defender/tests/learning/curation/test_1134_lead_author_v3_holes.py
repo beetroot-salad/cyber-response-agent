@@ -15,7 +15,7 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.lane_trees import DrainTrees, kind_at
 from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
-from defender.tests.support.learning.curation._lead_author_1134 import outcome, place, raised, scene_over, write
+from defender.tests.support.learning.curation._lead_author_1134 import draft_scene_over, outcome, place, raised, write
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder
@@ -109,9 +109,11 @@ def test_a_refused_listing_alone_does_not_refuse_the_draft(
 
 @pytest.fixture
 def scene(tmp_path: Path):
-    """The handle file's scene: `seed_skills_repo`, committed, a folder outside it, the lead
-    drain's trees over it, open for the test."""
-    with scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
+    """The handle file's scene after P4 (O7, OD6): `seed_skills_repo`'s skills tree at a
+    tenant-shaped root (`draft_scene_over`: the mount `<root>/agent/skills`, names
+    `agent/skills/...`, the adapters in the product checkout), committed, a folder outside it,
+    the lane's trees over it, open for the test."""
+    with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
 
@@ -158,7 +160,7 @@ def test_a_refused_draft_folder_neither_clears_the_twin_nor_departs_a_draft(
 
 @pytest.mark.parametrize("route", ["reopen", "scandir"])
 def test_kind_at_on_the_mount_point_answers_from_its_own_listing(scene, route: str):
-    rel = "defender/skills"
+    rel = "agent/skills"  # the mount point, repo-relative under the tenant-shaped root (OD6)
     assert kind_at(scene.repo, scene.tree_for, rel) == "dir"
     refuser = RefusesFolder(scene.skills_dir, route, errno.EIO)
     with DrainTrees.open((scene.skills_dir,), os_=refuser) as trees:

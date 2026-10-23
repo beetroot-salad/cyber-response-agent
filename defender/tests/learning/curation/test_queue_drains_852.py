@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain
 from defender.learning.core import drains
@@ -34,6 +35,11 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 # F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
+#
+# #1108 P4 (OD12 class ii): each tick runs over a batch's git-free draft (`_curator1134.draft_lane`,
+# the REAL lessons config over it through `draft_author_cfg`); "committed" is read on the batch
+# branch (`agent/lessons/...`), "nothing committed" is no commit on it, "restored away" is the
+# draft back at the batch base.
 
 
 def _write_corpus_file(corpus_dir: Path, stem: str, field: str, cited: list[str]) -> Path:
@@ -47,21 +53,29 @@ def _write_corpus_file(corpus_dir: Path, stem: str, field: str, cited: list[str]
     return path
 
 
-def _head_files(repo: Path) -> list[str]:
-    return h.git(repo, "show", "--name-only", "--pretty=format:", "HEAD").stdout.split()
+def _f02_lane(tmp_path: Path, files: dict[str, str] | None = None) -> C.DraftLane:
+    """The draft lane, its findings queue seeded with run-G/0 and run-B/0."""
+    lane = C.draft_lane(tmp_path, files=files)
+    h.seed(lane.paths, h.channel_of("findings"),
+           [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    return lane
 
 
-def _commits(repo: Path) -> int:
-    """Commit count — how "nothing was committed" is asserted, since HEAD on a faulted tick
-    is the fixture's own init commit and carries the whole tree."""
-    return int(h.git(repo, "rev-list", "--count", "HEAD").stdout.strip())
+def _head_files(lane: C.DraftLane) -> list[str]:
+    """The paths the batch branch's last commit changed."""
+    return lane.git("show", "--name-only", "--pretty=format:", lane.tip()).stdout.split()
+
+
+def _commits(lane: C.DraftLane) -> int:
+    """The commit-maker's commits on the batch branch — how "nothing was committed" is asserted."""
+    return len(lane.commits())
 
 
 def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp_path: Path):
     """F-02."""
-    paths = h.make_paths(tmp_path)
+    lane = _f02_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -73,14 +87,14 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
             "commit_message": "defender: lesson vouched",
         }
 
-    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
+    cfg = C.draft_author_cfg(lane, invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 2, "the unattributable file did not fault the tick"
 
     assert not (cfg.corpus_dir / "forward-bad.md").exists(), \
         "the rejected lesson survived in the corpus"
     assert not (cfg.corpus_dir / "vouched.md").exists(), \
         "the tick faulted but its batch-mate's edit was not restored away with it"
-    assert _commits(paths.repo_root) == 1, "a commit landed on a faulted tick"
+    assert _commits(lane) == 0, "a commit landed on a faulted tick"
     assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"], \
         "the batch left the queue on a tick that committed nothing"
     assert h.attempts_of(paths, ch, "run-G/0") == 1
@@ -90,9 +104,9 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     tmp_path: Path,
 ):
     """F-02's control, and its second half."""
-    paths = h.make_paths(tmp_path)
+    lane = _f02_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -102,10 +116,11 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
             "commit_message": "defender: lesson vouched",
         }
 
-    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
+    cfg = C.draft_author_cfg(lane, invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 0
 
-    assert _head_files(paths.repo_root) == ["defender/lessons/vouched.md"]
+    assert _commits(lane) == 1
+    assert _head_files(lane) == ["agent/lessons/vouched.md"]
     assert list(h.pending_by_id(paths, ch)) == ["run-B/0"]
     assert "attempts" not in h.pending_by_id(paths, ch)["run-B/0"]
     assert "held_reason" not in h.pending_by_id(paths, ch)["run-B/0"], (
@@ -117,14 +132,16 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     tmp_path: Path,
 ):
     """The exemption's edge."""
-    paths = h.make_paths(tmp_path)
+    # An earlier batch's lesson, published in the export the batch starts from.
+    earlier = tmp_path / "earlier"
+    earlier.mkdir()
+    old_text = _write_corpus_file(earlier, "old-fact", "source_finding_ids",
+                                  ["run-A/0"]).read_text(encoding="utf-8")
+    lane = _f02_lane(tmp_path, files={"lessons/old-fact.md": old_text})
+    paths = lane.paths
     ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
-
-    seeded = h.cfg_for(paths, "findings")
-    old = _write_corpus_file(seeded.corpus_dir, "old-fact", "source_finding_ids", ["run-A/0"])
-    h.git(paths.repo_root, "add", "-A")
-    h.git(paths.repo_root, "commit", "-q", "-m", "an earlier batch's lesson")
+    old = lane.lessons_dir / "old-fact.md"
+    assert old.read_text(encoding="utf-8") == old_text
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -140,9 +157,9 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
             "commit_message": "defender: lesson vouched",
         }
 
-    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
+    cfg = C.draft_author_cfg(lane, invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 2, "the rejected fold rode in on its batch-mate"
-    assert _commits(paths.repo_root) == 2
+    assert _commits(lane) == 0
     assert "run-B/0" not in old.read_text(encoding="utf-8"), "the rejected fold survived"
     assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"]
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import json
 
@@ -17,6 +18,7 @@ from ._support import (
     TOKEN,
     ForgeHTTP,
     bounded,
+    delivery,
     pr_row,
 )
 
@@ -316,16 +318,19 @@ def test_repository_identity_is_the_repository_id(method):
         [normalized(2, "lessons/a")]
 
 
-def test_the_writer_lease_is_not_held_by_a_fork_pr(tmp_path):
-    from defender.learning.author.branch import AuthorBranch
+def test_the_writer_lease_is_not_held_by_a_fork_pr(repo):
+    """OD8: the writer lease (amendment 3 C1) is the tenant delivery's `open_pr_exists` — the
+    legacy `AuthorBranch` is deleted with the worktree delivery (#1108 P4, O7). Only an open
+    PR of the tenant repository itself, under the lane's prefix, holds it."""
     http = ForgeHTTP()
-    branch = AuthorBranch(forge=forge(http), repo_root=tmp_path, branch_prefix="lessons/")
+    lane = dataclasses.replace(delivery(repo, http), branch_prefix="lessons/")
     others = [pr_row(1, "lessons/x", repo=FORK), pr_row(2, "lessons/y", repo=SIBLING_FORK),
-              pr_row(5, "lessons/v", repo=NAMESAKE), pr_row(6, "lessons/w", repo=None)]
+              pr_row(5, "lessons/v", repo=NAMESAKE), pr_row(6, "lessons/w", repo=None),
+              pr_row(7, "lead-author/u")]
     http.pages = {1: others}
-    assert branch.open_pr_exists() is False
+    assert lane.open_pr_exists() is False
     http.pages = {1: [*others, pr_row(3, "lessons/z")]}
-    assert branch.open_pr_exists() is True
+    assert lane.open_pr_exists() is True
 
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])

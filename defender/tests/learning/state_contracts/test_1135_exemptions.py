@@ -11,6 +11,8 @@ import functools
 import json
 import logging
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,7 +29,7 @@ from defender.learning.leads import _lead_spine, pitfalls_curator
 from defender.box import _scrub as scrub_mod
 from defender.presentation import visualize_episode
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.curation._lead_author_1134 import lead_trees
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
@@ -366,7 +368,20 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
         tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", "no-such-model-1135")
-    paths = S.built_paths(tmp_path, repo_root=seed_skills_repo(tmp_path / "repo"))
+    # #1108 P4 (OD12 class ii, OD16): the pitfalls lane runs over a batch's git-free draft
+    # holding the seeded skills tree (`_curator1134.draft_lane`, lane `skills`), the product
+    # checkout holding the adapters; its learning state at the non-default root.
+    seeded = seed_skills_repo(tmp_path / "seed")
+    agent = tmp_path / "agent-src"
+    shutil.copytree(seeded / "defender" / "skills", agent / "skills")
+    product = tmp_path / "product"
+    shutil.copytree(seeded / "defender" / "integrations", product / "defender" / "integrations")
+    for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"),
+                 ("config", "user.name", "t"), ("add", "-A"), ("commit", "-q", "-m", "adapters")):
+        subprocess.run(["git", *args], cwd=product, check=True)
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=product,
+                        state_dir=S.built_paths(tmp_path).state_dir)
+    paths = lane.paths
     S.write_jsonl(location_path(paths.state_root) / PITFALLS.queue, [{
         "schema_version": 1, "pitfall_id": "r:l-000:0", "source_run": "r", "system": "elastic",
         "query_id": "elastic.esql", "goal": "g", "executed_query": "bad pipe",
@@ -385,7 +400,7 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
 
     try:
         escaped = S.caught(lambda: pitfalls_curator.run_pitfalls(
-            paths=paths, trees=lead_trees(paths),
+            paths=paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch,
             invoke=functools.partial(pitfalls_curator._invoke_pitfalls_agent, spawn=spawn)))
         default_after = (S.entry_kind(default), S.tree_snapshot(default))
     finally:

@@ -1,4 +1,8 @@
-"""#869 O3/RF6/RF7/FK-2/FK-17 — reported, never silently absorbed; and the durable record."""
+"""#869 O3/RF6/RF7/FK-2/FK-17 — reported, never silently absorbed; and the durable record.
+
+#1108 P4 (O7, OD12 class ii): the mixed pitfalls tick runs over a batch draft
+(`_curator1134.draft_lane`), adapters in a product checkout; what landed is read from the batch
+branch (`agent/...`), the lane entry takes the batch (ASSUMED SEAM S-H `run_pitfalls(..., batch=)`)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -13,15 +17,16 @@ from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests.support.runtime.engine._declared869 import (
     Spawn,
-    head_files,
-    marker_file,
+    agent_marker_file,
     pitfall_row,
     read_rows,
+    seed_agent_files,
+    seed_product,
     seed_tree,
     write,
 )
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
-from defender.tests.support.learning.curation._lead_author_1134 import lead_trees
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir
 from defender.learning.core.state import PITFALLS
 
@@ -36,9 +41,12 @@ def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
     — its sha is `None` (C37) — and cannot see the defect at all: it takes a batch that DOES
     commit something for the dropped row to inherit a sha that has nothing to do with it."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
-                     skills=("elastic",), catalog=(), name=name)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / f"state-{name}")
+    product = seed_product(tmp_path, adapters=("elastic",), name=f"product-{name}")
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product,
+                        files=seed_agent_files(markers=("elastic",), skills=("elastic",),
+                                               catalog=()),
+                        state_dir=tmp_path / f"state-{name}")
+    paths = lane.paths
     state = open_state(paths)
     persist.append_pitfalls(
         [pitfall_row("r:l-000:0", "elastic"),
@@ -47,19 +55,25 @@ def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
         state=state,
     )
     spawn = Spawn(lambda root: write(
-        marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- curated\n",
-    ))
-    return repo, paths, spawn
+        agent_marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- curated\n",
+    ), root=lane.root)
+    return lane, paths, spawn
+
+
+def _run(lane, state, spawn: Spawn) -> int:
+    with C.draft_trees(lane) as trees:
+        return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, invoke=spawn,
+                                             trees=trees, batch=lane.batch)
 
 
 def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
-    repo, paths, spawn = _mixed_batch(tmp_path, monkeypatch)
+    lane, paths, spawn = _mixed_batch(tmp_path, monkeypatch)
     state = open_state(paths)
-    pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
+    _run(lane, state, spawn)
 
     consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
     assert set(consumed) == {"r:l-000:0", "r:l-001:0", "r:l-002:0"}
-    assert "defender/skills/elastic/execution.md" in head_files(repo)
+    assert "agent/skills/elastic/execution.md" in lane.landed()
 
     dropped = consumed["r:l-002:0"]
     assert dropped["consumed_category"] != "consumed_committed"
@@ -71,9 +85,9 @@ def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
 
 
 def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatch):
-    repo, paths, spawn = _mixed_batch(tmp_path, monkeypatch, name="undeclared")
+    lane, paths, spawn = _mixed_batch(tmp_path, monkeypatch, name="undeclared")
     state = open_state(paths)
-    pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
+    _run(lane, state, spawn)
 
     consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
     assert consumed["r:l-002:0"]["consumed_category"] == "consumed_unattributable"
@@ -86,7 +100,7 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
         "the dropped row leaves no durable record, so nothing reaches human review"
     )
     assert "r:l-000:0" not in graveyard
-    assert repo.is_dir()
+    assert "agent/skills/elastic/execution.md" in lane.landed()
 
 
 def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_path, capsys):

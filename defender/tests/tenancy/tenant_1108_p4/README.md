@@ -231,6 +231,9 @@ Wholly deleted files and their successors:
 - `learning/curation/test_1175_adversary_r2.py`, `test_1195_worktree_batch.py`: pinned legacy worktree delivery; successors are the same P3 batch/change tests and `test_drains.py`. The pointer here is thin.
 - `learning/retrieval/test_corpus_split.py`: validated `lessons-actor`/`lessons-environment`, deleted by U5; no successor.
 
+Deleted in the post-implementation contract repair (r2, OD12 class i):
+- `learning/curation/test_drain_byte_identity.py` (2 cases): pinned only `drain._byte_identical_to_head`, the checkout-HEAD byte comparison P4 removes → the ChangeSet compares the draft's raw bytes with the batch base's blobs: `tenant_1108_delivery/test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`, `::test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say`, `::test_claim_after_claim_the_box_sees_exactly_the_committed_bytes` (eol=crlf).
+
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
 ## 5. Expected reds and masking
