@@ -525,7 +525,7 @@ def _default_publish() -> Callable[..., object]:
     return real
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> Any:  # lint-dup: ok — PEP 562 hook; a module's lazy attribute is spelled this way, so a second one is not a copy to share
     """`run.launch_publish`, the real launcher, imported on first use so the run module does not
     load the delivery stack until a launch publishes. The contract's seam for the publish child
     (README section 2); nothing in production names it."""
