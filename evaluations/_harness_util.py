@@ -131,7 +131,12 @@ class LocalTenant:
         from defender.learning.author.version_control import TenantDelivery
         from defender.learning.author.version_control.forgejo import ForgejoForge
 
-        identity = _NoIssuer(HARNESS_TENANT_ID)
+        from typing import cast
+
+        from defender.learning.author.version_control.auth import ForgejoIdentity
+
+        # Duck-typed: the forge reads only `token()` off its identity.
+        identity = cast("ForgejoIdentity", _NoIssuer(HARNESS_TENANT_ID))
         repository = _local_origin_repository()(
             self.clone, FAKE_ORIGIN,
             ForgejoForge(origin=FAKE_ORIGIN, identity=identity, client=self.forge.client),

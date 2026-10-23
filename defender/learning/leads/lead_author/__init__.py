@@ -247,6 +247,13 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
     deps are given)."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
+    # The lane's grant is read before anything else: a non-member label never reaches the
+    # queue lock (#1179).
+    lane_batch = getattr(deps, "batch", None) if deps is not None else batch
+    writable = (
+        label.draft_trees(lane_batch) if lane_batch is not None
+        else label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]
+    )
     run_dir = Path(run.run_dir)
     sink = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
 
@@ -254,13 +261,10 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
     # resolver can't read yet.
     if deps is not None:
-        writable = (
-            label.draft_trees(deps.batch) if deps.batch is not None
-            else label.writable_trees(deps.paths)
-        )
-        if deps.skills_dir not in writable:
+        skills_dir = getattr(deps, "skills_dir", None) or deps.paths.skills_dir
+        if skills_dir not in writable:
             raise LeadAuthorError(
-                f"refused: the {str(label)!r} lane does not mount {deps.skills_dir}"
+                f"refused: the {str(label)!r} lane does not mount {skills_dir}"
             )
         with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
             if not locked:
