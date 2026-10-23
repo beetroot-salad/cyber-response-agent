@@ -12,8 +12,12 @@ if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(DEFENDER.parent))
 
 
-#: The shipped corpus, and the lesson in it this file is about.
-CORPUS = DEFENDER / "lessons"
+from defender.tests.support.shared._pre_p4_shipped import LESSONS as SHIPPED_LESSONS  # noqa: E402
+
+#: The shipped corpus, and the lesson in it this file is about. #1108 P4 (O1, O-U5): lessons
+#: are tenant knowledge and the product tree ships none; the corpus this repo shipped before P4
+#: is kept byte for byte as a test fixture, so the recall engine is still pinned against it.
+CORPUS = SHIPPED_LESSONS
 LESSON = "container-identity-gap-not-terminal"
 
 ALL_HITS = 99
