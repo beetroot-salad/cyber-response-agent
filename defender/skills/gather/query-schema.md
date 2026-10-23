@@ -1,7 +1,9 @@
 # Query template catalog — file format
 
-This directory is the gather subagent's accumulated memory of useful queries,
-organized per system of record. A template captures what an experienced
+The query catalog is the gather subagent's accumulated memory of useful queries,
+organized per system of record. It is the tenant's knowledge: it lives in the tenant repo's
+`agent/skills/gather/queries/` (a run reads its copy at `/agent/skills/gather/queries/`); this
+file, the format, is the product's. A template captures what an experienced
 analyst already knows about a data source: the right index, the right field
 names, the joins or regex tricks that took someone an afternoon to figure
 out the first time. Gather binds parameters and runs; it doesn't re-derive
@@ -10,8 +12,7 @@ the query under time pressure.
 ## Layout
 
 ```
-queries/
-  SCHEMA.md                    # this file
+agent/skills/gather/queries/
   {system}/                    # one dir per system of record
     {template-id}.md           # one file per template
 ```
