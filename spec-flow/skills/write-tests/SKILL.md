@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: "Turn a candidate design into a committed executable contract before implementation. Write tests to expose design holes, review their fidelity and attack them with deliberately wrong implementations, and iterate through patches or dissolving design amendments. Use after discuss-issue, or to repair a contract exposed by implementation or adversarial review."
+description: "Turn a candidate design into a committed executable contract before implementation. Write tests to expose design holes, review their fidelity, and iterate through patches or dissolving design amendments. Use after discuss-issue, or to repair a contract exposed by implementation or by the code stage's attackers."
 argument-hint: "[design doc path or issue #; optionally contract repair findings]"
 model: opus
 effort: medium
@@ -8,9 +8,9 @@ effort: medium
 
 # Write tests
 
-You own the **executable contract between design and code**. The design says what should happen and why; the tests enforce its observable commitments. Green tests are evidence about what those assertions check, never proof of complete intent or correct code. The contract you hand off has been checked for fidelity and attacked with deliberately wrong implementations, so the code stage can trust it.
+You own the **executable contract between design and code**. The design says what should happen and why; the tests enforce its observable commitments. Green tests are evidence about what those assertions check, never proof of complete intent or correct code. The contract you hand off has been checked for fidelity, so the code stage can trust what it demands. Whether it rejects wrong code is tested at the code stage, where attackers start from the honest implementation.
 
-The flow is **sketch and spike → design check → author thoroughly → review and attack → repair → hand off**. Its shape follows where problems are cheapest to fix. Writing concrete cases is how design holes surface, so start early and thin. Writing code surfaces a different kind of hole, where the design does not fit the existing system, so a throwaway spike runs before any thorough tests exist. Only once the design has survived both does the expensive pass begin.
+The flow is **sketch and spike → design check → author thoroughly → review → repair → hand off**. Its shape follows where problems are cheapest to fix. Writing concrete cases is how design holes surface, so start early and thin. Writing code surfaces a different kind of hole, where the design does not fit the existing system, so a throwaway spike runs before any thorough tests exist. Only once the design has survived both does the expensive pass begin.
 
 ## Keep agent work cheap
 
@@ -53,21 +53,18 @@ Build out from the sketch toward what makes the contract trustworthy: real obser
 
 Report design gaps as they appear rather than at the end, and don't build assertions on top of an unresolved choice. A new preference is a proposal, not a requirement.
 
-## 4. Review and attack the contract
+## 4. Review the contract
 
-Commit the candidate suite as a **candidate ref**. Every seat is fresh and sees neither the author's reasoning nor another seat's findings:
+Commit the candidate suite as a **candidate ref**. One fresh whole-contract reviewer, **Opus at high effort** (**references/review.md**), owns **fidelity**: does the suite demand the right behavior, nothing invented, nothing narrowed? It sees neither the author's reasoning nor the code map, so one reading of the code is free of the map's blind spots. Mandatory even for a small contract.
 
-- **One whole-contract reviewer, Opus at high effort** (**references/review.md**), owns **fidelity**: does the suite demand the right behavior, nothing invented, nothing narrowed? An attacker cannot find a test that demands the wrong thing; this seat can. It works without the code map, so one reading of the code is free of the map's blind spots.
-- **Two or three attackers, Sonnet at high effort** (**references/adversary.md**), own **discrimination** by demonstration: each tries to make the suite pass with deliberately wrong code, in its own worktree at the candidate ref, from a lens chosen for this design (lifecycle and recovery, input boundaries, compatibility, cross-surface effects). Past suites that a reading review had cleared still passed 5–19 wrong implementations; running beats reasoning here.
-
-Mandatory even for a small contract. Read every seat's output before patching. Keep each exploit as a patch: a repaired test proves itself by failing against the exploit that exposed it. An attacker blocked before running anything, including by a platform refusal, leaves its lens **incomplete**, not clean.
+**Discrimination**, whether the suite rejects wrong code, is shown by running, not reading, and is tested in write-code-from-tests §3. There, lensed attackers start from the honest implementation and try to keep the suite green with deliberately wrong variants. Attacking here would mean each attacker first building working code that the code stage builds anyway. The holes they find come back to §5 as contract repairs.
 
 ## 5. Reconcile, repair or dissolve
 
 Group findings by cause before acting; one cause usually explains several. Then route by what kind of problem it is:
 
 - **A factual question:** probe it. The human does not choose what the code does.
-- **A contract defect** (tests omit, misstate or fail to enforce settled behavior): a fresh author repairs it, preserving intent. Recheck with fresh workers: the repaired test fails against its exploit, the affected attacker reruns, and the fidelity reviewer reads changed assertions.
+- **A contract defect** (tests omit, misstate or fail to enforce settled behavior): a fresh author repairs it, preserving intent. Recheck with fresh workers: the fidelity reviewer reads changed assertions. On a repair from the code stage, the repaired test must also fail against the exploit that exposed it, and the affected attacker rechecks.
 - **A design defect or open choice:** propose the change that dissolves the whole family, through discuss-issue's amendment protocol. A proposal is not adopted until the human rules on it.
 - **An implementation defect, on a repair run:** return it to the code stage; don't bend the design around it.
 
@@ -81,7 +78,7 @@ The contract is ready when:
 
 - every in-scope promise and adopted amendment has enforcing assertions or an explicit design-level exclusion;
 - no known blocking defect, vacuous assertion counted as coverage, or unresolved consequential choice remains;
-- the fidelity review and every attacker lens cover the current revision and their findings are dispositioned; an incomplete lens blocks unless the human accepts it;
+- the fidelity review covers the current revision and its findings are dispositioned; on a repair run, so do the rechecks of the exploits that prompted it;
 - expected failures are told apart from broken machinery, and assertions that cannot run until implementation exists are named with who verifies them and how;
 - design, tests, maps and handoff agree at the recorded revisions.
 
@@ -89,4 +86,4 @@ Never turn a known blocker into an implementer note and call the contract ready.
 
 ## 7. Commit and hand off
 
-Commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record with the attack ledgers, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
+Commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.

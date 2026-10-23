@@ -10,11 +10,11 @@ Scratch state lives under `.spec-flow/`, outside the committed diff. It holds:
 - the **contract map**: design obligations, their scenarios and entry points, the enforcing tests, and verification status. A Markdown table is enough, for example `O-retry | same operation after uncertain result | import API | test_retry_preserves_identity: returned ID + row count | awaiting implementation`. A row is a claim to inspect, not proof;
 - findings and decisions by stable ID, with cause, disposition, evidence, the human's ruling where one was needed, and what they affect. Nothing gets silently dropped;
 - the claims inherited from discuss-issue plus new load-bearing observations, in its format. An ID does not make an unprobed fact settled;
-- which reviews and attacks ran against which revision, what verification is still owed and by whom, and the next action.
+- which reviews ran against which revision, what verification is still owed and by whom, and the next action.
 
 ## Resume and invalidation
 
-Mark the boundaries a resume needs: sketch and spike checked (or skipped, and why; their findings, never the spike's code), candidate authored, reviewed and attacked, repaired, ready or blocked. A worker that hands back mid-slice writes its progress here so a fresh worker can continue without its history.
+Mark the boundaries a resume needs: sketch and spike checked (or skipped, and why; their findings, never the spike's code), candidate authored, reviewed, repaired, ready or blocked. A worker that hands back mid-slice writes its progress here so a fresh worker can continue without its history.
 
 Before reusing anything, compare its recorded identities with the current inputs. A changed design, shared fixture, base, profile or environment invalidates the work that depended on it, and nothing else. Missing or stale review evidence means not reviewed; timestamps and "complete" labels prove nothing. Migrate an old-format run by carrying over its validated evidence and decisions, not its scaffolding.
 
@@ -24,11 +24,11 @@ The deliverable is the executable suite with its test-only fixtures and helpers.
 
 Commit it on its own before any implementation, and record the base and the immutable ref in the hand-off. The implementer starts from that ref, and any later repair is measured against it.
 
-Repairs after implementation exists keep that independence honest. Branch from the last contract-only ref, apply only reviewed test changes, keep the original base, and record the new ref beside the old. The implementation branch takes in only those test changes; attackers rechecking the repair start from the contract-only ref, never from implementation code. Disclose when a repair author saw the implementation, since a new commit can't undo that. Never rewrite history to fake independence, and report missing contract-only history rather than hide it by moving the base.
+Repairs after implementation exists keep that independence honest. Branch from the last contract-only ref, apply only reviewed test changes, keep the original base, and record the new ref beside the old. The implementation branch takes in only those test changes. An exploit recheck applies the attacker's patch to the implementation with the repaired tests in place. Disclose when a repair author saw the implementation, since a new commit can't undo that. Never rewrite history to fake independence, and report missing contract-only history rather than hide it by moving the base.
 
 ## Durable record and hand-off
 
-Scratch paths don't survive into a cold session, so publish a compact coverage and review record through the issue or the supplied design location when authorized. It holds the mapping, finding dispositions, attack ledgers, evidence, design identity and outstanding checks, not raw transcripts. If pushing is part of the task, confirm the remote has the contract ref before posting a ready-to-implement hand-off.
+Scratch paths don't survive into a cold session, so publish a compact coverage and review record through the issue or the supplied design location when authorized. It holds the mapping, finding dispositions, evidence, design identity and outstanding checks, not raw transcripts. If pushing is part of the task, confirm the remote has the contract ref before posting a ready-to-implement hand-off.
 
 State **ready**, **blocked**, or **repair required**, with:
 

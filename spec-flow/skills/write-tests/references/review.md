@@ -12,7 +12,7 @@ Return design-level findings grouped by the underlying decision, each with a pro
 
 ## Whole-contract fidelity
 
-On the panel after thorough authoring, you are the seat the attackers can't replace. They show where wrong code passes; only a reader catches a test that demands the wrong thing. You work without the code map, so read callers and construction paths yourself; that independence is the point of the seat.
+After thorough authoring, you are the one reader of the whole contract. Attackers at the code stage later show where wrong code passes; only a reader catches a test that demands the wrong thing. You work without the code map, so read callers and construction paths yourself; that independence is the point of the seat.
 
 Check both directions:
 
@@ -22,7 +22,7 @@ Check both directions:
 - Grounding corrections and earlier findings with behavioral consequences became tests, explicit exclusions or justified dismissals. Follow them by ID; matching counts proves nothing.
 - Source assumptions the tests rely on hold in the real code, particularly where injection might hide production behavior.
 
-Also read for discrimination where it's cheap to see: vacuous negatives, missing positive controls, canned responses, self-computed expectations, fakes that implement the policy, fixtures that can't reach the stated fault, tests that only exercise injected state. The attackers will run what you only suspect.
+Also read for discrimination where it's cheap to see: vacuous negatives, missing positive controls, canned responses, self-computed expectations, fakes that implement the policy, fixtures that can't reach the stated fault, tests that only exercise injected state. The code stage's attackers will run what you only suspect.
 
 When a property can't be expressed without a model, flow or failure policy the design hasn't settled, name the underlying decision and propose a change that dissolves its symptoms. Don't send the human a list of fixture questions.
 

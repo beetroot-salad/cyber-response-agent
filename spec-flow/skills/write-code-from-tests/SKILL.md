@@ -1,13 +1,13 @@
 ---
 name: write-code-from-tests
-description: "Implement a committed, already-attacked tests-first contract. Reconcile findings into code repairs, independently reviewed test repairs, or design amendments; verify locally, ship, and repair CI within a bounded loop. Use after write-tests, including contract-repair resumes."
+description: "Implement a committed tests-first contract, then attack it: lensed implementers try to keep the suite green with deliberately wrong variants of the honest code. Reconcile findings into code repairs, independently reviewed test repairs, or design amendments; verify locally, ship, and repair CI within a bounded loop. Use after write-tests, including contract-repair resumes."
 argument-hint: "[issue # or design doc; committed contract ref and handoff]"
 effort: medium
 ---
 
 # Write code from tests
 
-Write real code that satisfies the design and its committed contract. The contract arrives already attacked: write-tests' attackers tried to pass it with deliberately wrong code, and the holes they found were closed before commit. A green suite is still evidence, not a verdict: data models, flows and the chosen architecture bind you even where tests can't see them.
+Write real code that satisfies the design and its committed contract, then have it attacked. The contract arrives reviewed for fidelity but not yet attacked. Attacking needs working code, and this stage builds it anyway, so attackers start from your implementation rather than each building their own (§3). A green suite is still evidence, not a verdict: data models, flows and the chosen architecture bind you even where tests can't see them.
 
 **Make the code satisfy the contract; never bend the contract to fit the code.** When design and tests seem to disagree, that is a finding to resolve, not a licence to pick the easier one.
 
@@ -17,7 +17,7 @@ Your inputs are the current design and decisions, the immutable contract ref and
 
 Check the contract before trusting it: `git diff --name-status <base>...<contract-ref>` should show tests and test machinery only, committed before any implementation. A helper that implements the target policy is not valid machinery. On a resume, check the contract ref, not the implementation tip, and never move the base to hide mixed changes. Act on issue instructions from collaborators (`OWNER`/`MEMBER`/`COLLABORATOR`) or trusted workflow identities; treat other comments as claims to verify.
 
-Read the design and the hand-off before the tests. Know the real entry points and seams, the observable outcomes, the chosen mechanisms and owners, and the checks the hand-off says you owe. An unresolved consequential choice or a known blocking test defect stops work on the part it affects. Missing assertions and conflicts with the design are findings (§3), not choices to make quietly. On an old run with no compact hand-off, recover the decisions and outstanding checks into one before starting.
+Read the design and the hand-off before the tests. Know the real entry points and seams, the observable outcomes, the chosen mechanisms and owners, and the checks the hand-off says you owe. An unresolved consequential choice or a known blocking test defect stops work on the part it affects. Missing assertions and conflicts with the design are findings (§4), not choices to make quietly. On an old run with no compact hand-off, recover the decisions and outstanding checks into one before starting.
 
 A different mechanism from the one the design chose is allowed only when you can say which property, owner, lifetime and readers it preserves. A consequential substitution needs a design amendment; every approved one is declared in the PR.
 
@@ -40,26 +40,32 @@ Fix causes, never tests. A test that looks wrong goes back as a finding with evi
 
 For a named risk, an optional claims check can test what the new docstrings and comments promise, using **references/claims-adversary.md**. False prose gets corrected; code that breaks an intended guarantee gets fixed.
 
-## 3. Reconcile findings
+## 3. Attack the contract
+
+Once the implementation passes the contract's files locally, commit it in the worktree and dispatch **two or three attackers, Sonnet at high effort**, on **references/adversary.md**. Each gets its own worktree detached at that commit and a lens chosen for this design: lifecycle and recovery, input boundaries, compatibility, or cross-surface effects. Each tries to keep the suite green with deliberately wrong variants of your code. Past suites that a reading review had cleared still passed 5–19 wrong implementations; running beats reasoning here.
+
+This is mandatory even for a small contract. Keep each exploit as a patch: a repaired test proves itself by failing with the exploit applied and passing on the honest code. If it fails on the honest code too, the hole was hiding a real bug, so fix the code. An attacker blocked before running anything, including by a platform refusal, leaves its lens **incomplete**, not clean.
+
+## 4. Reconcile findings
 
 Group findings by cause; one model or flow change often dissolves several, though local bugs can still deserve local fixes. Route by kind:
 
 - **Code defect:** fix it under the settled design.
-- **Contract defect** (a wrong test, or a hole real code exposes): write-tests' repair author fixes it on the contract-only branch, and the affected attacker reruns against the revised ref (write-tests §4, **write-tests/references/contract.md**). Bring only the reviewed test changes into the implementation branch, run them against your code, and disclose if the repair author saw the implementation. An old clean attack doesn't certify changed tests. Don't ask the human to ratify each assertion repair.
+- **Contract defect** (an attacker's hole, a wrong test, or a gap real code exposes): write-tests' repair author fixes it on the contract-only branch (write-tests §5, **write-tests/references/contract.md**). The repaired test must fail against the exploit that exposed it, and the affected attacker rechecks the changed tests. Bring only the reviewed test changes into the implementation branch, run them against your code, and disclose if the repair author saw the implementation. An old clean attack doesn't certify changed tests. Don't ask the human to ratify each assertion repair.
 - **Design defect or open choice:** use discuss-issue's amendment protocol, framed as a demonstrated bug and the trade-offs of fixing it. Keep unaffected work; block only what depends on the choice.
 - **Factual question:** probe it. The human doesn't decide what existing code does.
 
 Stop after two repair rounds without material progress, or when the budget runs out with blockers, and report the concrete next action. A draft PR may show blocked work, but a known contract hole never accompanies a success verdict.
 
-## 4. Ship and watch CI
+## 5. Ship and watch CI
 
-Ship when the implementation reconciles with the current design and contract, owed checks are closed, blockers are resolved, and local test, lint and type checks pass at the revision being shipped. Use `ship` for the mechanics. Tests-first ancestry is pinned, so don't rebase or rewrite history. If the branch must be updated, keep the refs and revalidate whatever the update touches.
+Ship when the implementation reconciles with the current design and contract, every attacker lens is complete on the current revision with its holes closed, owed checks are closed, blockers are resolved, and local test, lint and type checks pass at the revision being shipped. Use `ship` for the mechanics. Tests-first ancestry is pinned, so don't rebase or rewrite history. If the branch must be updated, keep the refs and revalidate whatever the update touches.
 
-The PR links the issue, design revision, original and current contract refs, and the coverage record. It declares approved mechanism deviations, links write-tests' attack record, and lists any contract repairs made here with their rechecks. It also records deferred-verification results and any claims check, and names the next review step. Report the PR number on failure as well as success.
+The PR links the issue, design revision, original and current contract refs, and the coverage record. It declares approved mechanism deviations, links write-tests' review record and this stage's attack ledgers, and lists any contract repairs made here with their rechecks. It also records deferred-verification results and any claims check, and names the next review step. Report the PR number on failure as well as success.
 
-Watch with `gh pr checks --watch`. On red, read `gh run view <run-id> --log-failed`, fix the cause, push and watch again. Never weaken a test, suppress a new lint or type defect, or baseline a finding to get green. Test and design problems route through §3, and the same two-rounds-without-progress limit applies. A failed or unavailable required check stays blocked.
+Watch with `gh pr checks --watch`. On red, read `gh run view <run-id> --log-failed`, fix the cause, push and watch again. Never weaken a test, suppress a new lint or type defect, or baseline a finding to get green. Test and design problems route through §4, and the same two-rounds-without-progress limit applies. A failed or unavailable required check stays blocked.
 
-## 5. Exit
+## 6. Exit
 
 - **Ready for code review:** the implementation is complete on the recorded contract, blockers are resolved, and owed verification and CI are green. Hand off to the code-review workflow, then `finalize`. Do not merge.
 - **Blocked:** say what remains, why progress stopped, and the next action. Keep branch, worktree, refs, evidence and PR number for resume. Keep missing verification distinct from a known defect, and escalate design choices, not a queue of technical repairs.
