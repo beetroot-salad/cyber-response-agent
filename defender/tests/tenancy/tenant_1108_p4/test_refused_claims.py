@@ -263,9 +263,13 @@ class _LeadScene:
         self.paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
         self.bad = queued_run(t, self.paths, "p4-refused-a").name
         self.good = queued_run(t, self.paths, "p4-refused-b").name
+        # `a` runs an uncatalogued query, so the REAL draft synthesis mints a `_draft/` entry
+        # inside `a`'s claim: a refused `a` must take that draft down with it. `b` runs the
+        # catalogued template's own query, so its claim mints no draft and the branch carries
+        # exactly the template (test_writers' o7 cases pin the minted draft on a delivered claim).
         self.inner = LeadStep(
             executed={self.bad: [executed_lead("cmdb.owner-by-tag")],
-                      self.good: [executed_lead("cmdb.owner-by-tag", lead_id="l-002")]},
+                      self.good: [executed_lead("cmdb.host-owner", lead_id="l-002")]},
             edits={self.bad: {TEMPLATE: REFUSED_EDIT}, self.good: {TEMPLATE: SIBLING_EDIT}})
         self.step = _Planting(self.inner, plants={self.bad: plant} if plant else {},
                               outside=_outside(tmp_path), sibling=self.good)
@@ -307,7 +311,10 @@ def test_u10_control_an_unrefused_lead_batch_commits_both_claims(
     assert rc == 0, critical_text(caplog)
     assert s.step.sibling_saw == [{"edit": True, "planted": False}]
     (branch, tip), = remote_branches(t.remote, LEAD_PREFIX).items()
-    assert TEMPLATE_REL in touched(t.remote, main, tip)
+    paths_touched = touched(t.remote, main, tip)
+    assert TEMPLATE_REL in paths_touched
+    # Control for the refused case's exact path set: unrefused, `a`'s claim does mint its draft.
+    assert len([p for p in paths_touched if "/_draft/" in p]) == 1, paths_touched
     text = git(t.remote, "show", f"{tip}:{TEMPLATE_REL}")
     assert REFUSED_EDIT.strip() in text
     assert SIBLING_EDIT.strip() in text
