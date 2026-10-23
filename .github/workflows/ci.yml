@@ -559,7 +559,7 @@ jobs:
       # walk, never a second implementation), so a green gate here means the runtime reads
       # every entry the author wrote.
       - name: Tacit-knowledge registry (hard gate — the commit is the sign-off)
-        run: defender/.venv/bin/python -m defender.cli.tacit_cli check
+        run: defender/.venv/bin/python -m defender.cli.tacit_cli check --defender-dir knowledge/tenant-fixture/agent
 
       # The other half of the `gate` marker (defender/pyproject.toml): the nine tests that
       # re-run a repo-wide lint gate over the real tree, which the `test` job deselects with
