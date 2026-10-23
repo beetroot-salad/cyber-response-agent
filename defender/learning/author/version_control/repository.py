@@ -127,6 +127,12 @@ class LocalRepository:
             ["cat-file", "-e", f"{commit}^{{commit}}"], cwd=self.path, env=_local_env()
         )
 
+    def holds_ref(self, ref: str) -> bool:
+        """Whether the clone has the full ref `ref` (no fetch is made)."""
+        return _git.git_ok(
+            ["show-ref", "--verify", "--quiet", ref], cwd=self.path, env=_local_env()
+        )
+
     def branch_tip(self, branch: str) -> str | None:
         """The commit `refs/heads/<branch>` names, or `None` when the clone has no such
         branch."""

@@ -189,9 +189,8 @@ def _publish_findings(tenant: _tenant.Tenant) -> list[str]:
     findings: list[str] = []
     try:
         current: str | None = vc.current_export(tenant).commit
-    except vc.DeliveryRefused as none:
-        current = None
-        findings.append(f"no export is current: {none}")
+    except vc.DeliveryRefused:
+        current = None  # never published: nothing trails yet (a refusal is reported below)
     trail = _trail(tenant, current)
     if trail is not None:
         findings.append(trail)
@@ -209,10 +208,14 @@ def _trail(tenant: _tenant.Tenant, current: str | None) -> str | None:
     from defender.learning.author.version_control import DeliveryRefused
     from defender.learning.author.version_control.repository import LocalRepository
 
+    if current is None or not os.path.lexists(tenant.knowledge / ".git"):
+        return None
     try:
         repository = LocalRepository.open_local(tenant.knowledge)
+        if not repository.holds_ref("refs/remotes/origin/main"):
+            return None
         upstream = repository.revision("refs/remotes/origin/main")
-        if current is None or current == upstream:
+        if current == upstream:
             return None
         behind = len(repository.commits_since(current, upstream))
     except (OSError, _git.GitError, ValueError, DeliveryRefused) as unreadable:
