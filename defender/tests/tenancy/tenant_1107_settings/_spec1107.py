@@ -134,13 +134,23 @@ def plant(root: Path, tenant_id: str = PLAYGROUND_ID, *, marker: str = "t1107",
     folder `root/<tenant_id>/knowledge/` (#1120: the settings half is `<folder>/settings`).
 
     A knowledge folder already there (`_spec1078.tenant_source` places the committed fixture's)
-    is replaced whole, so every value the tenant carries is this call's. `configs` replaces the
+    has its content replaced whole, so every value the tenant carries is this call's; its
+    `.git` is kept (#1108 P4), so the folder stays the one repository an earlier publish pushed
+    and the next publish is a fast-forward on the same remote. `configs` replaces the
     per-system `config.env` set (default `config_texts(marker)`); `secrets` writes
     `settings/secrets.env` (a mapping is rendered `KEY="value"` per line). The rest (`table`,
     `omit`, `lead_zero`, …) is `_tenants1106.plant_tenant`'s."""
     import shutil
 
-    shutil.rmtree(Path(root) / tenant_id / "knowledge", ignore_errors=True)
+    knowledge = Path(root) / tenant_id / "knowledge"
+    if knowledge.is_dir() and not knowledge.is_symlink():
+        for entry in knowledge.iterdir():
+            if entry.name == ".git":
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
     folder = T1106.place_tenant(
         root, tenant_id, table=table,
         configs=configs if configs is not None else config_texts(marker), **kw)

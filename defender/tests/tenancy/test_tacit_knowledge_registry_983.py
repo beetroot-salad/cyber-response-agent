@@ -282,13 +282,16 @@ def test_registry_lookup_is_a_rostered_gather_verb():
 
 
 def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
-    """The committed registry loads clean through its own loader. #1108 P4 (O1, O-U5): it is
-    tenant knowledge — the committed fixture tenant's `agent/skills/tacit-knowledge/` — and the
-    product tree holds none (the per-system `SKILL.md` moved with the system skills to each
-    tenant, so it is not asserted here; `tenant_1108_p4/test_layout` owns the product tree)."""
+    """The committed registry loads clean through its own loader, and its companion `SKILL.md`
+    is the per-system reference every other system of record ships. #1108 P4 (O1, O-U5): both
+    are tenant knowledge — the committed fixture tenant's `agent/skills/tacit-knowledge/`, where
+    the system skills moved — and the product tree holds neither
+    (`tenant_1108_p4/test_layout` owns the product tree)."""
     path = registry().registry_path(FIXTURE_AGENT)
     assert path == FIXTURE_AGENT / "skills" / SYSTEM / "registry.yaml"
     assert path.is_file(), "the registry file itself is part of this change"
+    assert (FIXTURE_AGENT / "skills" / SYSTEM / "SKILL.md").is_file(), (
+        "the fixture tenant's tacit-knowledge registry ships no per-system SKILL.md")
     assert not registry().registry_path(DEFENDER).exists(), (
         "the product tree still carries a tacit-knowledge registry (#1108 P4: tenant knowledge)")
 

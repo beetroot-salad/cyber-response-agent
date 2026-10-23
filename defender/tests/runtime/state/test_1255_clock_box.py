@@ -60,22 +60,54 @@ class Captured:
         return _clock_candidates(self.docker)
 
 
-def _is_run_copy_stage(mount: dict) -> bool:
+def _run_copy_stage(mount: dict) -> Path | None:
     """#1108 P4 (U9, O-A): the run copy's `stage/` — `agent/` plus one token — is the one
-    other read-only bind outside the model roots a run's box carries by design (the token is
-    read back at startup; `/agent` resolves into `stage/agent/`). It is told apart by where the
-    design's data model puts it, `<T>/run-knowledge/<run id>/stage` (the copy is gone once the
-    run ends, so its shape cannot be read afterwards)."""
+    other read-only content outside the model roots a run's box carries by design (the token is
+    read back at startup; `/agent` resolves into `stage/agent/`). Whether it is bound as one
+    mount or several (`stage/agent/` and the token apart) is the implementer's choice, so a
+    mount belongs to it when its source is `<T>/run-knowledge/<run id>/stage` or anything below
+    it — where the design's data model puts it (the copy is gone once the run ends, so its shape
+    cannot be read afterwards). Returns that `stage/` path, or `None`."""
     source = Path(mount["source"])
-    return source.name == "stage" and source.parent.parent.name == "run-knowledge"
+    for stage in (source, *source.parents):
+        if stage.name == "stage" and stage.parent.parent.name == "run-knowledge":
+            return stage
+    return None
+
+
+def _stage_mount_kind(mount: dict, stage: Path) -> str | None:
+    """What a stage mount binds: `stage/agent/` (the agent half), `stage/` whole (which holds
+    only `agent/` and the token), or the token (one file directly in `stage/`); `None` for
+    anything else below `stage/`, which is no mount of its own."""
+    source = Path(mount["source"])
+    if source == stage / "agent":
+        return "agent"
+    if source == stage:
+        return "stage"
+    if source.parent == stage:
+        return "token"
+    return None
 
 
 def _clock_candidates(docker: RecordingDocker) -> list[dict]:
     """Read-only mounts outside the model roots, the run copy's `stage/` aside; only the clock
-    belongs there."""
-    return [m for m in docker.mounts()
-            if m["readonly"] and not V.under_model_root(m["target"])
-            and not _is_run_copy_stage(m)]
+    belongs there. The mounts set aside are only the copy's agent and token mounts — each kind
+    at most once, each read-only (U9)."""
+    candidates, kinds = [], []
+    for m in docker.mounts():
+        stage = _run_copy_stage(m)
+        if stage is not None:
+            assert m["readonly"], f"U9: a run copy stage mount is writable: {m}"
+            kind = _stage_mount_kind(m, stage)
+            assert kind is not None, (
+                f"U9: a mount below the run copy's stage/ is neither its agent half nor its "
+                f"token: {m}")
+            kinds.append(kind)
+        elif m["readonly"] and not V.under_model_root(m["target"]):
+            candidates.append(m)
+    assert sorted(kinds) == sorted(set(kinds)), (
+        f"U9: the run copy's stage/ is bound more than once as one kind: {kinds}")
+    return candidates
 
 
 def _within(path: Path, tree: Path) -> bool:

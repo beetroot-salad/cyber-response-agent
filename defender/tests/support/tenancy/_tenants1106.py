@@ -483,9 +483,9 @@ def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
 
 
 #: The lead-zero id a planted census repo's folders name, and the established catalog template
-#: that carries it (`defender/skills/gather/queries/alpha/by-entity.md`). M7's CI pass checks
-#: that each folder's `lead-zero.yaml` names a template the catalog holds, so a planted repo
-#: whose folders name one must also hold it.
+#: that carries it (`<folder>/agent/skills/gather/queries/alpha/by-entity.md`, each tenant
+#: folder's own catalog, #1108 P4). M7's CI pass checks that each folder's `lead-zero.yaml`
+#: names a template its catalog holds, so a planted folder that names one must also hold it.
 CENSUS_LEAD_ZERO_ID = "alpha.by-entity"
 CENSUS_QUERY_TEMPLATE = """\
 ---
@@ -506,9 +506,11 @@ entity
 """
 
 
-def plant_census_catalog(repo: Path) -> Path:
-    """Write the one established query template a planted census repo's lead-zero names."""
-    q = Path(repo) / "defender" / "skills" / "gather" / "queries" / "alpha" / "by-entity.md"
+def plant_census_catalog(folder: Path) -> Path:
+    """Write the one established query template a planted census folder's lead-zero names,
+    into that tenant folder's own catalog (`<folder>/agent/skills/gather/queries/`): #1108 P4
+    (O1/O2) — lead-zero resolves against the tenant's catalog; the product checkout holds none."""
+    q = Path(folder) / "agent" / "skills" / "gather" / "queries" / "alpha" / "by-entity.md"
     q.parent.mkdir(parents=True, exist_ok=True)
     q.write_text(CENSUS_QUERY_TEMPLATE, encoding="utf-8")
     return q
@@ -520,13 +522,12 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
     census gate walks (#1120 C26): `knowledge/tenant-fixture/` and
     `knowledge/tenant-template/`, each holding the table `rows` (as
     `_dispositions995.write_table` renders them — the template `template_rows` when given),
-    a `lead-zero.yaml` naming `CENSUS_LEAD_ZERO_ID`, and the mapping; plus the catalog template
-    that id resolves to. Plain folders, as committed: no `.tenant-id`, no row. Returns the
-    table paths written, fixture first, template last."""
+    a `lead-zero.yaml` naming `CENSUS_LEAD_ZERO_ID`, and the mapping; plus, in each folder's
+    own catalog, the template that id resolves to. Plain folders, as committed: no
+    `.tenant-id`, no row. Returns the table paths written, fixture first, template last."""
     from defender.tests.support.invlang.validation._dispositions995 import write_table
 
     repo = Path(repo)
-    plant_census_catalog(repo)
     written: list[Path] = []
     for name, table_rows in (("tenant-fixture", rows),
                              ("tenant-template", template_rows if template_rows is not None
@@ -540,6 +541,7 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
             (folder / "settings" / rel).write_text(text, encoding="utf-8")
         (folder / "agent").mkdir(parents=True, exist_ok=True)
         (folder / "agent" / ".gitkeep").write_text("", encoding="utf-8")
+        plant_census_catalog(folder)
         written.append(write_table(folder / "settings" / "verb-grants.yaml", table_rows))
     return written
 

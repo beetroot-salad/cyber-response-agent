@@ -50,7 +50,7 @@ RECORD = {
 }
 #: The files each mount holds beside its record.
 NEIGHBOURS = {
-    LESSONS: ("example-seed-lesson.md",),
+    LESSONS: ("fixture-seed-lesson.md",),
     QUESTIONER: ("names-the-window-before-the-query.md",),
     SKILLS: ("gather/defender-sql.md", "gather/queries/elastic/failed-logons.md"),
 }
@@ -66,7 +66,7 @@ BELOW = {LESSONS: (), QUESTIONER: (), SKILLS: ("elastic", "elastic/_draft")}
 #: catalog under skills) once the record is a plain file, written out in path-parts order.
 LISTING = {
     LESSONS: [("bastion-session-interactivity-signal.md", "file"),
-              ("example-seed-lesson.md", "file")],
+              ("fixture-seed-lesson.md", "file")],
     QUESTIONER: [("asks-which-host-owns-the-session.md", "file"),
                  ("names-the-window-before-the-query.md", "file")],
     SKILLS: [("elastic", "dir"), ("elastic/_draft", "dir"), ("elastic/_draft/x.md", "file"),
@@ -434,7 +434,7 @@ def test_an_empty_mount_list_holds_nothing_and_maps_nothing(drain):
 #: Names below each mount: its own files, a deep name, the catalog folder, and names under
 #: folders that do not exist (mapping makes nothing).
 MAPPED = [
-    (LESSONS, "example-seed-lesson.md"),
+    (LESSONS, "fixture-seed-lesson.md"),
     (LESSONS, RECORD[LESSONS]),
     (LESSONS, "sub/deeper/y.md"),
     (QUESTIONER, "names-the-window-before-the-query.md"),

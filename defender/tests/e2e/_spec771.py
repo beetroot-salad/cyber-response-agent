@@ -970,7 +970,6 @@ CENSUS_MODULES: frozenset[str] = frozenset(w.module for w in CENSUS)
 DRAIN_MODULES: frozenset[str] = frozenset({"learning/author/drain.py"})
 LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
     "_filesystem/", "runtime/query_catalog.py", "runtime/session_store/_pointers.py",
-    "learning/author/version_control/restore.py",
 }
 
 
@@ -1060,29 +1059,3 @@ def is_eexist(exc: BaseException) -> bool:
     return isinstance(exc, OSError) and exc.errno == errno.EEXIST
 
 
-# The second shared root's own production writers (F6)
-def quarantine_a_tainted_tree(
-    tree: Path, quarantine_dir: Path, *, batch_id: str = "b-771", verdict: dict | None = None,
-):
-    """Drive #747's REAL quarantine path over a real tainted tree, and return
-    `(archive, manifest_doc)` — the manifest of THIS batch, never whatever sorted first."""
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-    from defender.learning.core.quarantine import preserve_tainted_tree
-    from defender.box import _scrub as scrub_mod
-
-    os.symlink("/root/.ssh/id_rsa", tree / "stolen.json")
-    try:
-        scrub_mod.scrub(tree)
-    except scrub_mod.RunTainted as taint:
-        if verdict is None:
-            verdict_sidecar(tree).unlink(missing_ok=True)
-        else:
-            write_verdict(tree, verdict)
-        archive = preserve_tainted_tree(
-            tree, quarantine_dir, batch_id=batch_id, branch=f"lessons-{batch_id}",
-            label=AUTHOR_DRAIN_LABEL, taint=taint)
-    else:
-        raise AssertionError("the planted symlink did not taint the tree — the drive is vacuous")
-    manifest = quarantine_dir / f"{batch_id}.json"
-    doc = json.loads(manifest.read_text(encoding="utf-8")) if manifest.is_file() else {}
-    return archive, doc

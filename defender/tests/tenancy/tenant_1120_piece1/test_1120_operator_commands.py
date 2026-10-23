@@ -473,10 +473,12 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
      "another drainer holds the lock", 0),
     ("defender/learning/loop.py", ["--lead-author-drain"], ".lead-author-drain.lock",
      "another drainer holds the lock", 0),
-    ("defender/learning/author/lessons/run.py", [], "_pending/.lock",
-     "drain lock held by another process", 0),
-    ("defender/learning/author/questioner/run.py", [], "_pending/.lock",
-     "drain lock held by another process", 0),
+    # #1108 P4 (O7, OD16): a curator module's own command runs the author lane's tenant batch,
+    # as `loop.py --author-drain --tenant T` does, so it meets the author drain's lock.
+    ("defender/learning/author/lessons/run.py", [], ".author-drain.lock",
+     "another drainer holds the lock", 0),
+    ("defender/learning/author/questioner/run.py", [], ".author-drain.lock",
+     "another drainer holds the lock", 0),
     ("defender/cli/learning/revert_lesson.py", ["example-lesson"], ".author-drain.lock",
      "an author drain is in progress", 3),
 ])

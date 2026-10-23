@@ -17,8 +17,8 @@ EXCLUDED_DIRS: tuple[str, ...] = (
     # archival: frozen records of their moment
     "experiments/", "docs/decisions/", "docs/archive/", "defender/docs/decisions/", "defender/docs/archive/", "playground-v2/docs/archive/", "spec-flow/specs/", ".claude/worktrees/",
     # recorded data that quotes the code of its moment (lint_stale_refs.EXCLUDED_GREP_DIRS)
-    "playground-v2/examples/alerts/", "defender/tests/fixtures/e2e/", "defender/lessons/", "defender/lessons-actor/",
-    "defender/lessons-environment/", "defender/lessons-questioner/",
+    "playground-v2/examples/alerts/", "defender/tests/fixtures/e2e/", "defender/lessons/", "defender/lessons-actor/",  # lint-stale-ref: ok — base-era exclusions this suite records on purpose
+    "defender/lessons-environment/", "defender/lessons-questioner/",  # lint-stale-ref: ok — base-era exclusions this suite records on purpose
     "evaluations/judge_alignment/", "evaluations/oracle_golden/cases/",
     # this suite: it records the base on purpose
     "defender/tests/tooling/layout_contracts/",
@@ -176,7 +176,12 @@ def vanished_folder_mentions(root: Path) -> list[tuple[str, int, str]]:
     gone = vanished_folders(root)
     if not gone:
         return []
-    ambiguous = {g for g in gone if (root / "defender" / g).is_dir()}
+    # A name still live as a directory is ambiguous: a bare `<name>/` may mean the live one.
+    # Live means under `defender/`, or (#1108 P4, OD6) in a tenant's agent half, where the
+    # corpora moved (`agent/lessons/`, `agent/lessons-questioner/`): a bare `lessons/` is the
+    # tenant corpus (a branch prefix, a lane), not a pointer to the vanished checkout folder.
+    ambiguous = {g for g in gone if (root / "defender" / g).is_dir()
+                 or any(p.is_dir() for p in (root / "knowledge").glob(f"*/agent/{g}"))}
     bare_names = sorted(set(gone) - ambiguous, key=len, reverse=True)
     bare = re.compile(r"(?<![\w./-])(?:" + "|".join(re.escape(g) for g in bare_names)
                       + r")/") if bare_names else None

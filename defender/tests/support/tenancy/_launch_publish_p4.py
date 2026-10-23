@@ -8,7 +8,8 @@ for real, through the one shared helper (`tenant_1108_p4._support.publish_once`:
 committed, pushed to a served remote, P3's `TenantDelivery.publish()` exporting it and pointing
 `current` at it), and answers with OD2's one report line — `fresh <commit>`, or
 `stale:operator <reason>` when P3 or acceptance refuses the folder (a scenario that plants a
-broken tenant on purpose). It decides nothing else: which export the run reads, and every
+broken tenant on purpose), or `stale:transient <reason>` when the tenant lock is still busy
+after P3's bounded retry (O-STALE). It decides nothing else: which export the run reads, and every
 refusal, stay `run.main`'s.
 
 Publishing at call time (not at the test's setup) keeps "an edit made to the tenant's folder
@@ -17,10 +18,11 @@ data root publishes nothing the run can read.
 """
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from collections.abc import Callable, MutableMapping
 from typing import Any
+
+import pytest
 
 #: The keyword `run.main` takes its launch-time publish under (OD14).
 PUBLISH_SEAM = "publish"
@@ -47,15 +49,25 @@ def in_process_publish(scratch: Path | None = None,
         if calls is not None:
             calls.append((str(tenant_id), root))
         served = scratch if scratch is not None else forge_scratch(root)
-        # A tenant folder a test placed again (its `knowledge/` replaced whole, so no `.git`
-        # yet) is a new repository: the remote an earlier publish of the old folder left holds
-        # a history that is not its own, and a push onto it is refused. Start that remote anew.
+        # A test re-plants a tenant's folder in place, keeping its `.git` (`_spec1107.plant`),
+        # so every publish of one tenant is a fast-forward on the same remote. A folder with no
+        # `.git` beside a remote an earlier publish left is a planter that replaced the
+        # repository: a test-setup fault, never papered over by starting the remote anew. It is
+        # `pytest.fail` (a BaseException): `run.main` reads an `Exception` out of `publish=` as a
+        # failed child (U11) and would run on, stale, on the last snapshot.
         remote = served / "tenants" / f"{tenant_id}.git"
         if remote.exists() and not (root / str(tenant_id) / "knowledge" / ".git").exists():
-            shutil.rmtree(remote)
+            pytest.fail(
+                f"tenant {tenant_id}'s knowledge folder lost its .git after a publish to "
+                f"{remote}: re-plant the folder in place (keep .git), or give each arm its own "
+                "data root")
         try:
             done = publish_once(served, root=root, tenant_id=str(tenant_id))
-        except (DeliveryRefused, LockBusy, TenantRefused) as refused:
+        except LockBusy as busy:
+            # O-STALE: a tenant lock still busy after the bounded retry is transient.
+            reason = " ".join(str(busy).split()) or type(busy).__name__
+            return f"stale:transient {reason}"
+        except (DeliveryRefused, TenantRefused) as refused:
             reason = " ".join(str(refused).split()) or type(refused).__name__
             return f"stale:operator {reason}"
         return f"fresh {done.commit}"

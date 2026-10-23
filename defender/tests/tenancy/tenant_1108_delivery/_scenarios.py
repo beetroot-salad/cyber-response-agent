@@ -152,7 +152,22 @@ _REFUSED_OUTPUT = {
         lane / "deep", lambda e: e.symlink_to(outside, target_is_directory=True)),
     "replace-file-with-fifo": lambda lane, agent, outside, clone: _replace(lane / "seed.md", os.mkfifo),
     "non-utf8-name": lambda lane, agent, outside, clone: _write_bytes_name(lane, b"\xff\xfe.md"),
+    # #1108 P4 owner ruling 2 (2026-10-23): no hard-linked lesson may exist, so a regular file
+    # whose inode has another name (nlink > 1) is refused like any other aliased entry.
+    "hardlink-to-host": lambda lane, agent, outside, clone: os.link(outside / "secret.md", lane / "hard.md"),
+    "hardlink-in-lane": lambda lane, agent, outside, clone: os.link(lane / "seed.md", lane / "alias.md"),
+    "replace-file-with-hardlink": lambda lane, agent, outside, clone: _replace(
+        lane / "seed.md", lambda e: os.link(outside / "secret.md", e)),
+    "replace-file-with-hardlink-same-bytes": lambda lane, agent, outside, clone: _hardlink_twin(
+        lane / "seed.md", outside.parent / "host-twin.md"),
 }
+
+
+def _hardlink_twin(entry, twin):
+    """Replace `entry` by a hard link to a host file holding `entry`'s own bytes: nothing but
+    the shared inode tells it apart, so a reset that keeps byte-equal files keeps the alias."""
+    twin.write_bytes(entry.read_bytes())
+    _replace(entry, lambda e: os.link(twin, e))
 
 
 _REFUSED_BASE = {

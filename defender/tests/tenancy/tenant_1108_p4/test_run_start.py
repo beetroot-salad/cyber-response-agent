@@ -17,6 +17,7 @@ child identifiers only and holds no login material).
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +102,50 @@ def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_pa
         f"O-B: the run's knowledge stamp is not the export it copied ({tenant.commit}); the "
         f"clone's HEAD is {head}: {B.stamped_commit(out.stamp_after)!r}")
     assert B.knowledge_source(out)["commit"] == tenant.commit
+
+
+def _gitfile_nowhere(clone: Path) -> None:
+    shutil.rmtree(clone / ".git")
+    (clone / ".git").write_text("gitdir: /nonexistent/1108-p4/broken-clone.git\n", encoding="utf-8")
+
+
+def _git_removed(clone: Path) -> None:
+    shutil.rmtree(clone / ".git")
+
+
+def _uncommitted_edit(clone: Path) -> None:
+    (clone / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding="utf-8")
+    (clone / B.CMDB_ENV).write_text(B.cmdb_env(B.CLONE_ONLY_MARK), encoding="utf-8")
+
+
+@pytest.mark.parametrize("breakage", [_gitfile_nowhere, _git_removed, _uncommitted_edit],
+                         ids=["gitfile-pointing-nowhere", "dot-git-removed", "uncommitted-edit"])
+def test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp(
+        tenant, tmp_path, breakage):
+    """O-B (beside the case above): run start never reads the clone, so a clone whose `.git` is
+    a gitfile pointing nowhere, a clone with `.git` removed, and a clone with an uncommitted
+    lesson and settings edit each leave the run starting on `current`'s export, stamping that
+    export's commit, with the export's lesson and settings bytes."""
+    clone = B.clone_dir(tenant)
+    breakage(clone)
+    assert current_commit(tenant.tenant) == tenant.commit
+
+    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
+
+    assert out.reached, f"O-B: a broken clone stopped the run: {out.text()}"
+    assert out.rc == 0, out.text()
+    seen = out.seen[0]
+    assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent"), (
+        "O-B: the run's agent half is not the export `current` names")
+    assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
+    assert B.CLONE_ONLY_MARK not in seen.agent_files[B.LESSON_REL].decode(), (
+        "O-B: the run read the clone's working tree")
+    assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
+    assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
+        f"O-B: the stamp is not the export copied ({tenant.commit}): "
+        f"{B.stamped_commit(out.stamp_after)!r}")
+    source = B.knowledge_source(out)
+    assert (source["kind"], source["commit"]) == ("fresh", tenant.commit), source
 
 
 # --- O-STALE: the run record and continuing on a snapshot -------------------------------------

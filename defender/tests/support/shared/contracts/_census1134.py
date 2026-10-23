@@ -204,7 +204,6 @@ PINNED_ATTRS: dict[str, frozenset[str]] = {
 #: (`_git.py`: its `subprocess` calls are git's own reads, N-a).
 D6_MODULES: tuple[str, ...] = (
     "learning/author/drain.py",
-    "learning/author/version_control/restore.py",
     "learning/author/shared.py",
     "knowledge/_corpus.py",
     "knowledge/_scaffold_rules.py",

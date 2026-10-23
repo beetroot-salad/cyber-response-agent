@@ -51,6 +51,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     BoxSpy,
     CuratorTrigger,
     LeadStep,
+    PitfallsStep,
     author_drain,
     critical_text,
     draft_entries,
@@ -80,8 +81,18 @@ def _plant(kind: str, where: Path, outside: Path) -> None:
     where.parent.mkdir(parents=True, exist_ok=True)
     if kind == "link":
         where.symlink_to(outside)
+    elif kind == "out-of-lane":
+        where.write_text("a plain file outside the claim's lane\n", encoding="utf-8")
     else:
         os.mkfifo(where)
+
+
+#: Where a lead claim's plant goes, under the batch's draft root: a link or FIFO inside the
+#: skills lane; an out-of-lane plain file beside the lane, under `agent/` (OD18: an out-of-lane
+#: path is a commit-maker refusal, as a link or a FIFO is).
+_LEAD_PLANT_AT = {"link": f"{LEAD_DRAFT_LANES[0]}/gather/{PLANTED_NAME}",
+                  "fifo": f"{LEAD_DRAFT_LANES[0]}/gather/{PLANTED_NAME}",
+                  "out-of-lane": f"agent/{PLANTED_NAME}"}
 
 
 def _outside(tmp_path: Path) -> Path:
@@ -245,15 +256,17 @@ class _Planting:
 
     def __call__(self, paths: Any, state: Any, run: Any, *, batch: Any, **kw: Any) -> None:
         name = Path(run.run_dir).name
-        skills = draft_root_of(batch) / LEAD_DRAFT_LANES[0]
+        root = draft_root_of(batch)
+        skills = root / LEAD_DRAFT_LANES[0]
         if name == self.sibling:
             text = (skills / TEMPLATE).read_text(encoding="utf-8")
             self.sibling_saw.append({
                 "edit": REFUSED_EDIT.strip() in text,
-                "planted": os.path.lexists(skills / "gather" / PLANTED_NAME),
+                "planted": any(os.path.lexists(root / at) for at in set(_LEAD_PLANT_AT.values())),
             })
         if name in self.plants:
-            _plant(self.plants[name], skills / "gather" / PLANTED_NAME, self.outside)
+            kind = self.plants[name]
+            _plant(kind, root / _LEAD_PLANT_AT[kind], self.outside)
         return self.step(paths, state, run, batch=batch, **kw)
 
 
@@ -324,11 +337,11 @@ def test_u10_control_an_unrefused_lead_batch_commits_both_claims(
     assert draft_entries(t) == []
 
 
-@pytest.mark.parametrize("plant", ["link", "fifo"])
+@pytest.mark.parametrize("plant", ["link", "fifo", "out-of-lane"])
 def test_u10_a_refused_lead_claim_is_reset_counted_and_left_queued_while_its_sibling_delivers(
         p4_tenant, tmp_path, lead_lane, caplog, plant):
     """U10, lead lane: run `a`'s claim leaves a planted link / FIFO in the draft's skills lane,
-    so the commit-maker refuses it. Its draft changes are reset before `b` runs (`b` sees
+    or a plain file outside that lane (OD18), so the commit-maker refuses it. Its draft changes are reset before `b` runs (`b` sees
     neither `a`'s edit nor the plant), nothing of `a` reaches the branch, `a`'s record is back
     at the top of the queue carrying one attempt (not in flight, not failed); `b`'s claim
     commits and is delivered, and `b`'s row leaves the queue."""
@@ -384,4 +397,120 @@ def test_u10_a_refused_lead_row_is_retried_next_tick_and_quarantined_at_the_ceil
     assert s.tick(caplog) == 0, critical_text(caplog)
     assert (s.served(s.bad), s.served(s.good)) == (2, 1)
     assert set(remote_branches(t.remote, LEAD_PREFIX)) == known
+    assert draft_entries(t) == []
+
+
+# ---------------------------------------------------------------------------------------------
+# Lead lane, pitfalls step: its one claim refused
+# ---------------------------------------------------------------------------------------------
+
+
+class _PlantingPitfalls:
+    """The lead drain's `run_pitfalls` seam: `_drain_support.PitfallsStep` (the REAL pitfalls
+    curation), with, when `plant`, a link placed in the batch's draft skills lane first (inside
+    the pitfalls claim's window), so the commit-maker refuses the claim."""
+
+    def __init__(self, step: PitfallsStep, *, plant: bool, outside: Path) -> None:
+        self.step, self.plant, self.outside = step, plant, outside
+        self.calls = 0
+
+    def __call__(self, paths: Any, state: Any, *, batch: Any, **kw: Any) -> int:
+        self.calls += 1
+        if self.plant:
+            _plant("link", draft_root_of(batch) / _LEAD_PLANT_AT["link"], self.outside)
+        return self.step(paths, state, batch=batch, **kw)
+
+
+class _PitfallsScene:
+    def __init__(self, t: Any, tmp_path: Path, *, plant: bool) -> None:
+        from defender.learning.core.state import PITFALLS
+        from defender.tests.support.learning.core._declared870 import shim_row
+
+        self.t, self.channel = t, PITFALLS
+        self.paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+        queue(self.paths, [shim_row(PITFALL_ID)], channel=PITFALLS)
+        self.inner = PitfallsStep(PITFALL_BULLET)
+        self.step = _PlantingPitfalls(self.inner, plant=plant, outside=_outside(tmp_path))
+
+    def tick(self, caplog: Any) -> int:
+        with caplog.at_level(logging.INFO):
+            return lead_author_drain(self.t, self.paths, box=BoxSpy(), run_pitfalls=self.step,
+                                     run_lead_author=lambda *_a, **_k: None)
+
+    def row(self) -> dict | None:
+        return pending_by_id(self.paths, self.channel).get(PITFALL_ID)
+
+    def dead(self) -> list[dict]:
+        return [g for g in graveyard(self.paths, self.channel)
+                if g.get("pitfall_id") == PITFALL_ID]
+
+
+PITFALL_ID = "p4-run:1"
+PITFALL_BULLET = "- **Name the unnested column.** An anonymous unnest cannot be grouped."
+PITFALLS_ADDON = "agent/skills/gather/defender-sql.pitfalls.md"
+
+
+@pytest.fixture
+def pitfalls_lane(monkeypatch):
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
+
+
+def test_u10_control_an_unrefused_pitfalls_claim_delivers_and_leaves_the_queue(
+        p4_tenant, tmp_path, pitfalls_lane, caplog):
+    """Positive control for the pitfalls case below, same scene, no plant: the curated bullet
+    lands on the tenant add-on page on one `lead-author/` branch with its PR, and the pitfall
+    row is neither queued with an attempt nor dead-lettered."""
+    t = p4_tenant
+    bind_forge(t)
+    s = _PitfallsScene(t, tmp_path, plant=False)
+    assert s.row() is not None, "control: the pitfall is queued where the drain reads it"
+    main = t.origin_main()
+
+    rc = s.tick(caplog)
+
+    assert rc == 0, critical_text(caplog)
+    assert s.inner.handoffs, "the pitfalls curation never spawned"
+    (branch, tip), = remote_branches(t.remote, LEAD_PREFIX).items()
+    assert touched(t.remote, main, tip) == [PITFALLS_ADDON]
+    assert [c["head"] for c in t.forge.creates] == [branch]
+    row = s.row()
+    assert row is None or int(row.get("attempts") or 0) == 0, row
+    assert s.dead() == []
+    assert draft_entries(t) == []
+
+
+def test_u10_a_refused_pitfalls_claim_is_dead_lettered_as_refused_not_propagated(
+        p4_tenant, tmp_path, pitfalls_lane, caplog):
+    """U10/OD19, the lead drain's pitfalls step: its claim leaves a link in the draft's skills
+    lane, so the commit-maker refuses it. The refusal is the claim's outcome, not the tick's: the
+    tick completes (rc 0), nothing reaches the tenant origin or its forge, and the refusal counts
+    one attempt on the pitfall row, which stays queued; at the ceiling
+    (`LEARNING_AUTHOR_MAX_ATTEMPTS`, 2) the next refused tick dead-letters it, its graveyard
+    entry naming the refusal. A refusal propagated out of the step would end the tick instead."""
+    t = p4_tenant
+    bind_forge(t)
+    s = _PitfallsScene(t, tmp_path, plant=True)
+
+    rc = s.tick(caplog)
+
+    assert rc == 0, critical_text(caplog)
+    assert s.inner.handoffs, "the pitfalls curation never spawned, so nothing was refused"
+    assert remote_branches(t.remote, LEAD_PREFIX) == {}
+    assert t.forge.creates == []
+    row = s.row()
+    assert row is not None, "the refused pitfall left the queue on its first refusal"
+    assert row.get("attempts") == 1, row
+    assert s.dead() == []
+    assert draft_entries(t) == []
+
+    assert s.tick(caplog) == 0, critical_text(caplog)
+    assert s.step.calls == 2, "the refused pitfall was not retried"
+    assert s.row() is None, "the pitfall at the ceiling stayed queued"
+    (dead,) = s.dead()
+    assert dead.get("attempts") == 2, dead
+    assert "DeliveryRefused" in json.dumps(dead), (
+        f"the dead letter does not name the commit-maker's refusal: {dead}")
+    assert remote_branches(t.remote, LEAD_PREFIX) == {}
     assert draft_entries(t) == []

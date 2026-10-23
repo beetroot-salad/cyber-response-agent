@@ -84,7 +84,7 @@ FILES: dict[str, str] = {
     "lessons/zulu.md": lesson_text("zulu"),
     "lessons/.hidden.md": lesson_text("dot-name"),
     "lessons/.md": lesson_text("bare-dot"),
-    "lessons/_TEMPLATE.md": lesson_text("underscore-name"),
+    "lessons/_TEMPLATE.md": lesson_text("underscore-name"),  # lint-stale-ref: ok — test data: an underscore-named lesson, not the retired product template
     "lessons/notes.txt": lesson_text("not-md"),
     "lessons/sub/nested.md": lesson_text("nested"),
     # Near misses: `.md` inside a name that does not END `.md` (H5).

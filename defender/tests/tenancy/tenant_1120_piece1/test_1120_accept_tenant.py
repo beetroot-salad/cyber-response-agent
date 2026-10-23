@@ -428,7 +428,7 @@ EXTRA_TOP_LEVEL = [
 
 def _clone_with_every_allowed_entry(tmp_path: Path, root: Path) -> Path:
     """A clone of a repo committing agent/.tenant-id, a .github/workflows file, a README.md, a
-    .gitignore, a .gitattributes and a file under archive/ (A6's lessons-actor/, as the lab repo
+    .gitignore, a .gitattributes and a file under archive/ (A6's retired actor corpus, as the lab repo
     carries it — git keeps no empty directory) — every name V12 and V15 admit present at
     knowledge/'s top level."""
     src = tmp_path / "ci-src"
@@ -440,7 +440,7 @@ def _clone_with_every_allowed_entry(tmp_path: Path, root: Path) -> Path:
     (src / "README.md").write_text("# acme's tenant repo\n", encoding="utf-8")
     (src / ".gitignore").write_text("*.swp\n", encoding="utf-8")
     (src / ".gitattributes").write_text("*.yaml text eol=lf\n", encoding="utf-8")
-    archived = src / "archive" / "lessons-actor" / "README.md"
+    archived = src / "archive" / "lessons-actor" / "README.md"  # lint-stale-ref: ok — the lab repo's archived folder name, as it carries it
     archived.parent.mkdir(parents=True)
     archived.write_text("# retired actor lessons (A6)\n", encoding="utf-8")
     repo = H.repo_of(src, tmp_path / "ci-repo")

@@ -173,15 +173,28 @@ def test_a_covers_entry_must_be_an_identity_of_the_system_it_is_filed_under(tmp_
         ) == ["covers-system-mismatch"], spelling
 
 
+def _catalogs() -> list[Path]:
+    """#1108 P4 (O1, O-U5): the catalog is tenant knowledge and the product tree ships none.
+    The catalogs this repo commits are each tenant folder's (`knowledge/<name>/agent/...`), plus
+    the catalog the product shipped before P4, kept byte for byte as a test fixture (it is the
+    corpus that carries a `_draft/` template)."""
+    from defender.tests.support.shared._pre_p4_shipped import CATALOG as SHIPPED_CATALOG
+
+    tenants = sorted(p for p in (_DEFENDER.parent / "knowledge").glob(
+        "*/agent/skills/gather/queries") if p.is_dir())
+    assert tenants, "no committed tenant folder carries a catalog"
+    return [SHIPPED_CATALOG, *tenants]
+
+
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
     """The scope half. `validate_scaffold` excluded `_draft/`; this does not, which is the only
     reason the lead lane's output is inside any check at all."""
     offenders = []
     drafts = 0
-    for t in iter_query_templates(_CATALOG):
+    for t in (t for catalog in _catalogs() for t in iter_query_templates(catalog)):
         drafts += "_draft" in t.path.parts
         offenders += [
-            f"{t.path.relative_to(_DEFENDER)}: {f.code} — {f.message}"
+            f"{t.path.relative_to(_DEFENDER.parent)}: {f.code} — {f.message}"
             for f in _scaffold_rules.check_template(t, resolver.verbs(t.system))
         ]
     assert offenders == [], offenders

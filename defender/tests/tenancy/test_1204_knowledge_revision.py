@@ -514,10 +514,16 @@ def test_1204_only_a_40_or_64_lowercase_hex_sha_is_a_commit(tmp_path, site):
 # plain copy (a tenant is published, hence versioned, before any run reads it; with no export
 # the run is refused before message zero). Successors:
 # `tests/tenancy/tenant_1108_p4/test_run_start.py::test_o_b_the_stamp_is_the_export_copied_never_the_clones_head`,
+# `tests/tenancy/tenant_1108_p4/test_run_start.py::test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_and_knowledge_from_its_copy_of_current`,
 # `tests/tenancy/tenant_1108_p4/test_run_start.py::test_o_a_no_current_and_a_failed_publish_refuses_before_message_zero`,
 # `tests/tenancy/tenant_1108_p4/test_run_start.py::test_o_pin_a_pinned_launch_reads_that_export_skips_publish_and_records_pinned`
-# (siblings: the launcher's `--knowledge-commit` is the pin, owner ruling 3), and
+# (siblings: the launcher's `--knowledge-commit` is the pin, owner ruling 3),
+# `tests/tenancy/tenant_1108_p4/test_branch_replay.py::test_flow7_siblings_are_pinned_to_the_source_knowledge_commit_materialised_first`
+# (the fork sibling, materialised first, carries its source's knowledge commit), and
 # `tests/tenancy/tenant_1108_p4/test_branch_replay.py::test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_publish`.
+# The deleted fork-sibling case also pinned an arm's no-lineage fields (`world_id`/`parent_run_id`/
+# `fork_turn` null on an arm); that survives in
+# `tests/storage/ids_1187/test_1187_roster_sibling.py::test_natural_and_arm_stamps_carry_no_world_lineage`.
 # The reader (`capture_knowledge`) and the wire value it produces stay pinned above and below.
 
 
