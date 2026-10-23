@@ -411,10 +411,15 @@ def place_knowledge_for_rows() -> None:
 
 def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseException | None]:
     """Drive the REAL `run.main` over `argv` with every seam recorded. Returns
-    `(exit status, None)` or `(None, the SystemExit it refused with)`."""
+    `(exit status, None)` or `(None, the SystemExit it refused with)`.
+
+    #1108 P4 (OD14, O11): plus the in-process launch-time publish (`_launch_publish_p4`), which
+    publishes the requested tenant's folder for real when `run.main` launches it."""
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
     try:
         place_knowledge_for_rows()
-        return run_py().main(list(argv), **rec.seams()), None
+        return run_py().main(list(argv), **with_publish(dict(rec.seams()))), None
     except SystemExit as refused:
         return None, refused
 

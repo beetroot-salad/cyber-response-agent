@@ -238,10 +238,15 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
             "--run-id", run_id or str(uuid.uuid4())]  # #1187 (declared change 1): a UUID
     if enqueue is None:
         argv.append("--no-learn")
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the planted tenant
+    # for real when run.main launches it).
     return S.sym("run", "main")(
         argv, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
         visualize=lambda *_a, **_k: None, ticket_writer=S.NoTicket(),
-        enqueue=enqueue if enqueue is not None else (lambda *_a, **_k: False))
+        enqueue=enqueue if enqueue is not None else (lambda *_a, **_k: False),
+        publish=in_process_publish())
 
 
 def _scripted_daemon(**kw: Any) -> Any:

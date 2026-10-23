@@ -262,7 +262,12 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     rc, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID],
                           rec)
     assert rc is None, f"run.main ran over an unloadable table: rc={rc}"
-    assert str(table) in H.exit_text(exc), (
+    # #1108 P4 (flow 3, U9): the run loads the table from its own copy of the published
+    # export, so the refusal names THAT file — the same table, at
+    # `<T>/run-knowledge/<run id>/settings/verb-grants.yaml`.
+    named = re.findall(r"(/\S*/verb-grants\.yaml)", H.exit_text(exc))
+    assert [p for p in named
+            if H.run_copy_part(p, data_root) == ("settings", "verb-grants.yaml")], (
         f"run.main did not refuse the unloadable table naming it: {H.exit_text(exc)!r}")
     assert not rec.spent, f"run.main spent before refusing the table: {rec.order}"
 
@@ -325,15 +330,20 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
     rec = H.RunRecorder(tmp_path / "run")
     try:
+        from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
+        # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
         rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"],
-                         **{**rec.seams(), "lifecycle": lifecycle})
+                         **with_publish({**rec.seams(), "lifecycle": lifecycle}))
     except SystemExit as refused:
         pytest.fail(f"run.main refused a finished tenant: {H.exit_text(refused)}")
     assert rc == 0
     assert len(started) == 1, started
     agent = Path(started[0][1]["tenant_agent"])
-    assert agent.resolve() == H.agent_dir(data_root).resolve(), (
-        f"start_box was handed {agent}, not the data root's {H.agent_dir(data_root)}")
+    # #1108 P4 (U9, O-A): the box is handed the agent half of the run's OWN copy of the export
+    # (`<T>/run-knowledge/<run id>/stage/agent`), under the data root — never the clone's.
+    assert H.run_copy_part(agent, data_root) == ("stage", "agent"), (
+        f"start_box was handed {agent}, not the run copy's stage/agent under the data root")
 
     # #1187: the recorder's run folder is `fixture_uuid("run")` — read it off the recorder.
     argv = box_mod._create_argv(
@@ -342,7 +352,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
     mounts = _mount_specs(argv)
     agent_mounts = [m for m in mounts if m.get("target") == MODEL_AGENT]
     assert len(agent_mounts) == 1, mounts
-    assert Path(agent_mounts[0]["source"]).resolve() == H.agent_dir(data_root).resolve()
+    assert Path(agent_mounts[0]["source"]) == agent
     assert "readonly" in agent_mounts[0], agent_mounts
     for m in mounts:
         for forbidden in (H.settings_dir(data_root), H.knowledge_dir(data_root) / ".git",
@@ -355,8 +365,9 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
             f"the bind of {source} exposes tenant learning {learning} inside the box")
         assert not source.is_relative_to(learning), (
             f"the bind of {source} exposes a child of tenant learning {learning} inside the box")
-    # The control on the same predicate: the agent bind does expose the agent half.
-    assert _exposes(Path(agent_mounts[0]["source"]), H.agent_dir(data_root))
+    # The control on the same predicate: the agent bind does expose the agent half it is
+    # handed (the run copy's).
+    assert _exposes(Path(agent_mounts[0]["source"]), agent)
 
 
 def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_root_not_the_tenants_root(

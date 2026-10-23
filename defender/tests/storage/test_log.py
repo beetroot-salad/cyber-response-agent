@@ -13,6 +13,7 @@ import pytest
 
 from defender import _log
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 from defender.run_repository import RunPaths
 
 
@@ -294,7 +295,7 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
         (kw["run"].run_dir / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
-    T.mod("run").main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+    RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
                       lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=T.no_preflight)
     # #1187 (R1): no `_tenant.json`; the run's tenant is the request's `--tenant`, whose
     # `<data root>/<T>/runs` holds it.
@@ -315,7 +316,7 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
 
     capsys.readouterr()
     with pytest.raises(RuntimeError, match="lifecycle blew up"):
-        T.mod("run").main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+        RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
                           lifecycle=lifecycle, visualize=lambda p, **kw: None,
                           preflight=T.no_preflight)
     tenant = base.parent.name  # #1187 (R1): the request's `--tenant`, no record

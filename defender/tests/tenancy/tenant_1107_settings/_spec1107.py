@@ -570,9 +570,15 @@ def seed_session_store(run_dir: Path) -> None:
 
 def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | None, Any]:
     """Drive the REAL `run.main` over `argv` with `rec`'s seams (plus `seams`). Returns
-    `(exit status, None)` or `(None, the SystemExit it refused with)`."""
+    `(exit status, None)` or `(None, the SystemExit it refused with)`.
+
+    #1108 P4 (OD14, O11): an in-process `run.main` is handed its launch-time publish; unless the
+    caller passes its own, it is the in-process stand-in that publishes the tenant's folder for
+    real when `run.main` launches it (`_launch_publish_p4`), so the run reads an export."""
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
     try:
-        return run_py().main(argv, **{**rec.seams(), **seams}), None
+        return run_py().main(argv, **with_publish({**rec.seams(), **seams})), None
     except SystemExit as refused:
         return None, refused
 

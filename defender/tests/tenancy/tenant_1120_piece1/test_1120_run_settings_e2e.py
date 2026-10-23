@@ -88,11 +88,13 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
     assert len(rec.lifecycle_calls) == 1, f"the lifecycle ran {len(rec.lifecycle_calls)} times"
     run_tenant = rec.lifecycle_calls[0]["tenant"]
 
-    assert Path(run_tenant.settings) == settings, (
-        f"the run read its tenant's settings from {run_tenant.settings}, not the data root's "
-        f"copy {settings} — a checkout copy decided the run")
+    # #1108 P4 (flow 3, U9): the run reads its own copy of the tenant's published export
+    # (`<T>/run-knowledge/<run id>/settings`, under the data root), made from the folder above.
+    assert H.run_copy_part(run_tenant.settings, data_root, LAB_ID) == ("settings",), (
+        f"the run read its tenant's settings from {run_tenant.settings}, not its run copy of "
+        f"the data root's {settings} — a checkout copy decided the run")
     assert Path(run_tenant.tenant.settings) == settings
-    assert Path(run_tenant.grants.path) == settings / "verb-grants.yaml"
+    assert Path(run_tenant.grants.path) == Path(run_tenant.settings) / "verb-grants.yaml"
     expected = set(D995.GATHER_CENSUS) - {WITHHELD}
     assert WITHHELD in D995.GATHER_CENSUS, "the census no longer holds the withheld pair"
     assert _gather_pairs(run_tenant.grants.gather) == expected, (
@@ -155,7 +157,10 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
     assert len(folders) == 1, f"expected one tenant folder under the data root: {folders}"
     folder = folders[0]
     tenant_id = folder.name
-    assert handed.resolve() == (folder / "knowledge" / "settings").resolve()
+    # #1108 P4 (P-1, O-B): the harness runs the tenant's PUBLISHED export (the one
+    # `exports/current` names), its settings half — not the clone's working tree.
+    current = (folder / "exports" / "current").read_text(encoding="utf-8").strip()
+    assert handed.resolve() == (folder / "exports" / current / "settings").resolve()
     row = (folder / H.ROW_NAME).read_text(encoding="utf-8")
     assert f'"tenant_id": "{tenant_id}"' in row, f"the row does not name {tenant_id!r}: {row}"
     id_file = (folder / "knowledge" / H.TENANT_ID_FILE).read_text(encoding="utf-8")

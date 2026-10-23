@@ -131,9 +131,16 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
         f"RunTenant.tenant is not the Tenant accept_tenant returns: {run_tenant.tenant!r} "
         f"!= {expected!r}")
     assert type(run_tenant.tenant) is type(expected)
-    assert run_tenant.settings == H.settings_dir(data_root) == run_tenant.tenant.settings
+    # #1108 P4 (flow 3, U9): the accepted Tenant still names the tenant's own folder, but the
+    # run reads its OWN copy of the published export — its settings half and the grant table
+    # in it — never the clone's working tree (`knowledge/settings`).
+    assert run_tenant.tenant.settings == H.settings_dir(data_root)
+    assert H.run_copy_part(run_tenant.settings, data_root) == ("settings",), (
+        f"the run read settings from {run_tenant.settings}, not its own run copy")
     assert run_tenant.tenant_id == H.TID
-    assert Path(run_tenant.grants.path) == H.settings_dir(data_root) / "verb-grants.yaml"
+    assert H.run_copy_part(run_tenant.grants.path, data_root) == ("settings", "verb-grants.yaml"), (
+        f"the run's grants came from {run_tenant.grants.path}, not its run copy's table")
+    assert Path(run_tenant.grants.path).parent == Path(run_tenant.settings)
     assert {(s, v) for s, v, *_ in run_tenant.grants.gather.entries} == set(D995.GATHER_CENSUS)
     assert run_tenant.correlation is not None, "a fresh run carries its lead-zero dispatch"
     assert run_tenant.correlation.template_id == H.FIXTURE_CORRELATION_TEMPLATE
@@ -441,7 +448,11 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
     rec = H.RunRecorder(tmp_path / "unused")
     seams = rec.seams()
     seams.pop("materialize")
-    rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID], **seams)
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
+    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+    rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID],
+                     **with_publish(dict(seams)))
     assert rc == 0
     assert len(rec.lifecycle_calls) == 1
     run_dir = Path(rec.lifecycle_calls[0]["run_dir"])

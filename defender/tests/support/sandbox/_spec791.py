@@ -374,8 +374,14 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     require_tail_seam(main)
     tenant_id = ensure_d9_tenant()
     location_path(requested_tenant(fixture_data_root(current_data_root()), tenant_id).learning).mkdir(exist_ok=True)
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the tenant for real
+    # when `main` launches it), unless a scenario's `main` is not run.py's.
+    publish = ({"publish": in_process_publish()}
+               if "publish" in inspect.signature(main).parameters else {})
     return main([str(alert), "--tenant", tenant_id, *args], lifecycle=tail.lifecycle,
-                visualize=tail.visualize, ticket_writer=tail)
+                visualize=tail.visualize, ticket_writer=tail, **publish)
 
 
 def plant_alert(tmp_path: Path, *, name: str = "alert.json",
