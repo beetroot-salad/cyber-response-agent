@@ -39,7 +39,7 @@ from defender.learning.core.config import (
     author_max_attempts,
     author_timeout as _author_timeout,
 )
-from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState, names_systems
 from defender.knowledge._knowledge import LESSONS_QUESTIONER
 
@@ -226,13 +226,18 @@ def main(argv: list[str]) -> int:
     import argparse
     from defender.learning.core.cli import command_line_paths
 
+    from defender.learning.core.cli import _run_stage
+    from defender.learning.core.drains import author_drain
+
     parser = argparse.ArgumentParser(description="Curate this tenant's queued findings")
     parser.add_argument("--tenant", required=True)
     args = parser.parse_args(argv[1:])
     paths = command_line_paths(parser, args.tenant)
-    with LearningState.open(paths) as state, open_drain_trees(
-            paths, AUTHOR_DRAIN_LABEL) as trees:
-        return run_batch(paths=paths, state=state, trees=trees)
+    # A curator commits only into a batch's draft of the tenant's repo, and it has no batch of
+    # its own: both corpus curators run as claims of the author lane's one tick (batch, box,
+    # branch, PR lease). So this command is that tick, `loop.py --author-drain --tenant T`
+    # (#1108 P4) — never a curator over the checkout, which holds no corpus.
+    return _run_stage(lambda: author_drain(paths))
 
 
 if __name__ == "__main__":
