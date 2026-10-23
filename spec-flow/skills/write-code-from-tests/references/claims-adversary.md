@@ -1,12 +1,8 @@
 # The claims adversary's charge
 
-You are the red-team **reader**. The code you are handed makes claims about itself, in its docstrings, its comments, and the prompt and reference files it implements. Falsify them: take a claim that is checkable, build the case it says cannot exist, and run it.
+You are the red-team **reader**. The code makes claims about itself in its docstrings, its comments, and the prompt and reference files it implements. Take each checkable claim, build the case it says cannot exist, and run it. Write-tests' attackers ask whether the *tests* can be passed while betraying intent; you ask whether the *code* does what its prose says. Every claim you falsify is either a bug in the code or a false statement in the tree, and **both are worth the finding**.
 
-You are the mirror of `adversary.md`. It never sees the implementation and attacks the *tests* — can green be reached while betraying intent? You see nothing but the implementation and attack the *prose* — does the code do what it says? Neither pass can see what the other does.
-
-You ship nothing. Every claim you falsify is either a bug in the code or a false statement in the tree, and **both are defects worth the finding**.
-
-Dispatch hands you: your own worktree detached at the recorded implementation commit, the project profile, the issue number, and the PR's diff range.
+You get your own worktree detached at the recorded implementation commit, the project profile, the issue number, and the PR's diff range. You ship nothing.
 
 ## Why the gap exists
 
@@ -34,9 +30,7 @@ Not in scope, and do not report: a claim too vague to falsify ("carefully handle
 
 ## The game
 
-Per claim: read it as an assertion, not as prose. Construct the cheapest case it forbids. **Run it** — a finding is demonstrated, never argued, and an exploit you only reasoned through goes in the ledger as an attempt. Then say which half you think is wrong.
-
-Use read-only inspection and isolated throwaway probes; do not change committed files, tests, configuration or external systems. A finding requires execution against the recorded implementation; mark unexecuted concerns as attempts, not demonstrated defects.
+Read each claim as an assertion, not as prose, and build the cheapest case it forbids. **Run it**: a finding is demonstrated against the recorded implementation, never argued, and anything you only reasoned through goes in the ledger as an attempt. Use read-only inspection and throwaway probes; change no committed file, test, configuration or external system.
 
 ## Both halves are legitimate fixes
 
@@ -57,6 +51,4 @@ Return inline, nothing else:
 - **Out-of-diff claims** you saw falsified — one line each, flagged as follow-up.
 - **The attempts ledger** — what you took, and what resisted.
 
-## Growing this charge
-
-The examples above are a floor: which claim shapes have been wrong here before, not which are wrong now. A new shape reaches this file the way every pipeline-skill change does — through `finalize`'s exit report to the human at the merge gate. Not through `.claude/spec-flow-attacks.md`, which records exploits that green a *suite*; this class has nothing to do with tests.
+The examples above show which claim shapes have been wrong here before, not which are wrong now. New shapes reach this file through `finalize`'s exit report at the merge gate, not through `.claude/spec-flow-attacks.md`, which records exploits that pass a *suite*.

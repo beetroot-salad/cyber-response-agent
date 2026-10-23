@@ -1,46 +1,41 @@
-# Contract map, working state, and handoff
+# Working record, commit and hand-off
 
-Read when starting, resuming, or handing off contract work. Use the smallest record that lets a cold agent reconstruct coverage, decisions, uncertainty and next actions. No new schema checker or fixed frontier phase map is required.
+Keep the smallest record that lets a cold agent pick up the work: what the contract covers, what was decided, what is uncertain, and what comes next.
 
 ## Working record
 
-Keep scratch material under `.spec-flow/` outside the committed diff. Record:
+Scratch state lives under `.spec-flow/`, outside the committed diff. It holds:
 
-- Design source and revision/content hash, repository base commit, relevant dependency/environment identity, profile revision/hash, current test diff/ref, and the skill/plugin revision used.
-- Named design obligations, with scenarios and entry surfaces, enforcing test names/assertion groups, relevant evidence, and verification status. A Markdown table is enough; many-to-many mappings are allowed.
-- Findings and decisions by stable ID: cause, disposition, rationale/evidence, human ruling where required, and affected obligations/tests. Do not silently discard a probe result, exclusion, or adopted amendment.
-- Completed reviews with their input revisions and scope, unresolved verification and its owner/completion condition, and the next action.
-
-An example map row is `O-retry | same operation after uncertain result | import API | test_retry_preserves_identity: returned ID + row count | awaiting real implementation`. This records a coverage claim to inspect, not proof that the test enforces it.
-
-Record inherited `claims:` entries and new load-bearing observations with their source/base and instruments, using discuss-issue's format. Unprobed facts are not settled because they have IDs. Do not build a separate ledger of every possible interpretation or reconcile bookkeeping counts across reports.
+- the identities everything depends on: design revision, base commit, profile, current test ref, and the skill revision used;
+- the **contract map**: design obligations, their scenarios and entry points, the enforcing tests, and verification status. A Markdown table is enough, for example `O-retry | same operation after uncertain result | import API | test_retry_preserves_identity: returned ID + row count | awaiting implementation`. A row is a claim to inspect, not proof;
+- findings and decisions by stable ID, with cause, disposition, evidence, the human's ruling where one was needed, and what they affect. Nothing gets silently dropped;
+- the claims inherited from discuss-issue plus new load-bearing observations, in its format. An ID does not make an unprobed fact settled;
+- which reviews ran against which revision, what verification is still owed and by whom, and the next action.
 
 ## Resume and invalidation
 
-Persist meaningful boundaries: candidate authored, reviewed, amended/repaired, and ready or blocked. A resumed worker compares recorded identities with current inputs before reusing work. Missing/stale review evidence means not yet reviewed. A changed design, shared fixture, target/base, profile or relevant environment triggers an impact check; invalidate affected tests/evidence/review and cross-boundary consequences, keeping unaffected facts.
+Mark the boundaries a resume needs: sketch and spike checked (or skipped, and why; their findings, never the spike's code), candidate authored, reviewed, repaired, ready or blocked. A worker that hands back mid-slice writes its progress here so a fresh worker can continue without its history.
 
-Mtimes or a `complete` label alone do not establish freshness. For an old numbered run, migrate the relevant validated evidence and decisions into this compact record, explicitly invalidating affected work. Do not regenerate historical scaffolding or confuse its completion labels with current semantic readiness.
+Before reusing anything, compare its recorded identities with the current inputs. A changed design, shared fixture, base, profile or environment invalidates the work that depended on it, and nothing else. Missing or stale review evidence means not reviewed; timestamps and "complete" labels prove nothing. Migrate an old-format run by carrying over its validated evidence and decisions, not its scaffolding.
 
-## Deliverable and commit
+## Commit
 
-The primary deliverable is the executable suite, including test-only fixtures/helpers. Do not commit production implementations, production stubs, scratch working state, or a test helper that substitutes the policy under test.
+The deliverable is the executable suite with its test-only fixtures and helpers. Never commit production code, stubs, scratch state, or a helper that substitutes for the policy under test.
 
-Commit it independently before implementation. Record the base and immutable tests commit/ref in the durable handoff; both honest and adversarial implementers must start from that same contract. If contract repairs occur after implementation, make separate test changes and identify them honestly as a revision; seeing implementation cannot be undone by a new commit. Never rewrite history to fabricate independence. Keep a separate contract-only repair ref for the adversary, as described below.
+Commit it on its own before any implementation, and record the base and the immutable ref in the hand-off. The implementer starts from that ref, and any later repair is measured against it.
 
-Publish or link a compact coverage/review record through the issue or supplied durable design/document location when authorized. Scratch paths alone cannot carry decisions or verification into a cold session. A durable record contains the mapping, findings dispositions, evidence, design identity and outstanding checks; it need not include raw reviewer transcripts. Use structured posting arguments or a body file for multiline CLI text.
+Repairs after implementation exists keep that independence honest. Branch from the last contract-only ref, apply only reviewed test changes, keep the original base, and record the new ref beside the old. The implementation branch takes in only those test changes. An exploit recheck applies the attacker's patch to the implementation with the repaired tests in place. Disclose when a repair author saw the implementation, since a new commit can't undo that. Never rewrite history to fake independence, and report missing contract-only history rather than hide it by moving the base.
 
-`write-code-from-tests` accepts tests/test machinery and declared coverage metadata. Keep the durable record in the issue handoff or a supplied document location; it need not be committed with the tests. If publication/push is part of the task, verify the remote contains the contract ref before posting a ready-to-implement baton; otherwise identify the local ref and publication as the next action.
+## Durable record and hand-off
 
-For repairs after implementation exists, branch from the last contract-only ref, apply only reviewed test/metadata changes, and retain the original base. Record the revised immutable ref and its relationship to the original. The honest code worker incorporates only those contract changes into its implementation worktree; the adversary forks the repaired contract ref, without honest source changes. A separate tests commit on the implementation branch alone is not an isolated adversarial starting point. Missing contract-only history must be reported, not hidden by changing the base.
+Scratch paths don't survive into a cold session, so publish a compact coverage and review record through the issue or the supplied design location when authorized. It holds the mapping, finding dispositions, evidence, design identity and outstanding checks, not raw transcripts. If pushing is part of the task, confirm the remote has the contract ref before posting a ready-to-implement hand-off.
 
-## Handoff
+State **ready**, **blocked**, or **repair required**, with:
 
-State **ready**, **blocked/incomplete**, or **contract repair required**, together with:
+- design revision, branch, base, immutable contract ref and suite paths;
+- where the durable record and the code map live;
+- design amendments and consequential decisions. Chosen mechanisms bind the implementer even where tests can't observe them;
+- the checks actually run and their results, expected reds, and every assertion or environment check owed by the code stage, with its owner;
+- open blockers and the precise next action. A ready verdict carries no known blocker.
 
-- Current design source/revision, branch, base, immutable contract ref and suite paths.
-- Durable coverage/review record location.
-- Design amendments and consequential decisions; implementation constraints and chosen mechanisms remain binding even when tests cannot fully observe them.
-- Actual checks and their results, expected reds, unexercised assertions and environmental gaps, each required later check and its code-stage owner/completion condition.
-- Open blockers, if any, and the precise next action. No known blocker accompanies a ready verdict.
-
-The code stage owns exploit-based attacks and implementation-stage verification. Name `write-code-from-tests` as the next implementer.
+Name `write-code-from-tests` as the next stage.
