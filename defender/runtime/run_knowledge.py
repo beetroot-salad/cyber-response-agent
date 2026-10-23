@@ -39,10 +39,10 @@ _STALE_PREFIX = "stale:"
 _SUMMARY_LIMIT = 300
 
 #: The run copy's own names (U9). The box mounts `stage/`, which holds exactly `agent/` and the
-#: startup token; `owner` and `settings/` sit beside it, outside every mount.
+#: startup token; `owner` (`tenancy._owner.OWNER_FILE`, written by `write_owner`) and `settings/`
+#: sit beside it, outside every mount.
 STAGE = "stage"
 STAGE_TOKEN = "token"
-OWNER = "owner"
 #: A copy is built under a dot-name and renamed into place; the dot keeps it out of the run-id
 #: grammar, so no run copy is ever named so.
 _BUILDING_PREFIX = ".building-"

@@ -69,15 +69,6 @@ class KnowledgePaths:
         """`sub`'s spelling relative to the tenant repo (`agent/<sub>/`), with a trailing slash."""
         return f"{AGENT_REL}/{sub}/"
 
-    @property
-    def skills_rel(self) -> str:
-        return self.rel(SKILLS)
-
-    @property
-    def catalog_rel(self) -> str:
-        return self.rel(CATALOG)
-
-
 @model(frozen=True)
 class _CheckoutKnowledge(KnowledgePaths):
     """The knowledge a product checkout carried before #1108 P4 moved it into the tenant repo:

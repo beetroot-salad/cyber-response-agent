@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import os
 import re
@@ -412,13 +411,6 @@ def _is_ref_name(name: str) -> bool:
     return (len(parts) >= 2 and parts[0] == "refs"
             and all(part and part not in (".", "..") and part.isprintable()
                     and not any(ch.isspace() for ch in part) for part in parts))
-
-
-def capture_run(repo_root: Path, knowledge_dir: Path) -> RunProvenance:
-    """The code stamp of `repo_root` with the knowledge revision of `knowledge_dir` beside it —
-    what a run is stamped with and what the fork launcher compares a source against."""
-    record = capture_tree(repo_root)
-    return dataclasses.replace(record, knowledge=capture_knowledge(knowledge_dir))
 
 
 def write(path: Path, prov: RunProvenance) -> None:
