@@ -6,7 +6,6 @@ change_set, systems, reducer_offered, tree_for)` (the `ChangeSet` replaces `base
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 

@@ -146,15 +146,6 @@ def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_know
         assert reason in B.host_record_path(out.run_dir).read_text(encoding="utf-8")
 
 
-def _is_ancestor(t: Any, older: str, newer: str) -> bool:
-    """The test's own oracle: git on the tenant's clone (the run process has none)."""
-    import subprocess
-
-    return subprocess.run(  # noqa: S603 — the test's oracle
-        ["git", "-C", str(B.clone_dir(t)), "merge-base", "--is-ancestor", older, newer],
-        check=False, capture_output=True).returncode == 0
-
-
 def test_a_mismatch_a_copied_commit_descending_from_the_reported_one_is_fresh_at_the_copy(
         tenant, tmp_path):
     """A-MISMATCH: the child reports `fresh <S>` (the seeded commit) but `current` has since
@@ -163,11 +154,10 @@ def test_a_mismatch_a_copied_commit_descending_from_the_reported_one_is_fresh_at
     reported S as well. (Field name for the reported commit not frozen: any other field.) Every
     writer of `current` fast-forwards it under the tenant lock, so the copy is the reported
     commit or a descendant by construction; the run (no git, P-3) records fresh at the copy.
-    The oracle's `_is_ancestor` only checks the premise."""
+    M is built as a merge on top of S by `merge`, so it descends from S by construction."""
     merged = tenant.merge(B.MERGE_FILES)
     tenant.publish()
     assert current_commit(tenant.tenant) == merged
-    assert _is_ancestor(tenant, tenant.commit, merged), "premise: M descends from S"
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
 
     assert out.reached, out.text()
