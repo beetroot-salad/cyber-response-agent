@@ -60,13 +60,19 @@ def _paths(tmp_path: Path) -> Any:
     return D.make_paths(tmp_path, state_dir=Path(os.environ[S.LEARNING_STATE_ENV]))
 
 
-def _tick(paths: Any, channel: str, curator: Any) -> int:
+def _lane(tmp_path: Path) -> Any:
+    """`_paths` for a drain tick (#1108 P4, OD12 class ii): a batch's git-free draft
+    (`_curator1134.draft_lane`), its state root the env-named learning-state root."""
+    return C.draft_lane(tmp_path, state_dir=Path(os.environ[S.LEARNING_STATE_ENV]))
+
+
+def _tick(lane: Any, channel: str, curator: Any) -> int:
     """One real drain tick of `channel` (`FINDINGS` / `QUESTIONER_FINDINGS`) over the real
-    channel config, its curator seam replaced by `curator`."""
+    channel config over the lane's draft, its curator seam replaced by `curator`."""
     if channel == "FINDINGS":
-        cfg = D.cfg_for(paths, "findings", invoke_agent=curator)
+        cfg = C.draft_author_cfg(lane, invoke_agent=curator)
     else:
-        cfg = C.questioner_cfg(paths, invoke_agent=curator)
+        cfg = C.draft_questioner_cfg(lane, invoke_agent=curator)
     return S.mod(S.DRAIN).run_batch(cfg=cfg)
 
 
@@ -180,12 +186,13 @@ def _questioner_prompt(paths: Any, rows: list[dict]) -> str:
 
 
 def test_1234_gate_family_authors_rows_carrying_the_new_fields(tmp_path):
-    paths = _paths(tmp_path)
+    lane = _lane(tmp_path)
+    paths = lane.paths
     row = _new_row(_fid("b", 0, 0))
     D.seed(paths, _channel("FINDINGS"), [row])
     curator = _curator("new-shape")
 
-    assert _tick(paths, "FINDINGS", curator) == 0
+    assert _tick(lane, "FINDINGS", curator) == 0
 
     assert _handed(curator) == [row["finding_id"]], (
         f"the post-change row was not handed to the curator: handed {_handed(curator)}, still "
@@ -195,7 +202,8 @@ def test_1234_gate_family_authors_rows_carrying_the_new_fields(tmp_path):
 
 
 def test_1234_gate_family_holds_rows_lacking_the_new_fields(tmp_path):
-    paths = _paths(tmp_path)
+    lane = _lane(tmp_path)
+    paths = lane.paths
     control = _new_row(_fid("b", 0, 0))
     variants = {
         S.CONTRAST: _without(_new_row(_fid("b", 0, 1)), S.CONTRAST),
@@ -207,7 +215,7 @@ def test_1234_gate_family_holds_rows_lacking_the_new_fields(tmp_path):
     D.seed(paths, _channel("FINDINGS"), [control, *variants.values()])
     curator = _curator("mixed")
 
-    assert _tick(paths, "FINDINGS", curator) == 0
+    assert _tick(lane, "FINDINGS", curator) == 0
 
     assert _handed(curator) == [control["finding_id"]], (
         f"the curator was handed {_handed(curator)}: expected the post-change row alone")
