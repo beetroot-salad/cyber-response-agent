@@ -154,3 +154,6 @@ experiments/*/sessions/
 
 # Local discussion notes and evidence
 /.discussion/
+
+# contract-first plugin working state (scratch maps, findings, hand-off drafts)
+/.contract-first/

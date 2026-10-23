@@ -2,7 +2,7 @@
 
 Read the relevant entry when changing a shared seam or resolving a lint finding. This is not an additional always-loaded instruction file. Historical spec-graph artifact checking is retired from CI.
 
-This reference describes lint expectations and existing seams. `.github/workflows/ci.yml` determines which checks currently block CI; each checker module defines its exact scope and suppression syntax. The checkers live at `tooling/lint/lint_*.py` (repo root). Almost all scope to `defender/` alone — the text-I/O gate also covers `spec-flow/scripts/`, and the stale-reference scan works off the PR's whole diff. Run one directly: `defender/.venv/bin/python tooling/lint/<lint>.py`.
+This reference describes lint expectations and existing seams. `.github/workflows/ci.yml` determines which checks currently block CI; each checker module defines its exact scope and suppression syntax. The checkers live at `tooling/lint/lint_*.py` (repo root). Almost all scope to `defender/` alone — the stale-reference scan works off the PR's whole diff. Run one directly: `defender/.venv/bin/python tooling/lint/<lint>.py`.
 
 They are **ratcheted**, not absolute: each carries a checked-in `<lint>_baseline.json` (`tooling/lint/_baseline.py`) recording today's findings, so a gate fails only on a fingerprint that is not already in its baseline. That makes the baselines part of the contract, and there are two different reasons to touch one — keep them apart:
 

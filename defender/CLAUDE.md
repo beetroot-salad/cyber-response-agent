@@ -15,7 +15,7 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 - Diagnostics use `_log` and `logging.getLogger(__name__)`; command results remain stdout, refusals remain visible stderr or API errors. Entrypoints configure logging. Detailed rules are in `docs/runtime-development.md`.
 - Runs live under `$DEFENDER_DATA_ROOT/<tenant>/runs/`, outside tracked source; no default data root or tenant. Devcontainer bind-mount details and existing CLI procedures are in `docs/development-operations.md`.
 - Tests live in `tests/`, including runtime unit tests and hermetic e2e replay. Run affected files and relevant replay locally, not the full suite; every pytest invocation here uses `flock /tmp/defender-pytest.lock`. In worktrees, verify imports and set `PYTHONPATH=<worktree-root>`. <!-- lint-hygiene: ok — shared host test lock, not a product data path. -->
-- `.github/workflows/ci.yml` at the repository root defines current CI gates; `.claude/spec-flow.json` records the project profile. Fix new lint findings; never hide them by updating a baseline. Regenerate baselines only for pre-existing findings moved/refingerprinted by an unrelated change, and explain why.
+- `.github/workflows/ci.yml` at the repository root defines current CI gates; `.claude/contract-first.json` records the project profile. Fix new lint findings; never hide them by updating a baseline. Regenerate baselines only for pre-existing findings moved/refingerprinted by an unrelated change, and explain why.
 
 ## Find the relevant context
 

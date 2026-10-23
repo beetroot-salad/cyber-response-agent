@@ -1,8 +1,0 @@
-{
-  "name": "spec-flow",
-  "displayName": "spec-flow",
-  "version": "0.1.0",
-  "description": "A design-and-tests issue-to-PR pipeline: discuss an issue, turn the design into fidelity-reviewed contract tests, implement against them, attack the tests with deliberately wrong variants of that implementation, then finalize and ship. Tests encode intent; a fidelity review checks what they demand and the attacks check what they let through.",
-  "keywords": ["tdd", "spec", "code-review", "github", "pipeline"],
-  "license": "MIT"
-}

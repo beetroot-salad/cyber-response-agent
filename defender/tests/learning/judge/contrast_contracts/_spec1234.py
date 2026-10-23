@@ -27,8 +27,6 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
 
 DEFENDER = Path(__file__).resolve().parents[4]
-REPO_ROOT = DEFENDER.parent
-SPEC_GRAPH = REPO_ROOT / "spec-flow" / "specs" / "spec_graph_1234.yaml"
 
 # --------------------------------------------------------------------------------------
 # Per-test imports.

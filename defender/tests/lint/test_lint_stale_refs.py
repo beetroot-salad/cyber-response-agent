@@ -364,10 +364,9 @@ def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
 @pytest.mark.parametrize(
     "rel",
     [
-        "spec-flow/specs/archive/575-pre-graph/brief.md",
+        "docs/archive/spec-graphs/archive/575-pre-graph/brief.md",
         "defender/tests/fixtures/e2e/golden-x/investigation.md",
         "defender/lessons-environment/l-01.md",
-        "spec-flow/specs/spec_graph_551.yaml",
         "docs/design.md",
     ],
 )

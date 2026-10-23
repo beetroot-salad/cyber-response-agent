@@ -26,8 +26,6 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.tenancy import _tenants1106 as T6
 
 DEFENDER = Path(__file__).resolve().parents[4]
-REPO_ROOT = DEFENDER.parent
-SPEC_GRAPH = REPO_ROOT / "spec-flow" / "specs" / "spec_graph_1224.yaml"
 
 # --------------------------------------------------------------------------------------
 # Per-test imports.
