@@ -133,31 +133,40 @@ def test_a_lesson_frontmatter_value_cannot_forge_the_key_the_selector_reads(tmp_
 
 
 def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
-    """A questioner lesson never reaches the DEFENDER agent's prompt."""
+    """A questioner lesson never reaches the DEFENDER agent's prompt.
+
+    #1108 P4 (O1, O2): both corpora sit side by side under one agent root (`<agent>/lessons`,
+    `<agent>/lessons-questioner`), and the defender's lessons tools read `$DEFENDER_AGENT_DIR/
+    lessons` only (the engine's root is pinned by `test_1080_lessons_engine`). So the agent root
+    here holds a questioner lesson keyed on the run's own signature beside a defender lesson
+    keyed the same way, and the section the defender actually gets is built through the
+    production env seam with that root, so the shim really runs."""
+    from types import SimpleNamespace
+
     orient = W.mod("runtime.orient")
     run_common = W.mod("run_common")
-    lessons_fm = W.mod("runtime.lessons_engine.lessons_fm")
-    frontier = W.mod("runtime.lessons_engine.lessons_frontier")
-    paths = W.loop_paths(tmp_path)
-    W.questioner_lesson(paths, "q", body="QUESTIONER-ONLY-BODY", systems=[W.SYSTEM])
+    signature = "rule-v2-cross-tier-ssh-pivot"
+    agent = tmp_path / "agent"
+    W.questioner_lesson(
+        SimpleNamespace(lessons_questioner_dir=agent / W.QUESTIONER_CORPUS_DIRNAME), "q",
+        body="QUESTIONER-ONLY-BODY", systems=[W.SYSTEM],
+        description="QUESTIONER-ONLY-DESCRIPTION", source_signature=[signature])
+    defender_corpus = agent / "lessons"
+    defender_corpus.mkdir(parents=True)
+    (defender_corpus / "d.md").write_text(
+        "---\nname: d\ndescription: DEFENDER-LESSON-DESCRIPTION\n"
+        f"source_signature: [{signature}]\n---\n\nDefender body.\n", encoding="utf-8")
 
-    for root in (lessons_fm.LESSONS_DIR, frontier.DEFAULT_CORPUS):
-        assert root.name != W.QUESTIONER_CORPUS_DIRNAME, (
-            f"a defender-side lessons reader is rooted at {root} — the questioner corpus")
-        assert root.name == "lessons", f"the defender's lessons root moved to {root}"
-        assert not (root / W.QUESTIONER_CORPUS_DIRNAME).exists(), (
-            "the questioner corpus sits INSIDE the defender's own root, so a recursive glob "
-            "would reach it")
-
-    # And the section the defender actually gets, built through the production env seam so the
-    # shim really runs: it names neither the corpus nor anything in it.
     run_dir = tmp_path / "run"
     run_dir.mkdir(exist_ok=True)
-    env = run_common.run_env(Path(orient.__file__).resolve().parents[1], run_dir)
-    section = orient._build_lessons_section(env, "rule-v2-cross-tier-ssh-pivot", orient._shim)
+    env = run_common.run_env(Path(orient.__file__).resolve().parents[1], run_dir,
+                             tenant_agent=agent)
+    section = orient._build_lessons_section(env, signature, orient._shim)
 
-    assert section, ("the lessons shim produced nothing at all, so the two assertions below "
-                     "hold vacuously — check that defender/bin is on the built PATH")
-    assert "QUESTIONER-ONLY-BODY" not in section, (
+    assert section and "DEFENDER-LESSON-DESCRIPTION" in section, (
+        "control: the defender's own lesson for this signature did not reach the section, so "
+        f"the absences below would hold vacuously: {section!r}")
+    assert "QUESTIONER-ONLY-DESCRIPTION" not in section, (
         "a questioner lesson reached the defender agent's own orientation section")
+    assert "QUESTIONER-ONLY-BODY" not in section
     assert W.QUESTIONER_CORPUS_DIRNAME not in section

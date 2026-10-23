@@ -75,14 +75,21 @@ def test_the_utf8_pin_covers_the_write_not_only_the_read(tmp_path):
 
 
 def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path):
+    """#1108 P4 (O1, O2): the product tree holds no corpus; the real committed corpus a lane
+    reads is a tenant's, named by `DEFENDER_AGENT_DIR` — here the committed fixture tenant's,
+    whose lesson descriptions carry non-ASCII."""
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
+
     proc = subprocess.run(
         [str(WORKSPACE_ROOT / "defender/bin/defender-lessons")],
-        capture_output=True, text=True, env=C_LOCALE_ENV,
+        capture_output=True, text=True,
+        env={**C_LOCALE_ENV, "DEFENDER_AGENT_DIR": str(FIXTURE_AGENT)},
     )
 
     assert proc.returncode == 0, f"defender-lessons died under a C locale:\n{proc.stderr}"
     assert "Traceback" not in proc.stderr
     assert proc.stdout.count("\n") > 1
+    assert "—" in proc.stdout, "the corpus's em-dash did not survive the C-locale write"
 
 
 def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsys):
