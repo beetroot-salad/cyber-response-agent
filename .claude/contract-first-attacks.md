@@ -6,7 +6,7 @@ Entry format:
 
 ```
 ## <date> · PR #<n> — <exploit shape, one line>
-- **violated**: <demand id or design-doc clause, quoted>
+- **violated**: <design-doc clause, quoted, and the test meant to enforce it>
 - **exploit**: <how it greened — enough to re-attempt>
 - **killed by**: <what the fix asserts, or "open">
 ```

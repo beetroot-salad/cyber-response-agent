@@ -10,15 +10,13 @@ from __future__ import annotations
 import sys
 import textwrap
 
-from conftest import SPEC_GRAPH_DIR  # noqa: F401  (house import; anchors sys.path)
-from test_mechanical_checks import run_script
+from conftest import run_script
 
 
 def _spec_repo(make_repo):
     """A repo whose suite imports `appx.summarize` — a project-rooted module that does
     not exist (the not-yet-written target); `appx` is a namespace package."""
     r = make_repo()
-    r.config(code_roots=["appx"])
     r.write("appx/helper.py", "def existing():\n    return 1\n")
     return r
 
@@ -70,43 +68,6 @@ def test_teardown_error_does_not_demote_a_vacuous_pass(make_repo):
     assert p.returncode == 1, p.stdout + p.stderr
     assert "NULLSTUB-PASS" in p.stdout and "test_vacuous" in p.stdout
     assert "BROKEN" not in p.stdout
-
-
-def test_parametrized_recorded_passes_are_accepted(make_repo):
-    # Fix 5a: recorded ids were also split on "--", truncating `test_flag[--residue]`.
-    # Fix 5b: a recorded bare `test_bare` never matched nodeids like `test_bare[1]`.
-    r = _spec_repo(make_repo)
-    r.write("tests/spec/test_spec.py", textwrap.dedent("""\
-        import pytest
-
-        from appx.summarize import summarize
-
-
-        @pytest.mark.parametrize("flag", ["--residue"])
-        def test_flag(flag):
-            assert flag == "--residue"
-
-
-        @pytest.mark.parametrize("n", [1, 2])
-        def test_bare(n):
-            assert n > 0
-
-
-        def test_real():
-            assert summarize("a.txt") == "the summary"
-    """))
-    r.write("tests/spec/spec_graph_t.yaml", textwrap.dedent("""\
-        schema_version: 1
-        handoff:
-          nullstub_passes:
-            - "test_flag[--residue] — structure"
-            - "test_bare — structure"
-    """))
-    p = run_script(
-        "check_stub.py", str(r.root / "tests/spec"), "--python", sys.executable, cwd=r.root,
-    )
-    assert p.returncode == 0, p.stdout + p.stderr
-    assert "4 discriminating" in p.stdout
 
 
 def test_existing_target_shadowing_the_stub_voids_the_run(make_repo):

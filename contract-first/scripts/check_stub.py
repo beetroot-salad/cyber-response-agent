@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""spec-graph check #7 — null-stub discrimination (catches vacuous greens).
+"""Null-stub discrimination: catches tests that pass without checking anything.
 
 Write a throwaway no-op implementation of the target, run the suite against it once:
-every test must fail, each on its own demand-specific assertion. A test green against a
+every test must fail, each on its own assertion. A test green against a
 do-nothing implementation binds nothing; a test that errors instead of asserting is
 riding a sibling's machinery. This script does the mechanical part — generate the stub,
-run pytest, classify per test — and leaves the judgment (is a recorded pass legitimate?
-is a rider repairable?) to the phase-F leaf.
+run pytest, classify per test — and leaves the judgment (is a pass a legitimate control?
+is a rider repairable?) to the reviewer.
 
 Mechanics:
 
@@ -20,19 +20,17 @@ Mechanics:
   (the project's own pytest config must apply). The interpreter must be the project's
   test interpreter: `--python`, else `$SPEC_GRAPH_TEST_PYTHON`, else `python3`.
 * **Classify** — per test: `failed on AssertionError` is discrimination; `passed` is a
-  finding unless the graph's `handoff.nullstub_passes` records it; an error, skip, or
-  collection failure proves nothing and is a finding.
+  finding; an error, skip, or collection failure proves nothing and is a finding.
 
 The stub lives in a temp directory and is deleted after the run (`--keep` to inspect) —
-committing it would hand write-code-from-spec a skeleton to grow instead of a contract
+committing it would hand the implementer a skeleton to grow instead of a contract
 to meet. Namespace-package caveat: a stub submodule can only merge into a package that
 is itself a namespace package; if a regular (`__init__.py`) ancestor shadows it, the run
 warns and the import will fail loudly rather than silently testing real code.
 
 Usage:
-    spec-graph nullstub [graph.yaml | suite-dir] [--target <dotted.module> ...]
-                        [--python <interp>] [--keep] [--config <path>]
-Exit codes: 0 every test discriminates (or its pass is recorded); 1 findings; 2 the
+    spec-graph nullstub <suite-dir> [--target <dotted.module> ...] [--python <interp>] [--keep]
+Exit codes: 0 every test discriminates; 1 findings; 2 the
 run could not happen (no target, no pytest, no report) — never a silent pass.
 """
 from __future__ import annotations
@@ -43,13 +41,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
 from pathlib import Path
 
-import yaml
-
 import _cli
-import _config
 import _suite
 
 _NULL_MODULE = '''\
@@ -228,43 +222,6 @@ def _pytest_cwd(suite_dir: Path, root: Path) -> Path:
     return root
 
 
-def _owning_graphs(suite_dir: Path, cfg: dict) -> list[Path]:
-    """Every committed graph whose `tests:` resolves to this suite.
-
-    Needed because `spec-graph nullstub <suite-dir>` (the form write-tests emits) carries
-    no graph identity, yet the graphs hold `handoff.nullstub_passes`.
-    """
-    return [g for g in _config.artifacts(cfg) if _suite.suite_dir_from_arg(g) == suite_dir]
-
-
-def _recorded_passes(suite_dir: Path, graphs: Sequence[Path] = ()) -> set[str]:
-    """Test names recorded as legitimate null-stub passes ("<test> — <class>").
-
-    Read from the graphs that name this suite via `tests:` (which live elsewhere) as well as
-    any graph beside it.
-    """
-    candidates = sorted(suite_dir.glob("spec_graph_*.yaml"))
-    candidates += [g for g in graphs if g.is_file() and g not in candidates]
-    recorded: set[str] = set()
-    for g in candidates:
-        # A malformed graph is check_lint's finding; skip it.
-        try:
-            handoff = _cli.load_graph(g).get("handoff") or {}
-        except (OSError, ValueError, yaml.YAMLError, TypeError):
-            continue
-        if not isinstance(handoff, dict):
-            continue
-        # A truthy scalar survives `or []`: a number would raise outside the try, and a string
-        # would whitelist its characters. Skip anything but a list.
-        passes = handoff.get("nullstub_passes") or []
-        if not isinstance(passes, list):
-            continue
-        for entry in passes:
-            # Em-dash only: splitting on "--" would truncate ids like test_flag[--residue].
-            recorded.add(str(entry).split("—", 1)[0].strip())
-    return recorded
-
-
 def _drive_pytest(
     suite_dir: Path, targets: dict[str, set[str]], stub_dir: Path, report_file: Path,
     python: str, root: Path,
@@ -296,7 +253,7 @@ def _collect_results(
     no report, no tests collected, a shadowed stub, a timeout, an unreadable report, or a
     broken interpreter. Prints its own reason.
     """
-    root = _config.repo_root(suite_dir)
+    root = _suite.repo_root(suite_dir)
     # resolve(): the shadow check compares module __file__ origins against this dir.
     stub_dir = Path(tempfile.mkdtemp(prefix="nullstub-")).resolve()
     report_file = stub_dir / "report.json"
@@ -345,21 +302,16 @@ def _collect_results(
             shutil.rmtree(stub_dir, ignore_errors=True)
 
 
-def _verdict(nodeid: str, r: dict, recorded: set[str]) -> str | None:
+def _verdict(nodeid: str, r: dict) -> str | None:
     """One test's classification against the null stub: the finding it earns, or None
-    when it discriminated (failed on its own assertion, or is a recorded pass)."""
+    when it discriminated (failed on its own assertion)."""
     outcome, msg = r.get("outcome"), r.get("message", "")
-    test = nodeid.split("::")[-1]
     if outcome == "failed" and (msg.startswith("AssertionError") or msg.startswith("Failed")):
         return None
     if outcome == "passed":
-        # A recorded bare name covers every `[case]`; a full id covers just its own.
-        bare = test[: test.find("[")] if "[" in test and test.endswith("]") else test
-        if test in recorded or bare in recorded:
-            return None
         return (
-            f"NULLSTUB-PASS {nodeid}: green against a do-nothing target — binds nothing. "
-            f"Strengthen it, or record it with its class in handoff.nullstub_passes."
+            f"NULLSTUB-PASS {nodeid}: green against a do-nothing target — binds nothing, "
+            f"unless it is a control or regression test that should pass today."
         )
     if outcome == "failed":
         return (
@@ -374,12 +326,12 @@ def _verdict(nodeid: str, r: dict, recorded: set[str]) -> str | None:
     )
 
 
-def _classify(results: dict[str, dict], recorded: set[str]) -> tuple[list[str], int]:
+def _classify(results: dict[str, dict]) -> tuple[list[str], int]:
     """(findings, discriminating count) over the whole report, in nodeid order."""
     findings: list[str] = []
     discriminated = 0
     for nodeid, r in sorted(results.items()):
-        finding = _verdict(nodeid, r, recorded)
+        finding = _verdict(nodeid, r)
         if finding is None:
             discriminated += 1
         else:
@@ -387,12 +339,11 @@ def _classify(results: dict[str, dict], recorded: set[str]) -> tuple[list[str], 
     return findings, discriminated
 
 
-def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool,
-        graphs: Sequence[Path]) -> int:
+def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool) -> int:
     results = _collect_results(suite_dir, targets, python, keep)
     if results is None:
         return 2
-    findings, discriminated = _classify(results, _recorded_passes(suite_dir, graphs))
+    findings, discriminated = _classify(results)
     for f in findings:
         print(f"  {f}")
     print(f"\n[check_stub] {discriminated} discriminating, {len(findings)} finding(s), "
@@ -402,34 +353,20 @@ def run(suite_dir: Path, targets: dict[str, set[str]], python: str, keep: bool,
 
 def main(argv: list[str]) -> int:
     _cli.utf8_stdio()
-    opts, args = _cli.parse_argv(
-        argv, valued={"--config", "--python"}, multi={"--target"}, flags={"--keep"}
-    )
+    opts, args = _cli.parse_argv(argv, valued={"--python"}, multi={"--target"}, flags={"--keep"})
     # A `--python` with no value falls back to the default, never to None.
     python = opts["python"] or os.environ.get("SPEC_GRAPH_TEST_PYTHON", "python3")
     explicit: list[str] = opts["target"]
     keep = opts["keep"]
-    cfg = _config.load(opts["config"])
-    if args:
-        # Resolve first: pytest runs from the rootdir, so a relative arg would resolve wrong.
-        p = Path(args[0]).resolve()
-        suite_dir = _suite.suite_dir_from_arg(p)
-        # Every graph naming this suite contributes recorded passes, since pytest runs the
-        # whole directory. The named graph is added in case it is uncommitted or off-glob.
-        graphs = _owning_graphs(suite_dir, cfg)
-        if p.is_file() and p not in graphs:
-            graphs.append(p)
-    else:
-        dirs = sorted({_suite.suite_dir_from_arg(g) for g in _config.artifacts(cfg)})
-        if len(dirs) != 1:
-            print(f"check_stub: give the suite dir or graph explicitly (found {len(dirs)} "
-                  f"candidate dirs)", file=sys.stderr)
-            return 2
-        suite_dir = dirs[0].resolve()
-        graphs = _owning_graphs(suite_dir, cfg)
+    if len(args) != 1:
+        print("usage: spec-graph nullstub <suite-dir> [--target <dotted.module> ...] "
+              "[--python <interp>] [--keep]", file=sys.stderr)
+        return 2
+    # Resolve first: pytest runs from the rootdir, so a relative arg would resolve wrong.
+    suite_dir = Path(args[0]).resolve()
     # No `has_tests` preflight: `_collect_results` asks pytest what it collected, which
     # descends and honours `python_files`, unlike the flat guard `check_calls` uses.
-    root = _config.repo_root(suite_dir)
+    root = _suite.repo_root(suite_dir)
     targets, floor = _suite.target_modules(suite_dir, root)
     for t in explicit:
         targets.setdefault(t, set())
@@ -442,7 +379,7 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    return run(suite_dir, targets, python, keep, graphs)
+    return run(suite_dir, targets, python, keep)
 
 
 if __name__ == "__main__":

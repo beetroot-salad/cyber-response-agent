@@ -30,4 +30,4 @@ Read the result against the floor it prints. **Resolved fewer than grep** means 
 
 Static Python only — symbol and call edges. It does **not** see runtime dispatch (a `VERBS`-style registry the runtime imports and calls by data, a subprocess re-exec) or reachability matched on a string (a regex over a filename). Those are not call edges; read the dispatch site yourself. This is a sharper census for the code-symbol slice, not a reachability oracle.
 
-Requires pyrefly (`uvx pyrefly`, fetched on first use) and a `codeGraph` block in `.claude/contract-first.json` (`configDir` + `searchPath`). Without a pinned search path pyrefly silently under-resolves on namespace-package layouts — which is exactly why the guard exists.
+Requires pyrefly (`uvx pyrefly`, fetched on first use) and the project's pyrefly config with its import roots on `search-path` (a `pyrefly.toml`, or `[tool.pyrefly]` in `pyproject.toml`). Without a pinned search path pyrefly silently under-resolves on namespace-package layouts — which is exactly why the guard exists.

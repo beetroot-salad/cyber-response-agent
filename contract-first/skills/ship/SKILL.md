@@ -8,7 +8,7 @@ effort: low
 
 Branch, commit, push, and open a PR.
 
-The **default branch** is `main` unless the project profile (`.claude/contract-first.json`) sets `conventions.defaultBranch`.
+The **default branch** is what `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` reports.
 
 - If already on a feature branch with an open PR, just push new commits.
 - If on the default branch, create a branch. Derive the name from the changes.

@@ -14,59 +14,31 @@ consumers take `--target <dotted.module>` for these, and exit 2 when no target i
 from __future__ import annotations
 
 import ast
+import functools
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 _COPY = re.compile(r"\.copy\d+\.py$")
 
 
-def suite_dir_for(graph_path: Path, graph: dict, *, root: Path) -> Path:
-    """The suite a graph is the derivation of.
-
-    The graph names its suite via `tests:` (repo-relative), resolved against the repo
-    containing `root`. `root` is required, with no default, because callers pass the graph's
-    own directory and the graph may live in another checkout than the process cwd.
-
-    Falls back to the graph's directory when `tests:` is absent, not a non-empty relative
-    string, or resolves outside the repo (`check_stub` would otherwise run pytest, conftests
-    included, over an arbitrary directory). The fallback is loud, not a clean pass:
-    `check_binds` then reports every demand as a prose orphan.
-    """
-    declared = graph.get("tests")
-    if not isinstance(declared, str) or not declared or Path(declared).is_absolute():
-        return graph_path.parent
-    import _config
-
-    anchor = _config.repo_root(root).resolve()
-    resolved = (anchor / declared).resolve()
-    if not resolved.is_relative_to(anchor):
-        return graph_path.parent
-    return resolved
-
-
-def suite_dir_from_arg(arg: Path) -> Path:
-    """The suite directory a CLI argument names, always resolved.
-
-    A directory is itself. A file is a graph, whose suite is what its `tests:` declares
-    (via `suite_dir_for`), not the directory the graph sits in.
-
-    An unreadable or non-mapping graph falls back to its own directory; callers refuse a
-    directory with no tests, so this is not a silent pass. `ValueError` covers
-    `UnicodeDecodeError`.
-    """
-    if arg.is_dir():
-        # Both arms resolve: `_pytest_cwd` compares `d == root` against an absolute root.
-        return arg.resolve()
-    import yaml
-
-    import _cli
-
-    try:
-        graph = _cli.load_graph(arg)
-    except (OSError, ValueError, TypeError, yaml.YAMLError):
-        return arg.parent
-    return suite_dir_for(arg, graph, root=arg.parent).resolve()
+@functools.cache
+def repo_root(start: Path) -> Path:
+    """The checkout containing `start` (a suite dir may live in another repo than cwd)."""
+    out = subprocess.run(
+        ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, encoding="utf-8", check=False,
+    ).stdout.strip()
+    if out:
+        return Path(out)
+    # git could not answer (no git, no `.git`, or a `safe.directory` refusal): walk up for
+    # `.git` rather than return `start`, which would misplace the project root.
+    base = start.resolve()
+    for cand in (base, *base.parents):
+        if (cand / ".git").exists():
+            return cand
+    return base
 
 
 #: A module-level test function, however the file is named (matching `check_calls`' scan).
@@ -90,16 +62,12 @@ def has_tests(suite_dir: Path) -> bool:
     return False
 
 
-def no_tests_refusal(tool: str, dirs: list[Path]) -> str:
-    """The family's could-not-look sentence for a resolved suite directory holding no tests.
-
-    Shared by `check_calls` and `check_stub`; tests assert on this wording.
-    """
-    named = str(dirs[0]) if len(dirs) == 1 else str([str(d) for d in dirs])
+def no_tests_refusal(tool: str, suite_dir: Path) -> str:
+    """The could-not-look sentence for a suite directory holding no tests. Tests assert on
+    this wording."""
     return (
-        f"{tool}: no tests under {named} — nothing to collect, so this is a could-not-look "
-        f"rather than a clean run. Point at the suite directory, or at a graph whose "
-        f"`tests:` field names it."
+        f"{tool}: no tests under {suite_dir} — nothing to collect, so this is a could-not-look "
+        f"rather than a clean run. Point at the suite directory."
     )
 
 

@@ -1,6 +1,6 @@
 # Engineering principles
 
-The standing rules every design in this repo is judged against. A design doc can add to them or override them for its own issue; it says so in its principles section. The contract-first workflow reads this file (the profile's `conventions.principles` points here) and judges every fork against it — a fork that exists only to serve something these principles reject is proposed for dropping, and forks sharing one cause get one design call that dissolves them.
+The standing rules every design in this repo is judged against. A design doc can add to them or override them for its own issue; it says so in its principles section. The contract-first workflow reads this file (`defender/CLAUDE.md` points here) and judges every fork against it — a fork that exists only to serve something these principles reject is proposed for dropping, and forks sharing one cause get one design call that dissolves them.
 
 Stated by the owner during the #1105 and #1135 spec runs (October 2026); quotes are theirs.
 

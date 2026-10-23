@@ -20,7 +20,6 @@ issue → discuss-issue → write-tests → write-code-from-tests → code revie
 ```
 
 The implementation stage works against an immutable tests ref. Once its honest implementation is green, attackers try wrong variants of it, and the holes they find return to `write-tests` as contract repairs. `finalize` remains the plugin's existing post-implementation review stage.
-`write-code-with-no-spec` is retained for old runs.
 
 ## Choosing a lane
 
@@ -54,11 +53,9 @@ every edge case. The merge remains human-approved.
 | `/contract-first:write-code-from-tests` | Implements against the committed contract, then has two or three lensed Sonnet attackers try to keep it green with wrong variants of that code. Reconciles findings, completes deferred verification, ships and repairs CI. |
 | `/contract-first:proven-fix` | Fixes a bug against settled intent: the test is written red first, then the smallest fix, then up to five hand-written mutants of the fix's deciding lines. Sonnet. |
 | `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. Sonnet. |
-| `/contract-first:write-code-with-no-spec` | Legacy combined lane for existing runs; new small changes use write-tests then write-code-from-tests. |
-| `/contract-first:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
+| `/contract-first:finalize` | Meets the shipped PR **cold**: reviews it, fixes or files what it finds, feeds process findings back to the human, and re-greens the PR. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
 | `/contract-first:handoff` | Writes the terse note that lets a cold session resume the work. |
-| `/contract-first:init` | Writes the project profile. Run once per repo. |
 | `/contract-first:symbol-refs` | Resolves a Python symbol's cross-file references / definitions via Pyrefly — the resolved sibling of grep and the Explore agent. Used by `discuss-issue`'s census; useful on its own. |
 
 Each stage is a **cold start**: a fresh session that never saw the previous one. GitHub is the only
@@ -97,24 +94,18 @@ hermetically — no marketplace, no global state, nothing to bootstrap:
 claude --plugin-dir /path/to/contract-first -p "/contract-first:write-tests 559"
 ```
 
-## The project profile
+## Project facts
 
-The method is portable; a project's gate is not. Everything repo-specific lives in **one file** —
-`.claude/contract-first.json` — and nowhere else in the plugin:
+The method is portable; a project's gate is not. The skills take repo-specific facts from what
+the repo already keeps for any agent, not from a plugin file:
 
-- `gate` — the exact test + lint + type commands CI runs, the CI config that is the source of truth,
-  and the traps that make a green local run a lie.
-- `tests` — where tests live, the existing fake/replay harness to build on, and how fakes are meant
-  to enter the code (what the project's CI forbids).
-- `sourceRoots` — source directories and standalone entrypoints used by repository code censuses.
-- `codeGraph` — optional Python source-reference lookup configuration for `symbol-refs`;
-  it does not model feature requirements.
-- `conventions` — the default branch, the **danger lens** (what kind of hostile reality this system
-  faces; `write-tests` selects focused review where relevant), and a pointer to the project's **principles** document (what every fork
-  is judged against — the project owns it; asked of the owner, never guessed).
-
-`/contract-first:init` derives it from the repo and then *runs* what it wrote — a profile that has never
-been executed is a guess.
+- **CLAUDE.md files** — how to run tests here, the traps that make a green local run a lie, the
+  test harness to build on, and a pointer to the project's **principles** document (what every
+  design fork is judged against; the project owns it, asked of the owner, never guessed).
+- **The CI config** — the source of truth for what the gate runs. When it and CLAUDE.md disagree,
+  believe CI and fix CLAUDE.md.
+- **Pyrefly's own config** (`pyrefly.toml`, or `[tool.pyrefly]` in `pyproject.toml`) — the import
+  roots `symbol-refs` needs to resolve Python references.
 
 ## Invoking it
 
@@ -135,9 +126,8 @@ thing driving it can stay dumb.
 ## Requirements
 
 `git` and the `gh` CLI (authenticated). The optional Python suite checks (`spec-graph calls`
-and `spec-graph nullstub`) use the tests directly and need Python with PyYAML; the bundled
-command discovers an interpreter or falls back to `uv run --with pyyaml python`.
+and `spec-graph nullstub`) need `python3`, or the interpreter named in `SPEC_GRAPH_PYTHON`.
 
-The requirements graph is retired from the pipeline. Existing committed graphs and their
-checkers remain available for historical investigation; the graph-maintenance CI gate is retired and its project configuration is archived under `docs/archive/`. new work does not create, read, or maintain
-them. Historical graph documentation lives under `scripts/spec_graph/references/`.
+The requirements graph is retired, along with its checkers. Committed graphs from earlier runs
+are archived under `docs/archive/spec-graphs/` as historical evidence; new work does not create,
+read, or maintain them.

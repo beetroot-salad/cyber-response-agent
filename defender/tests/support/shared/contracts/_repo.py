@@ -12,7 +12,7 @@ from defender import _git
 
 #: Directory names a real filesystem and a real git accept, and a naive reader gets wrong.
 #: NOT decoration — each entry is a CLASS that has silently un-declared a system in this repo
-#: (#869/#908), and the tuple is the corpus a `spec-graph claims` `alphabet:` is answered with:
+#: (#869/#908), and the tuple is the corpus a probe that enumerates directory names runs over:
 #:
 #:   "café"      non-ASCII. C-QUOTED by `git ls-tree --name-only`: the entry arrives as
 #:               `"defender/skills/caf\303\251/execution.md"`, quotes included, so it no

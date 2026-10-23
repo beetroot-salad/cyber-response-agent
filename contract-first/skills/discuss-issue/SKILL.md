@@ -24,7 +24,7 @@ On a returned design defect, open with the bug and what remains unsettled; do no
 
 ## 2. Ground and draft
 
-Read the project profile (`.claude/contract-first.json`) if present, its principles pointer, relevant code and tests, and neighboring issues or PRs the design depends on. A missing profile need not block discussion. Verify assumptions that could change the design: current behavior, ownership, data boundaries, callers and execution contexts, dependency behavior, and constraints. Explore outwards from the affected flow; do not turn this into a repository-wide audit.
+Read the project's principles document (CLAUDE.md usually points to it), relevant code and tests, and neighboring issues or PRs the design depends on. Verify assumptions that could change the design: current behavior, ownership, data boundaries, callers and execution contexts, dependency behavior, and constraints. Explore outwards from the affected flow; do not turn this into a repository-wide audit.
 
 Use executed probes for behavior claims, reads for structure, and reproducible searches for a claimed census. A failed or unavailable probe leaves uncertainty, not a confirmed claim. Record grounding evidence with the revision it describes, separately from the human-facing design; **references/design-doc.md** defines the inherited `claims:` format and the **code map** that records where the relevant code lives, so later stages do not each re-read it. Correct the model of the problem plainly, without turning the discussion into a list of inaccuracies in the issue.
 
