@@ -658,13 +658,25 @@ def test_staying_commands_import_modules_that_have_moved(tmp_path):
     assert r.returncode == 0, f"tacit_cli check: {r.stdout!r} {r.stderr!r}"
 
 
+def _tenant_registry_step(command: str) -> str:
+    """`command` as CI runs it after #1108 P4: the `tacit_cli check` step over the fixture tenant."""
+    if command.endswith("-m defender.cli.tacit_cli check"):
+        return f"{command} --defender-dir knowledge/tenant-fixture/agent"
+    return command
+
+
 def test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working(tmp_path):
     ci = CI.read_text(encoding="utf-8")
     runs = ci_staying_runs(ci)
+    # #1108 P4 (O1, O-U5): the product tree ships no tacit-knowledge registry, so the staying
+    # `tacit_cli check` step names the committed fixture tenant's agent half, exactly as
+    # `test_staying_commands_import_modules_that_have_moved` runs it. The golden is the pre-move
+    # recording; the moves are applied to it here, one each.
     expected = [
         "python3 " + S.current_path(command[len("python3 "):])
         if command.startswith("python3 ")
-        else command.replace("defender.scripts.tacit_cli", "defender.cli.tacit_cli")
+        else _tenant_registry_step(
+            command.replace("defender.scripts.tacit_cli", "defender.cli.tacit_cli"))
         for command in _golden()["ci_staying_runs"]
     ]
     assert runs == expected, f"CI's staying-command steps changed: {runs}"

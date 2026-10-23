@@ -337,6 +337,9 @@ Repair round r5:
   placeholder<->param sweep covers the pre-P4 shipped catalog fixture, ≥20 templates, plus every committed `knowledge/*/agent` catalog);
   `e2e/test_540_box_boundary.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
   the product still ships, so the probe meets the ro bind rather than ENOENT; box-only, not run locally).
+- `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
+  (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of
+  `::test_staying_commands_import_modules_that_have_moved` runs (the golden stays the pre-move recording; the move is applied in the test).
 
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
