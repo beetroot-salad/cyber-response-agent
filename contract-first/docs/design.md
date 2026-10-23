@@ -33,14 +33,13 @@ Two artifacts carry the intent, and each holds what the other can't:
 - **The tests** hold the what, in a form that can fail. A sentence in a document can't stop wrong
   code from shipping. The tests are the spec.
 
-Why not a written spec as well? This is a judgment call, not a measured result. A spec would sit
-between the two: wordier than the design, which can lean on shared context and leave things
-implicit (a double-edged sword), and looser than the tests, which can't be read two ways.
-Everything in it would also be stated in one of the others, which gives them one more place to
-disagree. The one time this plugin kept a third artifact, a formal graph mapping each obligation to
-its test, keeping it in step became a job of its own; its checker had 4,872 open findings when it
-was retired. That's one project, and a formal graph rather than prose. The pipeline runs without a
-spec, but nobody has measured whether adding one would catch more.
+A written spec in between isn't needed. A natural-language spec exists so that people can
+coordinate on detail too fine for the design and too early for code. Agents don't need that layer:
+given the intent, they can turn it straight into tests, and the tests then serve as the spec,
+exact where prose would leave room for two readings. The design can stay compact and lean on
+shared context. That cuts both ways: whatever it leaves implicit still has to be settled, and here
+that happens when the tests are written and reviewed, not in more prose. This is a judgment from running the
+pipeline without a spec, not a measured comparison.
 
 The tests are committed **alone, before any implementation**, as a fixed reference. That makes the
 order provable from git history rather than from an agent's account, and it stops the code stage
