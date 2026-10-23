@@ -21,7 +21,23 @@ issue → discuss-issue → write-tests → write-code-from-tests → code revie
 
 The implementation stage works against an immutable tests ref. Once its honest implementation is green, attackers try wrong variants of it, and the holes they find return to `write-tests` as contract repairs. `finalize` remains the plugin's existing post-implementation review stage.
 `write-code-with-no-spec` is retained for old runs.
-Small changes use the same pipeline with fewer workers and targeted review.
+
+## Choosing a lane
+
+You choose the lane; skills don't route themselves. The full pipeline is built for new behavior and is too heavy for most fixes. Ask what the change does to what the system promises:
+
+| The change | Lane | What guards it |
+|---|---|---|
+| Adds or changes a promise: new behavior, a changed flow or model, a new surface | `discuss-issue` → `write-tests` → `write-code-from-tests` | A committed, reviewed and attacked test contract |
+| Code disagrees with intent that is already settled (a bug) | `proven-fix` | A test written red first, plus mutants of the fix's lines |
+| Structure changes, behavior doesn't (a refactor) | `refactor` | The existing suite, unchanged; a lint when a removed pattern could return |
+
+Soft guardrails, which the lighter lanes also enforce:
+
+- **If you can't state the intended behavior in a sentence, it isn't a bug fix.** Two reasonable readings of the intent is a design question.
+- **A refactor that needs an assertion changed is a behavior change.** The refactor skill stops there and asks.
+- **Lighter lanes hand back rather than decide.** When proven-fix or refactor hits a design question, it stops and says so, and you re-route to `discuss-issue`. Neither has anywhere to record a decision.
+- **Size isn't the test.** A one-line change to what a refusal says is a promise change. A thousand-line move with no behavior change is a refactor.
 
 Human attention goes to consequential design choices: behavior, scope, models, flows,
 architecture and trade-offs. Agents resolve technical details determined by those decisions.
@@ -36,6 +52,8 @@ every edge case. The merge remains human-approved.
 | `/contract-first:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows, and architecture. Groups findings into fixes or dissolving design choices; hands off a human-facing intent+design doc with supporting probed claims. Also handles design amendments discovered by tests or code. |
 | `/contract-first:write-tests` | Sketches the contract and spikes a throwaway implementation to settle the design, authors thorough tests with Sonnet, reviews fidelity with Opus, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record. Known blockers prevent a ready handoff. |
 | `/contract-first:write-code-from-tests` | Implements against the committed contract, then has two or three lensed Sonnet attackers try to keep it green with wrong variants of that code. Reconciles findings, completes deferred verification, ships and repairs CI. |
+| `/contract-first:proven-fix` | Fixes a bug against settled intent: the test is written red first, then the smallest fix, then up to five hand-written mutants of the fix's deciding lines. Sonnet. |
+| `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. Sonnet. |
 | `/contract-first:write-code-with-no-spec` | Legacy combined lane for existing runs; new small changes use write-tests then write-code-from-tests. |
 | `/contract-first:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
