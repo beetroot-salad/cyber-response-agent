@@ -32,6 +32,7 @@ from defender.tests.support.shared.contracts._fold_936 import (  # noqa: E402
     _rows,
 )
 from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root  # noqa: E402
 from defender.tests.support.storage._session_store_705 import StoreFault, sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -160,7 +161,9 @@ def test_the_fold_row_carries_the_block_the_whole_document_matched(tmp_path, mon
     assert block.startswith("\n\n"), f"the block is not separated from the record: {block[:40]!r}"
     assert _model_path(lesson) in block, (
         f"the frontier row carries no path for the lesson the document matched:\n{text}")
-    assert str(lesson.resolve()) not in text, "the frontier row names the lesson's host path"
+    # The run reads its tenant's published copy under the data root, not the planted tree.
+    assert str(current_data_root()) not in text, "the frontier row names the lesson's host path"
+    assert str(lesson.resolve()) not in text, "the frontier row names the planted lesson's path"
     assert FOLD_HEADER in block.strip().splitlines()[0], (
         f"the block's first line is not the fold header:\n{block.strip().splitlines()[0]}")
     assert WRITE_RETURN_HEADER not in text, (
@@ -334,8 +337,10 @@ def test_the_write_return_lane_keeps_pushing_after_the_fold_only_when_the_top_th
     assert WRITE_RETURN_HEADER in moving, f"the post-fold moving write returned no block:\n{moving}"
     assert _model_path(class_lesson) in moving
     assert _model_path(loginuid_lesson) in moving
+    assert str(current_data_root()) not in moving, (
+        "the write-return block names the corpus's host path (the tenant's copy under the data "
+        "root)")
     assert str(tmp_path) not in moving, "the write-return block names a host path"
-    assert "run-knowledge" not in moving, "the write-return block names the run copy's host path"
     assert FOLD_HEADER not in moving, "the write return borrowed the fold header"
     # still one frontier row: the appends are inside boundary 1's loop 2
     assert [seq for _id, seq, _t in _frontier_rows(store)] == [1]

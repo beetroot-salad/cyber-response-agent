@@ -370,8 +370,9 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     start writes the HOST record beside the run dir (U12) carrying kind, commit and raw reason;
     the comment the run posts (captured by the store fake) and the saved run page say so, naming
     the commit actually used; NO file the box can read carries the raw reason — scanned over the
-    box window (the run dir and `<T>/run-knowledge/` at lifecycle start: stamp, run copy,
-    everything). The saved `runtime.html` is written after the box stops and is an operator
+    box window (at lifecycle start: the run dir, stamp included, and every run copy's `stage/`
+    under `<T>/run-knowledge/`, the part U9 mounts; a copy's host-only `settings/` is not box
+    readable). The saved `runtime.html` is written after the box stops and is an operator
     surface (OD21): it may, and here must, show the raw reason.
     Seams: `publish=` (design O11), `ticket_writer=` (the real writer bound to the fake store),
     `lifecycle`/`preflight`/`enqueue` recorders."""
