@@ -13,7 +13,7 @@ from uuid import uuid4
 from defender._model import model
 from defender._text import is_content_less
 from defender._untrusted import wrap
-from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
+from defender.knowledge._knowledge import LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
@@ -86,15 +86,17 @@ _CORPUS_AUTHOR_DENY_REASON = (
 SHIPPED_LESSON_CORPORA: tuple[str, ...] = tuple(sorted(_LESSON_CORPORA))
 
 
-def lesson_read_confine(defender_dir: Path) -> tuple[Path, ...]:
-    """The curators' read confine: every shipped lesson corpus of the knowledge the tree at
-    `defender_dir` carries, resolved."""
-    knowledge = KnowledgePaths.of_defender_dir(defender_dir)
+def lesson_read_confine(agent_root: Path) -> tuple[Path, ...]:
+    """The curators' read confine: every shipped lesson corpus of the knowledge rooted at
+    `agent_root` (a batch draft's `agent/`), resolved."""
+    knowledge = KnowledgePaths(agent_root=agent_root)
     return tuple(knowledge.corpus_dir(name).resolve() for name in SHIPPED_LESSON_CORPORA)
 
 
 def _corpus_spellings(corpus_dir: Path) -> str:
-    rel = f"{CHECKOUT_KNOWLEDGE.agent_rel}/{corpus_dir.name}"
+    # The corpus as the spawn types it from its cwd (the folder holding the knowledge root),
+    # under the model's workspace, and on the host.
+    rel = f"{corpus_dir.parent.name}/{corpus_dir.name}"
     # The operator's policy API still accepts host operands; model tools additionally map
     # and scope-check every operand before execution, so that spelling grants no host alias.
     return "|".join(re.escape(s) for s in (rel, str(MODEL_WORKSPACE / rel), str(corpus_dir)))
@@ -141,16 +143,21 @@ class CuratorDeps(AgentDeps):
 
     @classmethod
     def for_run(cls, run_dir: Path, repo_root: Path, corpus_dir: Path, *, box: Any) -> CuratorDeps:
-        """A thin wrapper over `bind`, taking the corpus name from `corpus_dir`'s basename.
-        `box` is required, so a missing one fails loudly rather than silently disabling the
-        curator's bash lane."""
-        defender_dir = repo_root / "defender"
+        """A thin wrapper over `bind`, taking the corpus name from `corpus_dir`'s basename and
+        the knowledge root its corpora share from its parent (a batch draft's `agent/`, which
+        `repo_root` — the box's `staged` root — holds). `box` is required, so a missing one
+        fails loudly rather than silently disabling the curator's bash lane."""
+        knowledge_root = corpus_dir.parent
+        if knowledge_root.parent != repo_root:
+            raise ValueError(
+                f"the corpus {corpus_dir} is not a corpus of a knowledge root in {repo_root}"
+            )
         scope = RunScope(
             corpus_name=corpus_dir.name,
-            read_confine=lesson_read_confine(defender_dir),
+            read_confine=lesson_read_confine(knowledge_root),
         )
         deps = bind(
-            CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir,
+            CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=knowledge_root,
             box=box,
         )
         assert isinstance(deps, CuratorDeps)

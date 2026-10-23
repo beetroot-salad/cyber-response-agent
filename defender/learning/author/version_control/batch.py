@@ -77,6 +77,14 @@ class Batch:
                 changes.append(change)
             return ChangeSet(tuple(changes))
 
+    def base(self) -> dict[str, bytes]:
+        """The batch's base (its branch's last commit, or the export commit before the first):
+        `agent/` as `{repo-relative path: exact bytes}`, read from git's objects — what
+        `change_set` derives against and `reset` restores."""
+        with _refusals():
+            return {f"agent/{rel}": data
+                    for rel, data in agent_blobs(self.repository, self._line.head).items()}
+
     def commit(self, change_set: ChangeSet, message: str) -> str:
         """The commit-maker: commit `change_set` on the batch branch, returning the commit."""
         return self.committer.commit(self._line, change_set, message)

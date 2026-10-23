@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import random
-import re
-from collections.abc import Mapping
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -11,14 +9,14 @@ from typing import Any
 
 from defender import _yaml
 
-from defender import _git
 from defender._io import Bound, Held
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender._clock import now_iso
 from defender.knowledge._corpus import PROVENANCE_KEYS, iter_lessons
-from defender.learning.core.lane_trees import KIND_ABSENT, DrainTrees, kind_at
+from defender.knowledge._knowledge import AGENT_REL, KnowledgePaths
+from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.core.state import Channel, LearningState
 
 
@@ -43,6 +41,20 @@ def lane_corpus(trees: DrainTrees, corpus_dir: Path) -> Held:
             f"refused: the lane's held trees {[str(m) for m in trees.mounts]} hold no mount at "
             f"{corpus_dir}"
         ) from None
+
+
+def lane_corpus_dir(paths: Any, batch: Any, corpus: str) -> tuple[Path, Path, str]:
+    """`(root, corpus_dir, corpus_rel)` of the channel's corpus `corpus`: with a batch, the
+    corpus lies in its draft (`<draft_root>/agent/<corpus>`, the root being the box's `staged`
+    mount); without one, in the checkout-shaped tree `paths` names (a scene, which never
+    claims). `corpus_rel` is the corpus' spelling in the tenant repository (OD6)."""
+    if batch is not None:
+        root = Path(batch.draft_root)
+        knowledge = KnowledgePaths(agent_root=root / AGENT_REL)
+    else:
+        root = Path(paths.repo_root)
+        knowledge = paths.knowledge
+    return root, knowledge.corpus_dir(corpus), knowledge.rel(corpus)
 
 
 def without_consumed_category(rec: dict) -> dict:
@@ -82,44 +94,6 @@ def partition_committed(
     return [], committed
 
 
-
-
-def git_head_sha(repo_root: Path, *, timeout: float | None = None) -> str:
-    return _git.git_head_sha(repo_root, timeout=timeout)
-
-
-def changes_outside(
-    repo_root: Path, prefix: str, *, timeout: float | None = None,
-    env: Mapping[str, str] | None = None,
-) -> list[str]:
-    return [
-        path
-        for _xy, path in _git.git_status(repo_root, timeout=timeout, env=env)
-        if not (path.startswith(prefix) and path.endswith(".md"))
-    ]
-
-
-def corpus_dir_clean(
-    repo_root: Path, corpus_dir: Path, *, timeout: float | None = None,
-    env: Mapping[str, str] | None = None,
-) -> bool:
-    return not _git.git_status(repo_root, pathspec=corpus_dir, timeout=timeout, env=env)
-
-
-def assert_clean_corpus_dir(
-    repo_root: Path, corpus_dir: Path, corpus_dir_rel: str, *, corpus: Held,
-) -> None:
-    """Refuse the tick on any uncommitted change under the corpus. `corpus` is its held mount
-    (#1134): its root is held open, so it stands; `corpus_dir` is that root's spelling, the git
-    pathspec only."""
-    corpus.mkdir(".")
-    records = _git.git_status(repo_root, pathspec=corpus_dir)
-    if records:
-        listing = "\n".join(f"{xy} {path}" for xy, path in records)
-        raise AuthorError(
-            f"{corpus_dir_rel} has uncommitted changes — refusing to author. "
-            f"Output:\n{listing}"
-        )
 
 
 def result_list(result: dict, key: str) -> list[Any]:
@@ -206,100 +180,21 @@ def validate_agent_result_partition(
         raise AuthorError(f"author result carries unrecognized bucket key(s): {stray_bucket_keys}")
 
 
-def commit_corpus(
-    repo_root: Path,
-    corpus_dir: Path,
-    message: str,
-    *,
-    trailers: list[tuple[str, str]] | None = None,
-) -> str | None:
-    trailers = trailers or []
-    if trailers:
-        keys = "|".join(re.escape(key) for key, _ in trailers)
-        if re.search(rf"(?m)^(?:{keys}):", message):
-            labels = "/".join(f"{key}:" for key, _ in trailers)
-            raise AuthorError(
-                f"agent commit_message already carries {labels} "
-                "trailers; the loop owns provenance and git --trailer would append "
-                "duplicates — refusing to commit (queue intact for retry)"
-            )
-    return _git.git_commit(repo_root, corpus_dir, message, trailers=trailers)
-
-
-def commit_corpus_paths(
-    message: str, cfg: Any, approved_paths: list[str], deletion_paths: list[str],
-) -> str | None:
-    """The drain's explicit-path-list commit, called directly rather than via `cfg.commit_fn`.
-
-    @owns committed_paths — the one function that decides which paths land in this tick's
-    corpus commit; other consumers read it off HEAD afterward.
-
-    Which paths still stand in the worktree is asked of the lane's held mounts
-    (`cfg.tree_for`, through `kind_at`: its folder's listing, addendum 2 B3), never followed
-    through a link: anything but `KIND_ABSENT` — a file, a link, a dangling link, an entry below
-    a linked or unreadable folder — is staged as present, and git is handed the two lists
-    (#1134).
-    """
-    paths = sorted(set(approved_paths) | set(deletion_paths))
-    present = [p for p in paths if kind_at(cfg.repo_root, cfg.tree_for, p) != KIND_ABSENT]
-    absent = [p for p in paths if p not in present]
-    return _git.git_commit_paths(cfg.repo_root, present, absent, message,
-                                 env=_git.committed_view_env())
-
-
-def verify_agent_state(
-    repo_root: Path,
-    result: dict,
-    corpus_dir: Path,
-    corpus_dir_rel: str,
-    noun: str,
-    baseline_stray: list[str],
-) -> None:
-    """Both post-spawn cross-checks in one call: the tree's scope (`assert_no_new_stray`)
-    and the agent's report against it (`verify_agent_report`)."""
-    assert_no_new_stray(repo_root, corpus_dir_rel, baseline_stray)
-    verify_agent_report(repo_root, result, corpus_dir, corpus_dir_rel, noun)
-
-
-def assert_no_new_stray(
-    repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str], *,
-    timeout: float | None = None, env: Mapping[str, str] | None = None,
-) -> None:
-    """A change outside `<corpus>/*.md` beyond what was already dirty at tick start refuses
-    the tick — the spawn wrote where it was not asked to."""
-    new_stray = sorted(
-        set(changes_outside(repo_root, corpus_dir_rel, timeout=timeout, env=env))
-        - set(baseline_stray)
-    )
-    if new_stray:
-        raise AuthorError(
-            f"agent changed files outside {corpus_dir_rel}*.md: {new_stray}; "
-            "refusing to commit/rotate"
-        )
-
-
-def verify_agent_report(
-    repo_root: Path, result: dict, corpus_dir: Path, corpus_dir_rel: str, noun: str, *,
-    timeout: float | None = None, env: Mapping[str, str] | None = None,
-) -> None:
-    """Refuse a spawn whose report and tree disagree: `committed` non-empty with a clean
-    corpus, or empty with a dirty one."""
+def verify_agent_report(result: dict, *, corpus_changed: bool, corpus_rel: str, noun: str) -> None:
+    """Refuse a spawn whose report and tree disagree: `committed` non-empty with the corpus
+    unchanged against the batch's base, or empty with it changed (`corpus_changed`: the claim's
+    change set holds a lesson edit or a deletion under the corpus)."""
     committed = result_list(result, "committed")
-    corpus_dirty = not corpus_dir_clean(repo_root, corpus_dir, timeout=timeout, env=env)
-    if committed and not corpus_dirty:
+    if committed and not corpus_changed:
         raise AuthorError(
-            f"author reported committed {noun} but left {corpus_dir_rel} "
+            f"author reported committed {noun} but left {corpus_rel} "
             "unchanged; refusing to rotate queue"
         )
-    if not committed and corpus_dirty:
+    if not committed and corpus_changed:
         raise AuthorError(
-            f"author reported no commits but left edits in {corpus_dir_rel}; "
+            f"author reported no commits but left edits in {corpus_rel}; "
             "refusing to rotate queue"
         )
-
-
-
-
 
 
 def build_corpus_manifest(

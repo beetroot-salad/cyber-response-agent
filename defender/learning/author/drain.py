@@ -4,29 +4,22 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from collections.abc import Callable
 import contextlib
-import errno
-import functools
-import os
 from dataclasses import replace
 from defender._model import model
-from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender import _git
 from defender._clock import now_iso
-from defender._git import GitError, GitTimeout
+from defender._git import GitError
 from defender._frontmatter import FrontmatterError, split_frontmatter
-from defender._io import (
-    ENTRY_DIR,
-    Bound,
-)
+from defender._io import Bound
+from defender._text import one_line
 from defender.learning.author import shared as author_shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.core.config import (
+    FatalConfigError,
     provenance_field,
 )
 from defender.learning.core.state import (
@@ -38,85 +31,21 @@ from defender.learning.core.state import (
     canonical_row,
     retirement_stamp,
 )
-from defender._tree_listing import entry_kind
 from defender import box as box_mod
+from defender.learning.author.version_control import AgentChange, ChangeSet, DeliveryRefused
 
 AuthorError = author_shared.AuthorError
 
-from defender.learning.author.version_control.restore import (
-    _commit_landed as _commit_landed,
-    _left_for_scrub as _left_for_scrub,
-    _logger as _logger,
-    _put_back as _put_back,
-    _restore_corpus as _restore_corpus,
-    _revert_strays as _revert_strays,
-    _snapshot_corpus as _snapshot_corpus,
-    _unanswered as _unanswered,
-    _unchanged_names as _unchanged_names,
-    _undo_agent_edits as _undo_agent_edits,
-    _worktree_files_instead as _worktree_files_instead,
-    _worktree_git as _worktree_git,
-)
+_logger = logging.getLogger(__name__)
 
 
 #: Graveyard reason for a deferral that hit the ceiling, distinguishable from a fault's.
 DEFERRED_CEILING_REASON = "deferred_ceiling"
-#: git status codes for an unmerged path, refused before vouching rather than committed as
-#: ordinary text.
-_UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
-
 #: Not `faults.SYSTEMIC_FAULTS`, which keeps `GitError` out of retirement — the opposite of what
 #: a commit-time git failure needs here. Nor just `AuthorError`: without `GitError` a commit-time
 #: git failure would wedge the channel, and without `ModelRetry` an externally killed boxed
 #: command would report success.
 RETIRE_SET: tuple[type[BaseException], ...] = (AuthorError, GitError, ModelRetry)
-
-_T = TypeVar("_T")
-
-
-class GitProbeError(RuntimeError):
-    """A git command that reads repo state failed.
-
-    Not a `GitError` subclass and not in `RETIRE_SET`: a `git status` that lost a race for the
-    index lock says nothing about the batch, so it must not spend an attempt. The tick is
-    recorded as stuck instead."""
-
-
-def _git_read(what: str, fn: Callable[..., _T], *args: Any) -> _T:
-    """Run a step that reads repo state, re-raising its `GitError`, or a git call of it that did
-    not answer within its bound (`GitTimeout`), as `GitProbeError`.
-
-    Wraps whole steps, so an `AuthorError` the step raises on what it finds still retires."""
-    try:
-        return fn(*args)
-    except GitError as e:
-        raise GitProbeError(f"read-only git probe ({what}) failed: {e}") from e
-    except GitTimeout as e:
-        raise GitProbeError(
-            f"read-only git probe ({what}) failed: git did not answer within {e.timeout}s") from e
-
-
-def _revert_non_md_strays(cfg: CorpusAuthorConfig) -> None:
-    """Revert non-`.md` files under the corpus before vouching. They cite nothing by
-    construction, so leaving them to the vouching gate would turn a cleanup into a tick-wide
-    fault."""
-    for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True,
-                                   **_worktree_git(cfg.git_timeout)):
-        if not rel.endswith(".md") and "D" not in xy:
-            _put_back(cfg.repo_root, rel, tree_for=cfg.tree_for, timeout=cfg.git_timeout)
-
-
-def _assert_no_unmerged(cfg: CorpusAuthorConfig) -> None:
-    """Refuse the tick on an unmerged path under the corpus, rather than handing conflict
-    markers as ordinary text."""
-    for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True,
-                                   **_worktree_git(cfg.git_timeout)):
-        if xy in _UNMERGED_XY:
-            raise AuthorError(
-                f"{cfg.corpus_dir_rel} has an unmerged file ({xy.strip()} {rel}) — "
-                "refusing to author"
-            )
-
 
 #: Lock acquisition order. Drain lock first, so a contended tick skips before taking the
 #: globally serialising repo lock; append lock last and briefly, so an appender never waits on
@@ -256,19 +185,6 @@ def run_batch(
         except TimeoutError as e:
             log.warning(f"repo lock unavailable: {e}; queue intact")
             return 0
-        try:
-            author_shared.assert_clean_corpus_dir(
-                cfg.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel, corpus=cfg.corpus,
-            )
-        except AuthorError as e:
-            log.critical(f"{e}")
-            # An already-dirty corpus at tick start is recorded as stuck, not skipped
-            # silently.
-            try:
-                _record_stuck(state, channel, e, [])
-            except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
-                log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
-            return 2
         return _tick(cfg=cfg, hold_committed=hold_committed, log=log)
 
 
@@ -345,105 +261,106 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         raise
 
 
-@model(frozen=True)
-class _PreState:
-    """The worktree just before the agent runs, so a fault after it can restore it. Leftover
-    uncommitted edits would fail the next tick's cleanliness gate and wedge the channel."""
-
-    snapshot: dict[str, bytes] | None
-    baseline_stray: list[str]
-    head_before: str
-
-
-def _capture_pre_state(cfg: CorpusAuthorConfig) -> _PreState:
-    bound = cfg.git_timeout
-    head_before = _git_read(
-        "HEAD", functools.partial(author_shared.git_head_sha, timeout=bound), cfg.repo_root)
-    return _PreState(
-        snapshot=_git_read(
-            "corpus before-state", functools.partial(_snapshot_corpus, timeout=bound),
-            cfg.repo_root, cfg.corpus_dir, head_before,
-        ),
-        baseline_stray=_git_read(
-            "worktree status",
-            functools.partial(author_shared.changes_outside, timeout=bound,
-                              env=_git.committed_view_env()),
-            cfg.repo_root, cfg.corpus_dir_rel,
-        ),
-        head_before=head_before,
-    )
-
-
 # ---------------------------------------------------------------------------
-# The authoring region. One truth — the corpus tree after the spawn — from which every
-# decision is computed once: changed files, citations, approvals, the commit, and
-# each row's fate. A spawn's own report is read only for skip reasons and the commit message,
-# plus one cross-check: an id it claims committed that no file cites is deferred.
+# The authoring region. One truth — the claim's change set, the draft against the batch's base,
+# taken after the spawn — from which every decision is computed once: changed files,
+# citations, the commit, and each row's fate. A spawn's own report is read only for skip
+# reasons and the commit message, plus one cross-check: an id it claims committed that no file
+# cites is deferred.
 # ---------------------------------------------------------------------------
+
+
+def _claim_batch(cfg: CorpusAuthorConfig) -> Any:
+    """The batch this channel's claim belongs to. A config with none (a scene's) never claims:
+    the corpus is committed only by P3's commit-maker into a tenant batch (#1108 P4, O7)."""
+    if cfg.batch is None:
+        raise FatalConfigError(
+            f"{cfg.log_prefix}: a curator commits only into a tenant batch's draft, and this "
+            "config names none — nothing is committed"
+        )
+    return cfg.batch
+
+
+def _reset_claim(cfg: CorpusAuthorConfig) -> None:
+    """Re-sync the claim's draft with the batch branch (`Batch.reset`): the box's additions
+    removed, its edits and deletions restored, links and FIFOs removed without being followed
+    or opened. A config with no batch has nothing to reset."""
+    if cfg.batch is not None:
+        cfg.batch.reset()
 
 
 @model(frozen=True)
 class _Tree:
-    """The corpus after `_settle_tree`: repo-relative paths whose bytes differ from HEAD, and
-    paths deleted. Every later step reads the corpus through this."""
+    """The claim's corpus changes: lessons whose bytes differ from the batch's base, and paths
+    deleted. Every later step reads the corpus through this."""
 
-    changed: tuple[str, ...]
-    deleted: tuple[str, ...]
-
-
-def _settle_tree(cfg: CorpusAuthorConfig, state: _PreState) -> _Tree:
-    """The post-spawn normaliser. In order:"""
-
-    def settle() -> _Tree:
-        _revert_non_md_strays(cfg)
-        author_shared.assert_no_new_stray(cfg.repo_root, cfg.corpus_dir_rel, state.baseline_stray,
-                                          **_worktree_git(cfg.git_timeout))
-        _assert_no_unmerged(cfg)
-        changed: list[str] = []
-        deleted: list[str] = []
-        for xy, rel in _changed_corpus_records(cfg):
-            if "D" in xy:
-                deleted.append(rel)
-            elif xy != "??" and _byte_identical_to_head(cfg.repo_root, rel,
-                                                        timeout=cfg.git_timeout):
-                _git.git(["checkout", "-q", "--", rel], cwd=cfg.repo_root,
-                         **_worktree_git(cfg.git_timeout))
-            else:
-                changed.append(rel)
-        return _Tree(changed=tuple(sorted(changed)), deleted=tuple(sorted(deleted)))
-
-    return _git_read("settle tree", settle)
+    changed: tuple[AgentChange, ...]
+    deleted: tuple[AgentChange, ...]
 
 
-#: How many times `_read_citations` will re-read a tree that moved under it before giving up.
-#: Two is the honest need (read, then confirm nothing moved); the rest is slack for a
-#: concurrent editor that is still writing when the first confirmation runs.
-_CITE_ROUNDS = 4
+def _settle_tree(cfg: CorpusAuthorConfig, change_set: ChangeSet) -> _Tree:
+    """The post-spawn normaliser over the claim's change set: a change outside the corpus is a
+    stray the spawn was not asked to make, refusing the claim (no pre-run stray is tolerated,
+    OD15); a non-`.md` file under the corpus cites nothing by construction and never lands
+    (the claim's reset removes it), so it is dropped rather than turned into a tick-wide fault."""
+    strays = sorted(c.path for c in change_set if not c.path.startswith(cfg.corpus_rel))
+    if strays:
+        raise AuthorError(
+            f"agent changed files outside {cfg.corpus_rel}*.md: {strays}; "
+            "refusing to commit/rotate"
+        )
+    return _Tree(
+        changed=tuple(c for c in change_set if c.content is not None and c.path.endswith(".md")),
+        deleted=tuple(c for c in change_set if c.content is None),
+    )
+
+
+def _corpus_name(cfg: CorpusAuthorConfig, path: str) -> str:
+    """The repo-relative change path `path` as a name under the corpus mount."""
+    return path[len(cfg.corpus_rel):]
 
 
 def _read_citations(
-    cfg: CorpusAuthorConfig, files: tuple[str, ...], batch: set[str],
+    cfg: CorpusAuthorConfig, changed: tuple[AgentChange, ...], batch: set[str],
 ) -> dict[str, frozenset[str]]:
-    """rel_path -> the this-batch ids each of `files` cites, on the bytes it holds now. Rounds
-    repeat until nothing moved during one, so the citations approval reads are those of the
-    bytes that land in HEAD."""
+    """change path -> the this-batch ids each changed lesson cites. Each lesson is read through
+    the corpus mount (`cfg.corpus`, #1134), and must still hold the bytes the claim's change set
+    took from it: those are the bytes that land."""
     field_name = provenance_field(cfg.channel.id_key)
     view = cfg.corpus.view()
+    cites: dict[str, frozenset[str]] = {}
+    for change in changed:
+        text = _read_or_empty(view, _corpus_name(cfg, change.path))
+        assert change.content is not None  # `changed` holds no deletion
+        if text.encode("utf-8", "surrogateescape") != change.content:
+            raise AuthorError(
+                f"{change.path} changed after the claim's change set was taken — refusing to "
+                "commit bytes no citation was read from"
+            )
+        cites[change.path] = frozenset(_cited_ids_in(text, field_name) & batch)
+    return cites
 
-    def read(rel: str) -> str:
-        return _read_or_empty(view, _corpus_relative(cfg, rel))
 
-    texts: dict[str, str] = {}
-    for _ in range(_CITE_ROUNDS):
-        texts = {rel: read(rel) for rel in files}
-        if all(read(rel) == text for rel, text in texts.items()):
-            break
-    else:
+def _assert_corpus_attributable(
+    cfg: CorpusAuthorConfig, changed: tuple[AgentChange, ...], ids: set[str],
+) -> None:
+    """Every corpus file the curator spawn added must cite, under the channel's provenance
+    key, an id this batch read — whatever bucket the curator reported it under. Read through
+    the corpus mount: a refused read cites nothing. (`changed` holds additions only: an edit
+    of a base file citing nothing is repaired, never committed — `_author_batch`.)
+
+    The `AuthorError` unwinds the claim (its reset); the batch is bumped and stays queued."""
+    field = provenance_field(cfg.channel.id_key)
+    unattributed = [
+        c.path for c in changed
+        if not (_cited_ids(cfg.corpus.view(), _corpus_name(cfg, c.path), field) & ids)
+    ]
+    if unattributed:
         raise AuthorError(
-            f"{cfg.corpus_dir_rel} kept changing under the citation read for {_CITE_ROUNDS} "
-            "rounds — refusing to commit bytes no citation was read from"
+            f"author left {len(unattributed)} file(s) in {cfg.corpus_rel} that no "
+            f"finding of this batch vouches for: {unattributed}; each must cite a "
+            f"{field} entry from this batch ({sorted(ids)}) — refusing to commit"
         )
-    return {rel: frozenset(_cited_ids_in(text, field_name) & batch) for rel, text in texts.items()}
 
 
 @model(frozen=True)
@@ -481,11 +398,12 @@ def _author_batch(
     cfg: CorpusAuthorConfig,
     to_author: list[dict],
     batch_id: str,
-    state: _PreState,
     all_rows: dict[str, dict],
 ) -> _BatchOutcome:
-    """Spawn, settle, read citations; then read every fate off them and commit what they
-    approve."""
+    """Spawn, take the claim's change set, read citations; then read every fate off them and
+    commit what they approve through the batch's commit-maker. The change set is derived
+    before anything is attributed (OD23), so a link, FIFO or out-of-lane entry the box left is
+    a refused claim (`DeliveryRefused`), never read."""
     key = cfg.channel.id_key
     batch_ids = {row[key] for row in to_author}
 
@@ -493,34 +411,31 @@ def _author_batch(
     # wrote (#1195).
     with box_mod.box_for_run(cfg.box) as box:
         result = cfg.invoke_agent(to_author, batch_id, replace(cfg, box=box))
-    tree = _settle_tree(cfg, state)
-    _git_read(
-        "agent report",
-        functools.partial(author_shared.verify_agent_report, timeout=cfg.git_timeout,
-                          env=_git.committed_view_env()),
-        cfg.repo_root, result, cfg.corpus_dir, cfg.corpus_dir_rel, cfg.noun,
-    )
+    batch = _claim_batch(cfg)
+    tree = _settle_tree(cfg, batch.change_set())
+    author_shared.verify_agent_report(
+        result, corpus_changed=bool(tree.changed or tree.deleted), corpus_rel=cfg.corpus_rel,
+        noun=cfg.noun)
     author_shared.validate_agent_result_partition(
         result, to_author, id_key=key,
         buckets=tuple(b.name for b in cfg.buckets), noun=cfg.noun,
     )
-    _assert_corpus_attributable(cfg, tree.changed, batch_ids)
+    base = batch.base()
+    _assert_corpus_attributable(
+        cfg, tuple(c for c in tree.changed if c.path not in base), batch_ids)
 
     cites = _read_citations(cfg, tree.changed, batch_ids)
-    # Approved: cites something from this batch. A changed file citing nothing is not approved.
-    approved = {rel for rel, ids in cites.items() if ids}
     fates = _decide_fates(
         batch_ids, cites, claimed_committed=set(author_shared.result_list(result, "committed")),
     )
-    # Before the commit, so a restore failure can never coexist with a commit.
-    _restore_unapproved_files(cfg, state.snapshot, set(tree.changed) - approved,
-                              head_before=state.head_before)
-
-    message = (
-        author_shared.commit_message(result, cfg.noun) if approved or tree.deleted else ""
-    )
-    commit_sha = author_shared.commit_corpus_paths(
-        message, cfg, sorted(approved), list(tree.deleted)
+    # Approved: a changed lesson citing this batch. Every added lesson is (attributable above);
+    # an edit of a base lesson citing nothing from it is corpus repair — left out of the commit,
+    # and put back from the batch's base by the claim's reset. The curator's deletions under the
+    # corpus land with the approved lessons.
+    landing = (*(c for c in tree.changed if cites[c.path]), *tree.deleted)
+    commit_sha = (
+        batch.commit(ChangeSet(landing), author_shared.commit_message(result, cfg.noun))
+        if landing else None
     )
 
     # The curator's buckets, minus every id the tree already gave a fate.
@@ -536,6 +451,33 @@ def _author_batch(
         bucket_consumed=bucket_consumed,
         deferred_ids=fates.deferred,
     )
+
+
+def _handle_refused(
+    cfg: CorpusAuthorConfig, refused: DeliveryRefused, to_author: list[dict], key: str, log,
+) -> int:
+    """U10: a claim the commit-maker refused counts one attempt on each of its rows, which stay
+    queued until the ceiling retires them (#952); the tick itself completes (rc 0, OD19)."""
+    # Named by the entry's repo-relative spelling (`agent/lessons/x.md`), never the draft's host
+    # path.
+    reason = one_line(str(refused)).replace(f"{cfg.repo_root}/", "")
+    log.warning(f"the claim was refused by the commit-maker: {reason} — its draft is reset, "
+                "its rows count one attempt and stay queued")
+    outcome = retire(
+        cfg.state,
+        channel=cfg.channel,
+        batch_ids=[row[key] for row in to_author],
+        reason=f"refused-claim: {reason}",
+        max_attempts=cfg.max_attempts,
+        timeout_seconds=cfg.repo_lock_wait_seconds,
+    )
+    survivors = [row for row in to_author if row[key] not in outcome.retired]
+    if survivors:
+        try:
+            _record_stuck(cfg.state, cfg.channel, refused, survivors)
+        except Exception as unrecorded:  # noqa: BLE001 — never replaces the routed refusal
+            log.error(f"stuck record NOT written: {unrecorded!r} (the refusal itself: {reason})")
+    return 0
 
 
 def _handle_retire(
@@ -597,27 +539,33 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
     )
 
     if to_author:
-        state = _capture_pre_state(cfg)
         try:
-            outcome = _author_batch(cfg, to_author, batch_id, state, all_rows)
+            outcome = _author_batch(cfg, to_author, batch_id, all_rows)
+        except DeliveryRefused as refused:
+            # U10 (OD18, OD23): the commit-maker refused the claim. Its draft is reset, its
+            # rows count one attempt and stay queued until the ceiling; the tick goes on.
+            _reset_claim(cfg)
+            return _handle_refused(cfg, refused, to_author, key, log)
         except BaseException as e:
-            # Clean up on every fault, member or not: a stuck tick leaves the same edits a
-            # retiring one does, and leaving them wedges the channel.
+            # Reset on every fault, member or not: a stuck tick leaves the same edits a
+            # retiring one does, and leaving them would hand them to the next claim.
             box_fault = isinstance(e, box_mod.BoxFault)
             try:
-                _undo_agent_edits(cfg, state.snapshot, state.baseline_stray, state.head_before)
+                _reset_claim(cfg)
             except Exception as undo_fault:
-                # A box whose stop failed may still be writing while the undo runs, and the
-                # undo's own fault (a folder swapped for a link: ELOOP) must not replace the box
-                # fault: an `OSError` is contained above `run_batch`, and the box fault must
-                # halt the batch (#1195 D3a, O4). Any other fault keeps today's precedence.
+                # A box whose stop failed may still be writing while the reset runs, and the
+                # reset's own fault must not replace the box fault: the box fault must halt
+                # the batch (#1195 D3a, O4). Any other fault keeps today's precedence.
                 if not box_fault:
                     raise
-                log.error(f"undo after a box fault failed: {undo_fault!r} "
+                log.error(f"reset after a box fault failed: {undo_fault!r} "
                           "(the box fault follows)", exc_info=undo_fault)
             if box_fault or not isinstance(e, RETIRE_SET):
                 raise
             return _handle_retire(cfg, e, to_author, key, log)
+        # The claim landed (or made no change): the draft is re-synced with what the branch
+        # holds, so nothing unapproved reaches the next claim (OD15).
+        _reset_claim(cfg)
 
     committed = outcome.committed
     bucket_held, bucket_consumed = outcome.bucket_held, outcome.bucket_consumed
@@ -659,38 +607,6 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
     return 0
 
 
-def _corpus_relative(cfg: CorpusAuthorConfig, rel: str) -> str:
-    """The repo-relative corpus path `rel` as a name under the corpus mount."""
-    return (cfg.repo_root / rel).relative_to(cfg.corpus_dir).as_posix()
-
-
-def _restore_unapproved_files(
-    cfg: CorpusAuthorConfig, snapshot: dict[str, bytes] | None, rels: set[str], *,
-    head_before: str,
-) -> None:
-    """Put every file this tick changed but did not approve back to its tick-start bytes, or
-    remove it if the tick created it, through the corpus mount (#1134)."""
-    if snapshot is None:
-        return
-    names = {rel: _corpus_relative(cfg, rel) for rel in rels}
-    unchanged: frozenset[str] = frozenset()
-    if any(name in snapshot for name in names.values()):
-        unchanged = _git_read("unapproved restore",
-                              functools.partial(_unchanged_names, timeout=cfg.git_timeout),
-                              cfg.repo_root, cfg.corpus_dir, head_before)
-    view = cfg.corpus.view()
-    for rel, name in names.items():
-        pre = snapshot.get(name)
-        if pre is None:
-            if entry_kind(view, name).kind == ENTRY_DIR:
-                # A folder was never removable here; it keeps the error `unlink()` gave it.
-                raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), rel)
-            cfg.corpus.unlink(name)
-            continue
-        if name not in unchanged:
-            cfg.corpus.write(name, pre, mode="replace")
-
-
 def _flatten(buckets: tuple[BucketSpec, ...], rows: dict[str, list[dict]]) -> list[dict]:
     return [row for bucket in buckets for row in rows.get(bucket.name, [])]
 
@@ -724,51 +640,6 @@ def _project(
         target = bucket_consumed if bucket.disposition == "consumed" else bucket_held
         target[bucket.name] = rows
     return bucket_held, bucket_consumed
-
-
-def _assert_corpus_attributable(
-    cfg: CorpusAuthorConfig, changed: tuple[str, ...], ids: set[str],
-) -> None:
-    """Every corpus file the curator spawn changed must cite, under the channel's provenance
-    key, an id this batch read — whatever bucket the curator reported it under.
-
-    The `AuthorError` unwinds the tick via `_undo_agent_edits`; the batch is bumped and stays
-    queued."""
-    field = provenance_field(cfg.channel.id_key)
-    unattributed = [
-        rel for rel in changed
-        if not (_cited_ids(cfg.corpus.view(), _corpus_relative(cfg, rel), field) & ids)
-    ]
-    if unattributed:
-        raise AuthorError(
-            f"author left {len(unattributed)} file(s) in {cfg.corpus_dir_rel} that no "
-            f"finding of this batch vouches for: {unattributed}; each must cite a "
-            f"{field} entry from this batch ({sorted(ids)}) — refusing to commit"
-        )
-
-
-def _changed_corpus_records(cfg: CorpusAuthorConfig) -> list[tuple[str, str]]:
-    """`(status, repo-relative path)` for everything git reports under the corpus.
-
-    The corpus is clean at tick start (`assert_clean_corpus_dir`), so this is exactly what the
-    spawns wrote or removed. `no_renames=True` splits a rename into its `D`/`A` halves rather
-    than one `R` record naming two paths."""
-    return sorted(
-        _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True,
-                        **_worktree_git(cfg.git_timeout)),
-        key=lambda rec: rec[1],
-    )
-
-
-def _byte_identical_to_head(repo_root: Path, rel: str, *, timeout: float | None = None) -> bool:
-    """Whether the working-copy `rel` still holds the exact bytes HEAD carries for it, asked of
-    git (`_git.git_unchanged_since`, #1134 addendum 3 D1): raw bytes, so a CRLF-only rewrite is a
-    change (text decoding's universal newlines would call it equal); the executable bit ignored,
-    so a mode-only change is identical. A symlink, a FIFO or a folder at `rel` is never identical
-    and is neither followed nor opened; a hard link is judged by its content, which git hashes
-    (N-a, declared). A path HEAD does not carry is not identical. A git failure raises
-    `GitError`; one not answering within `timeout`, `GitTimeout`."""
-    return rel in _git.git_unchanged_since(repo_root, "HEAD", rel, timeout=timeout)
 
 
 def _cited_ids(corpus: Bound, name: str, field: str) -> set[str]:

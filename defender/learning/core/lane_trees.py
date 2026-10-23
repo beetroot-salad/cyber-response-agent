@@ -125,16 +125,20 @@ class DrainTrees:
         self._stack.__exit__(exc_type, exc, tb)
 
 
-def open_drain_trees(wt_paths: LoopPaths, label: DrainLabel) -> DrainTrees:
+def open_drain_trees(paths: LoopPaths, label: DrainLabel, *, batch: Any = None) -> DrainTrees:
     """The held roots of a `label` drain batch's writable mounts: :meth:`DrainTrees.open` over
-    exactly `label.writable_trees(wt_paths)` (the drain working copy's paths), the list
-    `_drain_box_request` mounts read-write, so the held roots are the box's rw mounts (#1134
-    O4). Nothing is derived here: a non-member raises before anything is held.
+    exactly `label.draft_trees(batch)` — the draft lanes P3's `Batch.box_request` mounts
+    read-write, so the held roots are the box's rw mounts (#1134 O4, #1108 P4) — or, with no
+    batch, over `label.writable_trees(paths)` (a checkout-shaped scene's trees). `paths` stays
+    the drain's own, product-rooted. Nothing is derived here: a non-member raises before
+    anything is held.
 
     The mounts must be absolute (`ValueError` before anything is held otherwise), so a
-    `wt_paths` with a relative `repo_root` is refused, never joined to the cwd. Use it as a
+    `paths` with a relative `repo_root` is refused, never joined to the cwd. Use it as a
     context manager inside the lane's work step."""
-    return DrainTrees.open(label.writable_trees(wt_paths))
+    if batch is None:
+        return DrainTrees.open(label.writable_trees(paths))
+    return DrainTrees.open(label.draft_trees(batch))
 
 
 #: :meth:`DrainTrees.tree_for`, bound: a working-copy path to the held mount containing it and its

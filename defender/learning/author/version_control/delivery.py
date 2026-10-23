@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     import httpx
 from defender import _io
 from defender.tenancy._tenant import Tenant
-from defender.learning.author.branch import LESSONS_BRANCH_PREFIX
 from defender import box
 from defender.box._docker import DockerFn, _docker
 
@@ -49,6 +48,9 @@ from .model import (
 from .record import _BatchKey, _NetChange, _Record
 from .repository import NETWORK_TIMEOUT, GitRepository
 from .status import record_published, recording
+
+#: The lessons lane's branch prefix on the tenant repository (a lane passes its own).
+LESSONS_BRANCH_PREFIX = "lessons/"
 
 
 @dataclass(frozen=True, eq=False)
@@ -141,6 +143,13 @@ class TenantDelivery:
                 committer=CommitMaker(self.tenant, self.repository),
                 _line=line,
             )
+
+    def open_pr_exists(self) -> bool:
+        """The lane's writer lease (amendment 3 C1, OD8): whether the tenant repository has an
+        open PR of its own whose branch starts with `branch_prefix`. A fork's PR, or a row
+        with no head repository (D-fork), holds nothing."""
+        with _refusals():
+            return bool(self.repository.forge.list_open_prs(self.branch_prefix))
 
     def _refuse_taken(self, batch_id: str, branch: str) -> None:
         if os.path.lexists(draft_path(self.tenant, batch_id)):

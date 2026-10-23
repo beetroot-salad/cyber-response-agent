@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""The questioner curator: folds `subject: world` findings into `defender/lessons-questioner/`.
+"""The questioner curator: folds `subject: world` findings into the tenant's
+`agent/lessons-questioner/`.
 
-Drained in the same tick as the defender lessons curator (one worktree, box, branch and PR
-lease) but with its own corpus and queue channel.
+Drained in the same tick as the defender lessons curator (one batch, box, branch and PR lease)
+but with its own corpus, queue channel and claim.
 
 Its pre-author gate is idempotency plus a `systems` shape check: a world finding has no
 defender ground truth to gate on, and a row naming no systems could only author a lesson no
@@ -40,6 +41,7 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState, names_systems
+from defender.knowledge._knowledge import LESSONS_QUESTIONER
 
 
 AuthorError = _shared.AuthorError
@@ -63,17 +65,20 @@ class QuestionerAuthorConfig(CorpusAuthorConfig):
 
 def build_questioner_config(
     paths: LoopPaths, *, state: LearningState, trees: DrainTrees,
-    manifest_seed: str | None = None, box: Any = None,
+    manifest_seed: str | None = None, box: Any = None, batch: Any = None,
 ) -> QuestionerAuthorConfig:
-    """This channel's config over `paths`, reading and writing its corpus through `trees`, the
-    lane's open trees (`open_drain_trees`): they must hold `paths.lessons_questioner_dir` itself
-    (`shared.lane_corpus`, else `FatalConfigError`). The config must not outlive `trees`."""
+    """This channel's config, reading and writing its corpus through `trees`, the lane's open
+    trees (`open_drain_trees`), which must hold the corpus itself (`shared.lane_corpus`, else
+    `FatalConfigError`): `batch`'s draft `agent/lessons-questioner`, or — with no batch — the
+    scene's `paths.lessons_questioner_dir`. The config must not outlive `trees`."""
+    root, corpus_dir, corpus_rel = _shared.lane_corpus_dir(paths, batch, LESSONS_QUESTIONER)
     return QuestionerAuthorConfig(
-        repo_root=paths.repo_root,
-        corpus_dir=paths.lessons_questioner_dir,
-        corpus=_shared.lane_corpus(trees, paths.lessons_questioner_dir),
+        repo_root=root,
+        corpus_dir=corpus_dir,
+        corpus=_shared.lane_corpus(trees, corpus_dir),
         tree_for=trees.tree_for,
-        corpus_dir_rel=paths.lessons_questioner_dir_rel,
+        corpus_rel=corpus_rel,
+        batch=batch,
         state=state,
         channel=QUESTIONER_FINDINGS,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
@@ -83,7 +88,6 @@ def build_questioner_config(
         gate=_gate_questioner,
         buckets=QUESTIONER_BUCKETS,
         post_rotate=_write_skip_report_after_rotate,
-        commit_fn=commit_questioner_lessons,
         noun="world findings",
         max_attempts=author_max_attempts(),
         manifest_seed=manifest_seed,
@@ -141,7 +145,7 @@ def build_questioner_user_prompt(
 ) -> str:
     return _shared.build_curator_user_prompt(
         findings, batch_id, corpus=cfg.corpus.view(), corpus_dir=cfg.corpus_dir,
-        corpus_dir_rel=cfg.corpus_dir_rel, label="world findings",
+        corpus_dir_rel=cfg.corpus_rel, label="world findings",
         manifest_seed=cfg.manifest_seed,
         salt=salt,
     )
@@ -192,10 +196,6 @@ QUESTIONER_BUCKETS: tuple[BucketSpec, ...] = (
 )
 
 
-def commit_questioner_lessons(message: str, cfg: QuestionerAuthorConfig) -> str | None:
-    return _shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
-
-
 _logger = logging.getLogger(__name__)
 
 
@@ -207,16 +207,17 @@ def run_batch(
     trees: DrainTrees | None = None,
     cfg: QuestionerAuthorConfig | None = None,
     box: Any = None,
+    batch: Any = None,
 ) -> int:
-    """This channel's entry point; the batch body is `drain.run_batch`. Exactly one of `trees`
-    (the lane's open trees: the drain's work step and `main` open them for their label, #1134)
-    and `cfg` (a config already built over such trees) is given."""
+    """This channel's entry point; the batch body is `drain.run_batch`, one claim of `batch`.
+    Exactly one of `trees` (the lane's open trees: the drain's work step opens them over the
+    batch's draft, #1134) and `cfg` (a config already built over such trees) is given."""
     if (trees is None) == (cfg is None):
         raise TypeError("run_batch takes exactly one of trees= and cfg=")
     if trees is not None:
         if paths is None or state is None:
             raise TypeError("run_batch with trees= takes paths= and state=")
-        cfg = build_questioner_config(paths, state=state, trees=trees, box=box)
+        cfg = build_questioner_config(paths, state=state, trees=trees, box=box, batch=batch)
     assert cfg is not None  # narrowed for mypy: exactly one of the two was given
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 

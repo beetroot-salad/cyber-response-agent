@@ -30,6 +30,7 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.learning.core.state import FINDINGS, LearningState
+from defender.knowledge._knowledge import LESSONS
 
 
 
@@ -58,19 +59,23 @@ class AuthorConfig(CorpusAuthorConfig):
 
 def build_author_config(
     paths: LoopPaths, *, state: LearningState, trees: DrainTrees,
-    manifest_seed: str | None = None, box: Any = None,
+    manifest_seed: str | None = None, box: Any = None, batch: Any = None,
 ) -> AuthorConfig:
-    """This channel's config over `paths`, reading and writing its corpus through `trees`, the
-    lane's open trees (`open_drain_trees`): they must hold `paths.lessons_dir` itself
-    (`shared.lane_corpus`, else `FatalConfigError`). The config must not outlive `trees`."""
+    """This channel's config, reading and writing its corpus through `trees`, the lane's open
+    trees (`open_drain_trees`), which must hold the corpus itself (`shared.lane_corpus`, else
+    `FatalConfigError`): `batch`'s draft `agent/lessons`, or — with no batch — the scene's
+    `paths.lessons_dir`. `paths` keeps the learning state and the product checkout. The config
+    must not outlive `trees`."""
     from defender.learning.author import shared as _shared
 
+    root, corpus_dir, corpus_rel = _shared.lane_corpus_dir(paths, batch, LESSONS)
     return AuthorConfig(
-        repo_root=paths.repo_root,
-        corpus_dir=paths.lessons_dir,
-        corpus=_shared.lane_corpus(trees, paths.lessons_dir),
+        repo_root=root,
+        corpus_dir=corpus_dir,
+        corpus=_shared.lane_corpus(trees, corpus_dir),
         tree_for=trees.tree_for,
-        corpus_dir_rel=paths.lessons_dir_rel,
+        corpus_rel=corpus_rel,
+        batch=batch,
         state=state,
         channel=FINDINGS,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
@@ -79,7 +84,6 @@ def build_author_config(
         invoke_agent=invoke_agent,
         gate=_gate_findings,
         buckets=FINDINGS_BUCKETS,
-        commit_fn=commit_lessons,
         noun="findings",
         max_attempts=author_max_attempts(),
         post_rotate=_write_held_report_after_rotate,
@@ -102,7 +106,7 @@ def build_user_prompt(
 ) -> str:
     return _shared.build_curator_user_prompt(
         findings, batch_id, corpus=cfg.corpus.view(), corpus_dir=cfg.corpus_dir,
-        corpus_dir_rel=cfg.corpus_dir_rel, label="findings",
+        corpus_dir_rel=cfg.corpus_rel, label="findings",
         manifest_seed=cfg.manifest_seed,
         salt=salt,
     )
@@ -139,10 +143,6 @@ FINDINGS_BUCKETS: tuple[BucketSpec, ...] = (
         formatter=str,
     ),
 )
-
-
-def commit_lessons(message: str, cfg: AuthorConfig) -> str | None:
-    return _shared.commit_corpus(cfg.repo_root, cfg.corpus_dir, message)
 
 
 def write_held_report(
@@ -198,16 +198,17 @@ def run_batch(
     trees: DrainTrees | None = None,
     cfg: AuthorConfig | None = None,
     box: Any = None,
+    batch: Any = None,
 ) -> int:
-    """This channel's entry point; the batch body is `drain.run_batch`. Exactly one of `trees`
-    (the lane's open trees: the drain's work step and `main` open them for their label, #1134)
-    and `cfg` (a config already built over such trees) is given."""
+    """This channel's entry point; the batch body is `drain.run_batch`, one claim of `batch`.
+    Exactly one of `trees` (the lane's open trees: the drain's work step opens them over the
+    batch's draft, #1134) and `cfg` (a config already built over such trees) is given."""
     if (trees is None) == (cfg is None):
         raise TypeError("run_batch takes exactly one of trees= and cfg=")
     if trees is not None:
         if paths is None or state is None:
             raise TypeError("run_batch with trees= takes paths= and state=")
-        cfg = build_author_config(paths, state=state, trees=trees, box=box)
+        cfg = build_author_config(paths, state=state, trees=trees, box=box, batch=batch)
     assert cfg is not None  # narrowed for mypy: exactly one of the two was given
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 
