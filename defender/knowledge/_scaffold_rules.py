@@ -62,7 +62,7 @@ class ScaffoldRuleError(Exception):
 
 
 def _id_findings(t: QueryTemplate) -> list[Finding]:
-    """The `id: {system}.{template-id}` invariant `SCHEMA.md` states.
+    """The `id: {system}.{template-id}` invariant `skills/gather/query-schema.md` states.
 
     A template's system comes from its directory, but consumers route on the id's prefix, so a
     mismatch sends rows to the wrong system and mints a sibling draft.
@@ -73,7 +73,7 @@ def _id_findings(t: QueryTemplate) -> list[Finding]:
     return [
         Finding(
             "id-system-mismatch",
-            f"`id: {t.id}` does not name the system it is filed under — `SCHEMA.md` spells an "
+            f"`id: {t.id}` does not name the system it is filed under — `query-schema.md` spells an "
             f"id `{{system}}.{{template-id}}`, so this file's id must start with {t.system!r}",
         )
     ]

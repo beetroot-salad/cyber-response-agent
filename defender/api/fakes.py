@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import datetime as _dt
 import itertools
-from collections.abc import Callable
-from typing import TypeVar
+from collections.abc import Callable, Mapping
+from typing import Any, TypeVar
 
 from pydantic import AwareDatetime
 
 from defender._model import model
+from defender.records import _knowledge_status
 
 from .models import (
     Alert,
     AlertSummary,
     Investigation,
+    InvestigationKnowledge,
     LearningJob,
     Lesson,
     System,
@@ -109,6 +111,24 @@ class InMemoryStore:
     def add_investigation(self, tenant_id: str, investigation: Investigation) -> Investigation:
         self._investigations[(tenant_id, investigation.investigation_id)] = investigation
         return investigation
+
+    def add_run_knowledge(
+        self, tenant_id: str, investigation_id: str, record_text: str | None, *,
+        stamp_knowledge_source: Mapping[str, Any] | None = None,
+    ) -> Investigation:
+        """Set an investigation's `knowledge` from its run's host-held knowledge record (its
+        file's text; `None`: no record) and the run stamp's `knowledge_source` (`None`: the
+        stamp has none, or there is no run), by the rule `InvestigationsRepository` states."""
+        key = (tenant_id, investigation_id)
+        investigation = self._investigations[key]
+        status = _knowledge_status.knowledge_status(
+            record_text, stamp_names_source=stamp_knowledge_source is not None)
+        knowledge = None if status is None else InvestigationKnowledge.model_validate({
+            "status": "current" if status.kind == _knowledge_status.FRESH else status.kind,
+            "commit": status.commit, "stale_kind": status.stale_kind})
+        updated = investigation.model_copy(update={"knowledge": knowledge})
+        self._investigations[key] = updated
+        return updated
 
     def add_learning_job(self, tenant_id: str, job: LearningJob) -> LearningJob:
         self._learning_jobs[(tenant_id, job.learning_job_id)] = job

@@ -56,18 +56,9 @@ EXCLUDED_PREFIXES = (
     "defender/__pycache__/",
     "playground-v2/examples/alerts/",
     "defender/tests/",
-    "defender/lessons/",
-    "defender/lessons-actor/",
-    "defender/lessons-questioner/",
+    # No tenant-knowledge carve-out (#1108 P4): lessons, system skills and query templates live
+    # in each tenant's own repo, outside this tree.
     "defender/docs/",                                  # POC design notes
-    "defender/skills/wazuh/",
-    "defender/skills/host-query/",
-    "defender/skills/stub-cmdb/",
-    "defender/skills/stub-iam/",
-    "defender/skills/gather/queries/wazuh/",
-    "defender/skills/gather/queries/host-query/",
-    "defender/skills/gather/queries/stub-cmdb/",
-    "defender/skills/gather/queries/stub-iam/",
     "defender/integrations/",                         # per-vendor adapters
 )
 

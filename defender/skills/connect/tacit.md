@@ -7,23 +7,22 @@ tacit-knowledge system is already connected.
 This is **not** the onboarding workflow. `SKILL.md`'s six steps connect a
 new system of record; this adds *data* to one that is already connected.
 Two different jobs in the same skill because the shape of the work is the
-same — interview a maintainer, write files, validate, propose them for review — and
+same — interview a maintainer, write files, validate, leave a proposal for review — and
 because a maintainer who has run `/connect` once already knows where to
 look. Nothing here touches an adapter, a config, or a query template.
 
 ## Why the skill does this at all
 
-The registry is a version-controlled file of the tenant's own repository,
-`agent/skills/tacit-knowledge/registry.yaml` (tenant knowledge, never this repo's).
-There is no service, no API, and no admin UI — a human edits YAML and
-commits it, and **the commit is the sign-off**. That is the entire safety
+The registry is a version-controlled file in the tenant's own repo,
+`agent/skills/tacit-knowledge/registry.yaml`. There is no service, no API, and no admin UI —
+a human edits YAML and a human merges it, and **the merged commit is the sign-off**. That is the entire safety
 argument for the system, and it is deliberate: nothing an investigation
 reaches can write this file, so the registry can never be populated from
 the agent's own conclusions.
 
 What you add is a **transcription** step, not an approval one. The human
 still decides that the pattern is sanctioned; you turn what they say into
-eight well-formed fields, check it, and hand them a review PR. Every property
+eight well-formed fields, check it, and hand them a pull request. Every property
 that makes the file trustworthy survives, because the thing that makes it
 trustworthy is the reviewed commit, not the keystrokes.
 
@@ -72,13 +71,15 @@ across an edited `pattern` silently re-points every existing citation.
 
 ## What you do
 
-1. **Stage the current file, and check it first.** Copy the tenant's current
-   `agent/skills/tacit-knowledge/registry.yaml` into a staging directory laid out as the
-   tenant's `agent/` — call it `{staged}` (for example `/tmp/tacit-{id}`), so the file is
-   `{staged}/skills/tacit-knowledge/registry.yaml` — and check that copy:
+1. **Stage the current file and check it first.** Make an empty staging folder of your own
+   outside this repo (`<staged>` below), shaped like the tenant's `agent/` root, and copy the
+   tenant's published registry into it: from
+   `$DEFENDER_DATA_ROOT/{tenant}/exports/current/agent/skills/tacit-knowledge/registry.yaml`
+   to `<staged>/skills/tacit-knowledge/registry.yaml` (run
+   `python3 defender/cli/tenant.py update {tenant}` first so `current` is the merged `main`).
 
    ```bash
-   defender/.venv/bin/python -m defender.cli.tacit_cli check --defender-dir {staged}
+   defender/.venv/bin/python -m defender.cli.tacit_cli --defender-dir <staged> check
    ```
 
    If it is already failing, say so before you add anything — an entry
@@ -98,7 +99,7 @@ across an edited `pattern` silently re-points every existing citation.
 4. **Show what is now in force.**
 
    ```bash
-   defender/.venv/bin/python -m defender.cli.tacit_cli show --defender-dir {staged}
+   defender/.venv/bin/python -m defender.cli.tacit_cli --defender-dir <staged> show
    ```
 
    Read the new entry back to them in their own terms — "uid-0 may
@@ -106,22 +107,22 @@ across an edited `pattern` silently re-points every existing citation.
    [name]'s sign-off" — and get a yes. This is the last point at which a
    misheard scope is cheap to fix.
 
-5. **Propose it to the tenant. Do not merge.**
+5. **Propose it to the tenant's repo. Do not merge.**
 
    ```bash
-   python3 defender/cli/tenant.py propose {tenant} {staged}
+   python3 defender/cli/tenant.py propose {tenant} <staged>
    ```
 
-   This opens one review PR on the tenant's forge touching
-   `agent/skills/tacit-knowledge/registry.yaml` only. Present: the entry, the
-   check output, the PR, and who must review it. The review of that PR is the
+   `propose` replaces the registry in the tenant's `agent/` with the staged one and opens a
+   pull request on the tenant's forge. Present: the entry, the check output, the pull
+   request, and who must review it. The review and merge of that pull request is the
    sign-off — say so, so nobody treats the proposal as the end of the process.
 
 ## Refreshing or removing one
 
 **Refreshing** is the same flow with a smaller interview: confirm the
 sanction still holds and who is re-attesting it, then move `added_at` and
-`review_by` forward in a fresh commit. That commit is the re-attestation,
+`review_by` forward in a fresh proposal. Its merged commit is the re-attestation,
 which is the step a file cannot perform for itself. Do not edit `pattern`
 or the scopes under a kept `id` — that is a different sanction and needs a
 different id.
@@ -134,7 +135,7 @@ flags it for exactly that reason.
 
 - Write any file but `registry.yaml`.
 - Author an entry the human did not state in full.
-- Merge, or treat its own proposal as approval.
+- Merge, push, or treat its own proposal as approval.
 - Add an entry because an investigation concluded something. A run's own
   finding is not a sanction, and a registry populated from closes is the
   system authorizing itself — the failure this whole design is shaped

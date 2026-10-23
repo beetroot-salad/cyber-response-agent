@@ -23,7 +23,8 @@ message, after the indexes — carries:
 - `lead_id` — the `l-NNN` id; the harness uses it as the queries-table FK. You
   never pass it to the `query` tool — just run your query.
 - `system` — system of record (a `skills/` subdir). The catalog of templates is
-  at `{defender_dir}/skills/gather/queries/{system}/`.
+  at `/agent/skills/gather/queries/{system}/` (the tenant's knowledge tree,
+  `$DEFENDER_AGENT_DIR`; the index above already lists the ones you may run).
 - `goal` — the measurement contract, usually one sentence. It may also carry
   evidence the harness already resolved, delimited as §Untrusted data describes;
   pick your query's filter axes off it.

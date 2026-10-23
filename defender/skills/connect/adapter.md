@@ -302,10 +302,10 @@ prompt-injection vector. Say which URL and why, in one line.
 
 ## Run the scaffold validator
 
-Run it on the system you just built:
+Run it on the system you just built (`<staged>` is the staging folder of `SKILL.md` step 4):
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged {staged}
+python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged <staged>
 ```
 
 Fix any FAIL before going further.

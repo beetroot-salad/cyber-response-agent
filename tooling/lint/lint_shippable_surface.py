@@ -2,9 +2,9 @@
 """Shippable-surface discipline — flag env-specific tokens in files that
 ship as part of the product.
 
-The defender plugin is meant to be vendor-neutral. Per-vendor knowledge
-lives under explicitly carved-out directories (the "systems skills" and
-their query templates). The rest of `defender/` must read as
+The defender plugin is meant to be vendor-neutral. Per-vendor knowledge (the systems
+skills and their query templates) is each tenant's, in its own repo, and the adapters sit
+in the carved-out `integrations/`. The rest of `defender/` must read as
 environment-agnostic.
 
 A token match is not automatically a bug: defender/SKILL.md may
@@ -29,33 +29,18 @@ from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The per-system carve-out is derived from the resolver (see `excluded_prefixes`) rather than
-# re-typed here, so this file keeps no separate idea of which systems exist.
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-from defender.learning.leads.declared_systems import declared_systems  # noqa: E402
-from defender.learning.leads.lead_extraction import LeadAuthorError  # noqa: E402
-
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 
 # Directories under defender/ allowed to contain vendor names (per-vendor by design, or not
 # part of the shipped surface).
 EXCLUDED_PREFIXES = (
-    # Gather query templates (+ their SCHEMA doc) are per-system.
-    "defender/skills/gather/queries/",
-    # No settings carve-out: per-tenant settings live under the data root
-    # (`$DEFENDER_DATA_ROOT/<id>/knowledge/settings/`), outside the repo.
+    # No settings or knowledge carve-out (#1108 P4): per-tenant settings, system skills, query
+    # templates and lessons live in each tenant's own repo, outside this tree.
     "playground-v2/examples/alerts/",
     # Vendored golden runs replayed by the e2e harness: env-specific test data by design.
     "defender/tests/fixtures/e2e/",
     "defender/tests/",
-    "defender/lessons/",
-    "defender/lessons-actor/",
-    # Per-environment lesson corpus + learning-loop calibration/eval fixtures (internal).
-    "defender/lessons-environment/",
-    # The questioner's corpus: findings about a world, not the runtime agent (internal).
-    "defender/lessons-questioner/",
     "evaluations/judge_alignment/",
     "evaluations/",
     "defender/.venv/",
@@ -98,15 +83,12 @@ FORBIDDEN = [
 
 
 def excluded_prefixes(root: Path) -> tuple[str, ...]:
-    """`EXCLUDED_PREFIXES` plus one `defender/skills/<system>/` per system `root` declares.
-
-    Derived from the resolver rather than hand-listed: a hand-kept list drifts silently when
-    a system's name is not a vendor word this scanner looks for. This decides only which
-    files may name a vendor, nothing about permissions.
-    """
-    return (*EXCLUDED_PREFIXES, *(
-        f"defender/skills/{system}/" for system in sorted(declared_systems(root))
-    ))
+    """The prefixes excluded under `root`: `EXCLUDED_PREFIXES`. There is no per-system
+    carve-out any more (#1108 P4): a system's skill is tenant knowledge, in the tenant's own
+    repo, so nothing under `defender/skills/` is vendor-named by design. This decides only
+    which files may name a vendor, nothing about permissions."""
+    del root  # one tree, one list: kept so callers name the tree they scan
+    return EXCLUDED_PREFIXES
 
 
 def _excluded(rel: str, prefixes: tuple[str, ...]) -> bool:
@@ -168,19 +150,14 @@ def main(argv: list[str]) -> int:
     if not DEFENDER.is_dir():
         print(f"defender/ not found at {DEFENDER}", file=sys.stderr)
         return 2
-    # An unreadable file never entered the corpus, and an unresolvable systems roster would
-    # run the scan with the wrong exclusions. Exit 2: the gate could not run, which is not
-    # "clean".
+    # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
+    # not "clean".
     try:
         findings = _scan()
     except ScanBlind as exc:
         print(f"lint_shippable_surface: {exc}", file=sys.stderr)
         return 2
-    except LeadAuthorError as exc:
-        print(f"lint_shippable_surface: cannot resolve systems: {exc}", file=sys.stderr)
-        return 2
     print("Suppress legitimate references with `# lint-shippable: ok — <reason>` on the line.")
-    print("Per-vendor systems skills are excluded by directory (see excluded_prefixes).")
     return gate(
         findings, BASELINE_PATH, argv,
         label="lint_shippable_surface", header=HEADER,

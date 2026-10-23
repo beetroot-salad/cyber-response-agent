@@ -660,7 +660,7 @@
  "staying_command_runs": {
   "tenant.py by path": {
    "rc": 0,
-   "usage": "usage: tenant.py [-h] {new-id,scaffold,setup,check,migrate} ..."
+   "usage": "usage: tenant.py [-h] {new-id,scaffold,setup,check,update,propose,migrate} ..."
   },
   "policy_cli via bin/defender-policy": {
    "rc": 0,
