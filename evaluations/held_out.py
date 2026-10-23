@@ -16,9 +16,11 @@ Launch one held-out run for an explicitly named tenant UUID::
 
 It refuses an F under the resolved data root (including all tenant learning roots), or reached through a
 link; mints a UUID; APPENDS ``{slug, run_id}`` to F; and only then runs
-``run.py <fixture alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn`` (``--no-learn`` keeps
-a scored run out of the learning corpora). A run that crashes, hangs or is killed still has
-its row.
+``run.py <fixture alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn --knowledge-commit <K>``
+(``--no-learn`` keeps a scored run out of the learning corpora). A run that crashes, hangs or is
+killed still has its row. ``K`` is the tenant's published ``current`` when the first launch
+into F resolved it, recorded in F (a ``{"knowledge_commit"}`` line): every run of one index
+reads one knowledge revision, so its scores are comparable (#1108 P4 OD10).
 
 Score (an evaluation tool outside the application: it takes no tenant and never resolves
 ``DEFENDER_DATA_ROOT``; it scores exactly the runs dir it is handed)::
@@ -55,7 +57,9 @@ from defender.records import _alert_input
 from defender._yaml import safe_load
 from defender._model import model
 from defender.records._report import read_report
+from defender.records._locations import DataRoot
 from defender.records._run_id import run_id_fault
+from defender.tenancy._exports import OID
 from defender.tenancy._tenant import (
     TenantId, TenantRefused, data_root_contains, data_root_description, resolve_data_root,
 )
@@ -186,15 +190,66 @@ def launch(slug: str, index: Path, fixtures_dir: Path, *, tenant_id: str, spawn:
         if data_root_contains(data_root, absolute):
             raise IndexRefused(f"it is under the data root {data_root_description(data_root)}, where a box or the loop can "
                                "write it")
+        pin, record = _index_pin(held, leaf, data_root, tenant_id)
         run_id = str(RunId.mint())
         row = json.dumps({"slug": slug, "run_id": run_id})  # lint-jsonl-io: ok — one row through the held folder's no-follow append; `append_jsonl` follows the spelling
         try:
-            held.write(leaf, row + "\n", mode="append", durable=True)
+            held.write(leaf, record + row + "\n", mode="append", durable=True)
         except OSError as exc:
             raise IndexRefused(f"its row could not be appended: {exc.strerror or exc}") from None
     print(f"{slug} {run_id}")
     return spawn([sys.executable, str(RUN_PY), str(fixture.alert_path),
-                  "--tenant", tenant_id, "--run-id", run_id, "--no-learn"])
+                  "--tenant", tenant_id, "--run-id", run_id, "--no-learn",
+                  KNOWLEDGE_PIN_FLAG, pin])
+
+
+#: run.py's pin (O-PIN, #1108 P4): every launch of an index runs on one knowledge commit.
+KNOWLEDGE_PIN_FLAG = "--knowledge-commit"
+#: The key of F's knowledge record: its first line, written when F is created, never a launch
+#: row (it carries no slug).
+KNOWLEDGE_KEY = "knowledge_commit"
+
+
+class KnowledgeUnpinned(Exception):  # noqa: N818 — named for its refusal, as `IndexRefused` is
+    """No knowledge commit to pin a new index to: the tenant has no published `current`."""
+
+
+def _index_pin(held: _io.Held, leaf: str, data_root: DataRoot,
+               tenant_id: TenantId) -> tuple[str, str]:
+    """`(the commit every launch of F pins to, the record line to write before this launch's
+    row)` (OD10). The first launch into F — a new F, or one written before the pin — resolves
+    the tenant's `current` once, here, and records it in F; every later launch reads that
+    record back, whatever `current` names by then."""
+    read = held.view().read(leaf, errors="replace")
+    if read.text is None and not read.absent:
+        raise IndexRefused(f"it cannot be read: {read.reason}")
+    recorded = _recorded_pin(read.text or "")
+    if recorded is not None:
+        return recorded, ""
+    from defender.tenancy._exports import DeliveryRefused, current_export_of
+
+    try:
+        commit = current_export_of(data_root, tenant_id).commit
+    except DeliveryRefused as refused:
+        raise KnowledgeUnpinned(str(refused)) from refused
+    return commit, json.dumps({KNOWLEDGE_KEY: commit}) + "\n"  # lint-jsonl-io: ok — written with this launch's row, through the held folder's no-follow append
+
+
+def _is_pin_record(row: object) -> bool:
+    return isinstance(row, dict) and set(row) == {KNOWLEDGE_KEY}
+
+
+def _recorded_pin(text: str) -> str | None:
+    """The knowledge commit F's first record names, or `None` when it holds none."""
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if _is_pin_record(row) and isinstance(row[KNOWLEDGE_KEY], str) \
+                and OID.fullmatch(row[KNOWLEDGE_KEY]):
+            return row[KNOWLEDGE_KEY]
+    return None
 
 
 def _spawn_run_py(argv: list[str], *, env: dict[str, str] | None = None) -> int:
@@ -218,6 +273,8 @@ def read_index(index: Path, runs_dir: Path) -> dict[str, str]:
         raise IndexRefused(f"{dropped} of its lines are not JSON objects")
     newest: dict[str, str] = {}
     for n, row in enumerate(rows, 1):
+        if _is_pin_record(row):
+            continue  # F's knowledge record (`_index_pin`), not a launch row
         slug, run_id = row.get("slug"), row.get("run_id")
         if not isinstance(slug, str) or not isinstance(run_id, str):
             raise IndexRefused(f"row {n} does not carry a text slug and run_id")
@@ -343,6 +400,9 @@ def _launch_main(argv: list[str], spawn: Spawn) -> int:
     except TenantRefused as refused:
         print(f"held_out launch: refused before the index {ns.index} was judged: {refused}",
               file=sys.stderr)
+    except KnowledgeUnpinned as refused:
+        print(f"held_out launch: no knowledge commit to pin the index {ns.index} to: "
+              f"{refused}", file=sys.stderr)
     return 2
 
 

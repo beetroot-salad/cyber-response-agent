@@ -72,6 +72,71 @@ def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
     return git_show_file(cwd, rev, path)
 
 
+@dataclasses.dataclass
+class KnowledgeBodies:
+    """Where a post-move sibling's lesson bodies are read (O6, #1108 P4): the tenant's export
+    at the knowledge commit the sibling's stamp names (`<T>/exports/<commit>/agent/...`),
+    materialised from the clone's objects when absent — never `current`, the clone's HEAD or
+    its working tree. `why` names what made the bodies unreadable (an `unversioned` or
+    `unavailable` stamp, none recorded, or a commit that cannot be materialised); the export is
+    resolved once, on the first read, so a pass that never needs it touches nothing."""
+
+    tenant: Any
+    knowledge: Any
+    _export: Path | None = None
+    _why: str | None = None
+    _resolved: bool = False
+
+    def read(self, rel: str) -> tuple[str | None, str | None]:
+        """`(body, None)` for the export's `agent/<rel>`, or `(None, why)`."""
+        self._resolve()
+        if self._export is None:
+            return None, self._why
+        from defender._io import bind
+
+        with bind(self._export) as root:
+            got = root.read(f"{AGENT_DIR}/{rel}")
+        if got.text is None:
+            why = "it is absent" if got.absent else got.reason
+            return None, (f"unreadable: {AGENT_DIR}/{rel} in the export at "
+                          f"{self._export.name} could not be read ({why})")
+        return got.text, None
+
+    def _resolve(self) -> None:
+        if self._resolved:
+            return
+        self._resolved = True
+        from defender.records._provenance import KnowledgeRevision
+
+        revision = KnowledgeRevision.from_wire(self.knowledge)
+        if revision is None:
+            self._why = "unreadable: no knowledge commit is recorded for this sibling"
+        elif revision.unavailable is not None:
+            self._why = ("unreadable: the sibling's knowledge was unavailable: "
+                         f"{revision.unavailable}")
+        elif revision.commit is None:
+            self._why = "unreadable: the sibling's knowledge was unversioned"
+        elif self.tenant is None:
+            self._why = (f"unreadable: no tenant is known to read knowledge commit "
+                         f"{revision.commit} from")
+        else:
+            from defender.learning.author.version_control import (
+                DeliveryRefused,
+                LockBusy,
+                materialise_export,
+            )
+
+            try:
+                self._export = Path(materialise_export(self.tenant, revision.commit).path)
+            except (DeliveryRefused, LockBusy) as refused:
+                self._why = (f"unreadable: knowledge commit {revision.commit} has no export "
+                             f"and none could be materialised ({refused})")
+
+
+#: The agent root's folder inside an export (`<T>/exports/<commit>/agent/`).
+AGENT_DIR = "agent"
+
+
 @model
 class JudgeInput:
     """The judged world's own views for one (world, pass) — its leads, lessons, documents,
@@ -305,6 +370,7 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
     facts: WorldFacts | None = None, samples: dict[str, Any] | None = None,
     manifest: dict[str, Any] | None = None, bound: Bound,
     family_text: list[Any] | None = None, runs: RunSet | None = None,
+    knowledge: KnowledgeBodies | None = None,
 ) -> JudgeContext:
     """The judge's computed context for one planted world (design M2, derived on read, P-b):
     the computed header, contrast table, fact surfaces and aligned lead rows of the focus and
@@ -320,7 +386,7 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
         family_text = render_family_text(record, failed)
     samples_doc = read_samples_record(bound) if samples is None else samples
     focus = _render_bound_world(bound, episode_dir, world_label, git_show=git_show,
-                                lessons_commit=lessons_commit,
+                                lessons_commit=lessons_commit, knowledge=knowledge,
                                 facts=facts if facts is not None else runs.usable.get(
                                     world_label),
                                 samples=samples_doc, manifest=doc)
@@ -337,7 +403,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     bound: Bound, episode_dir: Path, world_label: str, *,
     git_show: Any, lessons_commit: str | None,
     facts: WorldFacts | None, samples: dict[str, Any] | None,
-    manifest: dict[str, Any] | None,
+    manifest: dict[str, Any] | None, knowledge: KnowledgeBodies | None = None,
 ) -> JudgeInput:
     from defender.learning.judge.run import served_systems_of
 
@@ -378,21 +444,28 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
         name = exposure.lesson_name
         # The writer records no path column; the name resolves to one (see `_lesson_paths_for`).
         candidates = _lesson_paths_for(name)
-        path = candidates[0] if candidates else None
+        path = candidates[0][0] if candidates else None
         body = None
         note = None
-        if commit is None:
-            note = "unavailable: no commit is recorded for this sibling"
-        elif not candidates:
+        if not candidates:
             note = "unavailable: no path is recorded for this lesson and its name names none"
         else:
-            for candidate in candidates:
-                body = show(REPO_ROOT, commit, candidate)
-                if body is not None:
-                    path = candidate
-                    break
+            # O6 pre-move: a code commit whose tree holds the lesson is read from the product
+            # repository at that commit; any other run is post-move, read from its knowledge.
+            if commit is not None:
+                for product_path, _agent_rel in candidates:
+                    body = show(REPO_ROOT, commit, product_path)
+                    if body is not None:
+                        path = product_path
+                        break
             if body is None:
-                note = f"unavailable: {path!r} at {commit!r} could not be read"
+                source = knowledge if knowledge is not None else KnowledgeBodies(
+                    tenant=None, knowledge=provenance.get("knowledge"))
+                for _product_path, agent_rel in candidates:
+                    body, note = source.read(agent_rel)
+                    if body is not None:
+                        path = f"{AGENT_DIR}/{agent_rel}"
+                        break
         lessons.append({"lesson_name": name, "path": path, "body": body, "note": note,
                         "dirty": dirty, "exposure": _exposure_line(exposure)})
     if read.unnamed:
@@ -431,18 +504,20 @@ def _exposure_line(exposure: LessonExposure) -> str:
     return f"{_EXPOSURE_LINES[exposure.evidence]}{when}"
 
 
-def _lesson_paths_for(lesson_name: Any) -> list[str]:
-    """The repo-relative paths a runtime lesson row's `lesson_name` could name, in stable order.
+def _lesson_paths_for(lesson_name: Any) -> list[tuple[str, str]]:
+    """The places a runtime lesson row's `lesson_name` could name, in stable order, as
+    `(product-repo path before the move, agent-root-relative path after it)` pairs.
 
-    The inverse of `hooks.record_lesson_load.lesson_name` (which records the stem of
-    `defender/<corpus>/<stem>.md`) over `RUNTIME_LESSON_CORPORA`. Empty for a name that is not
-    a single path segment, which would build a path outside the corpus."""
+    The inverse of `hooks.record_lesson_load.lesson_name` (which records a lesson's stem) over
+    `RUNTIME_LESSON_CORPORA`. Empty for a name that is not a single path segment, which would
+    build a path outside the corpus. The product spelling is the judge's pre-move branch, the
+    one reader of `CHECKOUT_KNOWLEDGE` (O6)."""
     from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, RUNTIME_LESSON_CORPORA
 
     if (not isinstance(lesson_name, str) or not lesson_name
             or lesson_name != Path(lesson_name).name or lesson_name in (".", "..")):
         return []
-    return [f"{CHECKOUT_KNOWLEDGE.rel(corpus)}{lesson_name}.md"
+    return [(f"{CHECKOUT_KNOWLEDGE.rel(corpus)}{lesson_name}.md", f"{corpus}/{lesson_name}.md")
             for corpus in sorted(RUNTIME_LESSON_CORPORA)]
 
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _io
-from defender.records._locations import _unwrap_exports_root, _unwrap_knowledge_lock
+from defender.records._locations import DataRoot, _unwrap_exports_root, _unwrap_knowledge_lock
 from defender.tenancy._tenant import Tenant
 
 
@@ -38,7 +38,21 @@ def current_export(tenant: Tenant) -> TenantExport:
     """The export `<T>/exports/current` names, read from the files alone: no git and no process
     (P4's runs have neither). An absent or empty pointer, one that is not an object id (one
     leading out of `exports/` included), or one naming a missing export is `DeliveryRefused`."""
-    exports = _unwrap_exports_root(tenant.exports)
+    return _current_at(_unwrap_exports_root(tenant.exports), tenant.id)
+
+
+def current_export_of(data_root: DataRoot, tenant_id: str) -> TenantExport:
+    """`current_export` of the tenant `tenant_id` names under `data_root`, read from its files
+    before (or without) accepting it: a launcher that pins the runs it starts to one commit
+    (`evaluations/held_out`, #1108 P4 OD10) reads the pointer, and each run it starts accepts
+    the tenant itself. The data root and the tenant's folder meet the layout's own guards."""
+    from defender.tenancy._tenant import _TenantPaths
+
+    paths = _TenantPaths(data_root, tenant_id)
+    return _current_at(paths.exports, paths.tenant_id)
+
+
+def _current_at(exports: Path, tenant_id: object) -> TenantExport:
     with _io.bind(exports) as folder:
         # Text, decoded with replacement: an oid is ASCII, so any byte that is not fails the
         # match below rather than the read.
@@ -46,7 +60,7 @@ def current_export(tenant: Tenant) -> TenantExport:
         if pointer.text is None:
             why = "it is absent" if pointer.absent else pointer.refusal
             raise DeliveryRefused(
-                f"no export is published for tenant {tenant.id}: "
+                f"no export is published for tenant {tenant_id}: "
                 f"{exports / POINTER}: {why}"
             )
         commit = pointer.text.removesuffix("\n")

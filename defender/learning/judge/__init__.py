@@ -326,7 +326,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
         with _open_episode(runs, episode_id) as episode:
             resolved_judge = judge if judge is not None else _default_judge_seam(episode.dir)
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
-                                  git_show=git_show, state=state)
+                                  git_show=git_show, state=state, tenant=runs.tenant)
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches.
@@ -368,13 +368,14 @@ def _refuse_queueing(prior: EpisodeGrade) -> None:
 
 def _grade_episode(
     episode: Episode, *, judge: Any, draws: int, git_show: Any, state: LearningState,
+    tenant: Any = None,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
     # recorded grade — a stamp's included, which carries the committed rows it met — is carried
     # row by row: `queued` rows are final, a `queueing` row refuses the grade (after the gates,
     # so a stamp pass still writes its stamp), every other row is re-graded (A6).
     return _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
-                 prior=read_grade(episode)).grade()
+                 prior=read_grade(episode), tenant=tenant).grade()
 
 
 def _label_of(finding_id: str) -> str | None:
@@ -431,8 +432,10 @@ class _Pass:
     queue counts. Each commit (A6) writes the whole record as it stands."""
 
     def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,
-                 state: LearningState, prior: EpisodeGrade | None) -> None:
+                 state: LearningState, prior: EpisodeGrade | None, tenant: Any = None) -> None:
         self.episode = episode
+        #: The runs repository's tenant: whose exports a post-move lesson body is read from (O6).
+        self.tenant = tenant
         self.bound = episode.view()
         self.judge = judge
         self.draws = draws
@@ -456,6 +459,7 @@ class _Pass:
         self.world_queue_malformed = 0
         self.knobs: dict[str, Any] = {}
         self.lessons_commit: str | None = None
+        self.knowledge: render_mod.KnowledgeBodies | None = None
         self.run_id = Path(episode.dir).name
 
     # -- the gates -----------------------------------------------------------------------
@@ -554,6 +558,9 @@ class _Pass:
         self.lessons_commit = _pass_lessons_commit(bound, [runs.usable[label].token for label in runs.planted])
         if self.lessons_commit is None and prior is not None:
             self.lessons_commit = prior.lessons_commit
+        self.knowledge = render_mod.KnowledgeBodies(
+            tenant=self.tenant, knowledge=_pass_knowledge(
+                bound, [runs.usable[label].token for label in runs.planted]))
         for label in self.order:
             if label in kept:
                 continue
@@ -577,7 +584,8 @@ class _Pass:
         try:
             ctx = render_mod.render(
                 self.episode.dir, label, git_show=self.git_show,
-                lessons_commit=self.lessons_commit, payload_cap=self.cap,
+                lessons_commit=self.lessons_commit, knowledge=self.knowledge,
+                payload_cap=self.cap,
                 facts=self.run_set.usable[label], samples=self.samples, manifest=self.manifest,
                 bound=self.bound, family_text=self.noise, runs=self.run_set)
             prompt, placed = run_mod._build_prompt(ctx, self.manifest)
@@ -813,6 +821,17 @@ def _pass_lessons_commit(bound: Bound, world_ids: list[str]) -> str | None:
             bound.under(LAYOUT.world(world_id).dir)).get("commit")
         if commit is not None:
             return str(commit)
+    return None
+
+
+def _pass_knowledge(bound: Bound, world_ids: list[str]) -> object:
+    """The knowledge stamp (wire) every post-move lesson body in this pass is read at: the first
+    graded world's stamp that records one, resolved once, as `_pass_lessons_commit` is."""
+    for world_id in world_ids:
+        knowledge = render_mod._read_provenance(
+            bound.under(LAYOUT.world(world_id).dir)).get("knowledge")
+        if knowledge is not None:
+            return knowledge
     return None
 
 
