@@ -11,7 +11,7 @@ import re
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import SkipValidation
 
@@ -66,6 +66,10 @@ class RunText:
     text: str
 
 
+if TYPE_CHECKING:
+    from defender.tenancy._exports import TenantExport
+
+
 def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
     from defender._git import git_show_file
 
@@ -83,7 +87,7 @@ class KnowledgeBodies:
 
     tenant: Any
     knowledge: Any
-    _export: Path | None = None
+    _export: TenantExport | None = None
     _why: str | None = None
     _resolved: bool = False
 
@@ -92,15 +96,13 @@ class KnowledgeBodies:
         self._resolve()
         if self._export is None:
             return None, self._why
-        from defender._io import bind
+        from defender.tenancy._exports import read_export_text
 
-        with bind(self._export) as root:
-            got = root.read(f"{AGENT_DIR}/{rel}")
-        if got.text is None:
-            why = "it is absent" if got.absent else got.reason
+        text, why = read_export_text(self._export, f"{AGENT_DIR}/{rel}")
+        if text is None:
             return None, (f"unreadable: {AGENT_DIR}/{rel} in the export at "
-                          f"{self._export.name} could not be read ({why})")
-        return got.text, None
+                          f"{self._export.commit} could not be read ({why})")
+        return text, None
 
     def _resolve(self) -> None:
         if self._resolved:
@@ -127,7 +129,7 @@ class KnowledgeBodies:
             )
 
             try:
-                self._export = Path(materialise_export(self.tenant, revision.commit).path)
+                self._export = materialise_export(self.tenant, revision.commit)
             except (DeliveryRefused, LockBusy) as refused:
                 self._why = (f"unreadable: knowledge commit {revision.commit} has no export "
                              f"and none could be materialised ({refused})")
