@@ -67,5 +67,5 @@ Watch with `gh pr checks --watch`. On red, read `gh run view <run-id> --log-fail
 
 ## 6. Exit
 
-- **Ready for code review:** the implementation is complete on the recorded contract, blockers are resolved, and owed verification and CI are green. Hand off to the code-review workflow, then `finalize`. Do not merge.
+- **Ready for code review:** the implementation is complete on the recorded contract, blockers are resolved, and owed verification and CI are green. Hand off for review: `finalize`, or `/code-review` for a lighter pass. Do not merge.
 - **Blocked:** say what remains, why progress stopped, and the next action. Keep branch, worktree, refs, evidence and PR number for resume. Keep missing verification distinct from a known defect, and escalate design choices, not a queue of technical repairs.

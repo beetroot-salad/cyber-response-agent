@@ -10,7 +10,7 @@ can improve the design, the contract or the code; they are grouped by cause befo
 patched. A green suite still does not prove complete intent.
 
 ```
-issue → discuss-issue → write-tests → write-code-from-tests → finalize → human merge
+issue → discuss-issue → write-tests → write-code-from-tests → finalize or /code-review → human merge
              ↑              ↑                  │
              └──────────────┴──── findings ────┘
 ```
@@ -22,7 +22,7 @@ and is too heavy for most fixes. Ask what the change does to what the system pro
 
 | The change | Lane | What guards it |
 |---|---|---|
-| Adds or changes a promise: new behavior, a changed flow or model, a new surface | `discuss-issue` → `write-tests` → `write-code-from-tests` → `finalize` | A committed, reviewed and attacked test contract |
+| Adds or changes a promise: new behavior, a changed flow or model, a new surface | `discuss-issue` → `write-tests` → `write-code-from-tests` → `finalize` or `/code-review` | A committed, reviewed and attacked test contract |
 | Code disagrees with intent that is already settled (a bug) | `proven-fix` | A test written red first, plus mutants of the fix's lines |
 | Structure changes, behavior doesn't (a refactor) | `refactor` | The existing suite, unchanged; a lint when a removed pattern could return |
 
@@ -32,6 +32,10 @@ Soft guardrails, which the lighter lanes also enforce:
 - **A refactor that needs an assertion changed is a behavior change.** The refactor skill stops there and asks.
 - **Lighter lanes hand back rather than decide.** When proven-fix or refactor hits a design question, it stops and says so, and you re-route to `discuss-issue`. Neither has anywhere to record a decision.
 - **Size isn't the test.** A one-line change to what a refusal says is a promise change. A thousand-line move with no behavior change is a refactor.
+
+The last review is either `finalize` or Claude Code's built-in `/code-review`. `finalize` also
+traces escaped bugs back to the stage that missed them and feeds the attack deck; `/code-review`
+is the lighter pass.
 
 Human attention goes to consequential design choices. Agents resolve the technical details those
 choices determine, and the merge stays human-approved.
