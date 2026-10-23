@@ -383,17 +383,26 @@ def test_box_accepts_no_raw_command_string(tmp_path):
 
 def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
     run_dir = _run_dir(tmp_path)
-    lesson = sorted((DEFENDER / "lessons").glob("*.md"))[0]
-    lesson_rel = lesson.relative_to(DEFENDER.parent)
+    # A product file the gate DOES let MAIN read by its full path, spelled relative to the repo
+    # root: a gate that rebased onto the repo root would allow it, so the denial below is about
+    # the rebase and nothing else. (#1108 P4 O1: the product tree's `lessons/` is gone; the
+    # gather skill page stays product.)
+    product_page = DEFENDER / "skills" / "gather" / "SKILL.md"
+    product_rel = product_page.relative_to(DEFENDER.parent)
+    assert (DEFENDER.parent / product_rel).is_file()
+    assert not (run_dir / product_rel).exists(), "the run dir holds the file too; nothing separates the sites"
 
     t = RecordingTransport(framed(0, b"", b""))
     deps = _main_deps(run_dir, t)
 
     assert permission.decide_bash(
+        f"cat {product_page}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
+        "the control: MAIN may read the product page by its full path"
+    assert permission.decide_bash(
         f"cat {ALERT_REL}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
         "the gate did not rebase a relative operand onto the run dir"
     assert not permission.decide_bash(
-        f"cat {lesson_rel}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
+        f"cat {product_rel}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
         "the gate is still rebasing onto the repo root — site 1 did not move"
 
     _bash(deps, f"cat {ALERT_REL}")

@@ -140,6 +140,14 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `open_drain_trees(paths, label, *, batch)`: holds the lanes under `batch.draft_root`.
 - Lane builders: `lessons_run.build_author_config(paths, *, state, trees, batch, ...)`, `questioner_run.build_questioner_config(...)`, `lead_author.build_lead_author_deps(paths, *, state, trees, batch, ...)`, `pitfalls_curator.run_pitfalls(*, paths, state, trees, batch, ...)`, `lead_author.run(run, *, label, paths, batch, ...)`.
 - `run_under_held_queue_lock(run, *, paths, state, trees, box, on_done, git_timeout=, deps=None)`.
+- `declared_systems.declared_systems(repo_root, *, agent: Mapping[str, object] | None = None) -> frozenset[str]` (implementer-chosen,
+  adopted by the owner in repair r5): the adapter half is `repo_root`'s working-tree adapter glob, as before (#1172); the marker half is
+  read only off `agent`, a COMMITTED tree's repo-relative paths (`agent/skills/<name>/execution.md`, exactly one segment deep), never off
+  any working tree; `agent=None` is the adapter half alone. The lead-author lane passes its batch's base (`Batch.base()`), never the draft.
+  Why this seam: after O1 the markers are the tenant's, and the resolver can no longer find the tenant's committed tree from the product
+  checkout; handing it the committed tree as a value preserves the committed-vs-working-tree rule (#869 NF1) and moves "the committed
+  tree is unreadable" to the one reader of it (`Batch.base()` refuses, so the lane's deps refuse; never an adapter-only answer). Pinned by
+  `test_869_resolver.py`, including `::test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`.
 - Gate shapes kept: `_skills_path_rule(root, xy, path, *, systems, tree_for)`, `_verify_skills_state(root, *, change_set, ...)`, `_verify_pitfalls_state(root, *, ...)`; rules see repo-relative `agent/...` (OD6).
 - Pitfalls add-on path: `agent/skills/gather/defender-sql.pitfalls.md` (product page is never a tenant write).
 - `evaluations/harness.py::run_author(tmp, *, invoke_agent=None)`: drafts plus the drain tests' fake forge, no issuer.
@@ -173,14 +181,8 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `launch_publish(spawn=)` is used by `test_publish_child.py` but absent from `_s_b_support.py`'s docstring; the test is authoritative.
 - Two `run_pitfalls` symbols exist by design (drain step vs `pitfalls_curator.run_pitfalls`); not a conflict.
 - `run.main`'s default when `publish=` is omitted: the real publish child (OD14 clarification; agent decision for the owner to confirm).
-- **`declared_systems` marker half (open, repair r4 item 14).** `learning/catalog/test_869_resolver.py` (4 cases) calls
-  `declared_systems(repo)` and expects the marker half read from `repo`'s committed HEAD at `defender/skills/<name>/execution.md`
-  (depth one; raises when the skills tree or the repo is unresolvable). P4 moves the markers to the tenant (`agent/skills/<name>/execution.md`,
-  O1) and no seam here names how the resolver gets the tenant's committed tree. The implementation took
-  `declared_systems(repo_root, *, agent: Mapping | None = None)` (`agent`: a committed tree's repo-relative paths, e.g. `Batch.base`;
-  none given, the adapter half alone). Not respelled: the committed-vs-working-tree and unresolvable-marker halves move to the caller
-  that builds `agent`, which no test here pins yet. Owner call: adopt that seam in this section and respell the 4 cases onto it
-  (plus a lane-level case that the gate hands the batch base, never the draft), or name another seam.
+- **`declared_systems` marker half: resolved by the owner (repair r5 item 1).** The implementation's seam is adopted
+  (above, "Drains and lanes") and `learning/catalog/test_869_resolver.py` is re-spelled onto it.
 
 ## 3. Coverage map
 
@@ -318,6 +320,26 @@ Repair round r4 (this round), all additive or stricter:
   `_census_1107.py`/`test_1107_census_lint.py` homonym docs pruned to `skills/connect/SKILL.md` (the others moved to tenants);
   `tooling/layout_contracts/_pointers1080.vanished_folder_mentions` counts a name live in a tenant's agent half (`agent/lessons/`) as ambiguous,
   so a bare `lessons/` is not a stale pointer; stale-name test data reworded or suppressed with a reason (`lint_stale_refs` clean).
+
+Repair round r5:
+- `learning/catalog/test_869_resolver.py` (4 cases, class ii) re-spelled onto `declared_systems(repo_root, *, agent=)` (§2): the markers sit in a
+  real batch's published agent half and the resolver is handed `lane.batch.base()`; the union, committed-not-working-tree (a draft marker and
+  product-checkout markers under both spellings stay undeclared until committed on the batch branch), depth-one (`agent/...` nested markers
+  committed) and adapter-unreadable cases keep their assertions. Deleted, class (i): the `no defender/skills/ at HEAD` and `repo is no git
+  repository` raises (the resolver no longer reads a committed tree itself) → `::test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`,
+  added: the lane's systems come from the batch base, never the draft, and an unreadable base refuses the deps.
+- `tenancy/alert_front_door_1222/test_1222_lessons_and_corpus.py` p072, p074 (×2), p077 (class ii, repair-list class E): the REAL drain tick runs
+  over a fixture-tenant batch draft (`draft_lane`/`draft_author_cfg`) instead of a checkout-shaped repo, and "committed" is read from the batch
+  branch tip (`lane.landed()`/`text_at_tip`), never the draft; every assertion kept.
+- Vacuous or broken reads of the deleted product corpus, re-pointed at content that exists, each with a guard that it is not empty:
+  `e2e/test_540_exec_seam.py::test_relative_operand_names_the_same_file_at_all_three_sites` (a repo-root-relative operand now names the product
+  `skills/gather/SKILL.md`, with the control that its full path IS readable); `learning/curation/test_620_authoring_contract.py` (the
+  placeholder<->param sweep covers the pre-P4 shipped catalog fixture, ≥20 templates, plus every committed `knowledge/*/agent` catalog);
+  `e2e/test_540_box_boundary.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
+  the product still ships, so the probe meets the ro bind rather than ENOENT; box-only, not run locally).
+- `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
+  (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of
+  `::test_staying_commands_import_modules_that_have_moved` runs (the golden stays the pre-move recording; the move is applied in the test).
 
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
