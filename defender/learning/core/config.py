@@ -81,8 +81,7 @@ AUTHOR_DRAIN_LABEL = DrainLabel.AUTHOR
 LEAD_AUTHOR_DRAIN_LABEL = DrainLabel.LEAD_AUTHOR
 
 
-#: The quarantine directory's name under `worktree_base`, spelled once for both sides
-#: (`LoopPaths.quarantine_dir` reads it, `AuthorBranch.quarantine_dir` writes under it).
+#: The quarantine directory's name under `worktree_base` (`LoopPaths.quarantine_dir`).
 QUARANTINE_DIRNAME = "quarantine"
 
 
@@ -145,9 +144,9 @@ class LoopPaths(DefenderPaths):
 
     @property
     def quarantine_dir(self) -> Path:
-        """Where `quarantine.preserve_tainted_tree` archives a tainted worktree. Follows
-        `worktree_base`, not `state_root`: a copied state dir carries none of this host's
-        tainted trees. `AuthorBranch.quarantine_dir` is the same path on the writer's side."""
+        """Where the legacy worktree drain archived a tainted worktree, which the queue page
+        still counts (#1108 P4 retired the writer). Follows `worktree_base`, not `state_root`:
+        a copied state dir carries none of this host's tainted trees."""
         return self.worktree_base / QUARANTINE_DIRNAME
 
 
