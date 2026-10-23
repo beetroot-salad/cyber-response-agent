@@ -349,6 +349,55 @@ def config_texts(marker: str, *, events_index: str | None = None,
     return {system: text + access_lines(marker, system) for system, text in base.items()}
 
 
+#: The made-up catalog templates a planted tenant's lead-zero config names, written into the
+#: tenant's OWN catalog (`agent/skills/gather/queries/<system>/<name>.md`). #1108 P4 (flow 3,
+#: O1, O2): run start resolves `lead-zero.yaml` against the run copy's catalog — the checkout
+#: holds none — so a tenant that grants the correlation lead carries the template it names.
+#: Front matter mirrors the template schema (id agreeing with the path, established, the verb
+#: the holder's grant binds); the bodies are made up (decision 4: no copy of lab content).
+TENANT_CATALOG: dict[str, str] = {
+    "elastic/correlate-alerts-by-entity.md": """\
+---
+id: elastic.correlate-alerts-by-entity
+status: established
+verb: alerts
+params: [end, start]
+body_substitutions: [entity_filter]
+---
+
+## Goal
+
+Fixture template (#1222 suite, #1108 P4): alerts naming one entity over a window, counted
+across every rule (correlate alerts, same host, prior alert).
+
+## Query
+
+```
+${entity_filter}
+```
+""",
+    "cmdb/list-all-hosts.md": """\
+---
+id: cmdb.list-all-hosts
+status: established
+verb: list-hosts
+params: []
+---
+
+## Goal
+
+Fixture template (#1222 suite, #1108 P4): the whole host inventory, to find the registered
+name of a host a lookup did not recognise.
+
+## Query
+
+```query
+verb: list-hosts
+```
+""",
+}
+
+
 def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each part overridable
     root: Path, tenant_id: str, *,
     table: str = TABLE_A,
@@ -359,6 +408,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     configs: dict[str, str] | None = None,
     omit: tuple[str, ...] = (),
     agent_files: dict[str, str] | None = None,
+    catalog: bool = True,
 ) -> Path:
     """Write a plain knowledge folder `root/<tenant_id>/{settings,agent}/` and return it — the
     shape of the committed template and fixture (no `.tenant-id`, no row). `place_tenant` puts
@@ -376,8 +426,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
         "systems/case-history/mapping.yaml": mapping_text(reporter, open_status),
         "alert-mapping.yaml": ALERT_MAPPING_TEXT,
     }
-    for system, text in (configs if configs is not None
-                         else config_texts(marker or tenant_id)).items():
+    system_configs = configs if configs is not None else config_texts(marker or tenant_id)
+    for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text
     for rel, text in files.items():
         if rel in omit:
@@ -390,7 +440,30 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     for name, text in (agent_files if agent_files is not None
                        else {"AGENT.md": f"agent half of {tenant_id}\n"}).items():
         (agent / name).write_text(text, encoding="utf-8")
+    # #1108 P4 (O1, O2): run start resolves `lead-zero.yaml` against the tenant's OWN catalog
+    # (the checkout holds none), so a planted tenant carries the made-up templates its default
+    # lead-zero config and the non-Elastic tables name. `catalog=False` plants none of this
+    # agent knowledge (the "names a template its catalog lacks" shape).
+    # Likewise each configured system's skill descriptor (`agent/skills/<system>/SKILL.md`,
+    # the gather dispatch's "Systems of record" line): system skills are tenant knowledge, so a
+    # planted tenant carries a made-up one per system it configures.
+    if catalog:
+        for rel, text in TENANT_CATALOG.items():
+            template = agent / "skills" / "gather" / "queries" / rel
+            template.parent.mkdir(parents=True, exist_ok=True)
+            template.write_text(text, encoding="utf-8")
+        for system in system_configs:
+            skill = agent / "skills" / system / "SKILL.md"
+            skill.parent.mkdir(parents=True, exist_ok=True)
+            skill.write_text(system_skill_text(system), encoding="utf-8")
     return tenant
+
+
+def system_skill_text(system: str) -> str:
+    """A made-up system skill descriptor for `system` (front matter `name` + `description`)."""
+    return (f"---\nname: defender-{system}\ndescription: Fixture {system} system of record for "
+            f"a planted test tenant (#1108 P4).\n---\n\nFixture content; no real "
+            f"environment.\n")
 
 
 def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
