@@ -78,12 +78,12 @@ episode's analog of a single run's `runtime.html`.
 ## How lessons feed back
 
 Unchanged by the cutover, and it is the joint the whole thing swings on. The
-runtime-facing output is the tenant's `lessons/` corpus, in its knowledge tree (the tenant
+runtime-facing output is the tenant's `agent/lessons/` corpus, in its knowledge tree (the tenant
 repo's `agent/`; a run reads its own copy at `/agent/lessons/`). Once the findings
 queue holds `LEARNING_AUTHOR_THRESHOLD` (default **5**) rows it could
 AUTHOR — a row already stamped `held_reason` stays queued and counts for
 nothing (#881) — the lessons curator folds the queued rows into
-`lessons/*.md`, as a pull request on the tenant's repo:
+`agent/lessons/*.md`, as a pull request on the tenant's repo:
 
 ```
 python3 defender/learning/loop.py --author-drain
@@ -113,10 +113,10 @@ gather query catalog and the per-system skills, and opens its own PR.
 ## Two corpora, two queues
 
 The old loop ran two directions and fed three corpora — defender findings
-into `lessons/`, plus actor and environment observations into their own.
+into `agent/lessons/`, plus actor and environment observations into their own.
 Those two lost their producers at the cutover and are gone (see above).
 What is live since #1007 is partitioned by *subject*, not by direction:
-`lessons/`, fed by `_pending/findings.jsonl` and read by the runtime
+`agent/lessons/`, fed by `_pending/findings.jsonl` and read by the runtime
 agent, and `lessons-questioner/`, fed by
 `_pending/questioner_findings.jsonl` and read by the questioner. One drain
 tick serves both.

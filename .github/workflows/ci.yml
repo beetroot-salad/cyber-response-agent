@@ -752,7 +752,7 @@ jobs:
         run: defender/.venv/bin/python tooling/lint/lint_unbounded_whole_read.py
 
       # Hand-rolled git subprocess calls under defender/ that bypass the
-      # defender._git facade (git / git_status / git_commit / git_worktree_* /
+      # defender._git facade (git / git_status / git_head_sha / git_show_file /
       # GitError) — a ~8× dedup smell plus the spaced-path porcelain bug the
       # shared -z reader fixes (#460). New sites must route through defender._git;
       # the facade itself is excluded and test fixtures are exempt.

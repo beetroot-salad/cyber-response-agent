@@ -32,7 +32,7 @@ The defender is really two loops stacked:
    experiment. It forks a finished investigation at a chosen turn and re-runs
    it against a family of worlds that each differ by one authored fact, judges
    which of those differences the defender's verdict actually tracked, and
-   folds the lessons it distills into a `lessons/` corpus that feeds back into the runtime loop at PLAN time. It is
+   folds the lessons it distills into the tenant's `agent/lessons/` corpus that feeds back into the runtime loop at PLAN time. It is
    **operator-initiated** — a finished run is a starting point someone names
    later, never something a run feeds automatically. A run's one automatic
    post-step is the gather-catalog curation enqueue, which `--no-learn` skips.
@@ -96,7 +96,7 @@ discipline, not enforced transitions.
   `author/` (the two curators), `leads/` (the
   lead-author), `core/` (queues and drains), with `loop.py` as the drains'
   entry point and a role prompt beside each stage's driver.
-- **the tenant's `lessons/`** — pitfall lessons in the tenant repo's `agent/`, authored by
+- **the tenant's `agent/lessons/`** — pitfall lessons in the tenant repo's `agent/`, authored by
   the loop as pull requests a human merges, read by the runtime agent at PLAN time.
 - **the tenant's `lessons-questioner/`** — the questioner's own corpus beside it, authored by
   the second curator and read by the questioner, never by the runtime agent.

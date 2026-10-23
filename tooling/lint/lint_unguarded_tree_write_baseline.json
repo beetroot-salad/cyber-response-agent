@@ -5,7 +5,6 @@
     "learning/author/lessons/run.py:invoke_agent": "intentional (#1134 N-e): mkdir of the host-side `_pending` queue dir, outside every box mount; the corpus itself is written only through its held mount",
     "learning/author/shared.py:assert_clean_corpus_dir": "false positive (#1134): `corpus.mkdir(\".\")` is `Held.mkdir` on the corpus's held mount (descriptor-rooted, follows nothing); the lint matches `.mkdir` by name. The D6 census proves the receiver a `Held`",
     "learning/core/persist.py:append_pitfalls": "",
-    "learning/core/quarantine.py:preserve_tainted_tree": "",
     "learning/frontend/build.py:main": "",
     "learning/frontend/serialize.py:main": "",
     "learning/lead_repository.py:stage_tables": "",

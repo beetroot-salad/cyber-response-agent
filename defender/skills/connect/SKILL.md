@@ -39,7 +39,7 @@ one defender-specific tilt).
 
 You write the adapter (or record the MCP reach), the per-system skill,
 its config, and a couple of seed query templates. You do **not** author
-lessons (the learning loop owns `lessons/`), pre-build the query catalog
+lessons (the learning loop owns the tenant's `agent/lessons/`), pre-build the query catalog
 (the offline lead-author grows it from real runs), run investigations
 (that's `run.py`), or touch another system's files, `hooks/`, or
 `learning/`. If the maintainer asks for something outside connecting one
@@ -300,7 +300,7 @@ Then stop. `/ship` can open the PR.
   the staged `skills/{system}/`, that system's `config.env`, its staged seed templates, and
   its rows in every tenant's and the template's `settings/verb-grants.yaml`
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
-  `learning/`, `lessons/`, the runtime `defender/SKILL.md`, the invlang
+  `learning/`, `agent/lessons/`, the runtime `defender/SKILL.md`, the invlang
   skill, or another system's files. On the `tacit.md` route the lane is
   narrower still: the staged `skills/tacit-knowledge/registry.yaml` and nothing else.
 - **Never author a sanction.** On the `tacit.md` route you transcribe what

@@ -46,7 +46,7 @@ code, the investigator never occupies it, and it writes no `##` header into
   observation shape each competing explanation would produce — relative to
   the entity's baseline. Author `:H` (hypotheses + predictions) and `:L`
   (lead) blocks. PLAN does **not** pick a query template — that's gather's
-  job. Read any relevant `lessons/` here before writing blocks.
+  job. Read any relevant lessons (`/agent/lessons/`) here before writing blocks.
 - **GATHER** — dispatch the gather subagent per lead with the `gather` tool
   (a cheaper model, GLM 5.3 Flash by default). It picks a query template,
   binds params, calls the typed `query` tool (the harness captures the

@@ -12,7 +12,7 @@ Both problems are about a single source of truth:
 
 1. The signature says ``Path | None`` but the first body line makes it non-None. Optionality
    should be parsed away once at the boundary, then passed inward as a concrete value.
-2. The fallback (``REPO_ROOT`` / ``CATALOG_DIR`` / ``subscription_env()``) is default
+2. The fallback (``REPO_ROOT`` / a module-level default path / ``subscription_env()``) is default
    knowledge; repeating ``else REPO_ROOT`` in N functions lets it drift. Anchor it in one
    place: a signature default (``repo_root: Path = REPO_ROOT``), or better, defer to the
    callee/boundary that already owns it.

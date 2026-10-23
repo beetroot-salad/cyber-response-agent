@@ -86,13 +86,13 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--author-drain", action="store_true",
-        help="LESSONS AUTHOR stage: in a fresh lessons/ worktree, drain the "
+        help="LESSONS AUTHOR stage: in a batch draft of the tenant's repo, drain the "
              "findings/observation curator queues and open one lessons PR "
              "(takes no run_dir; one drainer at a time).",
     )
     parser.add_argument(
         "--lead-author-drain", action="store_true",
-        help="LEAD-AUTHOR stage: in a fresh lead-author/ worktree, curate the gather "
+        help="LEAD-AUTHOR stage: in a batch draft of the tenant's repo, curate the gather "
              "catalog + system skills for each queued run and open one lead-author "
              "PR (separate from the lessons PR; takes no run_dir; one drainer at a time).",
     )

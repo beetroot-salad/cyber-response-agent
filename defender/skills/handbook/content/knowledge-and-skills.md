@@ -70,7 +70,7 @@ rather than shipping it, so the edit cannot be forgotten, only made.
 
 ## Lessons
 
-`lessons/*.md` under the tenant's knowledge tree (the tenant repo's `agent/`, which a run
+`agent/lessons/*.md` under the tenant's knowledge tree (the tenant repo's `agent/`, which a run
 reads from its own copy at `/agent/`, `$DEFENDER_AGENT_DIR`) is the corpus the **learning loop
 authors and the runtime agent reads** — the two ends of the feedback loop. The product tree
 holds no lessons.
@@ -83,7 +83,7 @@ holds no lessons.
   Reads the bodies whose `description` looks relevant to the current alert,
   before writing its `:H`/`:L` blocks.
 - **Authored by the loop.** The lessons curator (`learning/author/lessons/run.py`) folds
-  queued findings into `lessons/` once `_pending` crosses the threshold (see
+  queued findings into `agent/lessons/` once `_pending` crosses the threshold (see
   `content/learning-loop.md`), as a pull request on the tenant's repo that a human merges.
   Hand-edits are fine if they match the schema in `learning/author/lessons/prompt.md`, but
   the corpus is meant to be loop-authored.
