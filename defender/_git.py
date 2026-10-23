@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -292,53 +291,3 @@ def git_tree_blobs(
                      env=committed_view_env(rev), timeout=timeout)
     blobs = blob_batch(batch_args, out, [oid for oid, _ in wanted])
     return {path: blob for (_oid, path), blob in zip(wanted, blobs, strict=True)}
-
-
-#: `git diff`'s options for a comparison of raw bytes: the executable bit ignored (a mode-only
-#: change is no content change), no end-of-line conversion from config, a symlink kept a symlink,
-#: and the stat-dirty but identical file re-hashed rather than reported.
-_RAW_COMPARE = ("-c", "core.fileMode=false", "-c", "core.autocrlf=false",
-                "-c", "core.symlinks=true", "-c", "diff.autoRefreshIndex=true",
-                "--literal-pathspecs")
-
-
-def git_unchanged_since(
-    cwd: Path, rev: str, pathspec: str, *, timeout: float | None = None,
-) -> frozenset[str]:
-    """The repo-relative paths of the regular files `rev` carries under `pathspec` (nested
-    included) that git still finds unchanged in the working tree: still a regular file, with the
-    same bytes. Git's own comparison (#1134 addendum 3, D1; N-a): it lstats each entry, so a
-    symlink is a type change and a FIFO, a folder or nothing at the name is a change, none of them
-    followed or opened; it hashes a regular file's content, a hard link's included. The executable
-    bit is ignored, and attributes come from `rev`'s tree (`GIT_ATTR_SOURCE`, git 2.42+), never
-    from a `.gitattributes` in the worktree, so no end-of-line conversion makes changed bytes
-    compare equal; replace objects are ignored, so the comparison is with the commit's own blobs
-    (`committed_view_env`). A path `rev` does not carry as a regular file is never in the answer.
-    A git failure (an unknown `rev`, an unreadable index, no repository) raises `GitError`;
-    `timeout` bounds each git process (`TimeoutExpired`)."""
-    carried = {path for _oid, path in _regular_blobs(cwd, rev, pathspec, timeout=timeout)}
-    if not carried:
-        return frozenset()
-    args = [*_RAW_COMPARE, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff",
-            "--no-textconv", rev, "--", pathspec]
-    out = _run_bytes(args, cwd=cwd, env=committed_view_env(rev), timeout=timeout)
-    changed = {p.decode("utf-8", "surrogateescape") for p in out.split(b"\0") if p}
-    return frozenset(carried - changed)
-
-
-def git_worktree_files(cwd: Path, pathspec: str, *, timeout: float | None = None) -> list[str]:
-    """Every file under `pathspec` in the working tree that `.gitignore` does not exclude, by its
-    repo-relative path, nested folders included: git's own walk of the worktree (`ls-files
-    --others --exclude-standard`) run against an index file that does not exist, which git reads
-    as an empty index — so the repo's real index is never opened and every such file counts as
-    "other". For a caller whose `git status` failed on a broken index (#1134 addendum 2
-    correction, C1: git names the names; nothing here lists a folder in Python). The index path
-    is a fresh name in the repo's git dir, never written (`ls-files` writes no index). A git
-    failure raises `GitError`; `timeout` bounds each git process (`TimeoutExpired`: a FIFO at a
-    `.gitignore` blocks the walk)."""
-    absent_index = git(["rev-parse", "--path-format=absolute", "--git-path",
-                        f"curator-absent-index-{uuid.uuid4().hex}"], cwd=cwd, timeout=timeout)
-    args = ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec]
-    out = _run_bytes(args, cwd=cwd, env={**os.environ, "GIT_INDEX_FILE": absent_index},
-                     timeout=timeout)
-    return [p.decode("utf-8", "surrogateescape") for p in out.split(b"\0") if p]
