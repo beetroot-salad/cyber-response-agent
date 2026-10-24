@@ -812,7 +812,7 @@ def _invoke_tenant_row_writer(run_dir: Path) -> None:
 #: FIFTEEN ROWS, and the two additions are not bookkeeping. `run_investigation` is the
 #: driver's fault-exit trace write — the SECOND of the two sites the original issue reported,
 #: dropped by every hand-derived instrument in this change at once (census, lint gate list,
-#: project-profile writer list). `query_tool_queries_table` is the second artifact of a writer
+#: shared-root writer list). `query_tool_queries_table` is the second artifact of a writer
 #: the census counted once: one bound edge, two plant targets, and the one an aliased append
 #: lands outside the tree verbatim.
 CENSUS: tuple[Writer, ...] = (

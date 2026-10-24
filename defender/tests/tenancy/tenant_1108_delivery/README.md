@@ -28,7 +28,7 @@ Status: **amendment 3 rewrite (2026-10-16), repaired after its review (REVISE) a
 - Original immutable contract: `810b70d8a5c8c9935c5eaeb3bdb9b4b311abbdeb`; this repair descends directly from it and retains the original base.
 - Base: `d4fea4cfd53a89fcdfff93f1c4ca6ef9c943e490` (merged P2).
 - Design: [issue design comment](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6063781627), fetched 2026-10-14, plus the user's session clarification: the tenant bot can read protection but cannot modify it; [D7 amendment 1](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6190547938); [D7 amendment 2](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6195623857), which supersedes the box half of D7 and of amendment 1 where they conflict (the `agent` mount kind is retired; `code`/`data` and `MOUNT_CHECK` stay); [design amendment 3](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6211955368), from the code review of #1253, which replaces parts of amendment 2, with the user's decisions D-closed, D-peel and D-fork.
-- Workflow: `spec-flow/skills/write-tests/SKILL.md` at base. No production skeleton or policy substitute is included.
+- Workflow: `spec-flow/skills/write-tests/SKILL.md` at base. No production skeleton or policy substitute is included. <!-- lint-stale-ref: ok — historical record: the plugin and its working-state folder were named spec-flow when this ran -->
 - Contract identity: the immutable git commit containing this suite and record; the final handoff names its SHA.
 - Next stage: `write-code-from-tests`, beginning from that contract commit. P3 stays dormant; P4 performs production wiring and removes GhForge.
 

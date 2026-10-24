@@ -126,8 +126,7 @@ def warn_window(text: str) -> tuple[Any, ...]:
     The module is `defender.skills.invlang.validate`, the module that already owns
     `Diagnostic` and `diagnose`: claim g5 censused exactly one consumer of `Diagnostic`
     outside it, so putting the derivation anywhere else would give the type a second
-    importer for no reason. An implementation that spells the name otherwise makes
-    `check_binds` skip the concept silently — that is why the name is pinned here."""
+    importer for no reason."""
     from defender.skills.invlang.validate import warn_diagnostics
 
     return tuple(warn_diagnostics(text))

@@ -415,8 +415,7 @@ PLANTS: dict[str, Plant] = {
         "import ast\n\n\ndef is_run_1191(path_1191, node_1191):\n"
         "    ast.parse(path_1191.read_text())\n"
         '    return node_1191.func.id == "run_1191"\n'),
-    "lint_unpinned_text_io": Plant(
-        UNPINNED_PLANT, support=lambda: {"spec-flow/scripts/inert_1191.py": T.INERT}),
+    "lint_unpinned_text_io": Plant(UNPINNED_PLANT),
     "lint_run_layout_imports": Plant(_layout_plant, support=_real_door),
     "lint_log_setup": Plant(
         'def main_1191():\n    return 0\n\n\nif __name__ == "__main__":\n    main_1191()\n'),

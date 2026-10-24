@@ -15,7 +15,7 @@ The idea is to give the agent a structured way to identify its runtime mistakes 
 - `playground-v2/`: the SOC lab the defender runs against — a Docker Compose stack (Elastic/Fleet, Keycloak, Zeek, Falco, role hosts with baseline-activity generators, attack runner) on a Hetzner VPS
 - `playground-v2/infra/`: Terraform for that VPS, with snapshot lever-up/lever-down scripts for cost control
 - the v1 lab (Wazuh-era) has been retired and deleted; its `ticket-server/` lives on at `playground-v2/ticket-server/`
-- `spec-flow/`: meta-tooling, not part of the security agent — the Claude Code plugin whose skills drive the spec-first dev workflow used to build this repo
+- `contract-first/`: meta-tooling, not part of the security agent — the Claude Code plugin whose skills drive the contract-first dev workflow (the design becomes a committed test contract before code is written) used to build this repo
 
 ## Runtime Loop
 

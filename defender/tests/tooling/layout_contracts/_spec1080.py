@@ -60,7 +60,7 @@ QUERY_RULES = "defender/knowledge/_query_rules.py"
 #: The flat-tier query rules keep their BASE names (the 2026-10-04 cut: dF11's public rename is
 #: parked with #1165), their values byte-identical: this table is the IDENTITY map. It stays the
 #: one place every file of this suite reads a rule's spelling from, so a later rename is made
-#: HERE, never through a `conceptAliases` entry (which would silently disable `check_binds`).
+#: HERE.
 QUERY_RULE_PUBLIC = {"_json_safe_params": "_json_safe_params", "_request_key": "_request_key"}
 
 #: Directory names no census, locator or scan descends into: tool output, caches, virtualenvs,

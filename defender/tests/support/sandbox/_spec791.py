@@ -21,9 +21,6 @@ RUN_COMMON_PY = DEFENDER / "run_common.py"
 CLI_PY = DEFENDER / "learning" / "core" / "cli.py"
 SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
 VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
-PROJECT_PROFILE = REPO_ROOT / ".claude" / "spec-flow.json"
-HISTORICAL_GRAPH_PROFILE = (
-    REPO_ROOT / "docs/archive/spec-flow-project-config.json")
 
 # `OLDER_SPEC_GRAPH` (spec_graph_774.yaml) and `LIVE_STAGE_WORD` ("projection") left with
 # #797: the graph is deleted and the live projection stage is retired, so the two demands
@@ -46,8 +43,7 @@ RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
 #: replaced) lived in `core/markers.py`, which that change deleted outright — a symbol that no
 #: longer exists has no dead-code record to name.
 RETIRED_DEAD_SYMBOLS: tuple[str, ...] = ()
-# The projected-telemetry writer bullet 3 deletes, as the project profile's shared-root
-# census spells it. A census row naming a symbol that resolves to nothing reads exactly
+# The projected-telemetry writer bullet 3 deletes, as the shared-root census spells it. A census row naming a symbol that resolves to nothing reads exactly
 # like a row nobody wrote, and this file seeds the next change's grounding pass.
 RETIRED_TELEMETRY_WRITER = "_write_oracle_telemetry"
 
