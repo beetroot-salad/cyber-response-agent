@@ -196,6 +196,8 @@ class FakeSpawn:
     effect: Callable[[list[str]], None] | None = None
     calls: list[SpawnCall] = field(default_factory=list)
     seen: list[str | None] = field(default_factory=list)
+    #: The `env=` each call was handed (`None`: the child inherits the launcher's).
+    envs: list[Any] = field(default_factory=list)
 
     def _text(self) -> str | None:
         return self.index.read_text(encoding="utf-8") if self.index.is_file() else None
@@ -204,6 +206,7 @@ class FakeSpawn:
                  on_line: Callable[[str], None], **_: Any) -> int:
         args = [str(a) for a in argv]
         self.calls.append(SpawnCall(args, self._text()))
+        self.envs.append(env)
         if self.effect is not None:
             self.effect(args)
         for line in (self.lines(args) if callable(self.lines) else self.lines):
@@ -756,6 +759,45 @@ def test_1279_the_announced_id_is_recorded_while_the_child_still_runs(scene: Sce
     assert len(_rows(spawn.seen[-1])) == len(_rows(spawn.seen[0])), "a later line added a row"
 
 
+def test_1279_a_launch_and_its_id_row_are_each_synced_to_disk_when_appended(scene: Scene, monkeypatch):
+    """O7: the launch row and the id row are each durable (fsynced) the moment they are appended."""
+    index = scene.ops / INDEX_NAME
+    synced: list[int] = []
+    real_fsync = os.fsync
+
+    def spy(fd: int) -> None:
+        # rows in F at the instant of the sync: the sync that follows row n sees n rows
+        synced.append(len(_rows(index.read_text(encoding="utf-8") if index.is_file() else None)))
+        real_fsync(fd)
+
+    # `held_out` holds F's folder through the real `_io` over `os`, with no fsync seam: the one
+    # targeted patch of this test, a pass-through that records and still syncs.
+    monkeypatch.setattr(os, "fsync", spy)
+    rid = S.new_id()
+
+    _assert_launch_accepted(scene, index, spawn=FakeSpawn(index, lines=[_announce(rid)]),
+                            announced=rid)
+
+    assert 1 in synced, f"the launch row was never synced after it was written: {synced}"
+    assert 2 in synced, f"the id row was never synced after it was written: {synced}"
+
+
+def test_1279_launch_spawns_run_py_with_no_run_id_in_its_environment(scene: Scene):
+    """P-B: the launcher hands the child no run id through its environment, as it hands none on argv."""
+    index = scene.ops / INDEX_NAME
+    rid = S.new_id()
+    spawn = FakeSpawn(index, lines=[_announce(rid)])
+
+    _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
+
+    assert len(spawn.envs) == 1, spawn.envs
+    # Only what the launcher added or changed: a runner's own inherited variables (CI's
+    # GITHUB_RUN_ID) are not the launcher's doing.
+    named = [k for k, v in (spawn.envs[0] or {}).items()
+             if ("RUN_ID" in k.upper() or "RUNID" in k.upper()) and os.environ.get(k) != v]
+    assert named == [], f"the launch put a run id in the child's environment: {named}"
+
+
 def test_1279_the_announced_id_survives_a_launcher_killed_after_the_announce(scene: Scene):
     index = scene.ops / INDEX_NAME
     rid = S.new_id()
@@ -865,6 +907,8 @@ _BROKEN_FIRST_LINES = {
     "undashed-id": "run_id={bare}",
     "braced-id": "run_id={{{rid}}}",
     "trailing-text": "run_id={rid} extra",
+    "leading-space": " run_id={rid}",
+    "leading-tab": "\trun_id={rid}",
 }
 
 

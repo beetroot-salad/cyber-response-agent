@@ -290,6 +290,71 @@ def test_a7_a_mount_above_the_resolved_root_is_refused_and_a_clear_one_starts(tm
     assert not X.created(rec.calls)
 
 
+def _request_in_a_worktree(tmp_path: Path, main: Path, wt: Path, *, data: Path | None = None,
+                           lane_dir: Path | None = None) -> box_mod.BoxRequest:
+    """A request whose code mount and code root are the worktree's `defender/`; `data` / `lane_dir`
+    relocate the read-only data tree / the writable lane (created if absent)."""
+    base = X.request_lane(Path(tempfile.mkdtemp(prefix="req-", dir=tmp_path)))
+    moved = replace(base, code=wt / "defender", data=data or base.data, lane=lane_dir or base.lane)
+    for folder in (moved.data, moved.lane):
+        folder.mkdir(parents=True, exist_ok=True)
+    return replace(moved.request(), workdir=wt, defender_dir=wt / "defender")
+
+
+@pytest.mark.parametrize("mount", ["data", "writable"])
+def test_a7_a_worktrees_request_box_resolves_the_root_to_the_main_checkouts_folder(
+        tmp_path, monkeypatch, mount):
+    """A7: the request lane resolves the root from its `kind="code"` mount as the run lane does:
+    with the override unset, a mount in the main checkout's `run-visualizations/` is refused naming
+    root and mount, one in the worktree's own is clear."""
+    main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
+    X.dev_default_root(monkeypatch)
+    root = main / "run-visualizations"
+
+    def lane_at(folder: Path) -> box_mod.BoxRequest:
+        key = "data" if mount == "data" else "lane_dir"
+        return _request_in_a_worktree(tmp_path, main, wt, **{key: folder})
+
+    own = lane_at(wt / "run-visualizations" / "mount")
+    clear = RecordingDocker()
+    box_mod.start_box(own, docker=clear)
+    assert clear.create_argv is not None, "the worktree's own folder was taken as the publish root"
+
+    inside = lane_at(root / "mount")
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()) as refused:
+        box_mod.start_box(inside, docker=rec)
+    said = str(refused.value)
+    assert X.names_path(said, root) or X.names_path(said, root.resolve()), (
+        f"the refusal does not name the main checkout's root {root}: {said}")
+    assert X.names_path(said, root / "mount") or X.names_path(said, (root / "mount").resolve()), (
+        f"it does not name the mount: {said}")
+    assert not X.created(rec.calls)
+    assert not X.removed(rec.calls)
+
+
+@pytest.mark.parametrize("above", ["the main checkout", "the root itself"])
+def test_a7_a_request_mount_equal_to_or_above_the_resolved_root_is_refused_and_a_clear_one_starts(
+        tmp_path, monkeypatch, above):
+    """A7 + A1: in the request lane the main checkout (containing the resolved root) or the root
+    itself, mounted, is refused; the same layout with a clear data tree starts."""
+    main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
+    X.dev_default_root(monkeypatch)
+    clear = RecordingDocker()
+    box_mod.start_box(_request_in_a_worktree(tmp_path, main, wt), docker=clear)
+    assert clear.create_argv is not None, "control: a clear worktree request did not start"
+
+    mounted = main if above == "the main checkout" else main / "run-visualizations"
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()) as refused:
+        box_mod.start_box(
+            _request_in_a_worktree(tmp_path, main, wt, data=mounted), docker=rec)
+    said = str(refused.value)
+    assert X.names_path(said, mounted) or X.names_path(said, mounted.resolve()), (
+        f"the refusal does not name the mount {mounted}: {said}")
+    assert not X.created(rec.calls)
+
+
 def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
     """A caller-composed request that names no code tree: nothing to resolve the root from."""
     mounts = (
@@ -430,12 +495,15 @@ def test_a2_the_opt_out_never_degrades_an_existing_same_name_container(
     if lane_kind == "run":
         lane = X.run_lane(tmp_path)
         start = lambda: lane.start(rec)  # noqa: E731
+        name = box_mod.container_name(lane.run_dir.name)
     else:
         lane = X.request_lane(tmp_path)
         start = lambda: box_mod.start_box(lane.request(), docker=rec)  # noqa: E731
+        name = lane.request().name
     with pytest.raises(X.conflict_type()) as refused:
         start()
     assert isinstance(refused.value, box_mod.BoxFault)
+    assert name in str(refused.value), "the refusal does not name the container"
     assert not X.removed(rec.calls), "the start removed a container that holds its name"
     assert not X.created(rec.calls)
 
@@ -457,6 +525,42 @@ def test_a2_an_unreachable_daemon_still_degrades_and_is_not_the_refusal_subtype(
     X.allow_unsandboxed(monkeypatch)
     degraded = start()
     assert degraded.sandboxed is False, "hermetic replays rely on the unreachable daemon degrading"
+
+
+def _daemon_down(argv, **_kw):
+    """A daemon that answers every call with an error (the socket is there, nothing behind it)."""
+    import subprocess
+    return subprocess.CompletedProcess(list(argv), 1, "", "Cannot connect to the Docker daemon")
+
+
+@pytest.mark.parametrize("lane_kind", ["run", "request"])
+def test_a2_a_daemon_that_answers_errors_to_inspect_and_version_degrades_and_is_not_the_refusal(
+        tmp_path, monkeypatch, lane_kind):
+    """A2: a daemon that cannot say what a name holds and cannot answer for itself is a plain
+    BoxFault (not the same-name subtype); the opt-out degrades it; nothing is created or removed."""
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    calls: list[list[str]] = []
+
+    def down(argv, **kw):
+        calls.append(list(argv))
+        return _daemon_down(argv, **kw)
+
+    if lane_kind == "run":
+        lane = X.run_lane(tmp_path)
+        start = lambda: lane.start(down)  # noqa: E731
+    else:
+        lane = X.request_lane(tmp_path)
+        start = lambda: box_mod.start_box(lane.request(), docker=down)  # noqa: E731
+    with pytest.raises(box_mod.BoxFault) as faulted:
+        start()
+    assert not isinstance(faulted.value, X.conflict_type()), (
+        "an unreachable daemon was reported as a same-name container")
+    assert any(c[1:2] == ["version"] for c in calls), "control: the daemon was never probed"
+    X.allow_unsandboxed(monkeypatch)
+    degraded = start()
+    assert degraded.sandboxed is False, "the opt-out no longer degrades an unreachable daemon"
+    assert not X.created(calls)
+    assert not X.removed(calls)
 
 
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
@@ -664,8 +768,9 @@ def test_o6_the_drain_request_name_refuses_a_finished_container(tmp_path):
     wt, request = _drain(tmp_path)
     daemon = FakeDaemon(tmp_path)
     daemon.hold(request.name, "exited")
-    with pytest.raises(X.conflict_type()):
+    with pytest.raises(X.conflict_type()) as refused:
         box_mod.start_box(replace(request, spec=_PINNED), docker=daemon)
+    assert request.name in str(refused.value), "the refusal does not name the container"
     assert daemon.names() == [request.name]
     assert not X.removed(daemon.docker_calls())
 
@@ -759,7 +864,40 @@ def test_o6_the_oracle_request_name_refuses_a_finished_container(tmp_path, oracl
     request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"})
     daemon = FakeDaemon(tmp_path)
     daemon.hold(request.name, "exited")
-    with pytest.raises(X.conflict_type()):
+    with pytest.raises(X.conflict_type()) as refused:
         box_mod.start_box(request, docker=daemon)
+    assert request.name in str(refused.value), "the refusal does not name the container"
     assert daemon.names() == [request.name]
     assert not X.removed(daemon.docker_calls())
+
+
+def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
+        tmp_path, monkeypatch):
+    """O6: `start_oracle_box`, through its own docker closure, refuses when the daemon reports a
+    container under the oracle's minted name, with the conflict in the cause chain; it removes and
+    creates nothing. Control: a daemon holding nothing starts the same oracle."""
+    from defender.box import _oracle
+
+    env = {"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}
+    free = FakeDaemon(tmp_path / "free")
+    free.install(monkeypatch)
+    started = _oracle.start_oracle_box(env=env)
+    try:
+        assert started.sandboxed, "control: the oracle did not start on a free name"
+        assert len(free.created()) == 1
+    finally:
+        _oracle.stop_oracle_box(started)
+
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    log = X.hold_every_name(tmp_path / "holding", monkeypatch)
+    with pytest.raises(_oracle.BoxStartRefused) as refused:
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+    conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
+    assert conflicts, f"the refusal did not survive as the cause: {_chain(refused.value)}"
+    calls = X.logged_calls(log)
+    asked = [c[-1] for c in calls if c[:2] == ["inspect", "-f"]]
+    assert asked, calls
+    assert asked[0].startswith("defender-oracle-"), calls
+    assert asked[0] in str(conflicts[0]), "the refusal does not name the container"
+    assert not any(c[:1] == ["run"] for c in calls), "a box was created beside the held container"
+    assert not any(c[:1] == ["rm"] for c in calls), "the held container was removed"

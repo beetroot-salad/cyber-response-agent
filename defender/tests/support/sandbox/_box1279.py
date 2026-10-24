@@ -220,3 +220,37 @@ def overlapping(sources: list[Path], root: Path) -> list[Path]:
     r = root.resolve()
     return [s for s in sources if s.resolve() == r or s.resolve().is_relative_to(r)
             or r.is_relative_to(s.resolve())]
+
+
+# -- a daemon holding every name ----------------------------------------------------------------
+
+
+def hold_every_name(base: Path, monkeypatch: Any) -> Path:
+    """Put a `docker` program first on `PATH` that logs each call (arguments, one per line, calls
+    separated by a blank line) and answers every `docker inspect` as a container in state `exited`,
+    whatever name asked: a daemon holding every name, for an entry that mints its own. Returns the
+    log; read it with `logged_calls`."""
+    import os
+    import stat
+
+    bin_dir = base / "bin"
+    bin_dir.mkdir(parents=True)
+    log = base / "calls.log"
+    program = bin_dir / "docker"
+    program.write_text(
+        "#!/bin/sh\n"
+        f'for a in "$@"; do printf \'%s\\n\' "$a" >> "{log}"; done\n'
+        f'printf \'\\n\' >> "{log}"\n'
+        'if [ "$1" = inspect ]; then echo exited; fi\n'
+        "exit 0\n", encoding="utf-8")
+    program.chmod(program.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    return log
+
+
+def logged_calls(log: Path) -> list[list[str]]:
+    """The calls `hold_every_name`'s program saw, each as its argument list (without `docker`)."""
+    if not log.exists():
+        return []
+    blocks = log.read_text(encoding="utf-8").split("\n\n")
+    return [b.split("\n") for b in blocks if b.strip("\n")]

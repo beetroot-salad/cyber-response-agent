@@ -43,6 +43,46 @@ class PlantAfterRunDirIo:
         return guarded_mkdir
 
 
+class PlantBeforeRunDirIo(PlantAfterRunDirIo):
+    """A pass-through over the real `defender._io` that calls `plant(run_dir)` right BEFORE the
+    first real run-dir `guarded_mkdir` (not `gather_raw`): between any check of the id and the
+    make, so only an exclusive make refuses what it finds."""
+
+    def __getattr__(self, name: str) -> Any:
+        if name != "guarded_mkdir":
+            return super().__getattr__(name)
+        real = getattr(_io, name)
+
+        def guarded_mkdir(path: Path, *args: Any, **kwargs: Any) -> Any:
+            path = Path(path)
+            if self.planted_in is None and path.name != RUN_LAYOUT.gather_raw.name:
+                self.planted_in = path
+                self._plant(path)
+            return real(path, *args, **kwargs)
+
+        return guarded_mkdir
+
+
+#: What can sit at a sidecar's (or a run dir's) name besides a plain file; `plant_entry` makes each.
+OBSTRUCTIONS = ("regular-file", "directory", "dangling-link", "link-to-file")
+
+
+def plant_entry(kind: str, at: Path, elsewhere: Path) -> None:
+    """Put an entry of `kind` at `at`; `link-to-file` points at a real file under `elsewhere`."""
+    if kind == "regular-file":
+        at.write_text("{}\n", encoding="utf-8")
+    elif kind == "directory":
+        at.mkdir()
+    elif kind == "dangling-link":
+        at.symlink_to(elsewhere / "nowhere")
+    elif kind == "link-to-file":
+        elsewhere.mkdir(exist_ok=True)
+        (elsewhere / "target.json").write_text("{}\n", encoding="utf-8")
+        at.symlink_to(elsewhere / "target.json")
+    else:
+        raise ValueError(kind)
+
+
 class TenantWithRunsIo:
     """An accepted tenant whose `runs_repository()` is built over `io`. Everything else is the
     real tenant's (it answers `isinstance(…, Tenant)`)."""

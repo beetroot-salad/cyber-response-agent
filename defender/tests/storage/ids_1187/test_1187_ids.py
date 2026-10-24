@@ -4,6 +4,7 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import ast
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -333,6 +334,29 @@ def test_1279_o5_two_runs_announce_two_minted_ids(tmp_path, data_root):
         folder for _line, folder in announced)
 
 
+@pytest.mark.parametrize("var", ["DEFENDER_RUN_ID", "RUN_ID", "DEFENDER_RUNID", "DEFENDER_PINNED_RUN_ID"])
+def test_1279_o5_no_environment_variable_chooses_the_run_id(tmp_path, data_root, monkeypatch, var):
+    """P-B/O5: with a fresh uuid4 in the environment, run.py still announces a minted, different id."""
+    t = S.tenant(data_root)
+    alert = H.alert_file(tmp_path / "in")
+    runs = Path(location_path(t.runs))
+    chosen = S.new_id()
+    control = P.drive_run_py_stdout([str(alert), "--tenant", t.id, "--no-learn"], P.SiblingRecorder())
+    assert control.rc == 0, (control.rc, control.out, control.err)
+    assert control.out.startswith("run_id="), (control.rc, control.out, control.err)
+    monkeypatch.setenv(var, chosen)
+    rec = P.SiblingRecorder()
+
+    ran = P.drive_run_py_stdout([str(alert), "--tenant", t.id, "--no-learn"], rec)
+
+    assert ran.rc == 0, (ran.rc, ran.err, P.refusal_text(ran.refusal))
+    announced = ran.out.splitlines()[0].removeprefix("run_id=")
+    assert S.is_canonical_uuid(announced), ran.out
+    assert announced != chosen, f"{var} chose the run's id"
+    assert Path(rec.run_dir) == runs / announced
+    assert not os.path.lexists(runs / chosen), f"{var} named a run folder"
+
+
 def test_1279_o5_a_run_refused_before_setup_announces_nothing(tmp_path, data_root):
     """O5: nothing is on stdout before the announcement, and a refused start has none."""
     S.tenant(data_root)
@@ -354,14 +378,18 @@ def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
     from defender import run_common
     from defender.run_repository import EpisodeRuns, RunsRepository
 
-    for func in (run_common.materialize_run, run_py._materialize_run, RunsRepository.create):
+    seam = inspect.signature(run_py.main).parameters["materialize"].default
+    for func in (run_common.materialize_run, run_py._materialize_run, RunsRepository.create, seam):
         said = set(inspect.signature(func).parameters) & {"run_id", "pinned", "id"}
         assert said == set(), f"{func.__qualname__} still takes {sorted(said)}"
+        open_ended = [p.name for p in inspect.signature(func).parameters.values()
+                      if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]
+        assert open_ended == [], f"{func.__qualname__} takes *args/**kwargs {open_ended}: an id could ride them"
+    assert seam is run_py._materialize_run, "run.main's materialize seam defaults to run setup's helper"
     params = list(inspect.signature(RunsRepository.create).parameters.values())
     assert params[0].name == "self", params
     for param in params[1:]:
-        assert param.default is not param.empty or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD), (
-            f"create() requires {param.name!r}: it takes no caller input")
+        assert param.default is not param.empty, f"create() requires {param.name!r}: it takes no caller input"
         assert "id" not in param.name.casefold().replace("valid", ""), (
             f"create() takes an id-like parameter {param.name!r}")
     assert len(inspect.signature(EpisodeRuns.create).parameters) == 2, (
@@ -608,27 +636,34 @@ def run_id_handouts(root: Path, *, skip_tests: bool = True) -> list[Hit]:
     return sorted(set(hits))
 
 
+def _splats(node: ast.Call) -> bool:
+    """Does the call spread a mapping or sequence (`**m`, `*a`) that could carry an id?"""
+    return any(k.arg is None for k in node.keywords) or any(
+        isinstance(a, ast.Starred) for a in node.args)
+
+
 def _handouts_at(node: ast.AST, env, rel: str, values: dict) -> list[Hit]:
     if not isinstance(node, ast.Call):
         return []
     func = node.func
     called = _astlib.callee(node, env) or ""
     named = {k.arg for k in node.keywords}
-    handed = len(node.args) > 1 or bool(named & {"run_id", "pinned"})
+    handed = len(node.args) > 1 or bool(named & {"run_id", "pinned"}) or _splats(node)
     seam = isinstance(func, ast.Name) and func.id in ("materialize", "_materialize_run")
     if called.rsplit(".", 1)[-1] in ("materialize_run", "_materialize_run") or seam:
         return [Hit(rel, node.lineno, "setup-id", ast.unparse(node))] if handed else []
     if not (isinstance(func, ast.Attribute) and func.attr == "create"):
         return []
     receiver = func.value
-    if isinstance(receiver, ast.Call) and isinstance(receiver.func, ast.Attribute) and (
-            receiver.func.attr == "runs_repository"):
+    if S.spells(receiver, "runs_repository", values):  # direct, or through any local alias
         return [Hit(rel, node.lineno, "repo-id", ast.unparse(node))] if (
             node.args or node.keywords) else []
     if S.spells(receiver, "episode_runs", values):
-        sourced = bool(node.args) and S.spells(node.args[0], "arm_id", values)
+        sourced = bool(node.args) and S.spells(node.args[0], "arm_id", values) and not _splats(node)
         return [Hit(rel, node.lineno, "arm-create" if sourced else "arm-create-foreign",
                     ast.unparse(node))]
+    if _splats(node) or named & {"run_id", "pinned"}:  # a receiver that may be the repo
+        return [Hit(rel, node.lineno, "create-spread", ast.unparse(node))]
     return []
 
 
@@ -636,7 +671,7 @@ def test_1279_a3_census_no_production_call_hands_a_run_id_to_setup_or_create():
     hits = run_id_handouts(DEFENDER)
     listing = "\n  ".join(str(h) for h in hits)
 
-    handed = [h for h in hits if h.kind in ("setup-id", "repo-id", "arm-create-foreign")]
+    handed = [h for h in hits if h.kind != "arm-create"]
     assert handed == [], f"production hands an id around:\n  {listing}"
     assert [(h.rel, h.kind) for h in hits] == [("run_common.py", "arm-create")], (
         f"only run setup makes an arm, from the roster's arm id:\n  {listing}")
@@ -657,7 +692,21 @@ RUN_ID_HANDOUTS = [
      [("arm-create",)]),
     ("arm-from-elsewhere", "episode_runs.create(rid)", [("arm-create-foreign",)]),
     ("arm-through-alias", "view = episode_runs\nview.create(rid)", [("arm-create-foreign",)]),
+    ("setup-splat", "ctx = {'run_id': rid}\nrun_common.materialize_run(alert, tenant=t, **ctx)",
+     [("setup-id",)]),
+    ("seam-splat", "pin = {'run_id': rid}\nmaterialize(alert, tenant=t, model=m, **pin)",
+     [("setup-id",)]),
+    ("run-py-helper-splat", "_materialize_run(alert, tenant=t, model=m, **ctx)", [("setup-id",)]),
+    ("repo-through-variable", "repo = t.runs_repository()\nrepo.create(rid)", [("repo-id",)]),
+    ("repo-splat-through-variable", "repo = t.runs_repository()\nrepo.create(**ctx)",
+     [("repo-id",)]),
+    ("repo-through-two-names", "a = t.runs_repository()\nb = a\nb.create(run_id=rid)",
+     [("repo-id",)]),
+    ("repo-from-parameter-splat", "other.create(**ctx)", [("create-spread",)]),
+    ("arm-splat", "episode_runs.create(*[episode_runs.arm_id(world.world_id)])",
+     [("arm-create-foreign",)]),
     ("clean-setup", "run_common.materialize_run(alert, tenant=t, model=m, world=w)", []),
+    ("clean-repo-variable", "repo = t.runs_repository()\nrepo.create()", []),
     ("clean-seam", "materialize(alert, tenant=t, model=m)", []),
     ("clean-repo", "t.runs_repository().create()", []),
     ("unrelated-create", "episode.source_alert.create(raw)\nother.create(rid)", []),

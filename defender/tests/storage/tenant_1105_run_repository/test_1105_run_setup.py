@@ -203,3 +203,66 @@ def test_1279_o8_make_run_dir_refuses_anything_at_the_run_dir_without_following_
     if before is not None:
         assert H.tree_state(at) == before, f"{kind}: the refused make changed the dir"
     assert os.path.islink(at) == (kind in ("link-to-dir", "dangling-link"))
+
+
+@pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file"])
+def test_1279_o8_make_run_dir_refuses_what_appears_between_a_check_and_the_make(
+        tmp_path, data_root, kind):
+    """O8: an entry planted right before the run dir's own mkdir is refused untouched (exclusive make)."""
+    from defender.tests.support.storage import _setup_faults_1279 as F
+
+    t = H.tenant(data_root, H.T_ID)
+    elsewhere = tmp_path / "elsewhere"
+    io = F.PlantBeforeRunDirIo(lambda at: F.plant_entry(kind, at, elsewhere))
+    run = F.tenant_with_runs_io(t, io).runs_repository().create()
+    clean = t.runs_repository().create()
+    clean.make_run_dir()
+    assert clean.run_dir.is_dir(), "positive control: with nothing planted the make succeeds"
+
+    err = H.raised(run.make_run_dir)
+
+    assert io.planted_in == run.run_dir, f"nothing was planted before the run dir make: {io.planted_in}"
+    assert isinstance(err, FileExistsError), f"{kind}: a make over a planted entry gave {err!r}"
+    assert os.path.islink(run.run_dir) == (kind != "directory"), f"{kind}: the planted entry was replaced"
+    if kind == "directory":
+        assert H.tree_state(run.run_dir) == {}, "the make went into the planted dir"
+    assert not (elsewhere / "nowhere").exists(), f"{kind}: the make followed the planted link"
+
+
+def _sidecar_suffixes() -> tuple[str, ...]:
+    from defender.run_repository._layout import _SIDECAR_SUFFIXES
+
+    return tuple(_SIDECAR_SUFFIXES)
+
+
+@pytest.mark.parametrize("kind", ["regular-file", "directory", "dangling-link", "link-to-file"])
+@pytest.mark.parametrize("suffix", _sidecar_suffixes())
+def test_1279_o8_natural_setup_refuses_any_entry_at_its_minted_ids_sidecar_name(
+        tmp_path, data_root, monkeypatch, suffix, kind):
+    """O8: in the natural lane too, any entry at the minted id's sidecar name is refused, naming it."""
+    from defender.run_repository import RunId
+    from defender.tests.support.storage import _setup_faults_1279 as F
+
+    t = H.tenant(data_root, H.T_ID)
+    alert = H.alert_file(tmp_path / "in")
+    runs = Path(location_path(t.runs))
+    fixed = str(uuid.uuid4())
+    # No seam fixes the id `create()` mints, and a sidecar can only be planted at a known id: the
+    # one targeted patch of this test.
+    monkeypatch.setattr(RunId, "mint", classmethod(lambda cls: cls.parse(fixed)))
+    runs.mkdir(parents=True)
+    sidecar = runs / f"{fixed}{suffix}"
+    F.plant_entry(kind, sidecar, tmp_path / "elsewhere")
+    before = H.tree_state(runs)
+
+    err = H.raised(_via_run_py, alert, t)
+
+    assert _one_line_exit(err), f"{suffix} {kind}: setup gave {err!r}"
+    assert str(sidecar) in H.message(err), f"the refusal does not name the sidecar: {H.message(err)!r}"
+    assert not os.path.lexists(runs / fixed), "the run dir was made past a sidecar"
+    assert H.tree_state(runs) == before, "the refused setup changed the runs folder"
+
+    os.unlink(sidecar) if kind != "directory" else sidecar.rmdir()
+    run = _setup(alert, t)
+    assert run.run_dir == runs / fixed, "positive control: without the entry setup goes on"
+    assert run.run_dir.is_dir(), "positive control: without the entry setup goes on"

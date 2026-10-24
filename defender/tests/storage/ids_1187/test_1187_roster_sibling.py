@@ -904,7 +904,22 @@ def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_no
         assert existing.is_symlink()
 
 
-@pytest.mark.parametrize("suffix", S.SIDECAR_SUFFIXES)
+#: Every reserved sidecar suffix, spelled out: the sidecar tests run over THIS list, and the
+#: coverage test below pins it to the layout's, so a suffix added there cannot be missed silently.
+ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
+                        ".ticket-write.json", ".session-pointer.json", ".call-join.jsonl",
+                        ".ticket-comments.jsonl")
+
+
+def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():
+    """O8: the suffixes the sidecar tests run over are exactly the layout's reserved ones."""
+    from defender.run_repository._layout import _SIDECAR_SUFFIXES
+
+    assert sorted(ALL_SIDECAR_SUFFIXES) == sorted(_SIDECAR_SUFFIXES), (
+        "the layout reserves a different set of sidecar suffixes: update ALL_SIDECAR_SUFFIXES")
+
+
+@pytest.mark.parametrize("suffix", ALL_SIDECAR_SUFFIXES)
 def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
         tmp_path, data_root, suffix):
     """O8: a sidecar beside the arm's id (a prior run's trace) is refused; nothing is cleared."""
@@ -916,7 +931,7 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
     # Other ids' sidecars, every suffix, sit in the same base: the refusal is for THIS id's
     # sidecar, not for any sidecar (a glob would refuse the control below too).
     for neighbour in (S.new_id(), S.new_id()):
-        for other in S.SIDECAR_SUFFIXES:
+        for other in ALL_SIDECAR_SUFFIXES:
             (scene.ep / "runs" / f"{neighbour}{other}").write_text("{}\n", encoding="utf-8")
     before = S.tree(scene.ep / "runs")
 
@@ -935,3 +950,29 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
     sidecar.unlink()
     ok = _run_control(scene, f"sidecar-{suffix}")
     assert ok.run_dir.name == arm
+
+
+@pytest.mark.parametrize("suffix", [ALL_SIDECAR_SUFFIXES[0], ALL_SIDECAR_SUFFIXES[-1]])
+@pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file"])
+def test_1279_o8_setup_refuses_any_entry_at_an_arms_sidecar_name_links_and_dirs_included(
+        tmp_path, data_root, kind, suffix):
+    """O8: a link (dangling or not) or a dir at the arm's sidecar name is refused, as a file is."""
+    from defender.tests.support.storage import _setup_faults_1279 as F
+
+    scene = _Scene(tmp_path, data_root, B_ID)
+    scene.start_runs_by_hand()
+    arm = scene.roster[WORLD_ID]
+    runs = scene.ep / "runs"
+    F.plant_entry(kind, runs / f"{arm}{suffix}", tmp_path / "elsewhere")
+    before = sorted(os.listdir(runs))
+
+    ran = P.drive_run_py_stdout(P.new_sibling_argv(B_ID, scene.episode_id, LABEL),
+                                rec := P.SiblingRecorder())
+
+    said = f"{P.refusal_text(ran.refusal)}\n{ran.err}"
+    assert ran.refusal is not None, f"setup went on past a {kind} at the {suffix} name: rc {ran.rc}"
+    assert f"{arm}{suffix}" in said, f"the refusal does not name the sidecar: {said!r}"
+    assert "lifecycle" not in rec.order, rec.order
+    assert not os.path.lexists(runs / arm), "the run dir was made past a sidecar"
+    assert sorted(os.listdir(runs)) == before, "the refused setup changed the runs folder"
+    assert os.path.islink(runs / f"{arm}{suffix}") == (kind != "directory")

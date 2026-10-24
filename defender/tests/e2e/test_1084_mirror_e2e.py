@@ -415,6 +415,25 @@ def test_1279_o2_another_tenants_run_with_the_same_id_cannot_overwrite_or_land_i
     assert tenant_a.id == run_a.tenant_id
 
 
+def test_1279_a4_the_run_step_publishes_for_the_tenant_it_was_handed_not_one_it_looks_up(
+        tmp_path, data_root, run_visualizations_dir):
+    """A4: `run_common.visualize` forwards its `Tenant`; handed another tenant, it does not look up the run's own."""
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    run = tenant_run(driven_run(tmp_path))
+    run_common.visualize(run, tenant=tenant_of(run))
+    assert area(run_visualizations_dir, run).is_file(), "positive control: the run's own tenant publishes to its area"
+    shutil.rmtree(run_visualizations_dir)
+    run_visualizations_dir.mkdir()
+    handed_id = fixture_uuid("tenant:handed-1279")
+
+    run_common.visualize(run, tenant=H5.tenant(data_root, handed_id))
+
+    assert not area(run_visualizations_dir, run).exists(), (
+        "the step published for the run's own tenant, not the tenant it was handed")
+
+
 @pytest.mark.parametrize("deployment", ["production", "staging"])
 def test_1279_o4_outside_dev_the_copy_is_skipped_and_the_run_page_is_still_saved(
         tmp_path, run_visualizations_dir, monkeypatch, caplog, deployment):
@@ -435,6 +454,10 @@ def test_1279_o4_outside_dev_the_copy_is_skipped_and_the_run_page_is_still_saved
     _assert_record_written(run_dir)
     assert not list(run_visualizations_dir.iterdir()), "a non-dev run published a page"
     assert _warnings(caplog) == [], "a skipped copy was warned about"
+    skips = [r for r in caplog.records if r.name.startswith("defender.presentation")
+             and r.levelno >= logging.INFO and "production" in r.getMessage()]
+    assert skips, "a skipped copy was not logged: no INFO record from the presentation names the deployment"
+    assert all(r.levelno == logging.INFO for r in skips), [r.getMessage() for r in skips]
 
 
 def test_1279_a7_a_refused_root_resolution_fails_the_copy_not_the_run(

@@ -217,3 +217,84 @@ def test_1279_a4_no_presentation_or_frontend_module_accepts_a_tenant_outside_its
                 for path in modules
                 for line, name in _acceptance_calls(path.read_text(encoding="utf-8"))]
     assert offences == [], "tenant acceptance outside an entry point's main:\n" + "\n".join(offences)
+
+
+# A4 census: the deployment rule ("only `dev` has a publish destination") is stated once, in the
+# publish root's owner. Reading the deployment elsewhere re-states it. Allowed: the environment
+# module that defines `deployment()`, the owner, and the publisher's refusal message (which only
+# names the value the owner refused on). Scanned: every production module of the package.
+
+_DEPLOYMENT_READERS = frozenset({"configuration/_env.py", "configuration/publish_root.py",
+                                 "presentation/publisher.py"})
+_DEPLOYMENT_NAMES = frozenset({"deployment", "DEPLOYMENT_ENV", "DEPLOYMENTS"})
+
+
+def _deployment_reads(source: str) -> list[tuple[int, str]]:
+    """`(line, what)` of each read of the deployment: a call or attribute named `deployment`,
+    a `deployment`/`DEPLOYMENT_ENV` import (alias included), a `DEPLOYMENT_ENV` reference, or the
+    variable's literal name."""
+    found: list[tuple[int, str]] = []
+    tree = ast.parse(source)
+    docstrings = {id(n.body[0].value) for n in ast.walk(tree)
+                  if isinstance(n, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+                  and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in _DEPLOYMENT_NAMES:
+            found.append((node.lineno, node.attr))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "deployment":
+            found.append((node.lineno, "deployment()"))
+        elif isinstance(node, ast.Name) and node.id in {"DEPLOYMENT_ENV", "DEPLOYMENTS"}:
+            found.append((node.lineno, node.id))
+        elif isinstance(node, ast.ImportFrom):
+            found += [(node.lineno, a.name) for a in node.names if a.name in _DEPLOYMENT_NAMES]
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+              and id(node) not in docstrings and "DEFENDER_DEPLOYMENT" in node.value):
+            found.append((node.lineno, "DEFENDER_DEPLOYMENT"))
+    return found
+
+
+def test_1279_a4_the_deployment_census_sees_a_restated_rule_and_spares_innocent_code():
+    """The detector can fail (a synthetic negative) and is not fooled by a local named `deployment`."""
+    restated = {
+        "a call through the module": "def f():\n    return _env.deployment() != 'dev'\n",
+        "an aliased import": "from defender.configuration._env import deployment as d\ndef f():\n    return d()\n",
+        "a bare call": "def f():\n    return deployment() == 'dev'\n",
+        "a stored reference": "get = _env.deployment\n",
+        "the variable's name": "def f():\n    return os.environ.get(_env.DEPLOYMENT_ENV)\n",
+        "the variable's literal": "def f():\n    return os.environ['DEFENDER_DEPLOYMENT']\n",
+        "an imported name": "from defender.configuration._env import DEPLOYMENT_ENV\n",
+    }
+    for what, source in restated.items():
+        assert _deployment_reads(source), f"the census missed {what}"
+    innocent = "def f(deployment):\n    label = deployment\n    return label.upper()\n"
+    assert _deployment_reads(innocent) == [], "the census flagged a local named `deployment`"
+
+
+def test_1279_a4_only_the_publish_root_owner_reads_the_deployment():
+    """A4: the rule is stated only in `configuration/publish_root.py`; no mirror, build or run
+    step restates it (the allow-list: `_env.py`, the owner, and `publisher.py`'s refusal message)."""
+    from pathlib import Path
+
+    defender = Path(importlib.import_module("defender.presentation.publisher").__file__).resolve().parents[1]
+    # The publish consumers: the mirror and renderers, the learning build, box start and the
+    # run's own steps (the places a copy of the rule would be tempting).
+    scanned = [defender / "presentation", defender / "learning" / "frontend", defender / "box"]
+    modules = sorted({*(p for root in scanned for p in root.rglob("*.py")),
+                      defender / "run_common.py", defender / "run.py", defender / "configuration" / "publish_root.py"})
+    assert len(modules) > 20, f"the census saw almost no modules: {len(modules)}"
+    readers = {p.relative_to(defender).as_posix() for p in modules if _deployment_reads(p.read_text(encoding="utf-8"))}
+    assert "configuration/publish_root.py" in readers, f"positive control: the owner was not seen reading it: {readers}"
+    assert sorted(readers - _DEPLOYMENT_READERS) == [], (
+        "the deployment rule is restated outside the publish root's owner")
+
+
+def test_1279_a4_the_run_step_hands_on_the_tenant_it_was_given_and_never_accepts_one():
+    """A4: `run_common.visualize` forwards its `tenant` and holds no acceptance call of its own."""
+    from pathlib import Path
+
+    run_common = importlib.import_module("defender.run_common")
+    source = Path(run_common.__file__).read_text(encoding="utf-8")
+    (func,) = (n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "visualize")
+    segment = ast.get_source_segment(source, func)
+    assert segment is not None
+    assert _acceptance_calls(segment) == [], "run_common.visualize accepts a tenant instead of forwarding its own"
