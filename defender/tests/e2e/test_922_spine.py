@@ -14,13 +14,14 @@ from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core import drains
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.curation._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
 from defender.tests.support.learning.core import _state1135
 from defender.learning.core.state import FINDINGS
 from defender.tests.tenancy.tenant_1108_delivery._support import merge_on_remote
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    AUTHOR_DRAFT_LANES,
     LESSONS_PREFIX,
+    draft_lane_trees,
     drain_paths,
     product_repo,
     remote_branches,
@@ -59,22 +60,36 @@ class TriggerRecorder:
 
     def __init__(self, agent) -> None:
         self.calls: list[dict] = []
+        #: The modules whose REAL `run_batch` returned. The drain records a curator's fault and
+        #: goes on (rc 0), so a curator knocked out of the tick looks like one that held every
+        #: row; a demand about what the curator did checks this first.
+        self.completed: list[str] = []
         self._agent = agent
 
     def __call__(self, paths, state, channel, threshold_env, module_name, pending_label,
-                 *, box=None, **kw) -> None:
+                 *, batch, box=None, **kw) -> None:
+        # #1108 P4 (OD16, class ii): the drain hands the tick's batch; the curator runs over
+        # that batch's draft lanes with `batch=` (as `_drain_support.CuratorTrigger` does),
+        # never over checkout trees built from `paths`.
+        assert batch is not None, "the drain handed the findings trigger no batch"
         self.calls.append({
             "pending_file": state.describe(channel), "threshold_env": threshold_env,
             "module_name": module_name, "pending_label": pending_label, "box": box,
+            "batch": batch,
         })
         if module_name != "author":
             return
-        cfg = dataclasses.replace(
-            lessons_run.build_author_config(
-                paths, state=state, trees=author_trees(paths), box=box, **kw),
-            invoke_agent=self._agent,
-        )
-        lessons_run.run_batch(paths=paths, state=state, cfg=cfg, hold_committed=True, box=box)
+        with draft_lane_trees(batch, AUTHOR_DRAFT_LANES) as trees:
+            cfg = dataclasses.replace(
+                lessons_run.build_author_config(
+                    paths, state=state, trees=trees, box=box, batch=batch, **kw),
+                invoke_agent=self._agent,
+            )
+            assert Path(cfg.corpus_dir).is_relative_to(Path(batch.draft_root)), (
+                f"the curator's corpus {cfg.corpus_dir} is not in the batch's draft")
+            lessons_run.run_batch(paths=paths, state=state, cfg=cfg, hold_committed=True,
+                                  box=box)
+        self.completed.append(module_name)
 
     @property
     def modules(self) -> list[str]:
@@ -168,9 +183,11 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tena
 
     main = t.origin_main()
     agent = D.recording(D.committing("family-lesson"))
-    rc, _rec = drive_tenant_author_drain(t, paths, TriggerRecorder(agent))
+    first = TriggerRecorder(agent)
+    rc, _rec = drive_tenant_author_drain(t, paths, first)
 
     assert rc == 0, "author_drain did not complete its batch"
+    assert first.completed == ["author"], "the findings curator was taken out of the tick"
     assert len(agent.calls) == 1, (
         f"the findings curator ran {len(agent.calls)} times, not once")
     authored = [r["finding_id"] for r in agent.calls[0]["rows"]]
@@ -192,7 +209,9 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tena
     merge_on_remote(t.p3, t.scratch, branch)
     branches = remote_branches(t.remote, LESSONS_PREFIX)
     second = D.recording(D.committing("must-not-run-twice"))
-    assert drive_tenant_author_drain(t, paths, TriggerRecorder(second))[0] == 0
+    again = TriggerRecorder(second)
+    assert drive_tenant_author_drain(t, paths, again)[0] == 0
+    assert again.completed == ["author"], "the second tick's curator was taken out of the tick"
     assert second.calls == [], (
         "the second tick authored the same findings again — the corpus attribution the first "
         "tick wrote is not being read back")
@@ -219,9 +238,12 @@ def test_922_a_caught_family_is_consumed_without_authoring(tenant, tmp_path):
     ])
 
     agent = D.recording(D.committing("must-not-run"))
-    rc, _rec = drive_tenant_author_drain(t, paths, TriggerRecorder(agent))
+    trigger = TriggerRecorder(agent)
+    rc, _rec = drive_tenant_author_drain(t, paths, trigger)
 
     assert rc == 0
+    assert trigger.completed == ["author"], (
+        "the findings curator was taken out of the tick, so 'never authored' proves nothing")
     assert agent.calls == [], (
         "a retired-word family row reached the curator — the partition authored a row the "
         "retired design would have read")
@@ -245,6 +267,7 @@ def test_922_author_drain_triggers_exactly_the_findings_curator(tenant, tmp_path
     rc, _rec = drive_tenant_author_drain(t, paths, trigger)
 
     assert rc == 0
+    assert trigger.completed == ["author"], "the findings curator was taken out of the tick"
     assert sorted(trigger.modules) == ["author", "questioner_curator"], (
         f"author_drain triggered {trigger.modules} — it is still discovering its curators by "
         "iterating the direction table, so the retired observation channels are still drained")
@@ -269,6 +292,7 @@ def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tenant, tmp_
     rc, rec = drive_tenant_author_drain(t, paths, trigger, rec=rec)
 
     assert rc == 0
+    assert trigger.completed == ["author"], "the findings curator was taken out of the tick"
     request = rec.only_request()
     draft = draft_root(request)
     assert writable_sources(request) == {draft / "agent" / "lessons",
@@ -300,6 +324,7 @@ def test_922_a_full_findings_queue_alone_wakes_the_drain(tenant, tmp_path):
     rc, rec = drive_tenant_author_drain(t, paths, trigger, rec=rec)
 
     assert rc == 0
+    assert trigger.completed == ["author"], "the findings curator was taken out of the tick"
     assert "author" in trigger.modules, (
         "the findings queue alone did not wake the drain — the surviving channel's own "
         "threshold no longer answers the wake gate")

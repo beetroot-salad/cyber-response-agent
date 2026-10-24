@@ -340,6 +340,10 @@ Repair round r5:
 - `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
   (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of
   `::test_staying_commands_import_modules_that_have_moved` runs (the golden stays the pre-move recording; the move is applied in the test).
+- `e2e/test_922_spine.py` (class ii, repair-list class D): `TriggerRecorder` takes the batch the drain hands it and runs the REAL findings curator
+  over that batch's draft lanes with `batch=` (as `_drain_support.CuratorTrigger`), not over checkout trees. It records `completed`, and every
+  case asserts the curator's `run_batch` returned: the drain records a curator's `FatalConfigError` and goes on with rc 0, so four cases had
+  passed with the curator knocked out of the tick (`a_caught_family_is_consumed_without_authoring`'s "never authored" was vacuous).
 
 Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/state_contracts/rewritten_tier_map.yaml`.
 
