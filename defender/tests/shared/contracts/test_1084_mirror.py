@@ -185,13 +185,16 @@ def _break_commondir_undecodable(main: Path, wt: Path, admin: Path) -> None:
     (admin / "commondir").write_bytes(b"\xff\xfe\n")
 
 
-@pytest.mark.parametrize("breakage", [
+_BREAKAGES = pytest.mark.parametrize("breakage", [
     _break_commondir_target, _break_git_file_prefix, _break_gitdir_missing,
     _break_commondir_missing, _break_commondir_content, _break_git_file_undecodable,
     _break_commondir_undecodable,
 ], ids=["commondir-names-a-checkout-without-defender", "git-file-without-gitdir-prefix",
         "gitdir-points-nowhere", "commondir-missing", "commondir-names-elsewhere",
         "git-file-undecodable", "commondir-undecodable"])
+
+
+@_BREAKAGES
 def test_1279_a7_a_mismatched_or_malformed_chain_is_refused_not_a_fallback_to_start(
         tmp_path, warned, no_override, breakage):
     """#1279 A7 (conflict updated: #1084 warned and fell back to `start`): in dev a worktree whose
@@ -278,3 +281,27 @@ def test_1279_outside_dev_there_is_no_publish_root_even_when_one_is_configured(
     assert vr.publish_root() is None
     main = _checkout(tmp_path / "main")
     assert vr.publish_root(start=main) is None, "the default layout gave a root outside dev"
+
+
+@pytest.mark.parametrize("deployment", [None, "production"], ids=["unset", "production"])
+@_BREAKAGES
+def test_1279_a7_outside_dev_a_broken_worktree_pointer_gives_no_root_and_no_exception(
+        tmp_path, monkeypatch, no_override, breakage, deployment):
+    """A7: the deployment rule is applied first, so outside `dev` the owner answers `None`
+    without reading any checkout: the same broken worktree that is refused in dev (above) neither
+    raises nor yields a root. Positive control: in dev (the autouse) it is refused."""
+    from defender.configuration import _env
+
+    vr = _renderer()
+    main = _checkout(tmp_path / "main")
+    wt = tmp_path / "trees" / "wt"
+    admin = _worktree(main, wt)
+    breakage(main, wt, admin)
+    with pytest.raises(vr.PublishRootRefused):
+        vr.publish_root(start=wt)
+
+    if deployment is None:
+        monkeypatch.delenv(_env.DEPLOYMENT_ENV)
+    else:
+        monkeypatch.setenv(_env.DEPLOYMENT_ENV, deployment)
+    assert vr.publish_root(start=wt) is None

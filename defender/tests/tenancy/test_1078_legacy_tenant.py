@@ -123,7 +123,8 @@ def test_a_minted_run_id_is_never_the_tenant_records_name(tenant_root, tmp_path)
     run_dir = Path(_materialize(alert))
     assert run_dir.parent == base, run_dir
     assert run_dir.is_dir(), run_dir
-    assert is_valid_run_id(run_dir.name) and run_dir.name != H.RECORD_NAME
+    assert is_valid_run_id(run_dir.name), run_dir
+    assert run_dir.name != H.RECORD_NAME, run_dir
     assert not is_valid_run_id(H.RECORD_NAME), "claim C18, the first coincidence"
     assert not (base / H.RECORD_NAME).exists(), "setup left an entry at the record's name"
 

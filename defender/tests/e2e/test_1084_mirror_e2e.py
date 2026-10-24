@@ -462,4 +462,4 @@ def test_1279_a7_a_refused_root_resolution_fails_the_copy_not_the_run(
     assert not list(run_visualizations_dir.iterdir()), "a refused resolution published a page"
     caplog.clear()
     run_common.visualize(run, tenant=tenant)  # a refused copy is not a failed render: no VisualizeFailed
-    assert [r for r in caplog.records if r.levelno >= logging.WARNING], "the refusal was not logged"
+    assert _warning_records(caplog), "the refusal was not logged by the visualize_run logger"

@@ -262,7 +262,7 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
     # RD-05: rule.name over the committed fixture alerts; each against its own fixture's reference.
     by_name = {**SHIPPED, "signature": "rule.name"}
     names = []
-    for i, slug in enumerate(S.FIXTURE_SLUGS):
+    for slug in S.FIXTURE_SLUGS:
         fixture = S.fixture_alert(slug)
         bare = {**fixture, "rule": {k: v for k, v in fixture["rule"].items() if k != "id"}}
         named = _drive(tmp_path, planted, fixture, mapping=by_name)

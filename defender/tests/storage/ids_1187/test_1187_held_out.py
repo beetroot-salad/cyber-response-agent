@@ -93,7 +93,8 @@ def _assert_launch_row(row: dict, slug: str = SLUG) -> str:
     assert set(row) == {"slug", "launch_id", "launched_at"}, f"not a launch row: {row}"
     assert row["slug"] == slug, row
     assert S.is_canonical_uuid(row["launch_id"]), f"launch id is not a UUID: {row}"
-    assert isinstance(row["launched_at"], str) and row["launched_at"], row
+    assert isinstance(row["launched_at"], str), row
+    assert row["launched_at"], row
     return row["launch_id"]
 # The CLI, driven through `held_out.main`
 
@@ -286,8 +287,8 @@ def _assert_launch_accepted(scene: Scene, index: Path, *, spawn: FakeSpawn,
     call = spawn.calls[0]
     _assert_run_py_argv(call, scene.alert())
     then = _rows(call.index_then)
-    assert then[:len(before)] == before and len(then) == len(before) + 1, (
-        f"spawn did not follow exactly one launch row: {then}")
+    assert then[:len(before)] == before, f"spawn did not follow exactly one launch row: {then}"
+    assert len(then) == len(before) + 1, f"spawn did not follow exactly one launch row: {then}"
     launch_id = _assert_launch_row(then[-1])
     expected = [*then, _id_row(SLUG, launch_id, announced)] if announced else then
     assert _rows(index.read_text(encoding="utf-8")) == expected
@@ -778,9 +779,9 @@ def test_1279_a6_the_default_spawn_streams_the_announce_while_the_child_is_alive
     """A6/P-E: through the REAL default spawn (`held_out._spawn_run_py`, which is `main`'s default
     `spawn`, asserted below), `launch` has appended the id row while the child is still running.
     The child blocks on a sentinel that a watcher creates after it sees the id row in F; a spawn
-    that replays output after exit never gets there: the watcher times out with no id row (so
-    `seen_while_alive` stays empty and the assertion fails), and the child gives up at its own
-    deadline (exit 9, with the id row appended only afterwards)."""
+    that replays output after exit never gets there: the watcher times out with no id row, so
+    `seen_while_alive` stays empty and the assertion fails. (The sentinel is written in `finally`,
+    so the child still exits 0 once the watcher gives up; the failure is the empty list.)"""
     import inspect
     import sys
     import threading
@@ -837,7 +838,8 @@ def test_1279_the_rest_of_the_child_stdout_is_forwarded(scene: Scene):
     spawn = FakeSpawn(index, lines=[_announce(S.new_id()), "triage under way", "disposition: benign"])
     res = scene.launch(index, spawn)
     assert res.rc == 0, res.said
-    assert "triage under way" in res.out and "disposition: benign" in res.out, res.out
+    assert "triage under way" in res.out, res.out
+    assert "disposition: benign" in res.out, res.out
     assert res.out.index("triage under way") < res.out.index("disposition: benign"), res.out
     assert "announce" not in res.err.casefold(), res.err
 
@@ -1046,4 +1048,5 @@ def test_1279_scoring_refuses_an_index_that_cannot_be_trusted(board, kind):
     _index(index, *_refused_rows(kind, good.name))
     res = _score(runs, index, fixtures)
     _assert_refused(res, index, kind)
-    assert res.verdicts() == {} and res.accuracy() is None, f"{kind}: scoring went ahead:\n{res.out}"
+    assert res.verdicts() == {}, f"{kind}: scoring went ahead:\n{res.out}"
+    assert res.accuracy() is None, f"{kind}: scoring went ahead:\n{res.out}"

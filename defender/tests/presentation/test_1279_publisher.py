@@ -127,8 +127,10 @@ def _is_main_guard(node: ast.AST) -> bool:
     t = getattr(node, "test", None)
     return (isinstance(node, ast.If) and isinstance(t, ast.Compare)
             and isinstance(t.left, ast.Name) and t.left.id == "__name__"
-            and len(t.comparators) == 1 and isinstance(t.comparators[0], ast.Constant)
+            and len(t.comparators) == 1 and len(t.ops) == 1 and isinstance(t.comparators[0], ast.Constant)
+            and isinstance(t.ops[0], ast.Eq)
             and t.comparators[0].value == "__main__")
+
 
 def _is_entry_point(node: ast.AST) -> bool:
     if not (isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "main"):
@@ -139,7 +141,8 @@ def _is_entry_point(node: ast.AST) -> bool:
 
 def _acceptance_calls(source: str) -> list[tuple[int, str]]:
     """`(line, name)` of each call to tenant acceptance outside an entry point: an
-    `if __name__ == "__main__":` block or a `main(argv, ...)` function. An import alias of an
+    `if __name__ == "__main__":` block (its body only, comparison `==`) or a module-level
+    `main(argv, ...)` function. An import alias of an
     acceptance name counts as the name."""
     tree = ast.parse(source)
     banned = set(_ACCEPTANCE)
@@ -150,15 +153,18 @@ def _acceptance_calls(source: str) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
 
     def visit(node: ast.AST, exempt: bool) -> None:
-        if _is_entry_point(node) or _is_main_guard(node):
-            exempt = True
         if isinstance(node, ast.Call) and not exempt:
             f = node.func
             name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
             if name in banned:
                 found.append((node.lineno, name))
+        if _is_main_guard(node):
+            # only the guard's own body is the entry point; its test and `else` are scanned
+            for child in ast.iter_child_nodes(node):
+                visit(child, exempt or child in node.body)
+            return
         for child in ast.iter_child_nodes(node):
-            visit(child, exempt)
+            visit(child, exempt or (node is tree and _is_entry_point(child)))
 
     visit(tree, False)
     return found
@@ -178,6 +184,10 @@ def test_1279_a4_the_census_sees_a_reacceptance_and_spares_an_entry_points_own_a
         "a run opener": "def f(raw):\n    return open_requested_run(raw)\n",
         "a command-line run opener": "def f(raw):\n    return open_command_line_run(raw)\n",
         "a non-main guard": "if __name__ == 'other':\n    accept_tenant(1, 2)\n",
+        "a negated main guard": "if __name__ != '__main__':\n    accept_tenant(1, 2)\n",
+        "the else of a main guard": "if __name__ == '__main__':\n    main()\nelse:\n    accept_tenant(1, 2)\n",
+        "a main(argv) nested in a function": "def outer():\n    def main(argv):\n        return accept_tenant(1, argv)\n"
+                                              "    return main\n",
     }
     for what, source in reaccepts.items():
         assert _acceptance_calls(source), f"the census missed {what}"

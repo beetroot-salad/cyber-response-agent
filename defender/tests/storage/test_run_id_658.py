@@ -72,13 +72,11 @@ def test_materialize_takes_no_run_id_and_writes_nothing_for_one(tmp_path, monkey
     tenant = _set_up_tenant(tmp_path, monkeypatch)
     runs_base = location_path(tenant.runs)
 
+    args, kwargs = {"positional": ((S.SAMPLE_UUID,), {}),
+                    "run_id": ((), {"run_id": S.SAMPLE_UUID}),
+                    "pinned": ((), {"pinned": True})}[extra]
     with pytest.raises(TypeError):
-        if extra == "positional":
-            run_common.materialize_run(alert, S.SAMPLE_UUID, tenant=tenant)
-        elif extra == "run_id":
-            run_common.materialize_run(alert, run_id=S.SAMPLE_UUID, tenant=tenant)
-        else:
-            run_common.materialize_run(alert, pinned=True, tenant=tenant)
+        run_common.materialize_run(alert, *args, tenant=tenant, **kwargs)
 
     assert not runs_base.exists()
 

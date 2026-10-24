@@ -744,7 +744,7 @@ def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
             assert _tag_counts(section) == dict.fromkeys(_WRITTEN_P182, 1), (
                 f"the tags listing does not show the text written: {_tag_frame(section)}")
         assert _listed(section) == [name], f"orientation's lookup of {sig!r}: {_listed(section)}"
-    for i, sig in enumerate(["83", "True"]):
+    for sig in ["83", "True"]:
         d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted,
                         orient_shim=S.RecordingShim())
         assert _listed(_lessons_section(d)) == [], (

@@ -756,7 +756,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
     import shutil
 
     tenant = set_up_tenant(data_root, H.TID)
-    # `main(tenant)` derives the tenant's own LoopPaths (#1279 A7 flow): seed the tenant's state.
+    # `main(tenant)` derives the tenant's own LoopPaths (the learning-build flow): seed the tenant's state.
     shutil.copytree(location_path(paths.state_root), location_path(tenant.learning), dirs_exist_ok=True)
     area = run_visualizations_dir / tenant.id / "learning"
     area.mkdir(parents=True)

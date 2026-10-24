@@ -97,7 +97,8 @@ def test_o3_the_override_set_to_the_data_root_refuses_the_run_box(tmp_path, monk
     with pytest.raises(X.conflict_type()) as refused:
         lane.start(rec)
     inside = X.overlapping(list(lane.sources().values()), root)
-    assert lane.run_dir in inside and lane.agent in inside, "the scenario is not set up"
+    assert lane.run_dir in inside, "the scenario is not set up"
+    assert lane.agent in inside, "the scenario is not set up"
     X.assert_refused_for_overlap(refused.value, root=root, mounts=inside, rendered=rendered)
     assert not X.created(rec.calls)
 
@@ -352,6 +353,32 @@ def test_a7_in_dev_an_undeterminable_main_checkout_refuses_the_start(
         lane.start(rec)
     assert not X.created(rec.calls)
     assert not X.removed(rec.calls)
+
+
+@pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
+@pytest.mark.parametrize("deployment", [None, "production"], ids=["unset", "production"])
+@pytest.mark.parametrize("broken", X.BREAKAGES)
+def test_a7_outside_dev_a_broken_worktree_never_affects_the_start(
+        tmp_path, monkeypatch, broken, deployment, opt_out):
+    """A7: the deployment rule is applied first, so outside `dev` (override unset) a box whose
+    code mount is a broken worktree starts, plain and with the opt-out: the owner returns no root
+    without reading the checkout. Control: the same layout in dev is refused."""
+    _, wt = X.fake_main_and_worktree(tmp_path / "bad", broken=broken)
+    lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
+    X.dev_default_root(monkeypatch)
+    with pytest.raises(X.conflict_type()):
+        lane.start(RecordingDocker())
+
+    monkeypatch.delenv(X.PUBLISH_ROOT_ENV, raising=False)
+    if deployment is None:
+        monkeypatch.delenv(X.DEPLOYMENT_ENV, raising=False)
+    else:
+        monkeypatch.setenv(X.DEPLOYMENT_ENV, deployment)
+    if opt_out:
+        X.allow_unsandboxed(monkeypatch)
+    rec = RecordingDocker()
+    lane.start(rec)
+    assert rec.create_argv is not None, "a non-dev start was refused over a broken worktree"
 
 
 # ---------------------------------------------------------------------------------------
