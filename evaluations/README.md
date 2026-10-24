@@ -49,8 +49,9 @@ setup run as root — that adoption case only.)
 ```bash
 # Primary: score against ground truth. It walks fixtures/held_out/ and finds each
 # fixture's run through the held-out index F you name (outside every runs and episodes
-# tree): launch appends {slug, run_id} to F, then runs
-#   run.py <fixture>/alert.json --tenant "$TENANT_ID" --run-id <uuid> --no-learn
+# tree): launch appends a launch row to F, runs
+#   run.py <fixture>/alert.json --tenant "$TENANT_ID" --no-learn
+# and appends {slug, launch_id, run_id} once run.py announces the run id (#1279)
 python3 evaluations/held_out.py launch <slug> --tenant "$TENANT_ID" --index F
 python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```

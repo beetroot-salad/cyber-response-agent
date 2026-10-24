@@ -39,10 +39,13 @@ produces.
 ## Build
 
 ```bash
-python3 defender/learning/frontend/build.py
+DEFENDER_DEPLOYMENT=dev python3 defender/learning/frontend/build.py --tenant <tenant-uuid>
 ```
 
-Writes four artifacts (git-ignored) into this directory:
+Publishes four artifacts into the tenant's area under the publish root
+(`<publish root>/<tenant>/learning/`, #1279; the root is `run-visualizations/` at the main checkout,
+or `DEFENDER_RUN_VISUALIZATIONS_DIR`). Outside a `dev` deployment there is no publish root and the
+build refuses. Never into this directory: every box mounts `defender/`.
 
 - `lessons.json` / `queues.json` — the two view **contracts**
 - `lessons.html` / `queues.html` — **self-contained** pages (open in a browser, no server),

@@ -320,7 +320,7 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
    per-run metadata record it writes under `runs/<id>/` is the ground truth.
 3. When the rule fires, project the alert to fixture shape and run
    `defender/run.py <alert.json> --tenant playground --no-learn` (the run is named by a minted
-   UUID — `--run-id` takes only a UUID since #1187; every run
+   UUID — `run.py` takes no run id since #1279; every run
    names its tenant, and there is no default — #1078;
    clone the tenant repo into `$DEFENDER_DATA_ROOT/playground/knowledge` on the host, then,
    once the clone exits 0, run

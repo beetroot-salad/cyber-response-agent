@@ -36,7 +36,8 @@ copied there and no run records a pointer back to its fixture. Two consequences:
   ```
 
   which appends the row first, then runs
-  `run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant <tenant-uuid> --run-id <uuid> --no-learn`.
+  `run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant <tenant-uuid> --no-learn`; the id row
+  is appended when run.py announces its run id (`run_id=<uuid>`, its first stdout line).
 
 - **Contamination** is stopped at the two entrances to learning, and both checks
   are label-free:
