@@ -1,6 +1,6 @@
 ---
 name: discuss-issue
-description: "Turn an issue or feature description into a grounded, reviewed design: product behavior, scope, data models, flows, architecture, and their trade-offs, or split an issue too large for one pass into several. Use before writing contract tests, or when tests or code expose a consequential design defect. Start with the problem and open questions so the human can form an independent view."
+description: "Turn an issue or feature description into a grounded, reviewed design: product behavior, scope, data models, flows, architecture, and their trade-offs, or split an issue that bundles separate problems into several. Use before writing contract tests, or when tests or code expose a consequential design defect. Start with the problem and open questions so the human can form an independent view."
 argument-hint: "[issue number, description, or design amendment to discuss]"
 effort: high
 ---
@@ -30,7 +30,13 @@ Use executed probes for behavior claims, reads for structure, and reproducible s
 
 Draft the design using **references/design-doc.md**. Settle purpose, scope, models, flows, and architectural direction enough to attempt contract tests. Specify useful **design properties with reasons**: rules that resolve families of cases. Inherit project principles and the human's decisions. Propose new properties explicitly; do not present inferred preferences as adopted principles. Ask for a missing preference when it changes a consequential choice, rather than blocking all work on a generic values questionnaire.
 
-**Split an issue too large for one pass.** Once grounding shows the shape, ask whether this is one issue. Split it when it holds parts that can ship and be checked separately, or when one design would produce a contract no single reviewer could read whole. Cut along obligations and ownership so each piece leaves the system working and its promises observable on their own; a cut by layer (models, then API, then UI) delivers nothing checkable until the last piece lands. Settle in this pass only what the pieces share: the data model, the owners and the decisions that cross the cut, plus the order and dependencies between pieces. Each piece then gets its own discuss-issue pass before any tests, where the parent's decisions count as settled, not as proposals. The split is a §4 choice for the human.
+**Split an issue only on evidence.** One issue is the default. Your sense of how big or slow the work is is not evidence: don't split for estimated effort, file counts or how large the change feels, and coupled work stays one issue however large it is (write-tests splits its authoring when needed). Propose a split only when one of these holds:
+
+- the issue bundles separate problems: groups of obligations that share no data model, owner or flow, so each could be designed, tested and shipped without the other;
+- the human asks for it, or the issue already names phases;
+- a later stage returns the work as unworkable in one pass and names the uncoupled seam it found.
+
+Cut along obligations and ownership so each piece leaves the system working and its promises observable on their own; a cut by layer (models, then API, then UI) delivers nothing checkable until the last piece lands. Settle in this pass only what the pieces share: the data model, the owners and the decisions that cross the cut, plus the order and dependencies between pieces. Each piece then gets its own discuss-issue pass before any tests, where the parent's decisions count as settled, not as proposals. The split is a §4 choice for the human.
 
 ## 3. Review, then patch or dissolve
 
