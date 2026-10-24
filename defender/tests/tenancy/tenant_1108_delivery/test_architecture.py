@@ -155,6 +155,40 @@ _PROSE_SUFFIXES = frozenset({".md", ".txt", ".yaml", ".yml", ".j2", ".jinja", ".
 _OPERATOR_DOCS = frozenset({"README.md", "CLAUDE.md", "AGENTS.md"})
 
 
+def _agent_facing_text():
+    for path in sorted(DEFENDER.rglob("*")):
+        relative = path.relative_to(DEFENDER)
+        if (relative.parts[0] in {"docs", "tests", ".venv"} or "__pycache__" in relative.parts
+                or path.name in _OPERATOR_DOCS or path.suffix not in _PROSE_SUFFIXES
+                or not path.is_file()):
+            continue
+        yield path
+    for tree in ("tenant-template", "tenant-fixture"):
+        yield from (p for p in sorted((DEFENDER.parent / "knowledge" / tree / "agent").rglob("*"))
+                    if p.is_file())
+
+def _folded(node):
+    """The string a constant expression spells, else None: a literal, `+` of spelled parts, an
+    f-string whose parts all spell, a literal separator's join over literal elements. Computed
+    spellings beyond these (slicing, `chr`, a value read at run time) are out of a census's reach."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _folded(node.left), _folded(node.right)
+        return None if left is None or right is None else left + right
+    if isinstance(node, ast.JoinedStr):
+        parts = [_folded(value) for value in node.values]
+        return None if None in parts else "".join(parts)
+    if isinstance(node, ast.FormattedValue) and node.format_spec is None and node.conversion in (-1, ord("s")):
+        return _folded(node.value)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "join"  # lint-ast-resolve: ok — str.join on a literal receiver; no binding to resolve
+            and len(node.args) == 1 and isinstance(node.args[0], (ast.List, ast.Tuple))):
+        separator, parts = _folded(node.func.value), [_folded(e) for e in node.args[0].elts]
+        return None if separator is None or None in parts else separator.join(parts)
+    return None
+
+
 def test_code_check_file_is_one_of_the_oracles_runner_files():
     from defender import box
     from defender.box import _oracle
