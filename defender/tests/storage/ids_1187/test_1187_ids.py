@@ -334,7 +334,8 @@ def test_1279_o5_two_runs_announce_two_minted_ids(tmp_path, data_root):
         folder for _line, folder in announced)
 
 
-@pytest.mark.parametrize("var", ["DEFENDER_RUN_ID", "RUN_ID", "DEFENDER_RUNID", "DEFENDER_PINNED_RUN_ID"])
+@pytest.mark.parametrize("var", ["DEFENDER_RUN_ID", "RUN_ID", "DEFENDER_RUNID", "DEFENDER_PINNED_RUN_ID",
+                                 "DEFENDER_RUN_UUID"])
 def test_1279_o5_no_environment_variable_chooses_the_run_id(tmp_path, data_root, monkeypatch, var):
     """P-B/O5: with a fresh uuid4 in the environment, run.py still announces a minted, different id."""
     t = S.tenant(data_root)
@@ -355,6 +356,24 @@ def test_1279_o5_no_environment_variable_chooses_the_run_id(tmp_path, data_root,
     assert announced != chosen, f"{var} chose the run's id"
     assert Path(rec.run_dir) == runs / announced
     assert not os.path.lexists(runs / chosen), f"{var} named a run folder"
+
+
+def test_1279_o5_the_run_repository_package_reads_no_environment():
+    """P-B/O5: nothing under `defender/run_repository` reads `os.environ`/`getenv`, so no variable can name a run id."""
+    import defender.run_repository as pkg
+
+    def reads_env(tree: ast.AST) -> bool:
+        return any((isinstance(n, ast.Attribute) and n.attr in ("environ", "getenv", "environb"))
+                   or (isinstance(n, ast.ImportFrom) and n.module == "os"
+                       and any(a.name in ("environ", "getenv") for a in n.names))
+                   for n in ast.walk(tree))
+
+    files = sorted(Path(pkg.__file__).parent.rglob("*.py"))
+    assert files, "positive control: the package has sources to scan"
+    assert reads_env(ast.parse("import os\nx = os.environ.get('A')")), "positive control: the scan sees a read"
+    assert reads_env(ast.parse("from os import getenv")), "positive control: the scan sees an import"
+    readers = [f.name for f in files if reads_env(ast.parse(f.read_text(encoding="utf-8")))]
+    assert readers == [], f"these modules read the environment: {readers}"
 
 
 def test_1279_o5_a_run_refused_before_setup_announces_nothing(tmp_path, data_root):
@@ -385,6 +404,17 @@ def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
         open_ended = [p.name for p in inspect.signature(func).parameters.values()
                       if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]
         assert open_ended == [], f"{func.__qualname__} takes *args/**kwargs {open_ended}: an id could ride them"
+    K = inspect.Parameter
+    shape = {run_common.materialize_run: [("alert", K.POSITIONAL_OR_KEYWORD), ("tenant", K.KEYWORD_ONLY),
+                                          ("model", K.KEYWORD_ONLY), ("world", K.KEYWORD_ONLY),
+                                          ("episode_runs", K.KEYWORD_ONLY)],
+             run_py._materialize_run: [("alert", K.POSITIONAL_OR_KEYWORD), ("tenant", K.KEYWORD_ONLY),
+                                       ("model", K.KEYWORD_ONLY), ("world", K.KEYWORD_ONLY),
+                                       ("episode_runs", K.KEYWORD_ONLY)],
+             RunsRepository.create: [("self", K.POSITIONAL_OR_KEYWORD)]}
+    for func, expected in shape.items():
+        got = [(p.name, p.kind) for p in inspect.signature(func).parameters.values()]
+        assert got == expected, f"{func.__qualname__} takes {got}: a renamed id parameter could ride a new name"
     assert seam is run_py._materialize_run, "run.main's materialize seam defaults to run setup's helper"
     params = list(inspect.signature(RunsRepository.create).parameters.values())
     assert params[0].name == "self", params

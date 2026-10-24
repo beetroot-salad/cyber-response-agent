@@ -64,7 +64,8 @@ class PlantBeforeRunDirIo(PlantAfterRunDirIo):
 
 
 #: What can sit at a sidecar's (or a run dir's) name besides a plain file; `plant_entry` makes each.
-OBSTRUCTIONS = ("regular-file", "directory", "dangling-link", "link-to-file")
+OBSTRUCTIONS = ("regular-file", "directory", "dangling-link", "link-to-file",
+                "link-to-dir")
 
 
 def plant_entry(kind: str, at: Path, elsewhere: Path) -> None:
@@ -79,6 +80,9 @@ def plant_entry(kind: str, at: Path, elsewhere: Path) -> None:
         elsewhere.mkdir(exist_ok=True)
         (elsewhere / "target.json").write_text("{}\n", encoding="utf-8")
         at.symlink_to(elsewhere / "target.json")
+    elif kind == "link-to-dir":
+        (elsewhere / "target-dir").mkdir(parents=True, exist_ok=True)
+        at.symlink_to(elsewhere / "target-dir", target_is_directory=True)
     else:
         raise ValueError(kind)
 

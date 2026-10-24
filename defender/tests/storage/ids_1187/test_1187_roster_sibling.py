@@ -953,7 +953,7 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
 
 
 @pytest.mark.parametrize("suffix", [ALL_SIDECAR_SUFFIXES[0], ALL_SIDECAR_SUFFIXES[-1]])
-@pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file"])
+@pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file", "link-to-dir"])
 def test_1279_o8_setup_refuses_any_entry_at_an_arms_sidecar_name_links_and_dirs_included(
         tmp_path, data_root, kind, suffix):
     """O8: a link (dangling or not) or a dir at the arm's sidecar name is refused, as a file is."""

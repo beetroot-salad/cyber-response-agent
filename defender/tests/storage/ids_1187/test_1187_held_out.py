@@ -760,26 +760,46 @@ def test_1279_the_announced_id_is_recorded_while_the_child_still_runs(scene: Sce
 
 
 def test_1279_a_launch_and_its_id_row_are_each_synced_to_disk_when_appended(scene: Scene, monkeypatch):
-    """O7: the launch row and the id row are each durable (fsynced) the moment they are appended."""
+    """O7: the index file itself is fsynced after the launch row and before run.py starts, and
+    after the id row before the next line; the last sync of it saw every row."""
     index = scene.ops / INDEX_NAME
-    synced: list[int] = []
+    events: list[Any] = []
     real_fsync = os.fsync
 
     def spy(fd: int) -> None:
-        # rows in F at the instant of the sync: the sync that follows row n sees n rows
-        synced.append(len(_rows(index.read_text(encoding="utf-8") if index.is_file() else None)))
+        st = os.fstat(fd)
+        events.append(("sync", (st.st_dev, st.st_ino),
+                       len(_rows(index.read_text(encoding="utf-8") if index.is_file() else None))))
         real_fsync(fd)
 
+    def lines(_argv):
+        yield _announce(rid)
+        events.append(("after-announce",))
+        yield "a later line"
+        events.append(("after-later",))
+
     # `held_out` holds F's folder through the real `_io` over `os`, with no fsync seam: the one
-    # targeted patch of this test, a pass-through that records and still syncs.
+    # targeted patch of this test, a pass-through that records the synced file's identity.
     monkeypatch.setattr(os, "fsync", spy)
     rid = S.new_id()
+    spawn = FakeSpawn(index, lines=lines, effect=lambda _argv: events.append(("spawn",)))
 
-    _assert_launch_accepted(scene, index, spawn=FakeSpawn(index, lines=[_announce(rid)]),
-                            announced=rid)
+    _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
 
-    assert 1 in synced, f"the launch row was never synced after it was written: {synced}"
-    assert 2 in synced, f"the id row was never synced after it was written: {synced}"
+    st = index.stat()
+    ident = (st.st_dev, st.st_ino)
+    kinds = [e[0] for e in events]
+    assert kinds.count("spawn") == 1, events
+    assert "after-later" in kinds, events
+    synced = [(k, e[2]) for k, e in enumerate(events) if e[0] == "sync" and e[1] == ident]
+    assert synced, f"the index file was never synced: {events}"
+    at = {name: kinds.index(name) for name in ("spawn", "after-announce", "after-later")}
+    rows_at_spawn = len(_rows(spawn.calls[0].index_then))
+    assert any(k < at["spawn"] and n == rows_at_spawn for k, n in synced), (
+        f"no sync of the index followed the launch row before run.py started: {events}")
+    assert any(at["spawn"] < k < at["after-announce"] and n == rows_at_spawn + 1 for k, n in synced), (
+        f"no sync of the index followed the id row before the next line: {events}")
+    assert synced[-1][1] == rows_at_spawn + 1, f"the last sync of the index missed a row: {events}"
 
 
 def test_1279_launch_spawns_run_py_with_no_run_id_in_its_environment(scene: Scene):
@@ -791,11 +811,9 @@ def test_1279_launch_spawns_run_py_with_no_run_id_in_its_environment(scene: Scen
     _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
 
     assert len(spawn.envs) == 1, spawn.envs
-    # Only what the launcher added or changed: a runner's own inherited variables (CI's
-    # GITHUB_RUN_ID) are not the launcher's doing.
-    named = [k for k, v in (spawn.envs[0] or {}).items()
-             if ("RUN_ID" in k.upper() or "RUNID" in k.upper()) and os.environ.get(k) != v]
-    assert named == [], f"the launch put a run id in the child's environment: {named}"
+    # Name-free: the child gets the inherited environment, nothing added under any name.
+    assert spawn.envs[0] is None or dict(spawn.envs[0]) == dict(os.environ), (
+        "the launcher added or changed something in the child's environment")
 
 
 def test_1279_the_announced_id_survives_a_launcher_killed_after_the_announce(scene: Scene):

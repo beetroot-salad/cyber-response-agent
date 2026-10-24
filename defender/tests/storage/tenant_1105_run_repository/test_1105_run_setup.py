@@ -205,7 +205,7 @@ def test_1279_o8_make_run_dir_refuses_anything_at_the_run_dir_without_following_
     assert os.path.islink(at) == (kind in ("link-to-dir", "dangling-link"))
 
 
-@pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file"])
+@pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file", "link-to-dir"])
 def test_1279_o8_make_run_dir_refuses_what_appears_between_a_check_and_the_make(
         tmp_path, data_root, kind):
     """O8: an entry planted right before the run dir's own mkdir is refused untouched (exclusive make)."""
@@ -235,7 +235,7 @@ def _sidecar_suffixes() -> tuple[str, ...]:
     return tuple(_SIDECAR_SUFFIXES)
 
 
-@pytest.mark.parametrize("kind", ["regular-file", "directory", "dangling-link", "link-to-file"])
+@pytest.mark.parametrize("kind", ["regular-file", "directory", "dangling-link", "link-to-file", "link-to-dir"])
 @pytest.mark.parametrize("suffix", _sidecar_suffixes())
 def test_1279_o8_natural_setup_refuses_any_entry_at_its_minted_ids_sidecar_name(
         tmp_path, data_root, monkeypatch, suffix, kind):

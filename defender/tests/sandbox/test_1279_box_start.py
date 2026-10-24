@@ -355,6 +355,31 @@ def test_a7_a_request_mount_equal_to_or_above_the_resolved_root_is_refused_and_a
     assert not X.created(rec.calls)
 
 
+def test_a7_a_request_resolves_the_root_from_its_code_mount_not_from_its_workdir(
+        tmp_path, monkeypatch):
+    """A7: with the workdir in another checkout, the root is still the code mount's
+    main checkout's: a mount under it is refused, one under the workdir checkout's root starts."""
+    main, wt = X.fake_main_and_worktree(tmp_path / "code-side")
+    other_main, other_wt = X.fake_main_and_worktree(tmp_path / "workdir-side")
+    X.dev_default_root(monkeypatch)
+
+    def at(folder: Path) -> box_mod.BoxRequest:
+        req = _request_in_a_worktree(tmp_path, main, wt, data=folder)
+        return replace(req, workdir=other_wt)
+
+    elsewhere = RecordingDocker()
+    box_mod.start_box(at(other_main / "run-visualizations" / "mount"), docker=elsewhere)
+    assert elsewhere.create_argv is not None, "control: the workdir checkout's folder was taken as the root"
+
+    root = main / "run-visualizations"
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()) as refused:
+        box_mod.start_box(at(root / "mount"), docker=rec)
+    assert X.names_path(str(refused.value), root) or X.names_path(str(refused.value), root.resolve()), (
+        f"the refusal does not name the code mount's checkout root {root}: {refused.value}")
+    assert not X.created(rec.calls)
+
+
 def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
     """A caller-composed request that names no code tree: nothing to resolve the root from."""
     mounts = (
@@ -901,3 +926,14 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
     assert asked[0] in str(conflicts[0]), "the refusal does not name the container"
     assert not any(c[:1] == ["run"] for c in calls), "a box was created beside the held container"
     assert not any(c[:1] == ["rm"] for c in calls), "the held container was removed"
+
+
+def test_o6_every_oracle_box_name_is_fresh(tmp_path, oracle_tree):
+    """O6: two oracle requests carry distinct, `defender-oracle-` prefixed names."""
+    from defender.box import _oracle
+
+    runner, scratch = oracle_tree
+    env = {"DEFENDER_BOX_RUNTIME": "runc"}
+    names = [_oracle.oracle_box_request(scratch, runner, env=env).name for _ in range(3)]
+    assert len(set(names)) == 3, f"an oracle name repeated: {names}"
+    assert all(n.startswith("defender-oracle-") for n in names), names
