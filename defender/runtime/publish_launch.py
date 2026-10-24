@@ -51,9 +51,14 @@ def _failed(summary: str) -> str:
 
 
 def child_environment(environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The child's environment: the launcher's, minus every issuer-named variable."""
+    """The child's environment: the launcher's, minus every issuer-named variable and every
+    registered model provider's API key (the child only talks to the forge)."""
+    from defender.runtime import providers
+
     source = os.environ if environ is None else environ
-    return {key: value for key, value in source.items() if not _ISSUER_ENV.search(key)}
+    keys = set(providers.api_key_vars())
+    return {key: value for key, value in source.items()
+            if not _ISSUER_ENV.search(key) and key not in keys}
 
 
 def launch_publish(

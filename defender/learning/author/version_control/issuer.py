@@ -67,6 +67,8 @@ def read_issuer_config(path: Path) -> IssuerConfig:
             f"the issuer client config {path} lacks {', '.join(missing)}"
         )
     address = obj["issuer"].rstrip("/").removesuffix(IDENTITY_PATH)
+    if not address.lower().startswith("https://"):
+        raise DeliveryRefused(f"the issuer client config {path} names a non-https issuer address")
     return IssuerConfig(
         address=address,
         ca_cert=Path(obj["ca_cert"]),
