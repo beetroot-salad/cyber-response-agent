@@ -753,13 +753,17 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
+    import shutil
+
     tenant = set_up_tenant(data_root, H.TID)
+    # `main(tenant)` derives the tenant's own LoopPaths (#1279 A7 flow): seed the tenant's state.
+    shutil.copytree(location_path(paths.state_root), location_path(tenant.learning), dirs_exist_ok=True)
     area = run_visualizations_dir / tenant.id / "learning"
     area.mkdir(parents=True)
     (area / "queues.html").write_text("STALE", encoding="utf-8")
     before = _in_tree_pages()
     try:
-        assert build.main(paths, tenant=tenant) == 0
+        assert build.main(tenant) == 0
 
         assert sorted(p.name for p in area.iterdir()) == sorted(_PAGE_NAMES)
         queues = json.loads((area / "queues.json").read_text(encoding="utf-8"))
@@ -767,11 +771,11 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
             "findings", "questioner_findings", "pitfalls",
         ]
         assert queues["generated_at"]
-        assert Path(queues["state_root"]) == location_path(paths.state_root)
-        # Hermetic: the seeded root's two tainted trees, not whatever this checkout holds.
-        assert [t["batch_id"] for t in queues["quarantine"]["tainted"]["rows"]] == [
-            "b-later", "a-earlier",
-        ]
+        assert Path(queues["state_root"]) == location_path(tenant.learning)
+        assert _channel(queues, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
+        # The quarantine dir is the tenant's own LoopPaths' (host-wide until #1108 P4), not the
+        # fixture's: its rows are not asserted here.
+        assert "tainted" in queues["quarantine"]
         assert _embedded_data((area / "queues.html").read_text(encoding="utf-8")) == queues
         lessons = json.loads((area / "lessons.json").read_text(encoding="utf-8"))
         assert set(lessons["groups"]) == {"defender", "actor", "environment", "questioner"}

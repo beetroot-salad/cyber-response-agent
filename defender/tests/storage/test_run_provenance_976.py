@@ -326,6 +326,7 @@ def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
 
 def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, capsys):
     from defender import run_common
+    from defender.tests.support.storage._setup_faults_1279 import PlantAfterRunDirIo, tenant_with_runs_io
 
     tenant = _set_up_tenant(tmp_path, monkeypatch)
     runs = location_path(tenant.runs)
@@ -334,18 +335,23 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
     # shapes `write_guarded` refuses. #1279 (conflict updated): setup takes no id and never
     # resumes a dir, so a crashed run's leftover can no longer be planted at a chosen id; the
-    # obstruction is planted in a minted run's dir, between its creation and its stamp, and the
-    # stamp step is driven directly.
-    run = tenant.runs_repository().create()
-    run.make_run_dir()
-    (run.run_dir / PROVENANCE).mkdir()
+    # obstruction is planted by the runs repository's `io=` seam right after the REAL run-dir
+    # creation, and the REAL `materialize_run` is driven through to its stamp.
+    planted: list[Path] = []
 
-    run_common._stamp(run, knowledge_dir=tenant.knowledge)
+    def obstruct(run_dir: Path) -> None:
+        (run_dir / PROVENANCE).mkdir()
+        planted.append(run_dir)
 
+    run = run_common.materialize_run(
+        alert, tenant=tenant_with_runs_io(tenant, PlantAfterRunDirIo(obstruct)))
+
+    assert planted, "the obstruction was never planted: setup made no run dir through the seam"
     assert "could not stamp" in capsys.readouterr().err
     assert (run.run_dir / PROVENANCE).is_dir(), "the refusal removed the obstruction"
+    assert run.run_dir == planted[0]
     assert run.run_dir.parent == runs
-
+    assert RunPaths(run.run_dir).alert_input_dir.is_dir(), "the run did not finish setup after the failed stamp"
 
 
 def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):

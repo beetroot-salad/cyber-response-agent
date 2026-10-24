@@ -762,6 +762,65 @@ def test_1279_the_announced_id_survives_a_launcher_killed_after_the_announce(sce
     _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
 
 
+_ANNOUNCING_CHILD = """
+import os, sys, time
+print("run_id=" + sys.argv[1])
+sys.stdout.flush()
+deadline = time.monotonic() + 10
+while not os.path.exists(sys.argv[2]):
+    if time.monotonic() > deadline:
+        sys.exit(9)
+    time.sleep(0.02)
+"""
+
+
+def test_1279_a6_the_default_spawn_streams_the_announce_while_the_child_is_alive(scene: Scene):
+    """A6/P-E: through the REAL default spawn (`held_out._spawn_run_py`), `launch` has appended the
+    id row while the child is still running. The child blocks on a sentinel that a watcher creates
+    only after it sees the id row in F; a spawn that replays output after exit never gets there
+    (the child gives up with 9, the watcher with no id row, and both fail the test)."""
+    import sys
+    import threading
+    import time
+
+    from evaluations import held_out
+
+    index = scene.ops / INDEX_NAME
+    rid = S.new_id()
+    child = scene.tmp / "announcing_child.py"
+    child.write_text(_ANNOUNCING_CHILD, encoding="utf-8")
+    sentinel = scene.tmp / "id-row-seen"
+    seen_while_alive: list[list[dict]] = []
+
+    def watch() -> None:
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            rows = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
+            if any("run_id" in row for row in rows):
+                seen_while_alive.append(rows)
+                break
+            time.sleep(0.02)
+        sentinel.write_text("go", encoding="utf-8")
+
+    def default_spawn_of_a_stand_in_child(argv: Sequence[str], **kw: Any) -> int:
+        # The default spawn is the thing under test; only run.py is swapped for a tiny child.
+        return held_out._spawn_run_py([sys.executable, str(child), rid, str(sentinel)], **kw)
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    res = scene.launch(index, default_spawn_of_a_stand_in_child)
+    watcher.join(timeout=15)
+
+    assert res.crashed is None, res.crashed
+    assert seen_while_alive, ("the id row was not in F while the child was alive (a spawn that "
+                              f"only replays output after exit?):\n{res.said}")
+    assert res.rc == 0, f"the child never saw its sentinel (exit {res.rc}):\n{res.said}"
+    rows = _rows(index.read_text(encoding="utf-8"))
+    launch_id = _assert_launch_row(rows[0])
+    assert rows == [rows[0], _id_row(SLUG, launch_id, rid)]
+    assert seen_while_alive[0] == rows
+
+
 def test_1279_the_rest_of_the_child_stdout_is_forwarded(scene: Scene):
     index = scene.ops / INDEX_NAME
     spawn = FakeSpawn(index, lines=[_announce(S.new_id()), "triage under way", "disposition: benign"])
@@ -950,13 +1009,26 @@ def _refused_rows(kind: str, run_id: str) -> list[dict]:
         "repeated-launch-id-across-slugs": [_launch_row(SLUG, one), _launch_row(OTHER, one)],
         "id-row-run-id-not-canonical": [_launch_row(SLUG, one), _id_row(SLUG, one, "not-a-uuid")],
         "launch-id-not-text": [{**_launch_row(SLUG, one), "launch_id": 7}],
+        "id-slug-differs-from-its-launch": [_launch_row(SLUG, one), _id_row(OTHER, one, run_id)],
+        "launch-without-launched-at": [{"slug": SLUG, "launch_id": one}],
+        "launched-at-not-text": [{**_launch_row(SLUG, one), "launched_at": 7}],
+        "mixed-launch-and-id-row": [{**_launch_row(SLUG, one), "run_id": run_id}],
+        "mixed-row-after-its-launch": [_launch_row(SLUG, one),
+                                       {**_launch_row(SLUG, one), "run_id": run_id}],
+        "extra-key-on-a-launch-row": [{**_launch_row(SLUG, one), "note": "x"}],
+        "extra-key-on-an-id-row": [_launch_row(SLUG, one),
+                                   {**_id_row(SLUG, one, run_id), "note": "x"}],
+        "extra-key-on-a-legacy-row": [{**_legacy(SLUG, run_id), "note": "x"}],
     }[kind]
 
 
 @pytest.mark.parametrize("kind", [
     "id-before-its-launch", "id-names-no-launch", "id-names-no-launch-at-all",
     "two-id-rows-for-one-launch", "same-id-row-twice", "repeated-launch-id",
-    "repeated-launch-id-across-slugs", "id-row-run-id-not-canonical", "launch-id-not-text"])
+    "repeated-launch-id-across-slugs", "id-row-run-id-not-canonical", "launch-id-not-text",
+    "id-slug-differs-from-its-launch", "launch-without-launched-at", "launched-at-not-text",
+    "mixed-launch-and-id-row", "mixed-row-after-its-launch", "extra-key-on-a-launch-row",
+    "extra-key-on-an-id-row", "extra-key-on-a-legacy-row"])
 def test_1279_scoring_refuses_an_index_that_cannot_be_trusted(board, kind):
     runs, index, fixtures = board
     good = _run(runs, says="malicious")

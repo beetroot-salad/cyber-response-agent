@@ -106,3 +106,84 @@ def test_1279_a4_the_publisher_follows_the_root_at_call_time(dev, tenants, monke
     assert mod.Publisher.for_tenant(tenants[0]).run_page(RUN).path.is_relative_to(first)
     monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(second))
     assert mod.Publisher.for_tenant(tenants[0]).run_page(RUN).path.is_relative_to(second)
+
+
+# A4 census: callers pass the tenant they already accepted; the presentation and the build never
+# accept one again. An entry point's own `main` / `__main__` block is where its one acceptance of
+# the command line's tenant legitimately sits (the CLI hands the accepted Tenant on), so that is
+# the one place a call is allowed.
+
+_ACCEPTANCE = frozenset({
+    "accept_tenant", "requested_tenant", "requested_tenant_id", "accept_requested_tenant",
+    "resolve_data_root", "command_line_paths", "accept_placed_knowledge",
+})
+_ENTRY_POINT_FUNCTIONS = frozenset({"main"})
+
+
+def _acceptance_calls(source: str) -> list[tuple[int, str]]:
+    """`(line, name)` of each call to tenant acceptance outside an entry point's `main` or
+    `if __name__ == "__main__":` block. An import alias of an acceptance name counts as the name."""
+    import ast
+
+    tree = ast.parse(source)
+    banned = set(_ACCEPTANCE)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom | ast.Import):
+            banned |= {a.asname for a in node.names if a.asname and a.name.split(".")[-1] in _ACCEPTANCE}
+
+    def is_main_guard(node: ast.AST) -> bool:
+        return (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                and isinstance(node.test.left, ast.Name) and node.test.left.id == "__name__")
+
+    found: list[tuple[int, str]] = []
+
+    def visit(node: ast.AST, exempt: bool) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name in _ENTRY_POINT_FUNCTIONS:
+            exempt = True
+        if is_main_guard(node):
+            exempt = True
+        if isinstance(node, ast.Call) and not exempt:
+            f = node.func
+            name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+            if name in banned:
+                found.append((node.lineno, name))
+        for child in ast.iter_child_nodes(node):
+            visit(child, exempt)
+
+    visit(tree, False)
+    return found
+
+
+def test_1279_a4_the_census_sees_a_reacceptance_and_spares_an_entry_points_own_acceptance():
+    """The detector can fail (a synthetic negative) and is not blind to aliases, attributes or nesting."""
+    reaccepts = {
+        "a helper": "def publish(raw):\n    return requested_tenant(root, raw)\n",
+        "a method call": "def publish(t):\n    return t.accept_requested_tenant(1)\n",
+        "a module attribute": "def f():\n    return _tenant.resolve_data_root()\n",
+        "an alias": "from x import accept_tenant as take\ndef f():\n    return take(1, 2)\n",
+        "a function beside main": "def main():\n    def f():\n        return accept_tenant(1, 2)\n    return f\n"
+                                     "def g():\n    return accept_tenant(1, 2)\n",
+        "module level": "tenant = accept_tenant(1, 2)\n",
+    }
+    for what, source in reaccepts.items():
+        assert _acceptance_calls(source), f"the census missed {what}"
+    own = {
+        "main": "def main(argv):\n    return requested_tenant(resolve_data_root(), argv[0])\n",
+        "the main guard": "if __name__ == '__main__':\n    sys.exit(main(command_line_paths(p, 1)))\n",
+    }
+    for what, source in own.items():
+        assert _acceptance_calls(source) == [], f"the census flagged an entry point's own {what}"
+
+
+def test_1279_a4_no_presentation_or_frontend_module_accepts_a_tenant_outside_its_entry_point():
+    """A4: the publisher, the mirror, the renderers and the build take the `Tenant` their caller accepted."""
+    from pathlib import Path
+
+    defender = Path(__file__).resolve().parents[2]
+    modules = sorted([*(defender / "presentation").rglob("*.py"),
+                      *(defender / "learning" / "frontend").rglob("*.py")])
+    assert len(modules) > 5, f"the census saw almost no modules: {modules}"
+    offences = [f"{path.relative_to(defender)}:{line} {name}()"
+                for path in modules
+                for line, name in _acceptance_calls(path.read_text(encoding="utf-8"))]
+    assert offences == [], "tenant acceptance outside an entry point's main:\n" + "\n".join(offences)

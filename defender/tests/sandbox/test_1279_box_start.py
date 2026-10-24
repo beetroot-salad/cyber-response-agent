@@ -235,6 +235,100 @@ def test_o3_outside_dev_there_is_no_publish_root_and_nothing_is_checked(tmp_path
 
 
 # ---------------------------------------------------------------------------------------
+# A7: box start resolves the root through the owner, from the box's own code mount
+# ---------------------------------------------------------------------------------------
+
+
+def _agent_at(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".tenant-id").write_text(f"{X.TENANT}\n", encoding="utf-8")
+    return path
+
+
+def test_a7_a_worktrees_box_resolves_the_root_to_the_main_checkouts_folder(tmp_path, monkeypatch):
+    """A7: with the override unset, a box whose code mount is a worktree's `defender/` is judged
+    against `<main checkout>/run-visualizations/`, as the mirror resolves it: a mount in the
+    worktree's own `run-visualizations/` is clear, one in the main checkout's is refused."""
+    main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
+    X.dev_default_root(monkeypatch)
+    lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
+
+    own = replace(lane, agent=_agent_at(wt / "run-visualizations" / "agent"))
+    clear = RecordingDocker()
+    own.start(clear)
+    assert clear.create_argv is not None, "the worktree's own folder was taken as the publish root"
+
+    root = main / "run-visualizations"
+    inside = replace(lane, agent=_agent_at(root / "agent"))
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()) as refused:
+        inside.start(rec)
+    assert X.names_path(str(refused.value), root) or X.names_path(str(refused.value), root.resolve()), (
+        f"the refusal does not name the main checkout's root {root}: {refused.value}")
+    assert X.names_path(str(refused.value), root / "agent") or X.names_path(
+        str(refused.value), (root / "agent").resolve()), f"it does not name the mount: {refused.value}"
+    assert not X.created(rec.calls)
+    assert not X.removed(rec.calls)
+
+
+def test_a7_a_mount_above_the_resolved_root_is_refused_and_a_clear_one_starts(tmp_path, monkeypatch):
+    """A7 + A1: the main checkout itself, mounted, contains the resolved root (the other direction)."""
+    main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
+    X.dev_default_root(monkeypatch)
+    lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
+    clear = RecordingDocker()
+    lane.start(clear)
+    assert clear.create_argv is not None, "control: a clear worktree box did not start"
+
+    above = replace(lane, agent=_agent_at(main))
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()) as refused:
+        above.start(rec)
+    assert X.names_path(str(refused.value), main.resolve()) or X.names_path(
+        str(refused.value), main), f"the refusal does not name the mount {main}: {refused.value}"
+    assert not X.created(rec.calls)
+
+
+def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
+    """A caller-composed request that names no code tree: nothing to resolve the root from."""
+    mounts = (
+        box_mod.Mount(source=req.data, target=req.data, writable=False, kind="data"),
+        box_mod.Mount(source=req.lane, target=req.lane, writable=True),
+    )
+    return box_mod.BoxRequest(name=X.REQUEST_NAME, mounts=mounts, workdir=DEFENDER.parent, env={},
+                              require_sandbox=False)
+
+
+@pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
+def test_a7_in_dev_a_refused_root_resolution_refuses_the_start_never_no_root(
+        tmp_path, monkeypatch, opt_out):
+    """A7: in `dev`, a root that cannot be resolved (here: no code mount to resolve it from, and
+    the override unset under pytest, which the owner refuses) is an O3 refusal, not "no root" --
+    and the opt-out does not degrade it. The same request starts with the override set (control),
+    and outside `dev`, where there is no root to resolve."""
+    req = X.request_lane(tmp_path)
+    request = _request_without_a_code_mount(req)
+
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    clear = RecordingDocker()
+    box_mod.start_box(request, docker=clear)
+    assert clear.create_argv is not None, "control: the request does not start even with a root"
+
+    X.dev_default_root(monkeypatch)
+    if opt_out:
+        X.allow_unsandboxed(monkeypatch)
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()):
+        box_mod.start_box(request, docker=rec)
+    assert not X.created(rec.calls)
+
+    monkeypatch.delenv(X.DEPLOYMENT_ENV, raising=False)
+    outside = RecordingDocker()
+    box_mod.start_box(request, docker=outside)
+    assert outside.create_argv is not None, "outside dev there is no root to fail to resolve"
+
+
+# ---------------------------------------------------------------------------------------
 # A2: neither refusal is degraded by DEFENDER_ALLOW_UNSANDBOXED; an unreachable daemon still is
 # ---------------------------------------------------------------------------------------
 
@@ -310,6 +404,41 @@ def test_a2_an_unreachable_daemon_still_degrades_and_is_not_the_refusal_subtype(
     X.allow_unsandboxed(monkeypatch)
     degraded = start()
     assert degraded.sandboxed is False, "hermetic replays rely on the unreachable daemon degrading"
+
+
+@pytest.mark.parametrize("lane_kind", ["run", "request"])
+def test_a2_a_name_conflict_raised_by_docker_run_itself_stays_a_degradable_create_fault(
+        tmp_path, monkeypatch, lane_kind):
+    """A2: inspect found nothing (the name looked free), then `docker run` itself reports the
+    name taken (a race). That stays a create fault as today: not the refusal subtype, and the
+    opt-out degrades it."""
+    from defender.tests.e2e._box665 import DockerFault
+
+    def rec() -> RecordingDocker:
+        return RecordingDocker(
+            status=None, existing_token="another-lane-holds-this-name",
+            create=DockerFault(
+                rc=125, cite="C43a — the daemon's own name-conflict rc/text",
+                stderr='Conflict. The container name "/defender-run-x" is already in use'))
+
+    if lane_kind == "run":
+        lane = X.run_lane(tmp_path)
+        start = lambda docker: lane.start(docker)  # noqa: E731
+    else:
+        lane = X.request_lane(tmp_path)
+        start = lambda docker: box_mod.start_box(lane.request(), docker=docker)  # noqa: E731
+    monkeypatch.delenv(X.DEPLOYMENT_ENV, raising=False)
+    monkeypatch.delenv(X.ALLOW_ENV, raising=False)
+    with pytest.raises(box_mod.BoxFault) as faulted:
+        start(rec())
+    assert not isinstance(faulted.value, X.conflict_type()), (
+        "a name conflict found by `docker run` was reported as the pre-create refusal")
+    X.allow_unsandboxed(monkeypatch)
+    docker = rec()
+    degraded = start(docker)
+    assert degraded.sandboxed is False, "the opt-out no longer degrades a create-time name conflict"
+    assert not any(c[:3] == ["docker", "rm", "-f"] for c in docker.calls), (
+        "the create fault reaped the container another lane owns")
 
 
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
@@ -547,6 +676,26 @@ def test_o3_the_oracle_start_carries_the_refusal_as_the_cause_of_its_own(tmp_pat
         _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
     assert any(isinstance(e, X.conflict_type()) for e in _chain(refused.value)), (
         f"the refusal's text did not survive as the cause: {_chain(refused.value)}")
+    assert daemon.created() == []
+
+
+def test_o3_the_estate_oracle_start_turns_the_refusal_into_its_own_failure_keeping_its_text(
+        tmp_path, monkeypatch):
+    """A2 tail: `estate.oracle.start_box` re-wraps `_oracle.BoxStartRefused` as
+    `OracleSandboxError`; the BoxStartConflict, with its text, stays in the chain and in the
+    message the operator reads."""
+    from defender.learning.branch.estate import oracle as estate_oracle
+
+    root = X.dev_root(monkeypatch, Path(tempfile.gettempdir()))
+    daemon = FakeDaemon(tmp_path)
+    daemon.install(monkeypatch)
+    with pytest.raises(estate_oracle.OracleSandboxError) as refused:
+        estate_oracle.start_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+    conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
+    assert conflicts, f"the refusal did not survive the oracle's re-wrapping: {_chain(refused.value)}"
+    assert str(conflicts[0]) in str(refused.value), (
+        f"the operator's message dropped the refusal's text: {refused.value}")
+    assert X.names_path(str(refused.value), root) or X.names_path(str(refused.value), root.resolve())
     assert daemon.created() == []
 
 

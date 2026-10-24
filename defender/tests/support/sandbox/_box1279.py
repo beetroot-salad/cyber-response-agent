@@ -52,6 +52,37 @@ def allow_unsandboxed(monkeypatch: Any) -> None:
     monkeypatch.setenv(ALLOW_ENV, "1")
 
 
+def dev_default_root(monkeypatch: Any) -> None:
+    """A dev deployment with the publish-root override UNSET (the conftest sets it for every
+    test), so the root owner's own default resolution answers; the opt-out unset."""
+    monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
+    monkeypatch.delenv(PUBLISH_ROOT_ENV, raising=False)
+    monkeypatch.delenv(ALLOW_ENV, raising=False)
+
+
+def fake_main_and_worktree(base: Path) -> tuple[Path, Path]:
+    """A main checkout (`.git` a directory, a `defender/`) and one worktree of it (`.git` a file
+    pointing back, with a `defender/` holding the product check file), written the way git
+    leaves them (as test_1084_mirror's layouts). Returns `(main, worktree)`."""
+    import shutil
+
+    main, wt = base / "main", base / "trees" / "wt"
+    admin = main / ".git" / "worktrees" / "wt"
+    admin.mkdir(parents=True)
+    (main / "defender").mkdir()
+    (admin / "commondir").write_text("../..\n", encoding="utf-8")
+    (admin / "gitdir").write_text(f"{wt / '.git'}\n", encoding="utf-8")
+    (admin / "HEAD").write_text("ref: refs/heads/wt\n", encoding="utf-8")
+    (wt / "defender").mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
+    from defender.box._image import HASH_INPUTS
+
+    # What a real start reads back from its code mount: the product check file and the image inputs.
+    for name in (box_mod.CODE_CHECK_FILE, *HASH_INPUTS):
+        shutil.copyfile(B.DEFENDER / name, wt / "defender" / name)
+    return main, wt
+
+
 # -- the run lane --------------------------------------------------------------------------
 
 

@@ -18,6 +18,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.sandbox._spec791 import author_markers, marker_body
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
+from defender.tests.support.storage._setup_faults_1279 import PlantAfterRunDirIo, materialize_through
 
 #: The admission shapes A8 refuses (every distinguished shape but the two it admits).
 REFUSED_SHAPES = tuple(s for s in S.ADMISSION_SHAPES if s not in S.ADMITTED_SHAPES)
@@ -440,6 +441,40 @@ def test_p138_refused_alert_leaves_a_run_folder_without_a_reco(tmp_path):
     assert report.scanned == 1, f"the corpus scanned {report.scanned} past runs, not one"
     shown = _union_shown(tmp_path, source, location_path(planted.runs), "p138")
     assert finished_id not in shown, "the union lost the finished trial of this alert"
+
+
+def test_p139_record_cannot_be_written_at_run_start(tmp_path):
+    """Recovered (#1279 R2): setup mints the id, so the obstruction cannot be planted at a chosen
+    id beforehand. It is planted right after the REAL run-dir creation, through the runs
+    repository's `io=` seam (a real directory at the record's name), and the real writers refuse
+    it."""
+    planted = S.plant_tenant()
+    squatted: list[Path] = []
+
+    def squat(run_dir: Path) -> None:
+        squatter = S.record_file(run_dir)
+        squatter.mkdir(parents=True)
+        (squatter / "occupant.txt").write_text("not a record", encoding="utf-8")
+        squatted.append(squatter)
+
+    io = PlantAfterRunDirIo(squat)
+    d = _drive(tmp_path, planted, materialize=materialize_through(io))
+    message = d.refusal if isinstance(d.refusal, str) else (str(d.raised) if d.raised else "")
+    assert squatted, "the obstruction was never planted: setup made no run dir through the seam"
+    squatter = squatted[0]
+    assert d.rc not in (0, None) or d.raised is not None, (
+        f"run start went on although its record could not be written (rc={d.rc!r})")
+    assert message, "run start stopped without naming why"
+    assert squatter.name in message, f"the stop does not name the record's fault: {message!r}"
+    assert d.lifecycle_calls == [], "the box started although the record could not be written"
+    assert d.main.requests == 0, "MAIN started although the record could not be written"
+    assert d.router.leads() == [], "a lead started although the record could not be written"
+    assert (squatter / "occupant.txt").is_file(), "the squatter was removed"
+
+    control = _drive(tmp_path, planted)
+    run_dir = _assert_admitted(control, "the same start with the record's name free")
+    assert control.lifecycle_calls, "the run never started"
+    assert S.recorded_digest(run_dir) == S.sha256_hex(_admitted_bytes(control))
 
 
 # A1 — the record, written once beside the alert

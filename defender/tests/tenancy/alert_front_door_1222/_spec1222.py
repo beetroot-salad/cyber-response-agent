@@ -1630,7 +1630,7 @@ def operator_input(tmp_path: Path) -> Path:
     return Path(tmp_path) / "operator-input" / "alert.json"
 
 
-def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
+def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defaulted
     tmp_path: Path, *,
     alert: Mapping[str, Any] | bytes | None = None,
     tenant: Planted | None = None,
@@ -1656,6 +1656,7 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     wrap_model: Any = None,
     visualize: Callable[..., None] | None = None,
     router: LeadRouter | None = None,
+    materialize: Callable[..., Any] | None = None,
 ) -> Drive:
     """Drive one alert through the PRODUCTION front door (`run.main`) and return what happened.
 
@@ -1674,7 +1675,8 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
 
     #1243: `review_stages` and `wrap_model` are `_replay_harness.drive`'s seams of those names;
     `visualize` is `run.main`'s render step (default: none, as before); `router` is a ready-made
-    gather double (a `LeadRouter` subclass) used instead of one built from `leads`/`lead_faults`."""
+    gather double (a `LeadRouter` subclass) used instead of one built from `leads`/`lead_faults`.
+    `materialize` is `run.main`'s setup seam (default: the real one)."""
     if router is not None and (leads is not None or lead_faults is not None):
         raise ValueError("run_alert(router=...) scripts the leads itself; leads=/lead_faults= "
                          "beside it would be silently ignored")
@@ -1725,6 +1727,8 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     writer = tickets if tickets is not None else NoTicket()
     d.tickets = writer
     seams: dict[str, Any] = {} if roster is None else {"roster": roster}
+    if materialize is not None:
+        seams["materialize"] = materialize  # run.main's setup seam (#1279 R2: faults planted in setup)
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,

@@ -255,6 +255,66 @@ def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_ticket_and_bo
         assert ran.seen["ticket"] == line, f"stdout when the ticket opened: {ran.seen['ticket']!r}"
 
 
+def test_1279_o5_the_announce_is_flushed_not_left_in_stdouts_block_buffer(tmp_path, data_root):
+    """O5/A6: a launcher reads the child's stdout through a pipe, where stdout is block-buffered.
+    With `sys.stdout` a block-buffered text wrapper over a pipe, `run_id=<uuid>` is already in the
+    pipe when the box is reached, so run.py flushed it (an unflushed print would sit in the wrapper
+    until exit, and the launcher would see no id while the run is alive)."""
+    import io
+    import os
+    import select
+    from contextlib import redirect_stdout
+
+    t = S.tenant(data_root)
+    alert = H.alert_file(tmp_path / "in")
+    rec = P.SiblingRecorder()
+    read_end, write_end = os.pipe()
+    sink = io.TextIOWrapper(io.BufferedWriter(io.FileIO(write_end, "w", closefd=False)),
+                            encoding="utf-8", write_through=False)
+    in_pipe: dict[str, bytes] = {}
+
+    def lifecycle_after_reading_the_pipe(**kwargs):
+        ready, _, _ = select.select([read_end], [], [], 2)
+        in_pipe["at_lifecycle"] = os.read(read_end, 4096) if ready else b""
+        return rec.lifecycle(**kwargs)
+
+    try:
+        with redirect_stdout(sink):
+            rc, refusal, err = P.drive_run_py([str(alert), "--tenant", t.id, "--no-learn"], rec,
+                                              lifecycle=lifecycle_after_reading_the_pipe)
+        sink.flush()
+    finally:
+        os.close(write_end)
+        os.close(read_end)
+
+    assert refusal is None, (P.refusal_text(refusal), err)
+    assert rc == 0, err
+    expected = f"run_id={Path(rec.run_dir).name}\n".encode()
+    assert in_pipe["at_lifecycle"] == expected, (
+        f"the announce was not in the pipe when the box was reached: {in_pipe['at_lifecycle']!r}")
+
+
+def test_1279_o8_natural_setup_proceeds_beside_other_ids_sidecars(tmp_path, data_root):
+    """O8: setup refuses sidecars at ITS id only; other ids' sidecars (every suffix) in the runs
+    base neither refuse it nor are cleared."""
+    t = S.tenant(data_root)
+    alert = H.alert_file(tmp_path / "in")
+    runs = Path(location_path(t.runs))
+    runs.mkdir(parents=True, exist_ok=True)
+    neighbours = [runs / f"{S.new_id()}{suffix}" for suffix in S.SIDECAR_SUFFIXES for _ in range(2)]
+    for sidecar in neighbours:
+        sidecar.write_text("{}\n", encoding="utf-8")
+
+    from defender import run_common
+
+    run = run_common.materialize_run(alert, tenant=t)
+
+    assert run.run_dir.parent == runs
+    assert run.run_dir.is_dir()
+    assert all(sidecar.read_text(encoding="utf-8") == "{}\n" for sidecar in neighbours), (
+        "setup cleared or rewrote another id's sidecar")
+
+
 def test_1279_o5_two_runs_announce_two_minted_ids(tmp_path, data_root):
     """O5: each run's setup mints its own id; the announced id names the run folder it made."""
     t = S.tenant(data_root)
@@ -297,7 +357,13 @@ def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
     for func in (run_common.materialize_run, run_py._materialize_run, RunsRepository.create):
         said = set(inspect.signature(func).parameters) & {"run_id", "pinned", "id"}
         assert said == set(), f"{func.__qualname__} still takes {sorted(said)}"
-    assert list(inspect.signature(RunsRepository.create).parameters) == ["self"]
+    params = list(inspect.signature(RunsRepository.create).parameters.values())
+    assert params[0].name == "self", params
+    for param in params[1:]:
+        assert param.default is not param.empty or param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD), (
+            f"create() requires {param.name!r}: it takes no caller input")
+        assert "id" not in param.name.casefold().replace("valid", ""), (
+            f"create() takes an id-like parameter {param.name!r}")
     assert len(inspect.signature(EpisodeRuns.create).parameters) == 2, (
         "EpisodeRuns.create keeps its arm id: the roster check needs it")
 

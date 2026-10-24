@@ -852,6 +852,14 @@ def test_1279_o5_an_arm_announces_its_rosters_id_first_on_stdout(tmp_path, data_
     assert Path(rec.run_dir) == scene.ep / "runs" / scene.roster[WORLD_ID]
 
 
+def _assert_one_line_exit(refusal: BaseException | None) -> None:
+    """A `sys.exit(str)` refusal: one stderr line, no traceback (as test_1105_run_setup's
+    `_one_line_exit`, which the odd-occupant refusals asserted before they moved here)."""
+    assert isinstance(refusal, SystemExit), refusal
+    assert isinstance(refusal.code, str), refusal
+    assert len(refusal.code.splitlines()) == 1, f"the refusal is not one line: {refusal.code!r}"
+
+
 def _occupy(kind: str, existing: Path, outside: Path) -> None:
     """Put what a prior setup, a prior run or an attacker could have left at the arm's id."""
     if kind == "setup-only":
@@ -887,6 +895,7 @@ def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_no
     said = f"{P.refusal_text(ran.refusal)}\n{ran.err}"
     assert ran.refusal is not None, f"setup went on over a {kind}: rc {ran.rc} {rec.order}"
     assert scene.roster[WORLD_ID] in said, f"the refusal does not name the arm: {said!r}"
+    _assert_one_line_exit(ran.refusal)
     assert "lifecycle" not in rec.order, rec.order
     assert ran.out == "", f"a refused setup announced an id: {ran.out!r}"
     assert S.tree(scene.ep / "runs") == before, "the refused setup changed the runs folder"
@@ -904,6 +913,11 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
     arm = scene.roster[WORLD_ID]
     sidecar = scene.ep / "runs" / f"{arm}{suffix}"
     sidecar.write_text("{}\n", encoding="utf-8")
+    # Other ids' sidecars, every suffix, sit in the same base: the refusal is for THIS id's
+    # sidecar, not for any sidecar (a glob would refuse the control below too).
+    for neighbour in (S.new_id(), S.new_id()):
+        for other in S.SIDECAR_SUFFIXES:
+            (scene.ep / "runs" / f"{neighbour}{other}").write_text("{}\n", encoding="utf-8")
     before = S.tree(scene.ep / "runs")
 
     ran = P.drive_run_py_stdout(P.new_sibling_argv(B_ID, scene.episode_id, LABEL),
@@ -912,6 +926,7 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
     said = f"{P.refusal_text(ran.refusal)}\n{ran.err}"
     assert ran.refusal is not None, f"setup went on past a {suffix} sidecar: rc {ran.rc}"
     assert arm in said, f"the refusal does not name the arm: {said!r}"
+    _assert_one_line_exit(ran.refusal)
     assert "lifecycle" not in rec.order, rec.order
     assert ran.out == "", f"a refused setup announced an id: {ran.out!r}"
     assert not os.path.lexists(scene.ep / "runs" / arm), "the run dir was made past a sidecar"

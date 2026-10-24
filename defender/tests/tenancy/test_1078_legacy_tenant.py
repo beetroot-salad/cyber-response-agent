@@ -135,13 +135,19 @@ def test_an_arm_setup_that_was_interrupted_is_refused_not_resumed(tenant_root, t
     what_the_first_left_undone`): arms are never resumed in place. A setup-only dir at the
     roster's arm id (what an interrupted first call leaves) is refused, and left as it was."""
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
-    arm_dir = ep / "runs" / T.roster_arm_id(ep, world.world_id)
+    arm_id = T.roster_arm_id(ep, world.world_id)
+    arm_dir = ep / "runs" / arm_id
     arm_dir.mkdir(parents=True)
     (arm_dir / "gather_raw").mkdir()
     before = sorted(p.name for p in arm_dir.iterdir())
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as refused:
         _arm(RunPaths(src).alert, world, ep)
+
+    # The refusal is the setup-only dir's (O8), naming the arm: not some unrelated exit.
+    assert isinstance(refused.value.code, str), refused.value.code
+    assert arm_id in refused.value.code, (
+        f"the refusal does not name the arm {arm_id}: {refused.value.code!r}")
 
     assert sorted(p.name for p in arm_dir.iterdir()) == before, "the refused setup wrote into the dir"
     assert not (arm_dir / "provenance.json").exists(), "the refused setup re-stamped the dir"
