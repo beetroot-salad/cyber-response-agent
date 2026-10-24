@@ -60,3 +60,21 @@ def test_r6_a_busy_lock_is_not_recorded_as_a_refusal_and_keeps_the_earlier_recor
         with status.recording(tenant.tenant, by="r6-later"):
             raise LockBusy("lock busy")
     assert _status(tenant) == before
+
+
+def test_r6_batch_reset_keeps_the_lane_folders_a_running_box_has_bound(tenant):
+    """The lanes stay across a reset, in place (same inode), even when the batch head holds no
+    file under one: a box that bound the lane folder keeps its bind."""
+    batch = tenant.open_delivery().start_batch("r6", lanes=("lessons",))
+    lane = batch.draft_root / "agent" / "lessons"
+    inode = lane.stat().st_ino
+    for path in lane.rglob("*"):
+        if path.is_file():
+            path.unlink()
+    batch.commit(batch.change_set(), "empty the lane")
+    batch.reset()
+    assert lane.is_dir(), "the empty lane folder was dropped by reset"
+    assert lane.stat().st_ino == inode, "reset replaced the lane folder (a bound box is stale)"
+    (lane / "new.md").write_text("fresh draft\n", encoding="utf-8")
+    batch.reset()
+    assert lane.stat().st_ino == inode and not (lane / "new.md").exists()
