@@ -670,9 +670,9 @@ jobs:
       - name: Log-setup gate (every program configures logging)
         run: defender/.venv/bin/python tooling/lint/lint_log_setup.py
 
-      # Tenant delivery (#1108 P3): no production code spells a disk credential location, nothing
-      # outside learning/author/version_control/ names TenantDelivery until P4 wires it, and the
-      # box's code-check file name is spelled once in box/ and in no agent-facing text. No baseline.
+      # Tenant delivery (#1108 P3): no production code spells a disk credential location, and
+      # the box's code-check file name is spelled once (in the box spec) and in no agent-facing
+      # text. No baseline.
       - name: Tenant-delivery fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_delivery_architecture.py
 

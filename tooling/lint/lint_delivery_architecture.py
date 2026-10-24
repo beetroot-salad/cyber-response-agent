@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Tenant-delivery fence (#1108 P3): three who-may-spell-what rules over production source.
+"""Tenant-delivery fence (#1108 P3): two who-may-spell-what rules over production source.
 
 * No production code spells `git-credentials`: delivery has no credential location on disk.
-* Outside `learning/author/version_control/`, nothing names `TenantDelivery` or a
-  `tenant_delivery` module. The delivery code is dormant until P4 wires it; delete this rule
-  when P4 lands.
 * The box's code-check file name (`CODE_CHECK_FILE` in `box/_spec.py`) is spelled exactly once
   in production source, where that constant defines it, and appears in no agent-facing prose (docs, templates and
   the shipped tenant knowledge trees' agent halves).
@@ -33,7 +30,6 @@ import _astlib
 DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 EXCLUDED_DIRS = ("tests", ".venv", "__pycache__")
-_OWNER = "learning/author/version_control/"
 _CREDENTIAL_NAME = "git-credentials"
 _SPEC = "box/_spec.py"
 _CHECK_CONSTANT = "CODE_CHECK_FILE"
@@ -85,21 +81,6 @@ def _spellings(name: str, nodes: list[ast.AST]) -> Iterator[ast.AST]:
     yield from (node for node in hits if id(node) not in inner)
 
 
-def _names_delivery(node: ast.AST) -> bool:
-    names: list[str] = []
-    if isinstance(node, ast.Name):
-        names.append(node.id)
-    elif isinstance(node, ast.Attribute):
-        names.append(node.attr)
-    elif isinstance(node, ast.alias):
-        names.extend((node.name, node.asname or ""))  # lint-ast-resolve: ok — lexical ban on a dormant symbol includes aliases, not binding resolution
-    elif isinstance(node, ast.ImportFrom):
-        names.append(node.module or "")
-    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-        names.append(node.value)
-    return any(name == "TenantDelivery" or "tenant_delivery" in name.split(".") for name in names)
-
-
 def _check_file_name(root: Path) -> str | None:
     """`CODE_CHECK_FILE`'s value, read from the box spec's module-level assignment."""
     spec = root / _SPEC
@@ -129,11 +110,6 @@ def scan(root: Path) -> list[str]:
         for node in _spellings(_CREDENTIAL_NAME, nodes):
             findings.append(f"{rel}:{node.lineno}: spells `{_CREDENTIAL_NAME}`: delivery has "
                             "no credential location on disk")
-        if not rel.startswith(_OWNER):
-            for node in nodes:
-                if _names_delivery(node):
-                    findings.append(f"{rel}:{node.lineno}: names TenantDelivery; the delivery "
-                                    "is dormant, production wiring belongs to P4")
         if check_name is not None:
             check_spelled.extend((rel, node.lineno, _folded(node) or "")
                                  for node in _spellings(check_name, nodes))

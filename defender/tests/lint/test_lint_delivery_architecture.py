@@ -1,5 +1,5 @@
-"""Tests for the lint_delivery_architecture gate: no disk credential location, a dormant tenant
-delivery, and a box check-file name spelled once inside the box package."""
+"""Tests for the lint_delivery_architecture gate: no disk credential location and a box check-file name
+spelled once, in its spec, and absent from agent-facing text."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,31 +34,16 @@ def test_a_clean_tree_has_no_findings(tmp_path):
 ])
 def test_a_credential_location_is_found_however_the_name_is_spelled(tmp_path, src):
     found = _GATE.scan(_tree(tmp_path, {"learning/x.py": src}))
-    assert len(found) == 1 and "git-credentials" in found[0], found
+    assert len(found) == 1, found
+    assert "git-credentials" in found[0], found
 
 
 def test_a_docstring_may_mention_the_credential_name(tmp_path):
     assert _GATE.scan(_tree(tmp_path, {"learning/x.py": '"""Never git-credentials."""\n'})) == []
 
 
-@pytest.mark.parametrize("src", [
-    "from defender.learning.author.version_control import TenantDelivery\n",
-    "from defender.learning.author.version_control.tenant_delivery import go\n",
-    "x = TenantDelivery\n",
-    "y = 'tenant_delivery'\n",
-])
-def test_delivery_named_outside_its_owner_is_found(tmp_path, src):
-    found = _GATE.scan(_tree(tmp_path, {"learning/x.py": src}))
-    assert found and all("TenantDelivery" in f for f in found), found
-
-
-def test_delivery_named_inside_its_owner_is_allowed(tmp_path):
-    owner = "learning/author/version_control/delivery.py"
-    assert _GATE.scan(_tree(tmp_path, {owner: "class TenantDelivery: ...\n"})) == []
-
-
 def test_tests_are_not_swept(tmp_path):
-    assert _GATE.scan(_tree(tmp_path, {"tests/t.py": 'P = "git-credentials"\nx = TenantDelivery\n'})) == []
+    assert _GATE.scan(_tree(tmp_path, {"tests/t.py": 'P = "git-credentials"\n'})) == []
 
 
 def test_the_check_file_name_spelled_a_second_time_outside_the_spec_is_found(tmp_path):
@@ -70,7 +55,8 @@ def test_the_check_file_name_spelled_a_second_time_outside_the_spec_is_found(tmp
 @pytest.mark.parametrize("rel", ["prompts/a.md", "prompts/b.j2", "knowledge_note.yaml"])
 def test_agent_facing_text_must_not_name_the_check_file(tmp_path, rel):
     found = _GATE.scan(_tree(tmp_path, {rel: "read MOUNT_CHECK first\n"}))
-    assert len(found) == 1 and "agent-facing" in found[0], found
+    assert len(found) == 1, found
+    assert "agent-facing" in found[0], found
 
 
 def test_operator_docs_and_the_docs_folder_may_name_it(tmp_path):
@@ -84,7 +70,8 @@ def test_the_shipped_knowledge_trees_agent_halves_are_swept(tmp_path):
     note.parent.mkdir(parents=True)
     note.write_text("MOUNT_CHECK", encoding="utf-8")
     found = _GATE.scan(root)
-    assert len(found) == 1 and "knowledge/tenant-template/agent/n.txt" in found[0], found
+    assert len(found) == 1, found
+    assert "knowledge/tenant-template/agent/n.txt" in found[0], found
 
 
 def test_a_missing_spec_constant_is_a_finding_not_a_pass(tmp_path):
