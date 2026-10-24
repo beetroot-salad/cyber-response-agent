@@ -11,8 +11,11 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender.tests.storage import test_1133_census as vocabulary
-from defender.tests.support.shared.contracts._by_path import import_lint_lib
+from defender.tests.support.shared.contracts._by_path import WORKTREE, import_lint_lib
+
+#: The shared census vocabulary (`lint_episode_paths`) and the checkout view it resolves against.
+vocabulary = import_lint_lib("lint_episode_paths")
+_VIEW = import_lint_lib("_census1134").tree_of(WORKTREE)
 
 # Runtime includes the former gather_tools; only ticket_writer belonged to case_history.
 # Box I/O moved out of runtime and retains the same counted coverage.
@@ -112,7 +115,7 @@ def _target(node: ast.expr | None, scan, seen: frozenset[str] = frozenset()) -> 
 
 def census_source(rel: str, source: str) -> list[Hit]:
     tree = ast.parse(source)
-    scan = vocabulary._scan(rel, tree)
+    scan = vocabulary._scan(_VIEW, rel, tree)
     aliases = vocabulary.module_aliases(tree, scan)
     visitor = vocabulary._Scoped()
     visitor.visit(tree)
