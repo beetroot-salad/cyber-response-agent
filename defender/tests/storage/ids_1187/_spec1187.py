@@ -11,7 +11,6 @@ from typing import Any
 
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
 from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape as is_canonical_uuid
-from defender.tests.support.shared.contracts._by_path import import_lint_lib
 
 tree = H5.tree_state
 
@@ -257,15 +256,6 @@ def identities(root: Path, names: Iterable[str] | None = None) -> dict[str, tupl
             st = os.lstat(path)
             out[rel.as_posix()] = (st.st_dev, st.st_ino)
     return out
-# The censuses' local-value resolution and the walk owner live in the lint library, where
-# `lint_episode_paths` uses them too.
-_scope = import_lint_lib("_episode_scope")
-bound_values = _scope.bound_values
-spells = _scope.spells
-attribute_values = _scope.attribute_values
-scoped_nodes = _scope.scoped_nodes
-WALK_OWNER = _scope.WALK_OWNER
-owned = _scope.owned
 # Observe process opens directly so calls outside an injected seam remain visible.
 
 _PATH_EVENTS = frozenset({"open", "os.mkdir"})
