@@ -150,8 +150,8 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6).
-    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6; +1 for #1279's `sidecar_names`).
+    assert _out(proc).split()[0] == "72", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 
