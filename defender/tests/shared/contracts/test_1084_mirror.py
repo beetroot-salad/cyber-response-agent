@@ -1,4 +1,4 @@
-"""#1084 — the run-page mirror moves out of `defender/`, to the MAIN checkout's top level."""
+"""#1084 — the publish root (once the run-page mirror's) lives outside `defender/`, at the MAIN checkout's top level; #1279 A4 — it has one tenant-free owner, which is also where a non-`dev` deployment gets no root."""
 from __future__ import annotations
 
 import importlib
@@ -14,7 +14,17 @@ MIRROR = "run-visualizations"
 
 
 def _renderer():
-    return importlib.import_module("defender.presentation.visualize_run")
+    """The publish root's one owner (#1279 A4): tenant-free, below `presentation`. It answers the
+    root, or `None` outside `dev`; the old `visualize_run.mirror_root` is retired into it."""
+    return importlib.import_module("defender.configuration.publish_root")
+
+
+@pytest.fixture(autouse=True)
+def _dev_deployment(deployment_unset, monkeypatch):
+    """Resolution is only asked of a `dev` deployment (#1279 O4): the rule lives in the owner."""
+    from defender.configuration import _env
+
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -75,33 +85,33 @@ def warned(caplog):
 
 
 def test_1084_the_override_wins_even_over_an_explicit_start(tmp_path, monkeypatch):
-    """With the override set, `mirror_root(start=<a well-formed main checkout>)` returns
+    """With the override set, `publish_root(start=<a well-formed main checkout>)` returns
     `Path(<override>)` exactly — the setting is step (1), ahead of any layout."""
     vr = _renderer()
     main = _checkout(tmp_path / "main")
     elsewhere = tmp_path / "elsewhere" / "pages"
     monkeypatch.setenv(ENV, str(elsewhere))
-    assert vr.mirror_root(start=main) == elsewhere
+    assert vr.publish_root(start=main) == elsewhere
 
     monkeypatch.delenv(ENV)
-    assert _same(vr.mirror_root(start=main), main / MIRROR)
+    assert _same(vr.publish_root(start=main), main / MIRROR)
 
 
 def test_1084_the_override_is_read_at_call_time_not_at_import(tmp_path, monkeypatch):
     vr = _renderer()
     main = _checkout(tmp_path / "main")
     monkeypatch.delenv(ENV, raising=False)
-    assert _same(vr.mirror_root(start=main), main / MIRROR)
+    assert _same(vr.publish_root(start=main), main / MIRROR)
 
     first, second = tmp_path / "first", tmp_path / "second"
     monkeypatch.setenv(ENV, str(first))
-    assert vr.mirror_root(start=main) == first
+    assert vr.publish_root(start=main) == first
     monkeypatch.setenv(ENV, str(second))
-    assert vr.mirror_root(start=main) == second
-    assert vr.mirror_root() == second, "the no-`start` call reads the same moment's setting"
+    assert vr.publish_root(start=main) == second
+    assert vr.publish_root() == second, "the no-`start` call reads the same moment's setting"
 
     monkeypatch.delenv(ENV)
-    assert _same(vr.mirror_root(start=main), main / MIRROR)
+    assert _same(vr.publish_root(start=main), main / MIRROR)
 
 
 # M1 — the git-less resolution over fake layouts (O1/D3, and O2's default path)
@@ -111,7 +121,7 @@ def test_1084_a_main_checkout_resolves_to_its_own_top_level_folder(tmp_path, war
     """`start/.git` is a directory → `start` is the main checkout → `start/run-visualizations`,
     and nothing is warned (a well-formed layout is not warned about)."""
     main = _checkout(tmp_path / "main")
-    got = _renderer().mirror_root(start=main)
+    got = _renderer().publish_root(start=main)
     assert got.name == MIRROR
     assert _same(got, main / MIRROR)
     assert warned() == []
@@ -123,7 +133,7 @@ def test_1084_a_worktree_resolves_to_the_main_checkouts_folder_not_its_own(
     main = _checkout(tmp_path / "main")
     wt = tmp_path / "trees" / "wt"
     _worktree(main, wt, relative=relative)
-    got = _renderer().mirror_root(start=wt)
+    got = _renderer().publish_root(start=wt)
     assert got.name == MIRROR
     assert _same(got, main / MIRROR), f"resolved {got}, not the main checkout's folder"
     assert not _same(got, wt / MIRROR)
@@ -134,7 +144,7 @@ def test_1084_no_git_at_all_falls_back_to_start_without_a_warning(tmp_path, warn
     """(3) an image build has no `.git`: the answer is `start/run-visualizations`, and that is
     an expected layout, not a malformed one — nothing is warned."""
     image = _checkout(tmp_path / "image", git_dir=False)
-    got = _renderer().mirror_root(start=image)
+    got = _renderer().publish_root(start=image)
     assert _same(got, image / MIRROR)
     assert warned() == []
 
@@ -190,11 +200,11 @@ def test_1084_a_mismatched_or_malformed_chain_falls_back_to_start_and_warns(
     main = _checkout(tmp_path / "main")
     wt = tmp_path / "trees" / "wt"
     admin = _worktree(main, wt)
-    assert _same(vr.mirror_root(start=wt), main / MIRROR), "positive control: well-formed"
+    assert _same(vr.publish_root(start=wt), main / MIRROR), "positive control: well-formed"
     assert warned() == [], "positive control: a well-formed chain is not warned"
 
     breakage(main, wt, admin)
-    got = vr.mirror_root(start=wt)
+    got = vr.publish_root(start=wt)
     assert _same(got, wt / MIRROR), f"a broken chain resolved to {got}, not the fallback"
     notices = warned()
     assert len(notices) == 1, f"the fallback was not ONE logged warning: {notices!r}"
@@ -209,11 +219,11 @@ def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, war
     other = _checkout(tmp_path / "other")
     wt = tmp_path / "trees" / "wt"
     admin = _worktree(main, wt)
-    assert _same(vr.mirror_root(start=wt), main / MIRROR), "positive control: `../..`"
+    assert _same(vr.publish_root(start=wt), main / MIRROR), "positive control: `../..`"
 
     (admin / "commondir").write_text(f"{os.path.relpath(other / '.git', admin)}\n",
                                      encoding="utf-8")
-    assert _same(vr.mirror_root(start=wt), other / MIRROR)
+    assert _same(vr.publish_root(start=wt), other / MIRROR)
     assert warned() == []
 
 
@@ -223,18 +233,18 @@ def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, war
 def test_1084_under_pytest_without_the_override_the_default_resolution_is_refused(
         tmp_path, monkeypatch):
     vr = _renderer()
-    assert issubclass(vr.MirrorRootRefused, Exception)
+    assert issubclass(vr.PublishRootRefused, Exception)
     monkeypatch.delenv(ENV, raising=False)
     assert "PYTEST_CURRENT_TEST" in os.environ, "precondition: the detector's input is present"
-    with pytest.raises(vr.MirrorRootRefused):
-        vr.mirror_root()
+    with pytest.raises(vr.PublishRootRefused):
+        vr.publish_root()
 
     main = _checkout(tmp_path / "main")
-    assert _same(vr.mirror_root(start=main), main / MIRROR)
+    assert _same(vr.publish_root(start=main), main / MIRROR)
 
     elsewhere = tmp_path / "pages"
     monkeypatch.setenv(ENV, str(elsewhere))
-    assert vr.mirror_root() == elsewhere
+    assert vr.publish_root() == elsewhere
 
 
 def test_1084_an_empty_override_is_not_an_override(monkeypatch):
@@ -242,5 +252,29 @@ def test_1084_an_empty_override_is_not_an_override(monkeypatch):
     become `Path("")` (the cwd) — under pytest it is refused like an unset one."""
     vr = _renderer()
     monkeypatch.setenv(ENV, "")
-    with pytest.raises(vr.MirrorRootRefused):
-        vr.mirror_root()
+    with pytest.raises(vr.PublishRootRefused):
+        vr.publish_root()
+
+
+# #1279 A4/O4 — the deployment rule is stated once, in the owner
+
+
+@pytest.mark.parametrize("deployment", [None, "production", "staging", ""],
+                         ids=["unset", "production", "typo", "empty"])
+def test_1279_outside_dev_there_is_no_publish_root_even_when_one_is_configured(
+        tmp_path, monkeypatch, deployment):
+    """O4/A4: only `dev` has a publish root; the override does not conjure one elsewhere."""
+    from defender.configuration import _env
+
+    vr = _renderer()
+    pages = tmp_path / "pages"
+    monkeypatch.setenv(ENV, str(pages))
+    assert vr.publish_root() == pages, "positive control: dev with the override has its root"
+
+    if deployment is None:
+        monkeypatch.delenv(_env.DEPLOYMENT_ENV)
+    else:
+        monkeypatch.setenv(_env.DEPLOYMENT_ENV, deployment)
+    assert vr.publish_root() is None
+    main = _checkout(tmp_path / "main")
+    assert vr.publish_root(start=main) is None, "the default layout gave a root outside dev"

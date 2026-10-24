@@ -819,7 +819,7 @@ def test_natural_and_arm_stamps_carry_no_world_lineage(
 
     scene = _Scene(tmp_path, data_root, B_ID)
     t = S.tenant(data_root, B_ID)
-    natural = run_common.materialize_run(H5.alert_file(tmp_path / "in"), None, tenant=t)
+    natural = run_common.materialize_run(H5.alert_file(tmp_path / "in"), tenant=t)
     natural_stamp = json.loads(
         (Path(natural.run_dir) / "provenance.json").read_text(encoding="utf-8"))
     assert natural_stamp.get("world_id") is None, (
@@ -835,18 +835,88 @@ def test_natural_and_arm_stamps_carry_no_world_lineage(
         assert stamp.get("fork_turn") is None, stamp
 
 
+def test_1279_o5_an_arm_announces_its_rosters_id_first_on_stdout(tmp_path, data_root):
+    """O5: an arm's `run_id=` line carries the id its roster published, before the box."""
+    scene = _Scene(tmp_path, data_root, B_ID)
+    scene.start_runs_by_hand()
+    rec = P.SiblingRecorder()
+
+    ran = P.drive_run_py_stdout(P.new_sibling_argv(B_ID, scene.episode_id, LABEL), rec)
+
+    assert ran.refusal is None, (P.refusal_text(ran.refusal), ran.err)
+    assert ran.rc == 0, (ran.rc, ran.err)
+    line = f"run_id={scene.roster[WORLD_ID]}\n"
+    assert ran.out.splitlines(keepends=True)[:1] == [line], ran.out
+    assert ran.seen["preflight"] == "", f"stdout before setup: {ran.seen['preflight']!r}"
+    assert ran.seen["lifecycle"] == line, ran.seen["lifecycle"]
+    assert Path(rec.run_dir) == scene.ep / "runs" / scene.roster[WORLD_ID]
+
+
+def _occupy(kind: str, existing: Path, outside: Path) -> None:
+    """Put what a prior setup, a prior run or an attacker could have left at the arm's id."""
+    if kind == "setup-only":
+        (existing / "gather_raw").mkdir(parents=True)
+    elif kind == "empty-dir":
+        existing.mkdir()
+    elif kind == "ran":
+        (existing / "gather_raw").mkdir(parents=True)
+        (existing / "report.md").write_text("a run was here\n", encoding="utf-8")
+    elif kind == "regular-file":
+        existing.write_text("not a run dir\n", encoding="utf-8")
+    else:
+        outside.mkdir()
+        existing.symlink_to(outside, target_is_directory=True)
+
+
+@pytest.mark.parametrize("kind", ["setup-only", "empty-dir", "ran", "regular-file",
+                                  "link-to-a-dir"])
 def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_nothing(
-        tmp_path, data_root):
-    """O8: a setup-only dir already at the roster's arm id is refused, not resumed."""
+        tmp_path, data_root, kind):
+    """O8: anything already at the roster's arm id is refused, not resumed or followed."""
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
     existing = scene.ep / "runs" / scene.roster[WORLD_ID]
-    (existing / "gather_raw").mkdir(parents=True)
-    before = S.tree(existing)
+    outside = tmp_path / "outside"
+    _occupy(kind, existing, outside)
+    before = S.tree(scene.ep / "runs")
+    outside_before = S.tree(outside) if outside.exists() else None
 
-    rc, refused, said, rec = _sibling(B_ID, scene.episode_id)
+    ran = P.drive_run_py_stdout(P.new_sibling_argv(B_ID, scene.episode_id, LABEL),
+                                rec := P.SiblingRecorder())
 
-    assert refused is not None, f"setup materialised into an existing run dir: rc {rc} {rec.order}"
-    assert str(existing) in said, f"the refusal does not name the run dir: {said!r}"
+    said = f"{P.refusal_text(ran.refusal)}\n{ran.err}"
+    assert ran.refusal is not None, f"setup went on over a {kind}: rc {ran.rc} {rec.order}"
+    assert scene.roster[WORLD_ID] in said, f"the refusal does not name the arm: {said!r}"
     assert "lifecycle" not in rec.order, rec.order
-    assert S.tree(existing) == before, "the refused setup changed the existing run dir"
+    assert ran.out == "", f"a refused setup announced an id: {ran.out!r}"
+    assert S.tree(scene.ep / "runs") == before, "the refused setup changed the runs folder"
+    if outside_before is not None:
+        assert S.tree(outside) == outside_before, "the refused setup wrote through the link"
+        assert existing.is_symlink()
+
+
+@pytest.mark.parametrize("suffix", S.SIDECAR_SUFFIXES)
+def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
+        tmp_path, data_root, suffix):
+    """O8: a sidecar beside the arm's id (a prior run's trace) is refused; nothing is cleared."""
+    scene = _Scene(tmp_path, data_root, B_ID)
+    scene.start_runs_by_hand()
+    arm = scene.roster[WORLD_ID]
+    sidecar = scene.ep / "runs" / f"{arm}{suffix}"
+    sidecar.write_text("{}\n", encoding="utf-8")
+    before = S.tree(scene.ep / "runs")
+
+    ran = P.drive_run_py_stdout(P.new_sibling_argv(B_ID, scene.episode_id, LABEL),
+                                rec := P.SiblingRecorder())
+
+    said = f"{P.refusal_text(ran.refusal)}\n{ran.err}"
+    assert ran.refusal is not None, f"setup went on past a {suffix} sidecar: rc {ran.rc}"
+    assert arm in said, f"the refusal does not name the arm: {said!r}"
+    assert "lifecycle" not in rec.order, rec.order
+    assert ran.out == "", f"a refused setup announced an id: {ran.out!r}"
+    assert not os.path.lexists(scene.ep / "runs" / arm), "the run dir was made past a sidecar"
+    assert S.tree(scene.ep / "runs") == before, "the refused setup changed the runs folder"
+
+    sidecar.unlink()
+    ok = _run_control(scene, f"sidecar-{suffix}")
+    assert ok.run_dir.name == arm

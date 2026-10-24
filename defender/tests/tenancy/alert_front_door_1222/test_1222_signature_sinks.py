@@ -100,7 +100,6 @@ def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR0
               shim: S.RecordingShim | None = None, main: Any = None,
               before: Callable[[Path], None] | None = None,
               lessons: Mapping[str, Sequence[str]] | None = None,
-              run_id: str | None = None,
               store: S.TicketStore | None = None) -> tuple[S.Drive, S.TicketStore]:
     """One run through `run.main` with `--update-ticket`: the open leg, the driver, the record
     leg — the REAL ticket writer over `store` (default a fresh `TicketStore`), which records each
@@ -113,7 +112,7 @@ def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR0
     d = S.run_alert(tmp_path, alert=alert, tenant=planted, tickets=S.ticket_writer(sink),
                     update_ticket=True, orient_shim=shim,
                     main=main if main is not None else S.closing_main_turns(),
-                    before=before, run_id=run_id)
+                    before=before)
     return _completed(d), sink
 
 
@@ -329,11 +328,10 @@ def test_o8_main_system_prompt_takes_the_signature_from_orientation(tmp_path: Pa
 def test_o10_orientation_names_the_missing_signature(tmp_path: Path) -> None:
     planted = S.plant_tenant(alert_mapping=MAPPING)
     signed = S.run_alert(tmp_path / "signed", alert=_alert(), tenant=planted,
-                         orient_shim=S.RecordingShim(fail=("--tags",)), run_id=fixture_uuid("o10-signed"))
+                         orient_shim=S.RecordingShim(fail=("--tags",)))
     S.remap(planted, NO_SIG_MAPPING)
     shim = S.RecordingShim(fail=("--tags",))
-    d = S.run_alert(tmp_path / "unsigned", alert=_alert(), orient_shim=shim, tenant=planted,
-                    run_id=fixture_uuid("o10-unsigned"))
+    d = S.run_alert(tmp_path / "unsigned", alert=_alert(), orient_shim=shim, tenant=planted)
     section = S.lessons_section(d.opening_message)
     assert S.missing_signature_lines(d.opening_message, signed.opening_message), (
         f"the Lessons section names no missing signature the signed run's did not: {section!r}")
@@ -494,7 +492,7 @@ def test_p056_alert_key_names_are_hostile_and_the_harness_name(tmp_path: Path) -
 def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -> None:
     holding = S.HoldingTicketStore()
     signed, _ = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
-                          mapping=S.DEFAULT_MAPPING_GENERIC, store=holding, run_id=fixture_uuid("p082-signed"))
+                          mapping=S.DEFAULT_MAPPING_GENERIC, store=holding)
     opened = holding.only_open()
     assert _sig_label(opened) == RULE_ID, "the sig: label is not the recorded signature verbatim"
     assert _labels(opened, "evt:") == [f"evt:{DETECTED_AT}"], (
@@ -506,8 +504,7 @@ def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -
     name = "Beacon, outbound: rare destination"
     alert = S.generic_alert(rule={"id": RULE_ID, "name": name, "description": DESCRIPTION})
     d, store = _ticketed(tmp_path / "unsigned", alert=alert,
-                         mapping={**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.name"},
-                         run_id=fixture_uuid("p082-unsigned"))
+                         mapping={**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.name"})
     payload = store.only_open()
     assert _sig_label(payload) == S.CASE_FALLBACK_SIGNATURE
     assert _labels(payload, "evt:") == [f"evt:{DETECTED_AT}"]
@@ -527,7 +524,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
 
     accepting = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
     ok, _ = _ticketed(tmp_path / "accepted", alert=S.generic_alert(rule_id=RULE_ID),
-                      mapping=S.DEFAULT_MAPPING_GENERIC, store=accepting, run_id=fixture_uuid("b1-accepted"))
+                      mapping=S.DEFAULT_MAPPING_GENERIC, store=accepting)
     assert accepting.refused == [], f"the control's ticket was refused: {accepting.refused}"
     assert accepting.find(f"sig:{RULE_ID}") == [str(accepting.only_open().get("key"))], (
         "the control's case is not found by its sig: label")
@@ -537,7 +534,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
     refusing = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
     d, _ = _ticketed(tmp_path / "refused",
                      alert=S.generic_alert(rule_id=RULE_ID, detected_at=SPACED_EVENT_TIME),
-                     mapping=S.DEFAULT_MAPPING_GENERIC, store=refusing, run_id=fixture_uuid("b1-refused"))
+                     mapping=S.DEFAULT_MAPPING_GENERIC, store=refusing)
     label = f"evt:{SPACED_EVENT_TIME}"
     assert refusing.refused == [label], (
         "the store never refused the create: the evt: label did not carry the event time "
@@ -566,14 +563,13 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
     for value, other in ((upper, lower), (lower, upper)):
         shim = S.RecordingShim()
         d, store = _ticketed(tmp_path / value, alert=S.generic_alert(rule_id=value),
-                             mapping=S.DEFAULT_MAPPING_GENERIC, shim=shim, lessons=lessons,
-                             run_id=fixture_uuid(f"p089-{value.lower()}-{1 if value == upper else 2}"))
+                             mapping=S.DEFAULT_MAPPING_GENERIC, shim=shim, lessons=lessons)
         assert _sig_label(store.only_open()) == value
         assert _listed(d.opening_message, lessons) == {f"fd1222-p089-{'upper' if value == upper else 'lower'}"}, (
             f"the lessons lookup for {value!r} folded case into {other!r}")
     for i, value in enumerate((LOOKALIKE, "Ré", "Ré", "R-1 ")):
         d, store = _ticketed(tmp_path / f"nonkey-{i}", alert=S.generic_alert(rule_id=value),
-                             mapping=S.DEFAULT_MAPPING_GENERIC, run_id=fixture_uuid(f"p089-nonkey-{i}"))
+                             mapping=S.DEFAULT_MAPPING_GENERIC)
         assert _sig_label(store.only_open()) == S.CASE_FALLBACK_SIGNATURE, (
             f"{value!r} (not a key under A6) became a ticket label")
         assert d.recorded("signature") is None

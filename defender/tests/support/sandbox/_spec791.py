@@ -295,7 +295,7 @@ class SpecTail:
         return {"output": "spec791 verdict", "requests": 1, "truncated_by": self._truncated_by,
                 "closed_before_cut": self._closed_before_cut}
 
-    def visualize(self, run: Any, *, update_ticket: bool = False) -> None:
+    def visualize(self, run: Any, *, tenant: Any = None, update_ticket: bool = False) -> None:
         # #1110: the seam is handed the run's tenant-bound `Run` handle, not a bare path — the
         # step saves the page through it. Kept whole in `visualized` so a demand can ask what
         # handle the tail was given; the step itself is noted against the handle's run dir.

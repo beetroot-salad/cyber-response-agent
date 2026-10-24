@@ -269,8 +269,8 @@ def test_o5_a_provider_down_run_hands_its_class_to_the_post_steps_and_renders(tm
 
     rendered: list[Path] = []
 
-    def visualize(run: Any, **kw: Any) -> None:
-        run_common.visualize(run, **kw)
+    def visualize(run: Any, *, tenant: Any, **kw: Any) -> None:
+        run_common.visualize(run, tenant=tenant, **kw)
         rendered.append(Path(run.run_dir))
 
     d = S.run_alert(tmp_path, main=S.MainScript([S.text(S.DONE)], fault=_down_at(1)),

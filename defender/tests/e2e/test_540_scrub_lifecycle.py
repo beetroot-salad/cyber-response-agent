@@ -968,7 +968,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     try:
-        run = run_common.materialize_run(alert, None, tenant=tenant)
+        run = run_common.materialize_run(alert, tenant=tenant)
     except SystemExit as refused:
         pytest.fail(f"the alert's filename stem still reaches the minted run id: {refused}")
     run_id = run.run_dir.name

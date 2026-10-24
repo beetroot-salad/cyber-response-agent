@@ -250,35 +250,28 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     alert = tmp_path / "alert.json"
     alert.write_text('{"id": "a-771"}\n', encoding="utf-8")
 
-    # ARM 1 — the mint refuses an id whose directory a RUN has been in, and touches nothing.
-    # "Has been in" is judged by contents: setup writes exactly the alert, `gather_raw/` and
-    # the stamp, so anything else under the id (here the model's own report) is a run's trace,
-    # and a container from that run may still be mounted on the tree. (#1077 decision 3 makes
-    # a directory holding NOTHING BUT setup's own writes resumable — an interrupted setup
-    # never started a box, so that premise does not reach it.)
-    first = run_common.materialize_run(alert, fixture_uuid("stale-771"), tenant=tenant).run_dir
+    # ARM 1 — the run dir's creation is exclusive: a directory a RUN has been in is refused, and
+    # touched in no way. A container from that run may still be mounted on the tree. (#1279 O8:
+    # there is no resume, so setup-only leftovers are refused too.)
+    first_run = run_common.materialize_run(alert, tenant=tenant)
+    first = first_run.run_dir
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
     before = sorted(p.name for p in first.iterdir())
 
-    with pytest.raises(SystemExit) as exit_:
-        run_common.materialize_run(alert, fixture_uuid("stale-771"), tenant=tenant)
+    with pytest.raises(FileExistsError):
+        first_run.make_run_dir()
 
-    assert "already exists" in str(exit_.value), (
-        f"the second mint on a live run id did not refuse on the directory's contents: "
-        f"{exit_.value} — the refusal is what keeps a later run out of a tree a container from "
-        f"an earlier run may still be mounted on"
-    )
     assert sorted(p.name for p in first.iterdir()) == before, (
         "the refused mint still wrote into the existing tree"
     )
     assert (first / "report.md").read_text(encoding="utf-8") == "FIRST RUN\n", (
         "the refused mint overwrote the earlier run's artifact"
     )
-    # The complementary condition: a FRESH id under the same base materializes, so the refusal
+    # The complementary condition: a FRESH run under the same base materializes, so the refusal
     # above is the existing directory and not a mint that fails on everything.
-    fresh = run_common.materialize_run(alert, fixture_uuid("fresh-771"), tenant=tenant).run_dir
+    fresh = run_common.materialize_run(alert, tenant=tenant).run_dir
     assert fresh.is_dir(), "no run dir can be minted at all under this base"
-    assert fresh != first, "a fresh id minted the same directory the refusal was about"
+    assert fresh != first, "a fresh run minted the same directory the refusal was about"
 
     # ARM 2 — a reference taken while the tree was alive is a reference to the OBJECT. This
     # re-probes the kernel rule on every run rather than pinning a one-time observation of it.

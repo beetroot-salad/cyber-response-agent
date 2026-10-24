@@ -253,6 +253,78 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
 
+# #1279 A5 — the exclusive mode: the final component must be made by this call
+def test_an_exclusive_mkdir_makes_the_final_component_and_the_missing_ones_above_it(tmp_path):
+    """exclusive_mkdir_creates — a fresh final component is made, with the missing folders
+    between it and the base (#1279 A5)."""
+    run = run_tree(tmp_path)
+
+    guarded_mkdir(run / "gather_raw" / "l-020" / "fresh", base=run, exclusive=True)
+
+    assert (run / "gather_raw" / "l-020" / "fresh").is_dir()
+    assert not (run / "gather_raw" / "l-020" / "fresh").is_symlink()
+    assert list((run / "gather_raw" / "l-020" / "fresh").iterdir()) == []
+
+
+@pytest.mark.parametrize("kind", ["empty-dir", "dir-with-content", "regular-file", "link-to-dir",
+                                  "dangling-link"])
+def test_an_exclusive_mkdir_refuses_whatever_already_holds_the_final_name(tmp_path, kind):
+    """exclusive_mkdir_refuses_existing — a dir, file or link (followed or dangling) at the final
+    name is a `FileExistsError` and is left as found; a link is not followed (#1279 A5)."""
+    run = run_tree(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    final = run / "gather_raw" / "l-021"
+    if kind in ("empty-dir", "dir-with-content"):
+        final.mkdir()
+        if kind == "dir-with-content":
+            (final / "kept.txt").write_text("kept\n", encoding="utf-8")
+    elif kind == "regular-file":
+        final.write_text("not a dir\n", encoding="utf-8")
+    elif kind == "link-to-dir":
+        plant_dir_symlink(final, elsewhere / "loot")
+    else:
+        os.symlink(elsewhere / "nowhere", final)
+    before_outside = snapshot_outside(elsewhere)
+    before_run = snapshot_outside(run)
+
+    with pytest.raises(FileExistsError):
+        guarded_mkdir(final, base=run, exclusive=True)
+
+    assert snapshot_outside(elsewhere) == before_outside, "the refused mkdir reached through the link"
+    assert snapshot_outside(run) == before_run, "the refused mkdir changed the tree"
+    assert os.path.islink(final) == (kind in ("link-to-dir", "dangling-link"))
+    assert not (elsewhere / "nowhere").exists()
+
+
+def test_an_exclusive_mkdir_still_refuses_a_planted_component_above_the_final_name(tmp_path):
+    """exclusive_mkdir_keeps_the_component_check — the exclusive mode judges the folders above
+    the final name as the default mode does (#1279 A5)."""
+    run = run_tree(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    plant_dir_symlink(run / "gather_raw" / "l-022", elsewhere / "loot")
+    before = snapshot_outside(elsewhere)
+
+    with pytest.raises(OSError) as refused:  # noqa: PT011 — the component check's errno is the idiom's
+        guarded_mkdir(run / "gather_raw" / "l-022" / "fresh", base=run, exclusive=True)
+
+    assert not isinstance(refused.value, FileExistsError), refused.value
+    assert snapshot_outside(elsewhere) == before, "the exclusive mkdir created through the component"
+
+
+def test_the_default_mkdir_still_accepts_an_existing_final_name(tmp_path):
+    """default_mkdir_is_idempotent — control for the exclusive cases: without the mode an
+    existing final directory is accepted (#1279 A5)."""
+    run = run_tree(tmp_path)
+    (run / "gather_raw" / "l-023").mkdir()
+    (run / "gather_raw" / "l-023" / "kept.txt").write_text("kept\n", encoding="utf-8")
+
+    guarded_mkdir(run / "gather_raw" / "l-023", base=run)
+    guarded_mkdir(run / "gather_raw" / "l-023", base=run, exclusive=False)
+
+    assert (run / "gather_raw" / "l-023" / "kept.txt").read_text(encoding="utf-8") == "kept\n"
+
+
 # §7 D1 — the staged name, and the collision class it dissolves
 def test_a_replacing_write_stages_under_an_unpredictable_name(tmp_path):
     """staged_name_is_unpredictable — the replacing write stages its payload under a name that is

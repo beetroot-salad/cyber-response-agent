@@ -231,9 +231,8 @@ def test_1105_the_repository_answers_from_the_tenant_it_is_handed_and_reads_no_e
     assert answers() == expected, "answers moved with DEFENDER_DATA_ROOT elsewhere"
     shutil.rmtree(t.knowledge)
     assert answers() == expected, "answers moved with the knowledge folder gone"
-    made = str(uuid.uuid4())
-    created = t.runs_repository().create(RunId.parse(made))
-    assert created.run_dir == location_path(t.runs) / made, f"runs.create landed at {created.run_dir}"
+    created = t.runs_repository().create()
+    assert created.run_dir.parent == location_path(t.runs), f"runs.create landed at {created.run_dir}"
     assert not (other_root / t.id / "runs").exists(), "something reached the env's data root"
     err = H.raised(_tenant.accept_tenant, fixture_data_root(root), t.id, defender_dir=H.DEFENDER)
     assert H.is_a(err, TenantRefused), f"acceptance at the edge did not refuse: {err!r}"
@@ -594,9 +593,9 @@ def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
         assert H.tree_state(root) == before, f"a reader wrote over the {state} folder"
     u = H.tenant(root, H.U_ID)
     alert = H.alert_file(tmp_path / "alerts")
-    pinned = str(uuid.uuid4())
-    run_common.materialize_run(alert, pinned, tenant=u)
-    assert (location_path(u.runs) / pinned).is_dir(), "run setup creates the runs folder and the run"
+    made = run_common.materialize_run(alert, tenant=u)
+    assert made.run_dir.parent == location_path(u.runs)
+    assert made.run_dir.is_dir(), "run setup creates the runs folder and the run"
     assert not (location_path(u.runs) / "_tenant.json").exists(), "run setup wrote the retired tenant record"
 
 
@@ -617,8 +616,7 @@ def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root, H.T_ID)
-    rid = str(uuid.uuid4())
-    run_common.materialize_run(H.alert_file(tmp_path / "alerts"), rid, tenant=t)
+    rid = run_common.materialize_run(H.alert_file(tmp_path / "alerts"), tenant=t).run_dir.name
     assert t.runs_repository().open(RunId.parse(rid)).run_dir == location_path(t.runs) / rid, "T's run opens for T"
     u = H.tenant(root, H.U_ID)
     err = H.raised(u.runs_repository().open, RunId.parse(rid))
@@ -861,7 +859,7 @@ def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
     assert H.is_a(err, RunAbsent), f"runs.open over an absent folder gave {err!r}"
     assert H.tree_state(root) == before, "something was created"
     assert not location_path(t.runs).exists(), "something was created"
-    run_common.materialize_run(H.alert_file(tmp_path / "alerts"), rid, tenant=t)
+    rid = run_common.materialize_run(H.alert_file(tmp_path / "alerts"), tenant=t).run_dir.name
     assert (location_path(t.runs) / rid).is_dir(), "run setup made the folder and the run"
     assert not (location_path(t.runs) / "_tenant.json").exists(), "run setup wrote the retired tenant record"
     assert t.runs_repository().open(RunId.parse(rid)).run_dir == location_path(t.runs) / rid, "the run opens"

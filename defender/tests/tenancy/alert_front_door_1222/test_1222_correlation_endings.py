@@ -70,8 +70,6 @@ class _Scene:
         sub = self.tmp / f"{self.tenant.tenant_id}-{self._n:02d}-{label}"
         sub.mkdir(parents=True)
         kw.setdefault("tenant", self.tenant)
-        # #1187 (declared change 1): a run id is a canonical UUID, named after the readable label.
-        kw.setdefault("run_id", fixture_uuid(f"fd1222-{self.tenant.tenant_id}-{label}-{self._n:02d}"))
         return S.run_alert(sub, alert=_alert(), backend=backend if backend is not None
                            else _backend(), **kw)
 

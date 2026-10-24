@@ -5,7 +5,6 @@ from __future__ import annotations
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import functools
 import json
@@ -162,7 +161,7 @@ def _run(  # noqa: PLR0913 — one scenario's inputs, each defaulted
     scripts = dict(leads or {})
     scripts[S.L3] = list(l3) if l3 is not None else _l3_turns()
     d = S.run_alert(tmp_path / sub, alert=alert if alert is not None else _alert(),
-                    tenant=tenant if tenant is not None else _tenant(), run_id=fixture_uuid(f"gr-{sub}"),
+                    tenant=tenant if tenant is not None else _tenant(),
                     main=main, leads=scripts, lead_faults=faults,
                     backend=S.Backend(answer=_answer), defender_dir=defender_dir)
     assert d.raised is None, f"the run raised: {d.raised!r}"

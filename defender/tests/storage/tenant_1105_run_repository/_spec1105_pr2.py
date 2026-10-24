@@ -328,6 +328,51 @@ def drive_run_py(argv: list[str], rec: SiblingRecorder, **override: Any) -> tupl
     return rc, None, err.getvalue()
 
 
+@dataclass
+class StdoutRun:
+    """`drive_run_py` with stdout captured: `seen[step]` is what stdout held when `step`'s seam
+    ran (`preflight`, `ticket`, `lifecycle`, ...)."""
+
+    rc: int | None
+    refusal: BaseException | None
+    err: str
+    out: str
+    seen: dict[str, str]
+
+
+class _TicketTap:
+    """A ticket writer that records stdout when the ticket is opened (`--update-ticket`)."""
+
+    def __init__(self, tap: Any) -> None:
+        self._tap = tap
+
+    def open_case_ticket(self, *_a: Any, **_kw: Any) -> None:
+        self._tap("ticket")
+
+    def record_case_ticket(self, *_a: Any, **_kw: Any) -> None:
+        return None
+
+
+def drive_run_py_stdout(argv: list[str], rec: SiblingRecorder, **override: Any) -> StdoutRun:
+    out = io.StringIO()
+    seen: dict[str, str] = {}
+
+    def tap(step: str) -> None:
+        seen[step] = out.getvalue()
+
+    def tapped(step: str, seam: Any) -> Any:
+        def call(*a: Any, **kw: Any) -> Any:
+            tap(step)
+            return seam(*a, **kw)
+        return call
+
+    seams = {name: tapped(name, seam) for name, seam in rec.seams().items()}
+    seams["ticket_writer"] = _TicketTap(tap)
+    with redirect_stdout(out):
+        rc, refusal, err = drive_run_py(argv, rec, **{**seams, **override})
+    return StdoutRun(rc, refusal, err, out.getvalue(), seen)
+
+
 def refusal_text(exc: BaseException | None) -> str:
     if exc is None:
         return ""

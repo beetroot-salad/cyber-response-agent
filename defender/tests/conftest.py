@@ -94,8 +94,8 @@ def _held_capabilities(checkout_roster):
 
 
 #: The run-page mirror's location override (#1084 D4). Spelled here rather than imported from
-#: `visualize_run`, so this conftest never imports the renderer; `test_1084_mirror` pins that
-#: the renderer's own constant is this same name, so the two cannot drift apart.
+#: `defender.configuration.publish_root`, so this conftest never imports the resolver;
+#: `test_1084_mirror` spells the same name and drives the resolver through it.
 RUN_VISUALIZATIONS_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 
 
@@ -103,7 +103,7 @@ RUN_VISUALIZATIONS_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     """Every test's run-page mirror lands in a per-test tmp dir, never in a real checkout's
     `run-visualizations/` (#1084 O3, M4). This is the PREVENTION. For a test that removes
-    it, the resolver still refuses the real checkout under pytest (`MirrorRootRefused`), so no
+    it, the resolver still refuses the real checkout under pytest (`PublishRootRefused`), so no
     copy lands there — but since #1110 a refused copy is a logged WARNING, not a failed render,
     so that refusal surfaces as a warning in the test's log, never as a failing test."""
     mirror = tmp_path_factory.mktemp("run-visualizations")

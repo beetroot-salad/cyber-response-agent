@@ -455,9 +455,9 @@ class RunRecorder:
         self.order.append("preflight")
         return 0
 
-    def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Any:
+    def materialize(self, alert: Path, **kw: Any) -> Any:
         self.order.append("materialize")
-        self.materialize_calls.append({"alert": alert, "run_id": run_id, **kw})
+        self.materialize_calls.append({"alert": alert, **kw})
         self.run_dir_at.mkdir(parents=True, exist_ok=True)
         # Run start settles the alert once (#1222): the folder holds it with its record, which
         # the box mount needs.

@@ -36,14 +36,14 @@ def test_1187_o1_mint_contract():
         assert RunId.parse(text) == run_id
 
 
-def test_1187_o1_run_setup_names_an_unpinned_run_folder_by_a_bare_uuid(tmp_path, data_root):
+def test_1187_o1_run_setup_names_a_run_folder_by_a_bare_uuid(tmp_path, data_root):
     from defender import run_common
 
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in", "ssh-brute-force.json")
 
-    first = run_common.materialize_run(alert, None, tenant=t)
-    second = run_common.materialize_run(alert, None, tenant=t)
+    first = run_common.materialize_run(alert, tenant=t)
+    second = run_common.materialize_run(alert, tenant=t)
 
     runs = Path(location_path(t.runs))
     assert Path(first.run_dir).parent == runs
@@ -190,94 +190,129 @@ def test_1187_o1_the_episode_layout_spells_no_sibling_run_dir():
     for owner in (_episode_paths.EpisodeLayout, _episode_paths.LAYOUT):
         assert not hasattr(owner, "sibling_run_dir"), (
             f"{owner!r} still spells the composed sibling run dir")
-# O2: `run.py --run-id` refuses an old id and accepts a UUID.
+# #1279 O5: no run id on the command line; the minted id is announced first on stdout.
 
 def _run_py(tenant, alert: Path, run_id: str):
-    """Drive run.main while recording spending seams without invoking a model or sandbox."""
+    """Drive run.main with `--run-id <id>` while recording the spend seams."""
     rec = P.SiblingRecorder()
     argv = [str(alert), "--tenant", tenant.id, "--run-id", run_id, "--no-learn"]
     status, refusal, stderr = P.drive_run_py(argv, rec)
     return status, refusal, stderr, rec
 
 
-def test_1187_o2_run_py_runs_a_pinned_uuid(tmp_path, data_root):
-    t = S.tenant(data_root)
-    alert = H.alert_file(tmp_path / "in")
-    run_id = S.new_id()
-
-    status, refusal, stderr, rec = _run_py(t, alert, run_id)
-
-    assert refusal is None, f"--run-id {run_id} was refused: {P.refusal_text(refusal)!r} {stderr!r}"
-    assert status == 0, (status, stderr)
-    assert rec.order.count("lifecycle") == 1, rec.order
-    assert (Path(location_path(t.runs)) / run_id).is_dir()
-
-
-@pytest.mark.parametrize("text", [pytest.param(t, id=repr(t)) for t in S.NON_CANONICAL_IDS
-                                  if t.strip() == t and t])
-def test_1187_o2_run_py_refuses_a_pinned_id_that_is_not_a_canonical_uuid(
-        text, tmp_path, data_root):
+@pytest.mark.parametrize("text", [pytest.param(S.SAMPLE_UUID, id="canonical-uuid")] + [
+    pytest.param(t, id=repr(t)) for t in S.NON_CANONICAL_IDS if t.strip() == t and t])
+def test_1279_o5_run_py_rejects_run_id_on_the_command_line(text, tmp_path, data_root):
+    """O5: `--run-id` is no longer an argument, whatever it carries; the run stops before setup."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
 
     status, refusal, stderr, rec = _run_py(t, alert, text)
 
-    assert refusal is not None, f"--run-id {text!r} ran: status {status}, order {rec.order}"
-    said = P.refusal_text(refusal)
-    assert "run id" in said, f"not a run-id refusal: {said!r}"
-    # Pre-flight runs before run setup (it spends nothing); the lifecycle, the page and the
-    # curation enqueue are what a refused id must never reach.
-    assert [step for step in rec.order if step != "preflight"] == [], (
-        f"the run went on past a refused id: {rec.order}")
-    assert not Path(location_path(t.runs)).exists() or sorted(Path(location_path(t.runs)).iterdir()) == [], (
-        f"a refused id left something in the runs folder: {sorted(Path(location_path(t.runs)).iterdir())}")
-# #1279 O5: no run id on the command line; the minted id is announced first on stdout.
-
-def test_1279_o5_run_py_rejects_run_id_on_the_command_line(tmp_path, data_root):
-    """O5: `--run-id` is no longer an argument; the run stops before setup."""
-    t = S.tenant(data_root)
-    alert = H.alert_file(tmp_path / "in")
-    run_id = S.new_id()
-
-    status, refusal, stderr, rec = _run_py(t, alert, run_id)
-
     assert refusal is not None, f"--run-id was accepted: status {status}, order {rec.order}"
     assert "--run-id" in f"{P.refusal_text(refusal)}\n{stderr}", (P.refusal_text(refusal), stderr)
     assert rec.order == [], f"the run went on past a refused argument: {rec.order}"
     runs = Path(location_path(t.runs))
-    assert not (runs / run_id).exists()
+    assert not (runs / text).exists()
     assert not runs.exists() or sorted(runs.iterdir()) == [], sorted(runs.iterdir())
 
 
-def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_box(tmp_path, data_root):
-    """O5: `run_id=<uuid>` is stdout's first line, written after setup and before the lifecycle."""
-    import contextlib
-    import io
-    import re
+def test_1279_o5_run_py_rejects_the_equals_form_of_run_id(tmp_path, data_root):
+    """O5: `--run-id=<uuid>` is refused as the spaced form is."""
+    t = S.tenant(data_root)
+    rec = P.SiblingRecorder()
 
+    status, refusal, stderr = P.drive_run_py(
+        [str(H.alert_file(tmp_path / "in")), "--tenant", t.id, f"--run-id={S.new_id()}",
+         "--no-learn"], rec)
+
+    assert refusal is not None, f"status {status}, order {rec.order}"
+    assert "--run-id" in f"{P.refusal_text(refusal)}\n{stderr}"
+    assert rec.order == []
+
+
+@pytest.mark.parametrize("update_ticket", [False, True], ids=["plain", "with-ticket"])
+def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_ticket_and_box(
+        tmp_path, data_root, update_ticket):
+    """O5: `run_id=<uuid>` is stdout's first line, after setup and before ticket and lifecycle."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
     rec = P.SiblingRecorder()
-    out = io.StringIO()
-    at_lifecycle: list[str] = []
+    argv = [str(alert), "--tenant", t.id, "--no-learn"] + (["--update-ticket"] if update_ticket else [])
 
-    def lifecycle(**kwargs):
-        at_lifecycle.append(out.getvalue())
-        return rec.lifecycle(**kwargs)
+    ran = P.drive_run_py_stdout(argv, rec)
 
-    with contextlib.redirect_stdout(out):
-        status, refusal, stderr = P.drive_run_py(
-            [str(alert), "--tenant", t.id, "--no-learn"], rec, lifecycle=lifecycle)
-
-    assert refusal is None, (P.refusal_text(refusal), stderr)
-    assert status == 0, (status, stderr)
+    assert ran.refusal is None, (P.refusal_text(ran.refusal), ran.err)
+    assert ran.rc == 0, (ran.rc, ran.err)
     run_dir = Path(rec.run_dir)
-    assert at_lifecycle == [f"run_id={run_dir.name}\n"], (
-        f"stdout when the box was reached: {at_lifecycle!r}")
-    first = out.getvalue().splitlines()[0]
-    assert re.fullmatch(r"run_id=(.+)", first), first
-    assert S.is_canonical_uuid(first.removeprefix("run_id=")), first
+    line = f"run_id={run_dir.name}\n"
+    assert S.is_canonical_uuid(run_dir.name), run_dir.name
     assert run_dir.parent == Path(location_path(t.runs))
+    assert ran.out.splitlines(keepends=True)[:1] == [line], ran.out
+    assert ran.seen["preflight"] == "", f"stdout before setup: {ran.seen['preflight']!r}"
+    assert ran.seen["lifecycle"] == line, f"stdout when the box was reached: {ran.seen['lifecycle']!r}"
+    if update_ticket:
+        assert ran.seen["ticket"] == line, f"stdout when the ticket opened: {ran.seen['ticket']!r}"
+
+
+def test_1279_o5_two_runs_announce_two_minted_ids(tmp_path, data_root):
+    """O5: each run's setup mints its own id; the announced id names the run folder it made."""
+    t = S.tenant(data_root)
+    alert = H.alert_file(tmp_path / "in")
+    announced = []
+    for _ in range(2):
+        rec = P.SiblingRecorder()
+        ran = P.drive_run_py_stdout([str(alert), "--tenant", t.id, "--no-learn"], rec)
+        assert ran.rc == 0, ran.err
+        announced.append(("".join(ran.out.splitlines()[:1]), Path(rec.run_dir).name))
+
+    assert announced[0][0] != announced[1][0]
+    for line, folder in announced:
+        assert line == f"run_id={folder}"
+    assert sorted(p.name for p in Path(location_path(t.runs)).iterdir()) == sorted(
+        folder for _line, folder in announced)
+
+
+def test_1279_o5_a_run_refused_before_setup_announces_nothing(tmp_path, data_root):
+    """O5: nothing is on stdout before the announcement, and a refused start has none."""
+    S.tenant(data_root)
+    rec = P.SiblingRecorder()
+
+    ran = P.drive_run_py_stdout(
+        [str(H.alert_file(tmp_path / "in")), "--tenant", S.new_id()[:8], "--no-learn"], rec)
+
+    assert ran.refusal is not None, f"an unknown tenant ran: {ran.rc}"
+    assert ran.out == "", f"stdout before setup: {ran.out!r}"
+    assert rec.order == []
+
+
+def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
+    """A3: no id parameter on `materialize_run`, `run.py`'s seam or `create()`; `create()` mints."""
+    import inspect
+
+    from defender import run as run_py
+    from defender import run_common
+    from defender.run_repository import EpisodeRuns, RunsRepository
+
+    for func in (run_common.materialize_run, run_py._materialize_run, RunsRepository.create):
+        said = set(inspect.signature(func).parameters) & {"run_id", "pinned", "id"}
+        assert said == set(), f"{func.__qualname__} still takes {sorted(said)}"
+    assert list(inspect.signature(RunsRepository.create).parameters) == ["self"]
+    assert len(inspect.signature(EpisodeRuns.create).parameters) == 2, (
+        "EpisodeRuns.create keeps its arm id: the roster check needs it")
+
+    t = S.tenant(data_root)
+    runs = t.runs_repository()
+    assert isinstance(S.raised(runs.create, S.new_id()), TypeError), "create took an id"
+    made = [runs.create() for _ in range(3)]
+    names = [Path(r.run_dir).name for r in made]
+    assert len(set(names)) == 3, names
+    assert all(S.is_canonical_uuid(n) for n in names), names
+    alert = H.alert_file(tmp_path / "in")
+    assert isinstance(S.raised(run_common.materialize_run, alert, S.new_id(), tenant=t),
+                      TypeError), "materialize_run took an id"
+
+
 # O1: the census. No production source composes, derives or bounds an id by meaning.
 
 #: Functions production must neither call nor pass around (C1 of the design): the stamp-label
@@ -487,6 +522,95 @@ def test_1187_o1_no_production_source_composes_derives_or_bounds_an_id_by_meanin
     hits = census(DEFENDER)
     listing = "\n  ".join(str(h) for h in hits)
     assert hits == [], f"{len(hits)} production sites still read or build id meaning:\n  {listing}"
+
+
+# #1279 A3 census: no production call hands a run id to run setup or `RunsRepository.create`;
+# only run setup makes an arm, from the roster's id.
+
+def run_id_handouts(root: Path, *, skip_tests: bool = True) -> list[Hit]:
+    """Production calls that pass an id to setup or `create`, and every arm `create`."""
+    root = Path(root)
+    excluded = (".venv", "__pycache__", "node_modules") + (("tests",) if skip_tests else ())
+    hits: list[Hit] = []
+    for rel in _astlib.source_files(root, excluded):
+        _text, tree = _astlib.read_and_parse(root / rel, rel)
+        module, package = _astlib.module_and_package(rel, root="defender")
+        env = _astlib.module_env(tree, module, package)
+        with _astlib.scan_guard(rel):
+            for node, values in S.scoped_nodes(tree):
+                hits.extend(_handouts_at(node, env, rel, values))
+    return sorted(set(hits))
+
+
+def _handouts_at(node: ast.AST, env, rel: str, values: dict) -> list[Hit]:
+    if not isinstance(node, ast.Call):
+        return []
+    func = node.func
+    called = _astlib.callee(node, env) or ""
+    named = {k.arg for k in node.keywords}
+    handed = len(node.args) > 1 or bool(named & {"run_id", "pinned"})
+    seam = isinstance(func, ast.Name) and func.id in ("materialize", "_materialize_run")
+    if called.rsplit(".", 1)[-1] in ("materialize_run", "_materialize_run") or seam:
+        return [Hit(rel, node.lineno, "setup-id", ast.unparse(node))] if handed else []
+    if not (isinstance(func, ast.Attribute) and func.attr == "create"):
+        return []
+    receiver = func.value
+    if isinstance(receiver, ast.Call) and isinstance(receiver.func, ast.Attribute) and (
+            receiver.func.attr == "runs_repository"):
+        return [Hit(rel, node.lineno, "repo-id", ast.unparse(node))] if (
+            node.args or node.keywords) else []
+    if S.spells(receiver, "episode_runs", values):
+        sourced = bool(node.args) and S.spells(node.args[0], "arm_id", values)
+        return [Hit(rel, node.lineno, "arm-create" if sourced else "arm-create-foreign",
+                    ast.unparse(node))]
+    return []
+
+
+def test_1279_a3_census_no_production_call_hands_a_run_id_to_setup_or_create():
+    hits = run_id_handouts(DEFENDER)
+    listing = "\n  ".join(str(h) for h in hits)
+
+    handed = [h for h in hits if h.kind in ("setup-id", "repo-id", "arm-create-foreign")]
+    assert handed == [], f"production hands an id around:\n  {listing}"
+    assert [(h.rel, h.kind) for h in hits] == [("run_common.py", "arm-create")], (
+        f"only run setup makes an arm, from the roster's arm id:\n  {listing}")
+
+
+RUN_ID_HANDOUTS = [
+    ("setup-positional", "run_common.materialize_run(alert, rid, tenant=t)", [("setup-id",)]),
+    ("setup-keyword", "run_common.materialize_run(alert, tenant=t, run_id=rid)", [("setup-id",)]),
+    ("setup-pinned", "run_common.materialize_run(alert, tenant=t, pinned=True)", [("setup-id",)]),
+    ("setup-alias", "mat(alert, rid, tenant=t)", [("setup-id",)]),
+    ("run-py-helper", "_materialize_run(alert, rid, tenant=t, model=m)", [("setup-id",)]),
+    ("seam", "materialize(alert, rid, tenant=t)", [("setup-id",)]),
+    ("repo-positional", "t.runs_repository().create(rid)", [("repo-id",)]),
+    ("repo-pinned", "t.runs_repository().create(pinned=True)", [("repo-id",)]),
+    ("arm-from-roster", "episode_runs.create(episode_runs.arm_id(world.world_id))",
+     [("arm-create",)]),
+    ("arm-from-local", "arm = episode_runs.arm_id(world.world_id)\nepisode_runs.create(arm)",
+     [("arm-create",)]),
+    ("arm-from-elsewhere", "episode_runs.create(rid)", [("arm-create-foreign",)]),
+    ("arm-through-alias", "view = episode_runs\nview.create(rid)", [("arm-create-foreign",)]),
+    ("clean-setup", "run_common.materialize_run(alert, tenant=t, model=m, world=w)", []),
+    ("clean-seam", "materialize(alert, tenant=t, model=m)", []),
+    ("clean-repo", "t.runs_repository().create()", []),
+    ("unrelated-create", "episode.source_alert.create(raw)\nother.create(rid)", []),
+]
+
+
+@pytest.mark.parametrize(("name", "body", "expected"), RUN_ID_HANDOUTS,
+                         ids=[c[0] for c in RUN_ID_HANDOUTS])
+def test_1279_a3_census_partitions(tmp_path, name, body, expected):
+    import textwrap
+
+    source = ("from defender import run_common\n"
+              "from defender.run_common import materialize_run as mat\n"
+              "def _materialize_run(*a, **k):\n    pass\n"
+              "def check(t, alert, rid, m, w, materialize, episode_runs, world, episode, other, raw):\n"
+              + textwrap.indent(body, "    ") + "\n")
+    (tmp_path / "probe.py").write_text(source, encoding="utf-8")
+
+    assert [(h.kind,) for h in run_id_handouts(tmp_path)] == expected, (name, source)
 
 
 # Each syntax partition has an exact oracle, including import aliases and negative controls.

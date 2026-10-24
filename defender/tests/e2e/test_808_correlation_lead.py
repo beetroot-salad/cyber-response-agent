@@ -10,7 +10,6 @@ from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.driver import GATHER_REQUEST_LIMIT  # noqa: E402
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S  # noqa: E402
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 pytestmark = pytest.mark.e2e
 
@@ -23,7 +22,7 @@ def _alerts(i: int) -> S.Turn:
 def test_correlation_lead_is_bound_to_the_alerts_index_only(tmp_path):
     """The correlation lead is dispatched with a narrowed verb grant that excludes `esql`: an
     ES|QL call from it is denied and recorded as a policy denial, while its granted verb runs."""
-    d = S.run_alert(tmp_path, tenant=S.plant_tenant(), run_id=fixture_uuid("b808-grant"), leads={S.L3: [
+    d = S.run_alert(tmp_path, tenant=S.plant_tenant(), leads={S.L3: [
         S.query("elastic", "esql", {"query": "FROM logs-* | LIMIT 1"}),
         _alerts(0), S.text(S.DEFAULT_CORRELATION_SUMMARY)]})
     assert d.raised is None, d.raised
@@ -40,7 +39,7 @@ def test_correlation_ceiling_is_eight_and_mains_leads_keep_forty(tmp_path):
     """The lead is stopped at its eighth request; a lead MAIN dispatches is not held to eight."""
     over = S.CORRELATION_REQUEST_LIMIT + 4
     d = S.run_alert(
-        tmp_path, tenant=S.plant_tenant(), run_id=fixture_uuid("b808-limit"),
+        tmp_path, tenant=S.plant_tenant(),
         main=[S.gather("l-001", "elastic"), S.text(S.DONE)],
         leads={S.L3: [_alerts(i) for i in range(over)],
                "l-001": [_alerts(100 + i) for i in range(over)] + [S.text("main lead done")]})
@@ -57,7 +56,7 @@ def test_correlation_session_cut_at_its_ceiling_reads_back_as_cut(tmp_path):
     gets: one cut off at its ceiling is distinguishable in the store from one that finished."""
     stores: list = []
     d = S.run_alert(
-        tmp_path, tenant=S.plant_tenant(), run_id=fixture_uuid("b808-stamp"),
+        tmp_path, tenant=S.plant_tenant(),
         leads={S.L3: [_alerts(i) for i in range(S.CORRELATION_REQUEST_LIMIT + 4)]},
         store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert d.raised is None, d.raised

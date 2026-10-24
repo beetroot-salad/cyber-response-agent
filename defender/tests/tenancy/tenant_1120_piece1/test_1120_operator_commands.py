@@ -428,26 +428,29 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     data_root: Path, tmp_path: Path, script: str, args: list[str], identity: list[str],
+    run_visualizations_dir: Path,
 ):
-    """O3: neither absent nor malformed tenant identity can select an ambient queue."""
+    """O3: neither absent nor malformed tenant identity can select an ambient queue. #1279: nor publish a page."""
     poison = tmp_path / "ambient-state"
     poison.mkdir()
     (poison / "operator-sentinel").write_bytes(b"untouched")
     before_state = {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()}
-    # The old frontend writes to its package before discovering state errors. Restore the
-    # existing build outputs even when this contract fails against that implementation.
+    # The old frontend wrote to its package before discovering state errors; the build now
+    # publishes per tenant (#1279), so a refusal leaves the tree and the publish root alone.
+    # Restore the existing build outputs even when this contract fails against an old build.
     frontend = H.REPO_ROOT / "defender/learning/frontend"
     outputs = [frontend / n for n in ("lessons.json", "lessons.html", "queues.json", "queues.html")]
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
     try:
         proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root,
-                            DEFENDER_LEARNING_STATE_DIR=str(poison))
+                            DEFENDER_LEARNING_STATE_DIR=str(poison), DEFENDER_DEPLOYMENT="dev")
         out = H.output(proc)
         assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
         assert "tenant" in out.lower(), out
         assert "traceback" not in out.lower(), out
         assert {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()} == before_state
         assert {p: p.read_bytes() if p.exists() else None for p in outputs} == before_pages
+        assert not list(run_visualizations_dir.iterdir()), "identity refusal published a page"
         assert not list(data_root.iterdir()), "identity refusal touched a tenant directory"
     finally:
         for p, blob in before_pages.items():

@@ -1,8 +1,6 @@
 """#1084/#1110 e2e: the dev-only run-page mirror copy. Replaced by stage+rename (never truncated in place), a planted link at the page name is refused and warned, a failed copy never fails the render, and (as root) pages are written as the checkout's owner and never through a link to a root-only target."""
 from __future__ import annotations
 
-from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
-
 import logging
 import os
 import pwd
@@ -36,6 +34,25 @@ def _renderer():
     from defender.presentation import visualize_run
 
     return visualize_run
+
+
+def _publish_root():
+    from defender.configuration import publish_root
+
+    return publish_root
+
+
+def tenant_of(run):
+    """The accepted `Tenant` of the run's tenant in this test's data root: what `run.py` holds and
+    hands the post-run step (#1279 A4)."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
+
+    return set_up_tenant(current_data_root(), run.tenant_id)
+
+
+def area(root: Path, run) -> Path:
+    """Where run R of tenant T is published under `root` (#1279 O2)."""
+    return root / run.tenant_id / "runs" / run.run_dir.name / PAGE
 
 
 def _warnings(caplog) -> list[str]:
@@ -90,13 +107,13 @@ def test_1084_an_existing_mirror_page_is_replaced_not_rewritten_in_place(
     """The page at the mirror is made a HARD LINK to an unrelated file before the render."""
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
-    folder = run_visualizations_dir / run_dir.name
-    folder.mkdir()
+    folder = area(run_visualizations_dir, run).parent
+    folder.mkdir(parents=True)
     bystander = tmp_path / "bystander.html"
     bystander.write_bytes(b"BYSTANDER\n")
     os.link(bystander, folder / PAGE)
 
-    run_common.visualize(run)
+    run_common.visualize(run, tenant=tenant_of(run))
 
     assert (folder / PAGE).read_bytes() == (run_dir / PAGE).read_bytes(), (
         "positive control: the mirror does not hold the run's page")
@@ -113,16 +130,16 @@ def test_1084_a_failed_mirror_write_is_warned_and_the_record_kept(tmp_path, monk
     blocker = tmp_path / "blocker"
     blocker.write_bytes(b"a file, not a folder\n")
     monkeypatch.setenv(ENV, str(blocker / "run-visualizations"))
-    dest = blocker / "run-visualizations" / run_dir.name / PAGE
-    page = vr.render_page(_run_handle_1165(run_dir))
+    dest = area(blocker / "run-visualizations", run)
+    tenant = tenant_of(run)
 
     caplog.set_level(logging.DEBUG)
-    assert vr.mirror_page(page, run_dir.name) == "failed"
+    assert vr.publish_page(run, tenant=tenant) == "failed"
     _assert_one_warning_naming_the_destination_once(caplog, dest)
     _assert_the_errors_reason_not_its_str(
         _warning_records(caplog)[0].getMessage(), "NotADirectoryError", "Not a directory")
     caplog.clear()
-    run_common.visualize(run)  # a failed copy is not a failed render: no VisualizeFailed
+    run_common.visualize(run, tenant=tenant)  # a failed copy is not a failed render: no VisualizeFailed
 
     _assert_record_written(run_dir)
     _assert_one_warning_naming_the_destination_once(caplog, dest)
@@ -131,8 +148,8 @@ def test_1084_a_failed_mirror_write_is_warned_and_the_record_kept(tmp_path, monk
     good = tmp_path / "good"
     monkeypatch.setenv(ENV, str(good))
     caplog.clear()
-    run_common.visualize(run)
-    assert (good / run_dir.name / PAGE).read_bytes() == (run_dir / PAGE).read_bytes()
+    run_common.visualize(run, tenant=tenant)
+    assert area(good, run).read_bytes() == (run_dir / PAGE).read_bytes()
     assert _warnings(caplog) == [], "a copy that landed was warned about"
 
 
@@ -142,19 +159,19 @@ def test_1084_a_link_at_the_page_name_is_refused_in_process_and_warned_naming_it
     vr = _renderer()
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
-    root = vr.mirror_root()
+    tenant = tenant_of(run)
+    root = _publish_root().publish_root()
     assert root == run_visualizations_dir, "precondition: the copy resolves to the override"
     assert os.geteuid() != 0 or os.lstat(root.parent).st_uid == 0, (
         "precondition: the copy is written in-process, not by a dropped-privilege child")
-    dest = root / run_dir.name / PAGE
-    dest.parent.mkdir()
+    dest = area(root, run)
+    dest.parent.mkdir(parents=True)
     outside = tmp_path / "outside.html"
     outside.write_bytes(b"OUTSIDE\n")
     os.symlink(outside, dest)
-    page = vr.render_page(_run_handle_1165(run_dir))
 
     caplog.set_level(logging.DEBUG)
-    assert vr.mirror_page(page, run_dir.name) == "failed"
+    assert vr.publish_page(run, tenant=tenant) == "failed"
     _assert_one_warning_naming_the_destination_once(caplog, dest)
     _assert_the_errors_reason_not_its_str(
         _warning_records(caplog)[0].getMessage(), "OSError", "refusing to replace a symlink")
@@ -163,15 +180,15 @@ def test_1084_a_link_at_the_page_name_is_refused_in_process_and_warned_naming_it
     assert os.readlink(dest) == str(outside), "the planted link was re-aimed"
 
     caplog.clear()
-    run_common.visualize(run)  # a refused copy is not a failed render: no VisualizeFailed
+    run_common.visualize(run, tenant=tenant)  # a refused copy is not a failed render: no VisualizeFailed
     _assert_record_written(run_dir)
     _assert_one_warning_naming_the_destination_once(caplog, dest)
     assert outside.read_bytes() == b"OUTSIDE\n", "the post-run step wrote through the link"
 
     dest.unlink()
     caplog.clear()
-    assert vr.mirror_page(page, run_dir.name) == "copied"
-    assert dest.read_bytes() == page.encode("utf-8")
+    assert vr.publish_page(run, tenant=tenant) == "copied"
+    assert dest.read_bytes() == (run_dir / PAGE).read_bytes()
     assert _warning_records(caplog) == [], "a copy that landed was warned about"
 
 
@@ -264,10 +281,11 @@ def test_1084_a_root_render_writes_the_mirror_as_the_checkouts_owner(tmp_path, o
     run_dir = driven_run(tmp_path)
     assert not owned_tree.mirror.exists()
 
-    run_common.visualize(tenant_run(run_dir))
+    run = tenant_run(run_dir)
+    run_common.visualize(run, tenant=tenant_of(run))
 
-    page = owned_tree.mirror / run_dir.name / PAGE
-    for made in (owned_tree.mirror, page.parent, page):
+    page = area(owned_tree.mirror, run)
+    for made in (owned_tree.mirror, page.parent.parent.parent, page.parent.parent, page.parent, page):
         _owned_by(made, owned_tree.uid, owned_tree.gid)
     assert page.read_bytes() == (run_dir / PAGE).read_bytes()
     assert MARKER in page.read_text(encoding="utf-8")
@@ -278,13 +296,14 @@ def test_1084_a_root_render_replaces_a_root_owned_page_left_by_the_old_writer(tm
     """(b) Today's pages are root:root 0644 (issue C4)."""
     _lane_precondition(owned_tree)
     run_dir = driven_run(tmp_path)
-    _user_dir(owned_tree.mirror, owned_tree)
-    _user_dir(owned_tree.mirror / run_dir.name, owned_tree)
-    stale = owned_tree.mirror / run_dir.name / PAGE
+    run = tenant_run(run_dir)
+    stale = area(owned_tree.mirror, run)
+    for folder in (owned_tree.mirror, stale.parent.parent.parent, stale.parent.parent, stale.parent):
+        _user_dir(folder, owned_tree)
     stale.write_bytes(b"STALE\n")
     os.chmod(stale, 0o644)
 
-    run_common.visualize(tenant_run(run_dir))
+    run_common.visualize(run, tenant=tenant_of(run))
 
     assert not stale.is_symlink()
     assert stale.read_bytes() == (run_dir / PAGE).read_bytes(), "the stale page was not replaced"
@@ -293,15 +312,17 @@ def test_1084_a_root_render_replaces_a_root_owned_page_left_by_the_old_writer(tm
 
 
 @root_only
-@pytest.mark.parametrize("site", ["run-visualizations", "run-visualizations/<run>",
-                                  "run-visualizations/<run>/runtime.html"])
+@pytest.mark.parametrize("site", ["run-visualizations", "run-visualizations/<tenant>",
+                                  "run-visualizations/<tenant>/runs",
+                                  "run-visualizations/<tenant>/runs/<run>",
+                                  "run-visualizations/<tenant>/runs/<run>/runtime.html"])
 def test_1084_a_link_planted_at_any_mirror_name_toward_a_root_only_target_is_refused_and_warned(
         tmp_path, owned_tree, site, caplog):
     """O4 — RE-PINNED BY #1110 (O4/O5) from `..._fails_the_render`."""
     _lane_precondition(owned_tree)
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
-    rel = site.replace("<run>", run_dir.name)
+    rel = site.replace("<run>", run_dir.name).replace("<tenant>", run.tenant_id)
     link = owned_tree.checkout / rel
     for parent in reversed(link.relative_to(owned_tree.checkout).parents[:-1]):
         _user_dir(owned_tree.checkout / parent, owned_tree)
@@ -311,10 +332,10 @@ def test_1084_a_link_planted_at_any_mirror_name_toward_a_root_only_target_is_ref
     before = _fingerprint(target)
 
     caplog.set_level(logging.DEBUG)
-    run_common.visualize(run)  # a refused copy is not a failed render: no VisualizeFailed
+    run_common.visualize(run, tenant=tenant_of(run))  # a refused copy is not a failed render: no VisualizeFailed
 
     _assert_record_written(run_dir)
-    _assert_warned(caplog, str(owned_tree.mirror / run_dir.name / PAGE))
+    _assert_warned(caplog, str(area(owned_tree.mirror, run)))
     assert _fingerprint(target) == before, f"the root-only target changed through {site}"
     assert link.is_symlink(), f"the link at {site} was replaced or removed"
     assert os.readlink(link) == str(target), f"the link at {site} was re-aimed"
@@ -337,11 +358,11 @@ def test_1084_a_mirror_folder_the_owner_cannot_write_is_left_untouched_and_warne
     before = _fingerprint(owned_tree.mirror)
 
     caplog.set_level(logging.DEBUG)
-    run_common.visualize(run)  # a failed copy is not a failed render: no VisualizeFailed
+    run_common.visualize(run, tenant=tenant_of(run))  # a failed copy is not a failed render: no VisualizeFailed
 
     _assert_record_written(run_dir)
     warned = _assert_one_warning_naming_the_destination_once(
-        caplog, owned_tree.mirror / run_dir.name / PAGE)
+        caplog, area(owned_tree.mirror, run))
     assert "Permission denied" in warned, f"the warning does not carry the error: {warned!r}"
     assert _fingerprint(owned_tree.mirror) == before, f"the {shape} mirror folder was written"
 
@@ -350,40 +371,67 @@ def test_1084_a_mirror_folder_the_owner_cannot_write_is_left_untouched_and_warne
 # #1279 O2/O4 — the dev copy lands in the run's tenant area; outside dev it is skipped
 
 
-def _set_up_run_tenant(data_root: Path, run) -> None:
-    """The run's tenant exists in this data root, whether or not the copy accepts it."""
-    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
-
-    set_up_tenant(data_root, run.tenant_id)
-
-
 def test_1279_o2_the_dev_copy_lands_under_the_runs_tenant_area_not_the_flat_folder(
-        tmp_path, data_root, run_visualizations_dir):
+        tmp_path, run_visualizations_dir):
     """O2: on dev, run R of tenant T is copied to `<root>/<T>/runs/<R>/runtime.html` only."""
     vr = _renderer()
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
-    _set_up_run_tenant(data_root, run)
 
-    assert vr.publish_page(run) == "copied"
+    assert vr.publish_page(run, tenant=tenant_of(run)) == "copied"
 
-    dest = run_visualizations_dir / run.tenant_id / "runs" / run_dir.name / PAGE
+    dest = area(run_visualizations_dir, run)
     assert dest.is_file(), f"no copy at {dest}: {sorted(run_visualizations_dir.rglob('*'))}"
     assert dest.read_bytes() == (run_dir / PAGE).read_bytes()
     assert not (run_visualizations_dir / run_dir.name).exists(), "the copy still lands flat"
     assert [p.name for p in run_visualizations_dir.iterdir()] == [run.tenant_id]
 
 
-def test_1279_o4_outside_dev_the_copy_is_skipped_and_the_run_page_is_still_saved(
-        tmp_path, data_root, run_visualizations_dir, monkeypatch):
-    """O4: production has no publish destination: the copy is skipped, the record kept, nothing published."""
+def test_1279_o2_another_tenants_run_with_the_same_id_cannot_overwrite_or_land_in_the_first_area(
+        tmp_path, data_root, run_visualizations_dir):
+    """O2: tenants A and B each publish a run with one id; A's published page is untouched by B's."""
+    from defender.run_repository import Run
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
     vr = _renderer()
-    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "production")
+    run_a = tenant_run(driven_run(tmp_path / "a"))
+    tenant_a = tenant_of(run_a)
+    b_id = fixture_uuid("tenant:second-1279")
+    tenant_b = H5.tenant(data_root, b_id)
+    run_b_dir = driven_run(tmp_path / "b")
+    run_b = Run.under(fixture_runs_base(run_b_dir.parent), run_b_dir.name, tenant_id=b_id)
+    assert run_a.run_dir.name == run_b.run_dir.name, "precondition: the two runs share one id"
+    planted = area(run_visualizations_dir, run_a)
+    planted.parent.mkdir(parents=True)
+    planted.write_bytes(b"A-SENTINEL\n")
+
+    assert vr.publish_page(run_b, tenant=tenant_b) == "copied"
+
+    assert planted.read_bytes() == b"A-SENTINEL\n", "B's run overwrote A's published page"
+    assert area(run_visualizations_dir, run_b).read_bytes() == (run_b_dir / PAGE).read_bytes()
+    assert sorted(p.name for p in run_visualizations_dir.iterdir()) == sorted([run_a.tenant_id, b_id])
+    assert tenant_a.id == run_a.tenant_id
+
+
+@pytest.mark.parametrize("deployment", ["production", "staging"])
+def test_1279_o4_outside_dev_the_copy_is_skipped_and_the_run_page_is_still_saved(
+        tmp_path, run_visualizations_dir, monkeypatch, caplog, deployment):
+    """O4: no publish destination outside dev: the copy is skipped (logged, not warned), the record kept, nothing published."""
+    vr = _renderer()
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
-    _set_up_run_tenant(data_root, run)
+    tenant = tenant_of(run)
+    assert vr.publish_page(run, tenant=tenant) == "copied", "positive control: dev publishes"
+    shutil.rmtree(run_visualizations_dir)
+    run_visualizations_dir.mkdir()
+    (run_dir / PAGE).unlink()
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, deployment)
+    caplog.set_level(logging.DEBUG)
 
-    assert vr.publish_page(run) == "skipped"
+    assert vr.publish_page(run, tenant=tenant) == "skipped"
 
     _assert_record_written(run_dir)
-    assert not list(run_visualizations_dir.iterdir()), "a production run published a page"
+    assert not list(run_visualizations_dir.iterdir()), "a non-dev run published a page"
+    assert _warnings(caplog) == [], "a skipped copy was warned about"

@@ -53,24 +53,48 @@ def _run(runs: Path, run_id: str | None = None, *, says: str | None,
     return run_dir
 
 
-def _index(path: Path, *rows: tuple[str, str]) -> Path:
-    """F holding `rows` (`(slug, run_id)`, oldest first) as the contract pins it: JSON Lines."""
+def _legacy(slug: str, run_id: str) -> dict:
+    """A pre-#1279 row: `{slug, run_id}`, no launch id (still admitted, #1279 O7)."""
+    return {"slug": slug, "run_id": run_id}
+
+
+def _launch_row(slug: str, launch_id: str, at: str = "2026-10-24T10:00:00+00:00") -> dict:
+    """A launch row: `{slug, launch_id, launched_at}` (#1279 O7)."""
+    return {"slug": slug, "launch_id": launch_id, "launched_at": at}
+
+
+def _id_row(slug: str, launch_id: str, run_id: str) -> dict:
+    """The id row of a launch: `{slug, launch_id, run_id}` (#1279 O7)."""
+    return {"slug": slug, "launch_id": launch_id, "run_id": run_id}
+
+
+def _index(path: Path, *rows: tuple[str, str] | dict) -> Path:
+    """F holding `rows` oldest first, as JSON Lines. A `(slug, run_id)` pair is a legacy row; a
+    dict is written as given (use `_launch_row` / `_id_row`)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps({"slug": slug, "run_id": run_id}) + "\n"
-                            for slug, run_id in rows), encoding="utf-8")
+    path.write_text("".join(json.dumps(_legacy(*row) if isinstance(row, tuple) else row) + "\n"
+                            for row in rows), encoding="utf-8")
     return path
 
 
-def _rows(text: str | None) -> list[tuple[str, str]]:
-    """F's rows as `(slug, run_id)`, read by the TEST (plain JSON Lines)."""
+def _rows(text: str | None) -> list[dict]:
+    """F's rows, read by the TEST (plain JSON Lines)."""
     if not text:
         return []
-    out = []
-    for line in text.splitlines():
-        if line.strip():
-            row = json.loads(line)
-            out.append((row["slug"], row["run_id"]))
-    return out
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def _is_launch(row: dict) -> bool:
+    return "launch_id" in row and "run_id" not in row
+
+
+def _assert_launch_row(row: dict, slug: str = SLUG) -> str:
+    """`row` is exactly a launch row for `slug`; returns its launch id."""
+    assert set(row) == {"slug", "launch_id", "launched_at"}, f"not a launch row: {row}"
+    assert row["slug"] == slug, row
+    assert S.is_canonical_uuid(row["launch_id"]), f"launch id is not a UUID: {row}"
+    assert isinstance(row["launched_at"], str) and row["launched_at"], row
+    return row["launch_id"]
 # The CLI, driven through `held_out.main`
 
 @dataclass
@@ -158,19 +182,32 @@ class SpawnCall:
 
 @dataclass
 class FakeSpawn:
-    """Record each launch command and the index contents visible before it starts."""
+    """The spawn seam's fake (#1279 A6): `spawn(argv, *, env=None, on_line) -> exit code`. It
+    streams the child's stdout lines (no terminator) to `on_line`, one at a time, then returns the
+    exit code (or raises `raises` after the lines). `lines` is a sequence, or a function of the
+    argv that makes it. `seen[i]` is F's text right after line i was delivered, so a test observes
+    what was durable while the child was still running."""
 
     index: Path
+    lines: Sequence[str] | Callable[[list[str]], Sequence[str]] = ()
     exit_code: int = 0
     raises: BaseException | None = None
     effect: Callable[[list[str]], None] | None = None
     calls: list[SpawnCall] = field(default_factory=list)
+    seen: list[str | None] = field(default_factory=list)
 
-    def __call__(self, argv: Sequence[str], *, env: Any = None, **_: Any) -> int:
-        then = self.index.read_text(encoding="utf-8") if self.index.is_file() else None
-        self.calls.append(SpawnCall([str(a) for a in argv], then))
+    def _text(self) -> str | None:
+        return self.index.read_text(encoding="utf-8") if self.index.is_file() else None
+
+    def __call__(self, argv: Sequence[str], *, env: Any = None,
+                 on_line: Callable[[str], None], **_: Any) -> int:
+        args = [str(a) for a in argv]
+        self.calls.append(SpawnCall(args, self._text()))
         if self.effect is not None:
-            self.effect([str(a) for a in argv])
+            self.effect(args)
+        for line in (self.lines(args) if callable(self.lines) else self.lines):
+            on_line(line)
+            self.seen.append(self._text())
         if self.raises is not None:
             raise self.raises
         return self.exit_code
@@ -183,21 +220,19 @@ def _after_run_py(argv: Sequence[str]) -> list[str]:
     return list(argv[names.index("run.py") + 1:])
 
 
-def _launched_run_id(call: SpawnCall, alert: Path) -> str:
-    """Assert `call` ran `run.py <alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn` (flags in any order, nothing else), and return the uuid."""
+def _assert_run_py_argv(call: SpawnCall, alert: Path) -> None:
+    """Assert `call` ran `run.py <alert> --tenant <tenant-uuid> --no-learn` (flags in any order,
+    nothing else): a caller never names the run id (#1279 P-B, O5)."""
     rest = _after_run_py(call.argv)
     assert rest, f"run.py was handed no arguments: {call.argv}"
     assert Path(rest[0]).resolve() == alert.resolve(), (
         f"run.py's alert is {rest[0]!r}, not the fixture's {alert}")
     flags = rest[1:]
-    assert len(flags) == 5, f"run.py's flags are not exactly --tenant/--run-id/--no-learn: {flags}"
+    assert not any(f.startswith("--run-id") for f in call.argv), f"--run-id on the argv: {call.argv}"
+    assert len(flags) == 3, f"run.py's flags are not exactly --tenant/--no-learn: {flags}"
     assert flags.count("--no-learn") == 1, flags
     assert "--tenant" in flags, flags
     assert flags[flags.index("--tenant") + 1] == LAUNCH_TENANT, flags
-    assert "--run-id" in flags, flags
-    run_id = flags[flags.index("--run-id") + 1]
-    assert S.is_canonical_uuid(run_id), f"the minted run id {run_id!r} is not a canonical UUID"
-    return run_id
 # The launch scene: the data root, tenant learning state, the operator's own folder
 
 @dataclass
@@ -235,7 +270,11 @@ def _assert_refused(res: Outcome, index: Path, what: str) -> None:
     assert index.name in res.said, f"{what}: the refusal does not name the index:\n{res.said}"
 
 
-def _assert_launch_accepted(scene: Scene, index: Path, *, spawn: FakeSpawn) -> str:
+def _assert_launch_accepted(scene: Scene, index: Path, *, spawn: FakeSpawn,
+                            announced: str | None = None) -> str:
+    """One launch ran: run.py was started once, with a launch row (and only that) already durable;
+    after it F holds `before + [launch row]` plus `announced`'s id row when the child announced it.
+    Returns the launch id."""
     before = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
     res = scene.launch(index, spawn)
     if spawn.raises is None:
@@ -245,14 +284,18 @@ def _assert_launch_accepted(scene: Scene, index: Path, *, spawn: FakeSpawn) -> s
         assert res.crashed is spawn.raises
     assert len(spawn.calls) == 1, spawn.calls
     call = spawn.calls[0]
-    run_id = _launched_run_id(call, scene.alert())
-    assert _rows(call.index_then) == [*before, (SLUG, run_id)], "spawn preceded its index row"
-    assert _rows(index.read_text(encoding="utf-8")) == [*before, (SLUG, run_id)]
-    return run_id
+    _assert_run_py_argv(call, scene.alert())
+    then = _rows(call.index_then)
+    assert then[:len(before)] == before and len(then) == len(before) + 1, (
+        f"spawn did not follow exactly one launch row: {then}")
+    launch_id = _assert_launch_row(then[-1])
+    expected = [*then, _id_row(SLUG, launch_id, announced)] if announced else then
+    assert _rows(index.read_text(encoding="utf-8")) == expected
+    return launch_id
 
 
 @pytest.mark.parametrize("scenario", ["empty", "append-twice", "exit-1", "crash", "interrupt"])
-def test_launch_records_each_fresh_id_before_start_even_when_the_child_fails(scene, scenario):
+def test_launch_records_each_fresh_launch_before_start_even_when_the_child_fails(scene, scenario):
     index = scene.ops / INDEX_NAME
     if scenario == "append-twice":
         _index(index, (OTHER, S.new_id()))
@@ -261,7 +304,7 @@ def test_launch_records_each_fresh_id_before_start_even_when_the_child_fails(sce
                 "interrupt": {"raises": KeyboardInterrupt()}}
     ids = [_assert_launch_accepted(scene, index, spawn=FakeSpawn(index, **failures.get(scenario, {})))
            for _ in range(2 if scenario == "append-twice" else 1)]
-    assert len(set(ids)) == len(ids), "launches reused an ID"
+    assert len(set(ids)) == len(ids), "launches reused a launch id"
     assert index.read_bytes().startswith(prefix), "pre-existing rows were rewritten"
 
 
@@ -282,7 +325,7 @@ def test_launch_requires_an_explicit_canonical_tenant_before_appending(scene, te
     _assert_launch_accepted(scene, index, spawn=FakeSpawn(index))
 
 
-def test_launch_as_the_operator_runs_it_really_starts_run_py(scene):
+def test_launch_as_the_operator_runs_it_really_starts_run_py_and_records_a_launch_only(scene):
     index = scene.ops / INDEX_NAME
     before = S.tree(location_path(scene.data_root))
     child = process.run_script(
@@ -291,9 +334,10 @@ def test_launch_as_the_operator_runs_it_really_starts_run_py(scene):
     said = f"{child.stdout}\n{child.stderr}"
 
     rows = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
-    assert [slug for slug, _run_id in rows] == [SLUG], (
+    assert [row["slug"] for row in rows] == [SLUG], (
         f"launch did not append one row for {SLUG}: {rows}\n{said[-1500:]}")
-    assert S.is_canonical_uuid(rows[0][1]), f"the row's run id is {rows[0][1]!r}"
+    # run.py refuses at tenant acceptance before announcing: an ordinary launch with no id.
+    _assert_launch_row(rows[0])
     playground = str(Path(location_path(scene.data_root)) / LAUNCH_TENANT)
     refusals = [line for line in said.splitlines() if "[run.py]" in line and playground in line]
     assert refusals, (
@@ -389,7 +433,7 @@ def audit(event, args):
         else:
             index.parent.rename(aside)
             index.parent.symlink_to(elsewhere, target_is_directory=True)
-def spawn(argv, *, env=None):
+def spawn(argv, *, env=None, on_line=None):
     calls.append(list(map(str, argv)))
     return 0
 sys.addaudithook(audit)
@@ -455,8 +499,8 @@ def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene
     assert outcome["rc"] in (0, None), outcome
     assert len(outcome["calls"]) == 1, outcome
     assert not outcome["swapped"], outcome
-    run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert())
-    assert _rows(control.read_text(encoding="utf-8"))[-1] == (SLUG, run_id)
+    _assert_run_py_argv(SpawnCall(outcome["calls"][0], None), scene.alert())
+    _assert_launch_row(_rows(control.read_text(encoding="utf-8"))[-1])
     assert canary.read_bytes() == before
 
     index, other, canary, before = _index_swap_scene(scene, "index-race-ops")
@@ -469,9 +513,9 @@ def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene
                 index.parent.with_name(index.parent.name + "-held-original") / index.name)
     if outcome["rc"] in (0, None):
         assert len(outcome["calls"]) == 1, outcome
-        run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert())
+        _assert_run_py_argv(SpawnCall(outcome["calls"][0], None), scene.alert())
         assert original.read_bytes().startswith(prefix)
-        assert _rows(original.read_text(encoding="utf-8"))[-1] == (SLUG, run_id)
+        _assert_launch_row(_rows(original.read_text(encoding="utf-8"))[-1])
     else:
         assert outcome["calls"] == [], "a refused index still started run.py"
         assert original.read_bytes() == prefix, "a refused index was changed"
@@ -642,14 +686,12 @@ def test_launch_then_score_counts_a_launch_whose_run_never_started_as_wrong(scen
     index = scene.ops / INDEX_NAME
     answers = {SLUG: "malicious", OTHER: "benign"}
 
-    def finished_run(argv: list[str]) -> None:
-        rest = _after_run_py(argv)
-        slug = Path(rest[0]).parent.name
-        run_id = rest[rest.index("--run-id") + 1]
-        _run(runs, run_id, says=answers[slug])
+    def announcing_a_finished_run(argv: list[str]) -> list[str]:
+        slug = Path(_after_run_py(argv)[0]).parent.name
+        return [f"run_id={_run(runs, says=answers[slug]).name}"]
 
-    for slug, spawn in ((SLUG, FakeSpawn(index, effect=finished_run)),
-                        (OTHER, FakeSpawn(index, effect=finished_run)),
+    for slug, spawn in ((SLUG, FakeSpawn(index, lines=announcing_a_finished_run)),
+                        (OTHER, FakeSpawn(index, lines=announcing_a_finished_run)),
                         (SLUG, FakeSpawn(index, exit_code=1))):
         res = scene.launch(index, spawn, slug)
         assert res.crashed is None, f"the launch crashed: {res.crashed!r}\n{res.err}"
@@ -657,14 +699,23 @@ def test_launch_then_score_counts_a_launch_whose_run_never_started_as_wrong(scen
 
     res = _score(runs, index, scene.fixtures)
     res.assert_score({SLUG: "WRONG", OTHER: "OK"}, (1, 2))
-    assert NO_RUN_RECORD in res.failures().get(SLUG, ""), res.out
+    assert res.failures().get(SLUG, "").startswith(NO_RUN), res.out
 
 
-# #1279 O7 (P-E): a launch row precedes the spawn; a launch with no announced id scores wrong.
+# #1279 O7 / P-E (A6): a launch row precedes the spawn; the announced id is recorded as an id row
+# while the child still runs; a launch no id row names scores wrong.
 
-def test_1279_o7_a_run_that_fails_before_announcing_its_id_scores_wrong_over_an_older_correct_run(
+NO_RUN = "launched, no run"
+
+
+def _announce(run_id: str) -> str:
+    return f"run_id={run_id}"
+
+
+def test_1279_a_run_that_fails_before_announcing_its_id_scores_wrong_over_an_older_correct_run(
         scene: Scene):
-    """O7: the newest row for the slug is a launch with no run id, so an older correct run cannot stand in."""
+    """O7: the newest row for the slug is a launch with no id row, so an older correct run cannot
+    stand in (preflight or the settings check failed today)."""
     runs = scene.tmp / "runs"
     runs.mkdir()
     yesterday = S.new_id()
@@ -673,19 +724,243 @@ def test_1279_o7_a_run_that_fails_before_announcing_its_id_scores_wrong_over_an_
     assert _score(runs, index, scene.fixtures).verdicts()[SLUG] == "OK", "precondition"
 
     # The real run.py, spawned by the real default: the scene's tenant has no row, so run.py
-    # exits at tenant acceptance, before setup mints or announces an id.
+    # exits at tenant acceptance, before setup mints or announces an id (no stdout line).
     launched = _cli(["launch", SLUG, "--tenant", LAUNCH_TENANT, "--index", index,
                      "--fixtures-dir", scene.fixtures])
     assert launched.crashed is None, launched.crashed
-    assert launched.rc != 0, f"a run.py that never started reported success: {launched.said}"
+    assert launched.rc not in (0, None), f"a run.py that never started reported success: {launched.said}"
 
-    rows = [json.loads(line) for line in index.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert rows[0] == {"slug": SLUG, "run_id": yesterday}
-    newest = [r for r in rows if r.get("slug") == SLUG][-1]
-    assert "run_id" not in newest, f"the launch recorded an id run.py never announced: {newest}"
-    assert newest.get("launched_at"), f"the launch row carries no launch time: {newest}"
+    rows = _rows(index.read_text(encoding="utf-8"))
+    assert rows[0] == _legacy(SLUG, yesterday)
+    assert len(rows) == 2, rows
+    _assert_launch_row(rows[1])
 
     scored = _score(runs, index, scene.fixtures)
     assert scored.rc == 0, scored.said
     assert scored.verdicts()[SLUG] == "WRONG", scored.out
-    assert scored.failures().get(SLUG, "").startswith("launched, no run"), scored.out
+    assert scored.failures().get(SLUG, "").startswith(NO_RUN), scored.out
+
+
+def test_1279_the_announced_id_is_recorded_while_the_child_still_runs(scene: Scene):
+    index = scene.ops / INDEX_NAME
+    rid = S.new_id()
+    spawn = FakeSpawn(index, lines=[_announce(rid), "first later line", "second later line"],
+                      exit_code=3)
+    launch_id = _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
+    # F held the id row as soon as the first line was consumed, before any later line, before exit.
+    assert len(spawn.seen) == 3
+    for text in spawn.seen:
+        assert _rows(text)[-1] == _id_row(SLUG, launch_id, rid), spawn.seen
+    assert len(_rows(spawn.seen[0])) == len(_rows(spawn.calls[0].index_then)) + 1
+    assert len(_rows(spawn.seen[-1])) == len(_rows(spawn.seen[0])), "a later line added a row"
+
+
+def test_1279_the_announced_id_survives_a_launcher_killed_after_the_announce(scene: Scene):
+    index = scene.ops / INDEX_NAME
+    rid = S.new_id()
+    spawn = FakeSpawn(index, lines=[_announce(rid)], raises=KeyboardInterrupt())
+    _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
+
+
+def test_1279_the_rest_of_the_child_stdout_is_forwarded(scene: Scene):
+    index = scene.ops / INDEX_NAME
+    spawn = FakeSpawn(index, lines=[_announce(S.new_id()), "triage under way", "disposition: benign"])
+    res = scene.launch(index, spawn)
+    assert res.rc == 0, res.said
+    assert "triage under way" in res.out and "disposition: benign" in res.out, res.out
+    assert res.out.index("triage under way") < res.out.index("disposition: benign"), res.out
+    assert "announce" not in res.err.casefold(), res.err
+
+
+def test_1279_a_child_with_no_stdout_is_an_ordinary_launch_without_an_id(scene: Scene):
+    index = scene.ops / INDEX_NAME
+    for code in (0, 1, 7):
+        spawn = FakeSpawn(index, exit_code=code)
+        _assert_launch_accepted(scene, index, spawn=spawn)
+        assert spawn.seen == []
+    assert [_is_launch(r) for r in _rows(index.read_text(encoding="utf-8"))] == [True] * 3
+
+
+_BROKEN_FIRST_LINES = {
+    "chatter": "starting up",
+    "empty-line": "",
+    "empty-id": "run_id=",
+    "not-a-uuid": "run_id=not-a-uuid",
+    "slug-as-id": f"run_id={SLUG}",
+    "wrong-key": "RUN_ID={rid}",
+    "bare-uuid": "{rid}",
+    "uppercase-id": "run_id={RID}",
+    "undashed-id": "run_id={bare}",
+    "braced-id": "run_id={{{rid}}}",
+    "trailing-text": "run_id={rid} extra",
+}
+
+
+@pytest.mark.parametrize("child_code", [0, 1])
+@pytest.mark.parametrize("kind", sorted(_BROKEN_FIRST_LINES))
+def test_1279_a_broken_first_line_records_nothing_and_fails_the_launch(scene, kind, child_code):
+    index = scene.ops / INDEX_NAME
+    rid = S.new_id()
+    first = _BROKEN_FIRST_LINES[kind].format(rid=rid, RID=rid.upper(), bare=rid.replace("-", ""))
+    # A valid announce after the broken first line must not repair it: only line one counts.
+    spawn = FakeSpawn(index, lines=[first, _announce(rid)], exit_code=child_code)
+    res = scene.launch(index, spawn)
+    assert res.crashed is None, res.crashed
+    assert res.rc not in (0, None), f"{kind}: a broken announce still launched clean:\n{res.said}"
+    assert "announce" in res.err.casefold(), f"{kind}: stderr does not name the broken announce:\n{res.err}"
+    rows = _rows(index.read_text(encoding="utf-8"))
+    assert len(rows) == 1, f"{kind}: more than the launch row was recorded: {rows}"
+    _assert_launch_row(rows[0])
+
+
+def test_1279_only_the_first_line_announces(scene: Scene):
+    index = scene.ops / INDEX_NAME
+    rid = S.new_id()
+    spawn = FakeSpawn(index, lines=[_announce(rid), _announce(S.new_id()), _announce(rid)])
+    _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
+
+
+def test_1279_no_launch_puts_a_run_id_on_the_childs_argv(scene: Scene):
+    index = scene.ops / INDEX_NAME
+    for lines in ((), [_announce(S.new_id())], ["junk"]):
+        spawn = FakeSpawn(index, lines=lines)
+        scene.launch(index, spawn)
+        assert not any("run-id" in a or "run_id" in a for a in spawn.calls[0].argv), spawn.calls[0].argv
+
+
+# Scoring by file position (O7).
+
+@pytest.fixture
+def board(tmp_path: Path, scoring) -> tuple[Path, Path, Path]:
+    """`(runs, index, fixtures)` with SLUG labelled malicious."""
+    runs, index, _ = scoring
+    return runs, index, _fixtures(tmp_path / "fixtures", {SLUG: "malicious"})
+
+
+def _lid() -> str:
+    return S.new_id()
+
+
+def test_1279_a_launch_with_its_id_row_scores_the_run_it_names(board):
+    runs, index, fixtures = board
+    right, lid = _run(runs, says="malicious"), _lid()
+    _index(index, _launch_row(SLUG, lid), _id_row(SLUG, lid, right.name))
+    _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
+
+
+def test_1279_an_id_row_naming_an_absent_run_scores_in_the_no_run_record_bucket(board):
+    runs, index, fixtures = board
+    lid = _lid()
+    _index(index, _launch_row(SLUG, lid), _id_row(SLUG, lid, S.new_id()))
+    res = _score(runs, index, fixtures)
+    res.assert_score({SLUG: "WRONG"}, (0, 1))
+    assert NO_RUN_RECORD in res.failures().get(SLUG, ""), res.out
+
+
+def test_1279_a_launch_no_id_row_names_scores_wrong_launched_no_run(board):
+    runs, index, fixtures = board
+    _index(index, _launch_row(SLUG, _lid()))
+    res = _score(runs, index, fixtures)
+    res.assert_score({SLUG: "WRONG"}, (0, 1))
+    assert res.failures().get(SLUG, "").startswith(NO_RUN), res.out
+    assert res.not_run() == [], res.out
+
+
+def test_1279_a_newer_launch_without_an_id_beats_an_older_launch_with_a_correct_run(board):
+    runs, index, fixtures = board
+    right, old, new = _run(runs, says="malicious"), _lid(), _lid()
+    _index(index, _launch_row(SLUG, old), _id_row(SLUG, old, right.name), _launch_row(SLUG, new))
+    res = _score(runs, index, fixtures)
+    res.assert_score({SLUG: "WRONG"}, (0, 1))
+    assert res.failures().get(SLUG, "").startswith(NO_RUN), res.out
+
+
+def test_1279_interleaved_launches_launch_1_launch_2_id_for_1_score_wrong(board):
+    runs, index, fixtures = board
+    right, one, two = _run(runs, says="malicious"), _lid(), _lid()
+    _index(index, _launch_row(SLUG, one), _launch_row(SLUG, two), _id_row(SLUG, one, right.name))
+    res = _score(runs, index, fixtures)
+    res.assert_score({SLUG: "WRONG"}, (0, 1))
+    assert res.failures().get(SLUG, "").startswith(NO_RUN), res.out
+
+
+def test_1279_interleaved_launches_score_the_newest_launchs_own_id_row(board):
+    runs, index, fixtures = board
+    right, wrong = _run(runs, says="malicious"), _run(runs, says="benign")
+    one, two = _lid(), _lid()
+    _index(index, _launch_row(SLUG, one), _launch_row(SLUG, two),
+           _id_row(SLUG, two, right.name), _id_row(SLUG, one, wrong.name))
+    _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
+
+
+def test_1279_file_position_decides_not_launched_at(board):
+    runs, index, fixtures = board
+    right, wrong = _run(runs, says="malicious"), _run(runs, says="benign")
+    one, two = _lid(), _lid()
+    # The later row carries the EARLIER time; position wins.
+    _index(index, _launch_row(SLUG, one, "2026-10-24T12:00:00+00:00"), _id_row(SLUG, one, wrong.name),
+           _launch_row(SLUG, two, "2026-10-24T08:00:00+00:00"), _id_row(SLUG, two, right.name))
+    _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
+
+
+def test_1279_legacy_rows_are_still_admitted_and_scored_as_before(board):
+    runs, index, fixtures = board
+    wrong, right = _run(runs, says="benign"), _run(runs, says="malicious")
+    _index(index, (SLUG, wrong.name), (SLUG, right.name))
+    _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
+
+
+def test_1279_a_launch_after_legacy_rows_is_the_newest(board):
+    runs, index, fixtures = board
+    right = _run(runs, says="malicious")
+    _index(index, (SLUG, right.name), _launch_row(SLUG, _lid()))
+    res = _score(runs, index, fixtures)
+    res.assert_score({SLUG: "WRONG"}, (0, 1))
+    assert res.failures().get(SLUG, "").startswith(NO_RUN), res.out
+
+
+def test_1279_a_legacy_row_after_launches_is_the_newest(board):
+    runs, index, fixtures = board
+    wrong, right, lid = _run(runs, says="benign"), _run(runs, says="malicious"), _lid()
+    _index(index, _launch_row(SLUG, lid), _id_row(SLUG, lid, wrong.name), (SLUG, right.name))
+    _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
+
+
+def test_1279_each_slug_is_judged_by_its_own_newest_launch(tmp_path, scoring):
+    runs, index, _ = scoring
+    fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious", OTHER: "benign"})
+    ok, lid, crashed = _run(runs, says="malicious"), _lid(), _lid()
+    _index(index, _launch_row(SLUG, lid), _launch_row(OTHER, crashed), _id_row(SLUG, lid, ok.name))
+    res = _score(runs, index, fixtures)
+    res.assert_score({SLUG: "OK", OTHER: "WRONG"}, (1, 2))
+    assert res.failures().get(OTHER, "").startswith(NO_RUN), res.out
+
+
+def _refused_rows(kind: str, run_id: str) -> list[dict]:
+    one, two = _lid(), _lid()
+    return {
+        "id-before-its-launch": [_id_row(SLUG, one, run_id), _launch_row(SLUG, one)],
+        "id-names-no-launch": [_launch_row(SLUG, one), _id_row(SLUG, two, run_id)],
+        "id-names-no-launch-at-all": [_id_row(SLUG, one, run_id)],
+        "two-id-rows-for-one-launch": [_launch_row(SLUG, one), _id_row(SLUG, one, run_id),
+                                       _id_row(SLUG, one, S.new_id())],
+        "same-id-row-twice": [_launch_row(SLUG, one), _id_row(SLUG, one, run_id),
+                              _id_row(SLUG, one, run_id)],
+        "repeated-launch-id": [_launch_row(SLUG, one), _launch_row(SLUG, one)],
+        "repeated-launch-id-across-slugs": [_launch_row(SLUG, one), _launch_row(OTHER, one)],
+        "id-row-run-id-not-canonical": [_launch_row(SLUG, one), _id_row(SLUG, one, "not-a-uuid")],
+        "launch-id-not-text": [{**_launch_row(SLUG, one), "launch_id": 7}],
+    }[kind]
+
+
+@pytest.mark.parametrize("kind", [
+    "id-before-its-launch", "id-names-no-launch", "id-names-no-launch-at-all",
+    "two-id-rows-for-one-launch", "same-id-row-twice", "repeated-launch-id",
+    "repeated-launch-id-across-slugs", "id-row-run-id-not-canonical", "launch-id-not-text"])
+def test_1279_scoring_refuses_an_index_that_cannot_be_trusted(board, kind):
+    runs, index, fixtures = board
+    good = _run(runs, says="malicious")
+    _index(index, *_refused_rows(kind, good.name))
+    res = _score(runs, index, fixtures)
+    _assert_refused(res, index, kind)
+    assert res.verdicts() == {} and res.accuracy() is None, f"{kind}: scoring went ahead:\n{res.out}"

@@ -17,7 +17,6 @@ import os
 import re
 import threading
 import urllib.parse
-import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,7 +41,6 @@ from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
-from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape  # noqa: E402
 
 _TENANT_ACME = fixture_uuid('tenant:acme')
 
@@ -1632,29 +1630,10 @@ def operator_input(tmp_path: Path) -> Path:
     return Path(tmp_path) / "operator-input" / "alert.json"
 
 
-def fresh_run_id() -> str:
-    """A run id unique to this call: a fresh canonical lowercase uuid4 — #1187 (declared change
-    1): `run.py --run-id` admits nothing else. `run_alert`'s default, so two runs of one test
-    never collide on one folder."""
-    return str(uuid.uuid4())
-
-
-def _alert_run_id(run_id: str | None) -> str:
-    """Choose a fresh UUID or validate the scenario's explicit canonical run id."""
-    if run_id is None:
-        return fresh_run_id()
-    if not is_fixture_uuid_shape(run_id):
-        raise AssertionError(
-            f"run_alert(run_id={run_id!r}): a run id is a canonical UUID (#1187) — pass "
-            f"fixture_uuid({run_id!r})")
-    return run_id
-
-
 def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     tmp_path: Path, *,
     alert: Mapping[str, Any] | bytes | None = None,
     tenant: Planted | None = None,
-    run_id: str | None = None,
     main: MainScript | Sequence[Turn] | None = None,
     leads: Mapping[str, Sequence[Turn]] | None = None,
     lead_faults: Mapping[str, LeadFault] | None = None,
@@ -1687,8 +1666,8 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     the materialized run folder just before the driver starts — the seam a test plants a REAL
     fault through (a pre-claimed `l-00c` sidecar, a directory squatting an artifact's name).
     `catch=False` lets an exception out of `run.main` (a setup fault that must stop the run
-    loudly); with `catch=True` it is kept on `.raised`. `run_id` defaults to `fresh_run_id()`
-    (unique per call); pass one to re-drive a folder or to pin a name. `roster` is handed to
+    loudly); with `catch=True` it is kept on `.raised`. The run's id is the one run setup mints (#1279 O5):
+    read it off `.run_dir.name`; no id can be passed. `roster` is handed to
     `run.main(roster=…)` when given: the adapters roster the run reads (#1256: the one whose
     declared checks judge each granted system at run start); omitted, `run.main` is called
     without it, as before.
@@ -1736,12 +1715,7 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
         d.enqueued.append((tuple(args), dict(kw)))
         return enqueue(*args, **kw) if enqueue is not None else False
 
-    # #1187 (declared change 1): `run.py --run-id` admits only a canonical UUID, so a readable
-    # label here would be refused by production for its shape, before the scenario is reached.
-    # Refused loudly HERE instead (a test names its run `fixture_uuid(<label>)`), so a label
-    # never passes at base and silently fails after the change.
-    argv = [str(input_path), "--tenant", planted.tenant_id,
-            "--run-id", _alert_run_id(run_id)]
+    argv = [str(input_path), "--tenant", planted.tenant_id]
     if no_learn and enqueue is None:
         argv.append("--no-learn")
     if update_ticket:

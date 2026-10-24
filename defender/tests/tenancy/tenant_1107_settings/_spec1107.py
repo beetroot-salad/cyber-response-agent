@@ -467,17 +467,14 @@ def run_py() -> Any:
 
 
 def run_argv(alert: Path, data_root: Path, *, tenant_id: str = PLAYGROUND_ID,
-             update_ticket: bool = False, run_id: str | None = None,
-             extra: Iterable[str] = ()) -> list[str]:
-    """`run.py`'s argv for `tenant_id`, planted under `data_root` (this test's). `run_id` is a
-    LABEL or a UUID: #1187 (declared change 1) — `--run-id` admits only a canonical UUID, so a
-    label is passed as `fixture_uuid(<label>)` (the same label, the same id in every test)."""
+             update_ticket: bool = False, extra: Iterable[str] = ()) -> list[str]:
+    """`run.py`'s argv for `tenant_id`, planted under `data_root` (this test's). #1279 (O5):
+    `run.py` takes no run id, so this has no `run_id` parameter; a run's id is the name of the
+    folder its `RunRecorder` builds."""
     _require_data_root(data_root)
     argv = [str(alert), "--tenant", tenant_id]
     if update_ticket:
         argv.append("--update-ticket")
-    if run_id is not None:
-        argv += ["--run-id", run_id if is_fixture_uuid_shape(run_id) else fixture_uuid(run_id)]
     return [*argv, *extra]
 
 
@@ -521,7 +518,7 @@ class RunRecorder:
         self.order.append("preflight")
         return 0
 
-    def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Any:
+    def materialize(self, alert: Path, **kw: Any) -> Any:
         self.order.append("materialize")
         run_dir = self.run_dir_at
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -629,7 +626,11 @@ def render_page(run_dir: Path, *, update_ticket: bool) -> str:
     """Render the page the way run.py does after teardown — `run_common.visualize`, the default
     `visualize` seam — handing it run.py's own `--update-ticket` flag as an ARGUMENT (PG-2a,
     coined keyword `update_ticket=`), and return the page's HTML."""
-    mod("run_common").visualize(_run_handle_1165(Path(run_dir)), update_ticket=update_ticket)
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
+
+    run = _run_handle_1165(Path(run_dir))
+    tenant = set_up_tenant(current_data_root())  # #1279 A4: the accepted Tenant rides beside the run
+    mod("run_common").visualize(run, tenant=tenant, update_ticket=update_ticket)
     return page_html(run_dir)
 
 

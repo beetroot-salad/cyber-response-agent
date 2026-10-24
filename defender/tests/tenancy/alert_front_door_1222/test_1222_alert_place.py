@@ -87,15 +87,12 @@ _MAIN_TWO_REQUESTS = [S.call("read_file", path="provenance.json"), S.text(S.DONE
 
 
 def _run(tmp_path: Path, *, alert: Mapping[str, Any] | bytes | None = None,  # noqa: PLR0913 — one scenario's inputs, each defaulted
-         tenant: S.Planted | None = None, run_id: str | None = None,
+         tenant: S.Planted | None = None,
          main: Any = None, leads: Mapping[str, Any] | None = None,
          **kw: Any) -> S.Drive:
     return S.run_alert(
         tmp_path, alert=alert if alert is not None else _alert(),
         tenant=tenant if tenant is not None else _tenant(),
-        # Unique per run: a scenario that drives two runs under one tenant must not collide.
-        # #1187 (declared change 1): a run id is a canonical UUID.
-        run_id=run_id or str(uuid.uuid4()),
         main=main if main is not None else _MAIN_TWO_REQUESTS, leads=leads,
         backend=S.Backend(answer=_resolving), **kw)
 
@@ -220,7 +217,6 @@ def _lifecycle() -> Callable[..., dict]:
 
 def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PLR0913 — the run's inputs plus the lifecycle's two seams
                 start_box: Callable[..., Any], investigate: Callable[..., dict],
-                run_id: str | None = None,
                 around: Callable[[Callable[..., dict], dict], dict] | None = None,
                 enqueue: Callable[..., bool] | None = None) -> int:
     """`run.main` with production's lifecycle, seamed at `start_box` and `investigate` only.
@@ -234,8 +230,7 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
     def lifecycle(**kw: Any) -> dict:
         return around(prod, kw) if around is not None else prod(**kw)
 
-    argv = [str(src / "alert.json"), "--tenant", planted.tenant_id,
-            "--run-id", run_id or str(uuid.uuid4())]  # #1187 (declared change 1): a UUID
+    argv = [str(src / "alert.json"), "--tenant", planted.tenant_id]
     if enqueue is None:
         argv.append("--no-learn")
     return S.sym("run", "main")(
@@ -644,7 +639,6 @@ def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runti
 def test_p149_agents_read_permission_and_the_one_directory_dow(tmp_path):
     rel, rec = S.alert_rel(), S.record_rel()
     planted = _tenant()
-    run_id = fixture_uuid("s08-p149")  # #1187 (declared change 1): a UUID
     reads = [S.call("read_file", path=rel), S.call("bash", command=f"cat {rel}"),
              S.call("read_file", path=f"{V.MODEL_RUN}/{rel}"),
              S.call("read_file", path=rec), S.call("bash", command=f"cat {rec}"),
@@ -655,7 +649,7 @@ def test_p149_agents_read_permission_and_the_one_directory_dow(tmp_path):
         other.parent.mkdir(parents=True, exist_ok=True)
         other.write_text(json.dumps({"note": SECRET}), encoding="utf-8")
 
-    d = _run(tmp_path, tenant=planted, run_id=run_id, main=[*reads, S.text(S.DONE)],
+    d = _run(tmp_path, tenant=planted, main=[*reads, S.text(S.DONE)],
              leads={S.L3: [*reads, S.text("ok")]}, before=plant_other)
     digest = S.sha256_hex(d.input_bytes)
     for who, seen in (("MAIN", d.main.seen), ("l-00c", d.router.seen(S.L3))):

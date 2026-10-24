@@ -54,8 +54,8 @@ class _Tail(SpecTail):
         if self.fail == TICKET:
             raise OSError(errno.EIO, "spec 1105: the ticket store failed (RG-08-b)")
 
-    def visualize(self, run: Any, *, update_ticket: bool = False) -> None:
-        super().visualize(run, update_ticket=update_ticket)
+    def visualize(self, run: Any, *, tenant: Any, update_ticket: bool = False) -> None:
+        super().visualize(run, tenant=tenant, update_ticket=update_ticket)
         if self.fail == PAGE:
             raise run_common.VisualizeFailed("spec 1105: the page was not saved (RG-08-d)")
 

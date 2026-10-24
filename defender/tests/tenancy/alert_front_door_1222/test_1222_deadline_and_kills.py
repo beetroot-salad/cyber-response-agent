@@ -18,7 +18,6 @@ from defender.run_repository import RunPaths
 from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 L3 = S.L3
 #: The correlation deadline every timed scenario configures (seconds).
@@ -258,13 +257,13 @@ def _tree_without_main_prompt(tmp: Path) -> Path:
 # --- the four kills from other causes (n12), shared with the demands that name one ---------
 
 def _budget_kill_during_lead(tmp: Path, tenant: S.Planted, monkeypatch: pytest.MonkeyPatch, *,
-                             run_id: str, stores: list, **kw: Any) -> S.Drive:
+                             stores: list, **kw: Any) -> S.Drive:
     """Budget enforcement on; the run's wall clock (KILL_WALL_S) expires while the lead's first
     model request is in flight, so its first tool call meets the kill (RJ-04 d)."""
     with monkeypatch.context() as m:
         m.setenv(_enforce_flag(), "true")
         return S.run_alert(
-            tmp, tenant=tenant, run_id=run_id,
+            tmp, tenant=tenant,
             leads={L3: [_alerts_call(), S.text(SUMMARY)]},
             lead_faults={L3: S.LeadFault(delay=KILL_DELAY_S)},
             limits=S.default_limits(wall_clock_timeout=KILL_WALL_S, grace_seconds=0),
@@ -285,11 +284,11 @@ def _assert_budget_kill_during_lead(d: S.Drive, stores: list) -> None:
         "one of the lead's own endings")
 
 
-def _kill_by_mains_failures(tmp: Path, tenant: S.Planted, *, run_id: str, stores: list,
+def _kill_by_mains_failures(tmp: Path, tenant: S.Planted, *, stores: list,
                             correlation: list[S.Turn] | None = None) -> S.Drive:
     """MAIN's own lead (`l-001`, cmdb) fails RUN_FAIL_KILL_LIMIT calls in one response."""
     return S.run_alert(
-        tmp, tenant=tenant, run_id=run_id,
+        tmp, tenant=tenant,
         main=[S.gather("l-001", "cmdb"), S.text(S.DONE)],
         leads={L3: correlation or [S.text(SUMMARY)],
                "l-001": [_parallel("cmdb", "get-host", _kill_limit()), S.text("no host")]},
@@ -297,9 +296,9 @@ def _kill_by_mains_failures(tmp: Path, tenant: S.Planted, *, run_id: str, stores
         store_factory=S.store_factory(tmp, sink=stores), stores=stores)
 
 
-def _store_fault_after_lead_output(tmp: Path, tenant: S.Planted, *, run_id: str,
+def _store_fault_after_lead_output(tmp: Path, tenant: S.Planted, *,
                                    stores: list, **kw: Any) -> S.Drive:
-    return S.run_alert(tmp, tenant=tenant, run_id=run_id, leads={L3: [S.text(SUMMARY)]},
+    return S.run_alert(tmp, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
                        store_factory=_main_append_fault_store(tmp, stores), stores=stores, **kw)
 
 
@@ -317,9 +316,9 @@ def _assert_store_fault_stopped_the_run(d: S.Drive) -> None:
     assert d.main.requests <= 1, "MAIN went on past a refused store write"
 
 
-def _setup_fault_after_lead(tmp: Path, tenant: S.Planted, *, run_id: str, stores: list,
+def _setup_fault_after_lead(tmp: Path, tenant: S.Planted, *, stores: list,
                             before: Callable[[Path], None] | None = None) -> S.Drive:
-    return S.run_alert(tmp, tenant=tenant, run_id=run_id, leads={L3: [S.text(SUMMARY)]},
+    return S.run_alert(tmp, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
                        defender_dir=_tree_without_main_prompt(tmp), before=before,
                        store_factory=S.store_factory(tmp, sink=stores), stores=stores)
 
@@ -340,11 +339,11 @@ def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
 
     stores: list = []
     budget = _budget_kill_during_lead(tmp_path / "budget", tenant, monkeypatch,
-                                      run_id=fixture_uuid("r1222-n12-budget"), stores=stores)
+                                      stores=stores)
     _assert_budget_kill_during_lead(budget, stores)
 
     stores = []
-    failures = _kill_by_mains_failures(tmp_path / "abort", tenant, run_id=fixture_uuid("r1222-n12-abort"),
+    failures = _kill_by_mains_failures(tmp_path / "abort", tenant,
                                        stores=stores)
     _assert_lead_ran(failures)
     _assert_summary_delivered(failures, SUMMARY)
@@ -355,12 +354,12 @@ def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
         "something — MAIN's kill was laid onto the correlation lead")
 
     stores = []
-    store = _store_fault_after_lead_output(tmp_path / "store", tenant, run_id=fixture_uuid("r1222-n12-store"),
+    store = _store_fault_after_lead_output(tmp_path / "store", tenant,
                                            stores=stores)
     _assert_store_fault_stopped_the_run(store)
 
     stores = []
-    setup = _setup_fault_after_lead(tmp_path / "setup", tenant, run_id=fixture_uuid("r1222-n12-setup"),
+    setup = _setup_fault_after_lead(tmp_path / "setup", tenant,
                                     stores=stores)
     _assert_setup_fault_stopped_the_run(setup)
 
@@ -381,7 +380,7 @@ def test_a7_one_deadline_bounds_how_late_main_starts(tmp_path: Path) -> None:
                       "backend": S.Backend(fault=T.Fault(delay=DEADLINE_S + 1.0))},
     }
     stores: list = []
-    control = S.run_alert(tmp_path / "control", tenant=tenant, run_id=fixture_uuid("r1222-a7-control"),
+    control = S.run_alert(tmp_path / "control", tenant=tenant,
                           leads={L3: [S.text(SUMMARY)]}, limits=limits,
                           store_factory=S.store_factory(tmp_path / "control", sink=stores),
                           stores=stores)
@@ -394,7 +393,7 @@ def test_a7_one_deadline_bounds_how_late_main_starts(tmp_path: Path) -> None:
         stores = []
         clock = _Clock()
         main = S.MainScript()
-        d = S.run_alert(tmp_path / kind, tenant=tenant, run_id=fixture_uuid(f"r1222-a7-{kind}"), main=main,
+        d = S.run_alert(tmp_path / kind, tenant=tenant, main=main,
                         limits=limits, before=clock,
                         store_factory=S.store_factory(tmp_path / kind, sink=stores),
                         stores=stores, **spec)
@@ -423,7 +422,7 @@ def test_a7_a_timed_out_lead_session_reads_back_as_timed_out(tmp_path: Path) -> 
     timed out — a member of the truncated_by vocabulary — never as no ending."""
     tenant = S.plant_tenant()
     stores: list = []
-    d = S.run_alert(tmp_path / "cut", tenant=tenant, run_id=fixture_uuid("r1222-a7s-cut"),
+    d = S.run_alert(tmp_path / "cut", tenant=tenant,
                     leads={L3: [S.text(LATE)]}, lead_faults={L3: S.LeadFault(delay=STALL_S)},
                     limits=S.with_deadline(DEADLINE_S),
                     store_factory=S.store_factory(tmp_path / "cut", sink=stores), stores=stores)
@@ -433,7 +432,7 @@ def test_a7_a_timed_out_lead_session_reads_back_as_timed_out(tmp_path: Path) -> 
 
     # The same member every time the lead times out: the stamp is the ending, not a detail.
     again: list = []
-    d2 = S.run_alert(tmp_path / "again", tenant=tenant, run_id=fixture_uuid("r1222-a7s-again"),
+    d2 = S.run_alert(tmp_path / "again", tenant=tenant,
                      leads={L3: [_alerts_call(), S.text(LATE)]},
                      backend=S.Backend(fault=T.Fault(delay=DEADLINE_S + 1.0)),
                      limits=S.with_deadline(DEADLINE_S),
@@ -451,7 +450,7 @@ def test_r5_a_correlation_dispatch_without_a_usable_deadline_refuses_to_run(
     stores: list = []
     clock = _Clock()
     main = S.MainScript()
-    ok = S.run_alert(tmp_path / "valid", tenant=tenant, run_id=fixture_uuid("r1222-r5-valid"), main=main,
+    ok = S.run_alert(tmp_path / "valid", tenant=tenant, main=main,
                      before=clock, leads={L3: [S.text(LATE)]},
                      lead_faults={L3: S.LeadFault(delay=STALL_S)}, limits=S.with_deadline(1),
                      store_factory=S.store_factory(tmp_path / "valid", sink=stores),
@@ -474,7 +473,7 @@ def test_r5_a_correlation_dispatch_without_a_usable_deadline_refuses_to_run(
     for i, (label, limits) in enumerate(refused.items()):
         caplog.clear()
         # A lead that WOULD answer (late) if a fallback deadline let it start.
-        d = S.run_alert(tmp_path / f"refused-{i}", tenant=tenant, run_id=fixture_uuid(f"r1222-r5-{i}"),
+        d = S.run_alert(tmp_path / f"refused-{i}", tenant=tenant,
                         leads={L3: [S.text(LATE)]}, lead_faults={L3: S.LeadFault(delay=3.0)},
                         limits=limits)
         assert d.router.requests(L3) == 0, (
@@ -526,7 +525,7 @@ def test_r7_a_lead_main_dispatched_is_stamped_and_read_back_as_before(
     for member, spec in endings.items():
         stores: list = []
         run_kw: dict[str, Any] = {
-            "tenant": tenant, "run_id": fixture_uuid(f"r1222-r7-{member}"), "main": list(gather_cmdb),
+            "tenant": tenant, "main": list(gather_cmdb),
             "leads": {"l-001": spec["l001"],
                       **({L3: spec["leads_l3"]} if "leads_l3" in spec else {})},
             "lead_faults": {**({"l-001": spec["fault"]} if "fault" in spec else {}),
@@ -560,7 +559,7 @@ def test_p002_spawn_budget_sized_to_mains_own_leads(tmp_path: Path,
     # correlation lead, so MAIN's planned lead meets the cap.
     with monkeypatch.context() as m:
         m.setenv(_enforce_flag(), "true")
-        d = S.run_alert(tmp_path / "spawn", tenant=tenant, run_id=fixture_uuid("r1222-p002-spawn"),
+        d = S.run_alert(tmp_path / "spawn", tenant=tenant,
                         main=[S.gather("l-001", "cmdb"), S.text(S.DONE)],
                         leads={L3: [_alerts_call(0), _alerts_call(1), S.text(SUMMARY)]},
                         limits=S.default_limits(max_subagent_spawns=1))
@@ -579,7 +578,7 @@ def test_p002_spawn_budget_sized_to_mains_own_leads(tmp_path: Path,
         f"MAIN's gather was not refused for budget: {refusals!r}")
 
     # The lead's failures never count toward the run-level failure kill.
-    over = S.run_alert(tmp_path / "failures", tenant=tenant, run_id=fixture_uuid("r1222-p002-failures"),
+    over = S.run_alert(tmp_path / "failures", tenant=tenant,
                        leads={L3: [_parallel("elastic", "alerts", _kill_limit()),
                                    S.text(SUMMARY)]},
                        backend=S.Backend(fault=T.Fault(fail_on=("elastic.",))))
@@ -593,13 +592,13 @@ def test_p002_spawn_budget_sized_to_mains_own_leads(tmp_path: Path,
     # A budget kill while the lead runs stops the run loudly, as a kill from another cause.
     stores: list = []
     killed = _budget_kill_during_lead(tmp_path / "kill", tenant, monkeypatch,
-                                      run_id=fixture_uuid("r1222-p002-kill"), stores=stores)
+                                      stores=stores)
     _assert_budget_kill_during_lead(killed, stores)
 
 
 def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -> None:
     tenant = S.plant_tenant()
-    done = S.run_alert(tmp_path / "done", tenant=tenant, run_id=fixture_uuid("r1222-p003-done"),
+    done = S.run_alert(tmp_path / "done", tenant=tenant,
                        leads={L3: [_alerts_call(), S.text(SUMMARY)]},
                        main=S.closing_main_turns(), limits=S.with_deadline(DEADLINE_S))
     _assert_lead_ran(done)
@@ -609,7 +608,7 @@ def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -
     stores: list = []
     clock = _Clock()
     main = S.MainScript(S.closing_main_turns())
-    hung = S.run_alert(tmp_path / "hung", tenant=tenant, run_id=fixture_uuid("r1222-p003-hung"), main=main,
+    hung = S.run_alert(tmp_path / "hung", tenant=tenant, main=main,
                        before=clock, leads={L3: [S.text(LATE)]},
                        lead_faults={L3: S.LeadFault(delay=STALL_S)},
                        limits=S.with_deadline(DEADLINE_S),
@@ -644,7 +643,7 @@ def test_p009_l00c_alone_reaches_the_run_kill_count(tmp_path: Path) -> None:
     prose: dict[str, str] = {}
     for label, script in runs.items():
         detail = details[label]
-        d = S.run_alert(tmp_path / label, tenant=tenant, run_id=fixture_uuid(f"r1222-p009-{label}"),
+        d = S.run_alert(tmp_path / label, tenant=tenant,
                         main=S.closing_main_turns(), leads={L3: script},
                         backend=S.Backend(fault=T.Fault(fail_on=("elastic.",)),
                                           exc=functools.partial(S.transport_fault, detail)))
@@ -678,7 +677,7 @@ def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -
         stores: list = []
         clock = _Clock()
         main = S.MainScript()
-        d = S.run_alert(tmp_path / kind, tenant=tenant, run_id=fixture_uuid(f"r1222-p167-{kind}"), main=main,
+        d = S.run_alert(tmp_path / kind, tenant=tenant, main=main,
                         before=clock, leads={L3: [S.text(LATE)]},
                         lead_faults={L3: S.LeadFault(delay=delay)},
                         limits=S.with_deadline(DEADLINE_S),
@@ -694,7 +693,7 @@ def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -
 
     # Positive control: a response just inside the deadline is the lead's summary.
     early: list = []
-    d = S.run_alert(tmp_path / "early", tenant=tenant, run_id=fixture_uuid("r1222-p167-early"),
+    d = S.run_alert(tmp_path / "early", tenant=tenant,
                     leads={L3: [S.text(SUMMARY)]},
                     lead_faults={L3: S.LeadFault(delay=0.25 * DEADLINE_S)},
                     limits=S.with_deadline(DEADLINE_S),
@@ -727,7 +726,7 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
     with monkeypatch.context() as m:
         m.setenv(_enforce_flag(), "true")
         main_kill = S.run_alert(
-            tmp_path / "main", tenant=tenant, run_id=fixture_uuid("r1222-p171-main"),
+            tmp_path / "main", tenant=tenant,
             main=S.MainScript(S.default_main_turns(), S.LeadFault(delay=KILL_DELAY_S)),
             limits=S.default_limits(wall_clock_timeout=KILL_WALL_S, grace_seconds=0),
             tickets=tickets_a, update_ticket=True, no_learn=False,
@@ -736,7 +735,7 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
     tickets_b, enqueue_b, handed_b, answers_b = post_steps()
     stores: list = []
     lead_kill = _budget_kill_during_lead(
-        tmp_path / "lead", tenant, monkeypatch, run_id=fixture_uuid("r1222-p171-lead"), stores=stores,
+        tmp_path / "lead", tenant, monkeypatch, stores=stores,
         tickets=tickets_b, update_ticket=True, no_learn=False,
         enqueue=enqueue_b)
     _assert_budget_kill_during_lead(lead_kill, stores)
@@ -763,7 +762,7 @@ def test_p174_lead_and_main_failures_together_pass_the_kill_co(tmp_path: Path) -
     outcome: dict[int, S.Drive] = {}
     for mains in (n - 1, n):
         stores: list = []
-        d = S.run_alert(tmp_path / f"m{mains}", tenant=tenant, run_id=fixture_uuid(f"r1222-p174-{mains}"),
+        d = S.run_alert(tmp_path / f"m{mains}", tenant=tenant,
                         main=[S.gather("l-001", "cmdb"), S.text(S.DONE)],
                         leads={L3: [_parallel("elastic", "alerts", n - 1), S.text(SUMMARY)],
                                "l-001": [_parallel("cmdb", "get-host", mains), S.text("x")]},

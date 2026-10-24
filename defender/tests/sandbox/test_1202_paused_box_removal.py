@@ -1,5 +1,6 @@
 """#1202: removing a paused runsc box. `docker rm -f` on a paused box kills it but answers non-zero;
-every removal site must wait it out and retry, and none may thaw the box."""
+every removal site must wait it out and retry, and none may thaw the box. (#1279 O6 removed the
+pre-create sweep's removal of a finished container, so that site is no longer one of them.)"""
 from __future__ import annotations
 
 import subprocess
@@ -7,7 +8,7 @@ import subprocess
 import pytest
 
 from defender.box import BoxExecutor, BoxFault, BoxSpec, _DockerTransport, stop_box
-from defender.box._docker import _reap_on_fault, _reap_stale_before_create
+from defender.box._docker import _reap_on_fault
 
 NAME = "defender-drain-r1202"
 
@@ -58,16 +59,12 @@ def _stop(daemon: Daemon) -> None:
     stop_box(_box(), docker=daemon)
 
 
-def _reap_stale(daemon: Daemon) -> None:
-    _reap_stale_before_create(daemon, NAME)
-
-
 def _reap_fault(daemon: Daemon) -> None:
     _reap_on_fault(daemon, NAME)
 
 
 SITES = pytest.mark.parametrize(
-    "remove", [_stop, _reap_stale, _reap_fault], ids=["stop_box", "reap_stale", "reap_on_fault"],
+    "remove", [_stop, _reap_fault], ids=["stop_box", "reap_on_fault"],
 )
 
 

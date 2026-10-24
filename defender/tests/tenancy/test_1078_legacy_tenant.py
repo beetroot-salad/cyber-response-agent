@@ -1,7 +1,7 @@
 """#1077's tenant-record/stamp/family demands, RESTORED under #1078's tenant-on-the-request API."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
@@ -31,11 +31,12 @@ def tenant_root(tmp_path, monkeypatch) -> Path:
     return root
 
 
-def _materialize(alert: Path, run_id: str | None, **kw):
+def _materialize(alert: Path, **kw):
     """`materialize_run` for T_ID, handed the `Tenant` the real `accept_tenant` returns over
-    this test's data root (#1120: the builder takes an accepted tenant, not an id)."""
+    this test's data root (#1120: the builder takes an accepted tenant, not an id). #1279 (A3):
+    setup takes no run id."""
     tenant = T1106.accept(current_data_root(), T_ID)
-    return H.run_common().materialize_run(alert, run_id, tenant=tenant, **kw).run_dir
+    return H.run_common().materialize_run(alert, tenant=tenant, **kw).run_dir
 
 
 def _arm(alert: Path, world, ep: Path):
@@ -45,10 +46,8 @@ def _arm(alert: Path, world, ep: Path):
     tenant = T1106.accept(current_data_root(), T_ID)
     with Episode.open(ep) as episode:
         view = T.episode_view(episode, tenant=tenant)
-        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
-        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
-        return _materialize(alert, T.roster_arm_id(ep, world.world_id), world=world,
-                            episode_runs=view)
+        # #1279 (A3): setup reads the arm's id from the roster itself (`episode_runs.arm_id`).
+        return _materialize(alert, world=world, episode_runs=view)
 
 
 def _stamp(run_dir: Path) -> dict:
@@ -96,7 +95,7 @@ def test_the_stamp_spells_tenant_id_and_world_id_on_the_wire():
 
 def test_materialize_stamps_the_tenant_and_world_from_the_record(tenant_root, tmp_path):
     alert = H.plant_alert(tmp_path / "in")
-    run_dir = Path(_materialize(alert, None))
+    run_dir = Path(_materialize(alert))
     base = tenant_root / T_ID / "runs"
     stamp = _stamp(run_dir)
     assert stamp["tenant_id"] == T_ID
@@ -107,104 +106,45 @@ def test_materialize_stamps_the_tenant_and_world_from_the_record(tenant_root, tm
         "the stamp is written by the host before the box exists — the sentinel is planted later")
 
 
-def test_the_stale_sidecar_clear_meets_the_new_neighbour(tenant_root, tmp_path):
-    import uuid
-
-    from defender.runtime import run_end
-
-    base = tenant_root / T_ID / "runs"
-    base.mkdir(parents=True, exist_ok=True)
-    reused, untouched = str(uuid.uuid4()), str(uuid.uuid4())
-
-    stale_dir = base / reused
-    stale_dir.mkdir()
-    stale = run_end.sidecar_path(stale_dir)
-    stale.write_text('{"exit_class": "from a previous occupant"}\n', encoding="utf-8")
-    other = run_end.sidecar_path(base / untouched)
-    other.write_text('{"exit_class": "someone else"}\n', encoding="utf-8")
-    stale_dir.rmdir()
-
-    alert = H.plant_alert(tmp_path / "in")
-    _materialize(alert, reused)
-
-    assert not stale.exists(), "positive control: the matching run's own stale sidecar IS cleared"
-    assert other.is_file(), (
-        "the clear reached another run's sidecar; it is keyed to the exact run_id, never a glob "
-        "over the base")
-    assert not (base / H.RECORD_NAME).exists(), "run setup wrote the retired tenant record"
-
-
 # Decision 4's sole exception — a corrupt tenant record refuses the run
 
 
 # Decision 13 — the record's scope, its create race, and the collision guard
 
 
-def test_run_creation_refuses_a_run_directory_named_like_the_tenant_record(tenant_root, tmp_path):
-    import uuid
-
+def test_a_minted_run_id_is_never_the_tenant_records_name(tenant_root, tmp_path):
+    """#1279 (A3, conflict updated): a caller can no longer offer `_tenant.json` as a run id for
+    the id rule to refuse, so what is left is the positive side: the minted id is a run id, the
+    record's name is not, and setup leaves no entry at the record's name."""
     from defender.records._run_id import is_valid_run_id
 
     alert = H.plant_alert(tmp_path / "in")
-    with pytest.raises(SystemExit) as refused:
-        _materialize(alert, H.RECORD_NAME)
-    assert str(refused.value.code).startswith("invalid run id: "), (
-        f"`_tenant.json` as a run id was not refused by the run-id rule: {refused.value.code!r}")
     base = tenant_root / T_ID / "runs"
-    assert not (base / H.RECORD_NAME).exists(), "a refused id left an entry at its name"
-    assert not is_valid_run_id(H.RECORD_NAME), "claim C18, the first coincidence"
-    pinned = str(uuid.uuid4())
-    run_dir = Path(_materialize(alert, pinned))
-    assert run_dir == base / pinned, f"positive control: a pinned UUID runs: {run_dir}"
+    run_dir = Path(_materialize(alert))
+    assert run_dir.parent == base, run_dir
     assert run_dir.is_dir(), run_dir
+    assert is_valid_run_id(run_dir.name) and run_dir.name != H.RECORD_NAME
+    assert not is_valid_run_id(H.RECORD_NAME), "claim C18, the first coincidence"
+    assert not (base / H.RECORD_NAME).exists(), "setup left an entry at the record's name"
 
 
-# Decision 3 — setup retry and reuse
+# Decision 3 — setup retry and reuse (retired by #1279: a run id is minted, never reused)
 
-def test_a_second_materialize_for_one_run_id_finishes_what_the_first_left_undone(
-        tenant_root, tmp_path):
-    import uuid
+def test_an_arm_setup_that_was_interrupted_is_refused_not_resumed(tenant_root, tmp_path):
+    """#1279 (O5, O8; conflict updated from `test_a_second_materialize_for_one_run_id_finishes_
+    what_the_first_left_undone`): arms are never resumed in place. A setup-only dir at the
+    roster's arm id (what an interrupted first call leaves) is refused, and left as it was."""
+    src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
+    arm_dir = ep / "runs" / T.roster_arm_id(ep, world.world_id)
+    arm_dir.mkdir(parents=True)
+    (arm_dir / "gather_raw").mkdir()
+    before = sorted(p.name for p in arm_dir.iterdir())
 
-    base = tenant_root / T_ID / "runs"
-    base.mkdir(parents=True, exist_ok=True)
-    resumable = str(uuid.uuid4())
-    run_dir = base / resumable
-    run_dir.mkdir()                       # the state an interrupted first call leaves
-    (run_dir / "gather_raw").mkdir()
-    assert not RunPaths(run_dir).alert.exists()
-    assert not (run_dir / "provenance.json").exists()
+    with pytest.raises(SystemExit):
+        _arm(RunPaths(src).alert, world, ep)
 
-    alert = H.plant_alert(tmp_path / "in")
-    again = Path(_materialize(alert, resumable))
-
-    assert again == run_dir, "the second call refused or minted a second directory"
-    assert RunPaths(run_dir).alert.is_file(), "the alert copy the first call never made"
-    assert _stamp(run_dir)["tenant_id"] == T_ID, "it re-stamps"
-    third = Path(_materialize(alert, resumable))
-    assert third == run_dir
-    assert len([p for p in base.iterdir() if p.is_dir()]) == 1, (
-        "a transient failure must not permanently burn a run id, and setup must not duplicate")
-
-
-def test_reusing_a_run_id_clears_all_three_sidecars_not_only_the_named_one(tenant_root, tmp_path):
-    base = tenant_root / T_ID / "runs"
-    base.mkdir(parents=True, exist_ok=True)
-    run_id = fixture_uuid("run-recycled")  # #1187: a run id is a uuid4
-    run_dir = base / run_id
-    sidecars = {
-        name: getattr(S.RunPaths(run_dir), name)(fixture_runs_base(base)) for name in S.SIDECAR_ACCESSORS}
-    for name, path in sidecars.items():
-        path.write_text(f'{{"from": "a previous occupant", "which": "{name}"}}\n',
-                        encoding="utf-8")
-        assert path.parent == base, f"{name} lands beside the runs base, keyed `<run_id><suffix>`"
-
-    alert = H.plant_alert(tmp_path / "in")
-    _materialize(alert, run_id)
-
-    left = {name: path for name, path in sidecars.items() if path.exists()}
-    assert left == {}, (
-        f"these sidecars survived the reuse and now attribute a previous occupant's verdict and "
-        f"accounting failures to a new run: {sorted(left)}")
+    assert sorted(p.name for p in arm_dir.iterdir()) == before, "the refused setup wrote into the dir"
+    assert not (arm_dir / "provenance.json").exists(), "the refused setup re-stamped the dir"
 
 
 # D3 / decision 15 — the world token, and a resume without a family record
@@ -213,7 +153,7 @@ def test_reusing_a_run_id_clears_all_three_sidecars_not_only_the_named_one(tenan
 def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_world(
         tenant_root, tmp_path):
     alert = H.plant_alert(tmp_path / "in")
-    unforked = Path(_materialize(alert, fixture_uuid("run-unforked")))
+    unforked = Path(_materialize(alert))
     assert _stamp(unforked).get("world_id") is None
     assert _stamp(unforked)["parent_run_id"] is None
     assert _stamp(unforked)["fork_turn"] is None
@@ -235,12 +175,10 @@ def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_
 
 
 def test_a_resume_without_a_family_record_stamps_the_tenants_base_world(tenant_root, tmp_path):
-    import uuid
-
     base = tenant_root / T_ID / "runs"
     alert = H.plant_alert(tmp_path / "in")
-    source = Path(_materialize(alert, str(uuid.uuid4())))
-    resumed = Path(_materialize(alert, str(uuid.uuid4())))
+    source = Path(_materialize(alert))
+    resumed = Path(_materialize(alert))
     no_family = (
         "'forked' means 'has a family record', stated explicitly (decision 15(1)) — a resume "
         "that is not an episode fork has none")

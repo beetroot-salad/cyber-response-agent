@@ -84,7 +84,7 @@ class World:
 
     def next_id(self, what: str) -> str:
         """A fresh run id for this world's `what`-th drive: #1187 (declared change 1) — a
-        canonical UUID (`run.py --run-id` refuses any other), derived from a readable label."""
+        canonical UUID, derived from a readable label."""
         self.n += 1
         return fixture_uuid(f"1222-tenant-check-{what}-{self.n}")
 
@@ -202,7 +202,7 @@ def at_check_folder(w: World) -> Verdict:
 
 def at_run_start(w: World, **run: Any) -> Verdict:
     run_id = w.next_id("run")
-    d = S.run_alert(w.tmp / run_id, tenant=w.planted, run_id=run_id, **run)
+    d = S.run_alert(w.tmp / run_id, tenant=w.planted, **run)
     if d.raised is not None:
         return Verdict("run-start", False, f"run.main raised {d.raised!r}", False, d)
     started = bool(d.lifecycle_calls)

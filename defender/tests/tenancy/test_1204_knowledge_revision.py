@@ -534,15 +534,13 @@ def _tenant_with_knowledge(tmp_path: Path, monkeypatch, *, versioned: bool) -> t
 
 
 def _materialise(tmp_path: Path, tenant: Any, label: str) -> tuple[Path, dict]:
-    """One run through the real `materialize_run`, and its stamp as the JSON on disk. The run is
-    pinned at the uuid4 `label` names (#1187: a run id is a uuid4; `fixture_uuid`)."""
+    """One run through the real `materialize_run`, and its stamp as the JSON on disk. #1279 (A3):
+    the run id is minted by setup; `label` only names the alert file."""
     from defender import run_common
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-    run_id = fixture_uuid(label)
-    alert = tmp_path / f"{run_id}.alert.json"
-    alert.write_text(json.dumps({"id": run_id}), encoding="utf-8")
-    run_dir = run_common.materialize_run(alert, run_id, tenant=tenant).run_dir
+    alert = tmp_path / f"{label}.alert.json"
+    alert.write_text(json.dumps({"id": label}), encoding="utf-8")
+    run_dir = run_common.materialize_run(alert, tenant=tenant).run_dir
     stamp = RunPaths(run_dir).provenance
     assert stamp.is_file(), "the run was not stamped at all"
     return run_dir, json.loads(stamp.read_text(encoding="utf-8"))
@@ -623,11 +621,9 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
         # PR 2's `container_required`): the view refuses unless the roster names the world.
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
                                                 require_roster=True)
-        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
-        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
+        # #1279 (A3): setup reads the arm's id from the roster itself.
         run_dir = run_common.materialize_run(
-            RunPaths(src).alert, T.roster_arm_id(episode_dir, world.world_id), tenant=tenant, world=world,
-            episode_runs=view).run_dir
+            RunPaths(src).alert, tenant=tenant, world=world, episode_runs=view).run_dir
     assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
     doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
     assert doc["world_id"] is None

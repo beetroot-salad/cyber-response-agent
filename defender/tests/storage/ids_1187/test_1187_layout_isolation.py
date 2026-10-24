@@ -94,28 +94,27 @@ def _records_under(folder: Path) -> list[str]:
 # The natural container: no record written, read or required (R1; O10; flow 1).
 
 def test_create_makes_the_runs_folder_and_writes_no_tenant_record(data_root):
-    from defender.run_repository import RunId
-
     t = S.tenant(data_root, A_ID)
     runs_dir = S.natural_runs(data_root, A_ID)
     assert not os.path.lexists(runs_dir)
     runs = t.runs_repository()
 
-    parsed = _rid(S.new_id())
-    run = runs.create(parsed)
+    run = runs.create()
     assert _real_dir(runs_dir), "create did not make <T>/runs as a real directory"
-    assert Path(run.run_dir) == runs_dir / str(parsed)
+    assert Path(run.run_dir).parent == runs_dir
+    assert S.is_canonical_uuid(Path(run.run_dir).name), run.run_dir
     assert str(run.tenant_id) == A_ID
     assert os.listdir(runs_dir) == [], (
         f"create wrote into <T>/runs beyond making it: {sorted(os.listdir(runs_dir))}")
 
-    minted = RunId.mint()
-    assert Path(runs.create(minted).run_dir) == runs_dir / str(minted)
+    again = runs.create()
+    assert Path(again.run_dir).parent == runs_dir
+    assert Path(again.run_dir) != Path(run.run_dir), "create minted the same id twice"
     assert os.listdir(runs_dir) == []
     assert _records_under(S.tenant_dir(data_root, A_ID)) == []
 
 
-def test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run(
+def test_run_setup_writes_no_tenant_record_for_a_minted_run(
         tmp_path, data_root):
     from defender import run_common
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
@@ -124,16 +123,15 @@ def test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run(
     runs_dir = S.natural_runs(data_root, A_ID)
     alert = H5.alert_file(tmp_path / "in")
 
-    minted = run_common.materialize_run(alert, None, tenant=t)
-    assert Path(minted.run_dir).parent == runs_dir
+    first = run_common.materialize_run(alert, tenant=t)
+    assert Path(first.run_dir).parent == runs_dir
     assert _records_under(runs_dir) == [], "run setup wrote a _tenant.json"
 
-    pinned_id = S.new_id()
-    pinned = run_common.materialize_run(alert, pinned_id, tenant=t)
-    assert Path(pinned.run_dir) == runs_dir / pinned_id
+    second = run_common.materialize_run(alert, tenant=t)
+    assert Path(second.run_dir).parent == runs_dir
     assert _records_under(S.tenant_dir(data_root, A_ID)) == [], "run setup wrote a _tenant.json"
     assert sorted(p.name for p in runs_dir.iterdir() if p.is_dir()) == sorted(
-        [Path(minted.run_dir).name, pinned_id])
+        [Path(first.run_dir).name, Path(second.run_dir).name])
 
 
 def test_a_container_with_no_record_opens_lists_and_hands_out_every_run(data_root):
@@ -245,7 +243,7 @@ def test_linked_repository_levels_refuse_and_restore(tmp_path, data_root, level)
         probes = {"list": runs.list, "all_runs": runs.all_runs,
                   "open": lambda: runs.open(_rid(opened_id))}
         if level == "runs":
-            probes["create"] = lambda: runs.create(_rid(S.new_id()))
+            probes["create"] = lambda: runs.create()
     elif level in ("episodes", "episode"):
         ep_id = b["episode_id"] if level == "episodes" else a["episode_id"]
         probes = {door: lambda door=door: _episode_door(runs, ep_id, door)
@@ -333,7 +331,7 @@ def test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repos
             "list()": (lambda: runs.list(), None),
             "all_runs()": (lambda: runs.all_runs(), None),
             "open(B's run)": (lambda: runs.open(_rid(b["run_id"])), b["run_id"]),
-            "create(fresh id)": (lambda: runs.create(_rid(S.new_id())), None),
+            "create()": (lambda: runs.create(), None),
             "create_episode()": (lambda: runs.create_episode(), None),
             "episode(B's episode)": (lambda: runs.episode(b["episode_id"]), b["episode_id"]),
             "episode_files(B's episode)": (
@@ -366,8 +364,7 @@ def test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repos
     assert [str(i) for i in runs.list()] == [a["run_id"]]
     assert [Path(r.run_dir).name for r in runs.all_runs()] == [a["run_id"]]
     assert Path(runs.open(_rid(a["run_id"])).run_dir) == a_runs / a["run_id"]
-    fresh = S.new_id()
-    assert Path(runs.create(_rid(fresh)).run_dir) == a_runs / fresh
+    assert Path(runs.create().run_dir).parent == a_runs
     with runs.create_episode() as claimed:
         claimed_id = claimed.episode_id
     assert _real_dir(S.episodes_dir(data_root, A_ID) / claimed_id)
@@ -785,19 +782,18 @@ def test_another_tenants_episode_is_absent_to_this_tenants_repository(data_root)
             a["episode"] / "runs" / a["roster"][T.fixture_world_id("a")])
 # R6 / declared change 13: no `_episodes` claim is read by `create`.
 
-def test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses(data_root):
+def test_create_is_not_refused_by_an_episodes_claim_and_the_listing_refuses(data_root):
     from defender.run_repository import RunRefused
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
 
     t = S.tenant(data_root, A_ID)
     runs_dir = S.natural_runs(data_root, A_ID)
-    pinned = S.new_id()
-    record = H5.plant_record(runs_dir, "e1", A_ID, S.new_id(), {"a": pinned})
+    record = H5.plant_record(runs_dir, "e1", A_ID, S.new_id(), {"a": S.new_id()})
     record_bytes = record.read_bytes()
     runs = t.runs_repository()
 
-    run = runs.create(_rid(pinned), pinned=True)
-    assert Path(run.run_dir) == runs_dir / pinned
+    run = runs.create()
+    assert Path(run.run_dir).parent == runs_dir
     assert record.read_bytes() == record_bytes, "create touched the _episodes record"
     assert not os.path.lexists(runs_dir / "_tenant.json"), "create wrote a _tenant.json"
     assert isinstance(S.raised(runs.all_runs), RunRefused), (

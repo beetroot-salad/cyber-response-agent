@@ -640,13 +640,11 @@ def _assert_an_unreadable_queue_never_reads_as_empty(
 
 def _accepted_enqueue_run(base: Path, label: str):
     """An accepted natural run with certified input for the real enqueue permission probe."""
-    from defender.run_repository import RunId
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
     from defender.box import _scrub as scrub_mod
 
     tenant = set_up_tenant(base / label)
-    run = tenant.runs_repository().create(RunId.parse(fixture_uuid(label)))
+    run = tenant.runs_repository().create()  # #1279 (A3): the id is minted
     run.run_dir.mkdir()
     plant_alert(run.run_dir, {"rule": {"name": "everyday"}})
     scrub_mod.scrub(run.run_dir)
