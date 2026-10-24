@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import ast
 
-from defender.tests.support.shared.contracts._by_path import import_lint_lib
+from _by_path import import_lint_lib
 
 import pytest
 

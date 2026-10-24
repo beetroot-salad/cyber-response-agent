@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from defender.tests.support.shared.contracts._by_path import load_lint_gate
+from _by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_hand_rolled_frontmatter")
 
