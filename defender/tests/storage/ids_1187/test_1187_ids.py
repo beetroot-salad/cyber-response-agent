@@ -18,7 +18,6 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
-
 NON_CANONICAL = [pytest.param(text, id=repr(text)) for text in S.NON_CANONICAL_IDS]
 # O1 / declared change 2: a minted id is a bare random UUID.
 
@@ -422,17 +421,10 @@ def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
                       TypeError), "materialize_run took an id"
 
 
-# O1: the census. No production source composes, derives or bounds an id by meaning.
-
-#: Functions production must neither call nor pass around (C1 of the design): the stamp-label
-#: minter, the `-n<message>` episode-id deriver, the held-out folder-name matcher, and #1257's
-#: composer of an arm id. A *definition* alone is not flagged: the contract is "nothing calls".
-BANNED_FUNCTIONS = frozenset({"mint_run_id", "episode_id_for", "_claimed_slug", "arm_run_id_for",
-                              "world_token_for", "episode_token_for"})
-#: The 206-byte bound's constant: neither defined nor read.
-BANNED_CONSTANT = "RUN_ID_MAX_BYTES"
+# #1279 A3: the run-id census helpers.
 
 _astlib = _by_path.import_lint_lib("_astlib")
+_scope = _by_path.import_lint_lib("_episode_scope")
 
 
 @dataclass(frozen=True, order=True)
@@ -448,191 +440,6 @@ class Hit:
         return f"{self.rel}:{self.line} {self.kind} {self.what}"
 
 
-def census(root: Path, *, skip_tests: bool = True) -> list[Hit]:
-    """Find production sites that derive meaning from run or episode identifiers."""
-    root = Path(root)
-    excluded = (".venv", "__pycache__", "node_modules") + (("tests",) if skip_tests else ())
-    hits: list[Hit] = []
-    parsed = []
-    for rel in _astlib.source_files(root, excluded):
-        _text, tree = _astlib.read_and_parse(root / rel, rel)
-        module, package = _astlib.module_and_package(rel, root="defender")
-        parsed.append((rel, tree, _astlib.module_env(tree, module, package)))
-    composers = _composers([tree for _rel, tree, _env in parsed])
-    for rel, tree, env in parsed:
-        with _astlib.scan_guard(rel):
-            for node, values in S.scoped_nodes(tree):
-                hits.extend(_hits_at(node, env, rel, values))
-                hits.extend(_composer_calls(node, rel, values, composers))
-    return sorted(set(hits))
-
-
-def _joined_params(func: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[int, str]:
-    """Find function parameters joined to separators in identifier compositions."""
-    args = [a.arg for a in (*func.args.posonlyargs, *func.args.args)]
-    values = S.bound_values(func)
-
-    def reaches(node: ast.AST, name: str, seen: frozenset[str] = frozenset()) -> bool:
-        for n in (x for x in ast.walk(node) if isinstance(x, ast.Name)):
-            if n.id == name or (n.id not in seen and any(
-                    reaches(v, name, seen | {n.id}) for v in values.get(n.id, ()))):
-                return True
-        return False
-
-    out: dict[int, str] = {}
-    for node in ast.walk(func):
-        fields: list[ast.AST] = []
-        if isinstance(node, ast.JoinedStr):
-            fields = [f.value for f, after in zip(node.values, node.values[1:], strict=False)
-                      if isinstance(f, ast.FormattedValue) and isinstance(after, ast.Constant)
-                      and isinstance(after.value, str) and after.value.startswith("-")]
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and isinstance(
-                node.right, ast.Constant) and isinstance(node.right.value, str) and (
-                node.right.value.startswith("-")):
-            fields = [_rightmost(node.left)]
-        offset = 1 if args[:1] in (["self"], ["cls"]) else 0
-        out.update({index - offset: name for index, name in enumerate(args)
-                    if index >= offset and any(reaches(f, name) for f in fields)})
-    return out
-
-
-def _composers(trees: list[ast.Module]) -> dict[str, dict[int, str]]:
-    """`{function or method name: {call position: parameter}}` over every file: the functions `_joined_params` finds."""
-    out: dict[str, dict[int, str]] = {}
-    for tree in trees:
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
-                    joined := _joined_params(node)):
-                out.setdefault(node.name, {}).update(joined)
-    return out
-
-
-def _composer_calls(node: ast.AST, rel: str, values: dict,
-                    composers: dict[str, dict[int, str]]) -> list[Hit]:
-    """Find composing calls whose joined parameter receives an episode identifier."""
-    if not isinstance(node, ast.Call):
-        return []
-    func = node.func
-    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(
-        func, ast.Attribute) else None
-    joined = composers.get(name or "")
-    if not joined:
-        return []
-    handed = [(i, a) for i, a in enumerate(node.args)] + [
-        (next((i for i, p in joined.items() if p == k.arg), -1), k.value)
-        for k in node.keywords]
-    if any(i in joined and _names_episode_id(a, values) for i, a in handed):
-        return [Hit(rel, node.lineno, "composer", ast.unparse(node))]
-    return []
-
-
-def _banned_origin(origin: str | None) -> str | None:
-    """The banned name an import-resolved origin ends in, if any."""
-    last = origin.rsplit(".", 1)[-1] if origin else None
-    return last if last in BANNED_FUNCTIONS or last == BANNED_CONSTANT else None
-
-
-def _hits_at(node: ast.AST, env, rel: str, values: dict) -> list[Hit]:
-    return [*_composed(node, rel, values), *_concatenated(node, rel, values),
-            *_banned_use(node, env, rel), *_banned_text(node, rel),
-            *_labelled_mint(node, env, rel)]
-
-
-def _names_episode_id(node: ast.AST, values: dict) -> bool:
-    """Recognize episode_id directly or through a locally bound alias."""
-    return S.spells(node, "episode_id", values)
-
-
-def _rightmost(node: ast.expr) -> ast.expr:
-    """The last operand of a `+` chain (`a + b + c` is `(a + b) + c`)."""
-    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        node = node.right
-    return node
-
-
-def _concatenated(node: ast.AST, rel: str, values: dict) -> list[Hit]:
-    """`concat` hits: an `episode_id` joined to a `-` by `+`, `str.join`, `str.format` or `%`."""
-    def text(n: ast.AST) -> str | None:
-        return n.value if isinstance(n, ast.Constant) and isinstance(n.value, str) else None
-
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        right = text(node.right)
-        if right is not None and right.startswith("-") and _names_episode_id(
-                _rightmost(node.left), values):
-            return [Hit(rel, node.lineno, "concat", ast.unparse(node))]
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
-        fmt = text(node.left)
-        if fmt is not None and "-%" in fmt and _names_episode_id(node.right, values):
-            return [Hit(rel, node.lineno, "concat", ast.unparse(node))]
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        fmt = text(node.func.value)
-        named = any(_names_episode_id(a, values) for a in (*node.args, *node.keywords))
-        if fmt == "-" and node.func.attr == "join" and named:
-            return [Hit(rel, node.lineno, "concat", ast.unparse(node))]
-        if fmt is not None and "}-" in fmt and node.func.attr == "format" and named:
-            return [Hit(rel, node.lineno, "concat", ast.unparse(node))]
-    return []
-
-
-def _composed(node: ast.AST, rel: str, values: dict) -> list[Hit]:
-    """`fstring` hits: a replacement field naming `episode_id` (directly or through a local alias) followed at once by a `-`."""
-    out: list[Hit] = []
-    if isinstance(node, ast.JoinedStr):
-        for field, after in zip(node.values, node.values[1:], strict=False):
-            if (isinstance(field, ast.FormattedValue)
-                    and isinstance(after, ast.Constant) and isinstance(after.value, str)
-                    and after.value.startswith("-")
-                    and _names_episode_id(field.value, values)):
-                out.append(Hit(rel, node.lineno, "fstring", "{" + ast.unparse(field.value) + "}-"))
-    return out
-
-
-def _banned_use(node: ast.AST, env, rel: str) -> list[Hit]:
-    """`ref` hits (a banned function or the constant used, however it is reached) and the constant's `def`."""
-    out: list[Hit] = []
-    if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
-        scope = env.scope_of.get(node, env)
-        banned = _banned_origin(_astlib.origin(node, env))
-        if banned is None and isinstance(node, ast.Name) and node.id in scope.own_defs and (
-                node.id in BANNED_FUNCTIONS):
-            banned = node.id
-        if banned is not None:
-            out.append(Hit(rel, node.lineno, "ref", banned))
-    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and (
-            node.id == BANNED_CONSTANT):
-        out.append(Hit(rel, node.lineno, "def", node.id))
-    return out
-
-
-def _banned_text(node: ast.AST, rel: str) -> list[Hit]:
-    """`str` hits: a banned name as a string constant (an `__all__` re-export)."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str) and (
-            node.value in BANNED_FUNCTIONS or node.value == BANNED_CONSTANT):
-        return [Hit(rel, node.lineno, "str", node.value)]
-    return []
-
-
-def _labelled_mint(node: ast.AST, env, rel: str) -> list[Hit]:
-    """Find RunId.mint calls that pass a label or clock, including import aliases."""
-    if isinstance(node, ast.Call) and (node.args or node.keywords):
-        called = _astlib.callee(node, env)
-        func = node.func
-        if (called is None and isinstance(func, ast.Call) and _astlib.callee(func, env) == (
-                "builtins.getattr") and len(func.args) == 2
-                and isinstance(func.args[1], ast.Constant) and func.args[1].value == "mint"):
-            owner = _astlib.origin(func.args[0], env)
-            called = f"{owner}.mint" if owner is not None else None
-        if called is not None and called.endswith("RunId.mint"):
-            return [Hit(rel, node.lineno, "mint-args", called)]
-    return []
-
-
-def test_1187_o1_no_production_source_composes_derives_or_bounds_an_id_by_meaning():
-    hits = census(DEFENDER)
-    listing = "\n  ".join(str(h) for h in hits)
-    assert hits == [], f"{len(hits)} production sites still read or build id meaning:\n  {listing}"
-
-
 # #1279 A3 census: no production call hands a run id to run setup or `RunsRepository.create`;
 # only run setup makes an arm, from the roster's id.
 
@@ -646,7 +453,7 @@ def run_id_handouts(root: Path, *, skip_tests: bool = True) -> list[Hit]:
         module, package = _astlib.module_and_package(rel, root="defender")
         env = _astlib.module_env(tree, module, package)
         with _astlib.scan_guard(rel):
-            for node, values in S.scoped_nodes(tree):
+            for node, values in _scope.scoped_nodes(tree):
                 hits.extend(_handouts_at(node, env, rel, values))
     return sorted(set(hits))
 
@@ -670,11 +477,11 @@ def _handouts_at(node: ast.AST, env, rel: str, values: dict) -> list[Hit]:
     if not (isinstance(func, ast.Attribute) and func.attr == "create"):
         return []
     receiver = func.value
-    if S.spells(receiver, "runs_repository", values):  # direct, or through any local alias
+    if _scope.spells(receiver, "runs_repository", values):  # direct, or through any local alias
         return [Hit(rel, node.lineno, "repo-id", ast.unparse(node))] if (
             node.args or node.keywords) else []
-    if S.spells(receiver, "episode_runs", values):
-        sourced = bool(node.args) and S.spells(node.args[0], "arm_id", values) and not _splats(node)
+    if _scope.spells(receiver, "episode_runs", values):
+        sourced = bool(node.args) and _scope.spells(node.args[0], "arm_id", values) and not _splats(node)
         return [Hit(rel, node.lineno, "arm-create" if sourced else "arm-create-foreign",
                     ast.unparse(node))]
     if _splats(node) or named & {"run_id", "pinned"}:  # a receiver that may be the repo
@@ -744,93 +551,3 @@ def test_1279_a3_census_partitions(tmp_path, name, body, expected):
 
 
 # Each syntax partition has an exact oracle, including import aliases and negative controls.
-IDENTITY_SYNTAX = [
-    ("bare-fstring", "return f'{episode_id}-{label}'", [("fstring", "{episode_id}-")]),
-    ("attribute-fstring", "return f'{family.episode_id}-r2'", [("fstring", "{family.episode_id}-")]),
-    ("import-alias", "return m('x')", [("ref", "mint_run_id")]),
-    ("module-attribute", "return _run_id.mint_run_id('y')", [("ref", "mint_run_id")]),
-    ("local-deriver", "return episode_id_for(label)", [("ref", "episode_id_for")]),
-    ("world-deriver", "return family_model.world_token_for(episode_id, label)",
-     [("ref", "world_token_for")]),
-    ("episode-deriver", "return family_model.episode_token_for(episode_id)",
-     [("ref", "episode_token_for")]),
-    ("labelled-mint", "return RunId.mint(label)", [("mint-args", "defender.run_repository.RunId.mint")]),
-    ("add", "return family.episode_id + '-' + label", [("concat", "family.episode_id + '-'")]),
-    ("join", "return '-'.join([episode_id, label])", [("concat", "'-'.join([episode_id, label])")]),
-    ("format", "return '{}-{}'.format(episode_id, label)",
-     [("concat", "'{}-{}'.format(episode_id, label)")]),
-    ("percent", "return '%s-%s' % (episode_id, label)", [("concat", "'%s-%s' % (episode_id, label)")]),
-    ("aliases", """    ep = episode_id
-    eid: str = family.episode_id
-    first = ep
-    second = first
-    a = f'{ep}-{label}'
-    b = f'{eid}-r{n}'
-    c = f'{second}-{label}'
-    d = ep + '-' + label
-    e = getattr(RunId, 'mint')(label)
-    if (w := family.episode_id):
-        return f'{w}-x'
-    return a, b, c, d, e""", [
-        ("fstring", "{ep}-"), ("fstring", "{eid}-"), ("fstring", "{second}-"),
-        ("concat", "ep + '-'"), ("mint-args", "defender.run_repository.RunId.mint"), ("fstring", "{w}-")]),
-    ("composer", "return compose(family.episode_id, label)",
-     [("composer", "compose(family.episode_id, label)")]),
-    ("class-attribute", """class Holder:
-    def __init__(self, family):
-        self._eid = family.episode_id
-    def arm(self, label):
-        return f'{self._eid}-{label}'""", [("fstring", "{self._eid}-")]),
-    ("constant", "RUN_ID_MAX_BYTES = 206", [("def", BANNED_CONSTANT)]),
-    ("re-export", "__all__ = ['episode_id_for']", [("str", "episode_id_for")]),
-    ("ordinary-text", """    note = f'{label}-{n} for {episode_id} - done'
-    joined = '-'.join([label, str(n)]) + label + '-x' + episode_id
-    said = 'episode %s - %s' % (episode_id, n)
-    return note, f'{episode_id}', RunId.mint(), joined, said""", []),
-    ("separate-scopes", """def binds(episode_id):
-    ep = episode_id
-    return ep
-def other_scope(label, n):
-    ep = label
-    return f'{ep}-{n}', getattr(RunId, 'mint')()""", []),
-    ("ordinary-composer", """def stamp(prefix, n):
-    return f'{prefix}-{n}'
-def uses_stamp(label, n):
-    return stamp(label, n)""", []),
-    ("ordinary-attribute", """class Plain:
-    def __init__(self, label):
-        self._label = label
-    def name(self, n):
-        return f'{self._label}-{n}'""", []),
-    ("unused-definition", "def mint_run_id():\n    return RunId.mint()", []),
-]
-
-
-@pytest.mark.parametrize(("name", "source", "expected"), IDENTITY_SYNTAX, ids=[c[0] for c in IDENTITY_SYNTAX])
-def test_1187_o1_census_syntax_partitions(tmp_path, name, source, expected):
-    import textwrap
-
-    prefix = ("from defender._run_id import mint_run_id as m\n"
-              "from defender.runtime.branch import _family as family_model\n"
-              "from defender import _run_id\nfrom defender.run_repository import RunId\n"
-              "def episode_id_for(src):\n    return src\n"
-              "def compose(eid, label):\n    joined = eid\n    return f'{joined}-{label}'\n")
-    if source.startswith(("class ", "def ", "RUN_", "__all__")):
-        module = source
-    else:
-        body = textwrap.indent(textwrap.dedent(source), "    ")
-        module = "def check(family, episode_id, label, n):\n" + body
-    path = tmp_path / "probe.py"
-    path.write_text(prefix + module + "\n", encoding="utf-8")
-    found = [(hit.kind, hit.what) for hit in census(tmp_path)]
-    assert sorted(found) == sorted(expected), (name, found)
-
-
-def test_1187_o1_the_census_leaves_tests_out(tmp_path):
-    root = tmp_path / "planted"
-    (root / "tests").mkdir(parents=True)
-    (root / "tests" / "old.py").write_text(
-        "def f(episode_id, label):\n    return f'{episode_id}-{label}'\n", encoding="utf-8")
-
-    assert census(root) == []
-    assert [h.kind for h in census(root, skip_tests=False)] == ["fstring"]

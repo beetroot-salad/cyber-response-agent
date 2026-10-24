@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.support.shared.contracts._by_path import LINT_DIR, load_lint_gate
+from _by_path import LINT_DIR, load_lint_gate
 
 _GATE = load_lint_gate("lint_unbounded_whole_read")
 

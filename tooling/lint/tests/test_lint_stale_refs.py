@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.support.shared.contracts._by_path import load_lint_gate
+from _by_path import load_lint_gate
 
 GATE = load_lint_gate("lint_stale_refs")
 

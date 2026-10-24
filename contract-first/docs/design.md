@@ -67,7 +67,7 @@ flowchart LR
 
 | Stage                      | Produces                                                                                      | The human decides                                 |
 | -------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| discuss-issue              | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map | What to promise, and the consequential trade-offs |
+| discuss-issue              | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map; or a split into several issues | What to promise, how to split, and the consequential trade-offs |
 | write-tests                | A committed test contract and a map of which test enforces which promise                      | Only design amendments the tests expose           |
 | write-code-from-tests      | Code that passes the contract, attacked by wrong variants; a PR                               | Only design amendments the code exposes           |
 | finalize or `/code-review` | A reviewed, re-greened PR; follow-up issues; new attack-deck entries                          | Whether to merge                                  |
@@ -124,6 +124,7 @@ since one model or flow change often dissolves several, then routed by kind:
 | A factual question                                           | A probe. The human doesn't decide what existing code does                               |
 | Code is wrong under the settled design                       | Fixed in the code stage                                                                 |
 | A test omits, misstates or fails to enforce settled behavior | write-tests' repair author                                                              |
+| An existing test goes red because it pins replaced behavior  | write-tests' stale-test repair: update, retire, or route as a design gap                 |
 | The design is wrong or leaves a consequential choice open    | discuss-issue's amendment, put to the human as "this is a bug; here are the trade-offs" |
 
 Human attention goes to consequential design choices, never to one question per edge case.

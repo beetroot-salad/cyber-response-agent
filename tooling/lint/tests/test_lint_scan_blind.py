@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-LINT_DIR = Path(__file__).resolve().parents[3] / "tooling" / "lint"
+LINT_DIR = Path(__file__).resolve().parents[1]
 
 DI_GATES = ["lint_unpinned_text_io", "lint_unsafe_jsonl_io", "lint_hand_rolled_frontmatter"]
 

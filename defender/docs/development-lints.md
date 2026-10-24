@@ -58,6 +58,10 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | No hardcoded `/workspace` or `/tmp/defender` paths in shipping code; no bare `python3 x.py` in a hook `command:` (it gets system python); a hook matcher naming *both* `Task` and `Agent`, since production dispatches as both | `# lint-hygiene: ok` |
 | No reference left behind to a symbol or file the PR's own diff removed — the missed-callsite-after-rename class. Diffs against `$STALE_REF_BASE` (default `origin/main`) | `# lint-stale-ref: ok` |
 | Every program (`__main__` block) calls `_log.configure_from_env()` first — without it INFO lines vanish and nothing is JSON | `# lint-log-setup: ok` |
+| Tenant delivery stays fenced (#1108 P3): no `git-credentials` spelling in production source; the box's check-file name is spelled once (in the box spec) and in no agent-facing text | none (no baseline) |
+| Every production pydantic_ai `Agent(...)` passes `retries=` (#631): the framework default gives a denied tool call no second try | none (no baseline) |
+| Episode trees are reached only through the Episode handle and the runs repository's walk: no episode I/O in the migrated modules but the declared residue, no path-taking parameter or path maker outside the allowlists, no production code opens or re-binds an episode by path | none (the script's tables are the allowlists) |
+| Episode ids carry no composed meaning (no `{episode_id}-…` build, banned id derivers, labelled `RunId.mint`); the walk owner makes no folder by its path; the arm roster's file name is spelled only in the episode layout | none (no baseline) |
 | No newly-introduced dead code (wraps vulture) | baseline only |
 
 CI also runs the jscpd Python-duplication gate; read the workflow for its current threshold.

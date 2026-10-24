@@ -1,6 +1,6 @@
 ---
 name: discuss-issue
-description: "Turn an issue or feature description into a grounded, reviewed design: product behavior, scope, data models, flows, architecture, and their trade-offs. Use before writing contract tests, or when tests or code expose a consequential design defect. Start with the problem and open questions so the human can form an independent view."
+description: "Turn an issue or feature description into a grounded, reviewed design: product behavior, scope, data models, flows, architecture, and their trade-offs, or split an issue that bundles separate problems into several. Use before writing contract tests, or when tests or code expose a consequential design defect. Start with the problem and open questions so the human can form an independent view."
 argument-hint: "[issue number, description, or design amendment to discuss]"
 effort: high
 ---
@@ -29,6 +29,14 @@ Read the project's principles document (CLAUDE.md usually points to it), relevan
 Use executed probes for behavior claims, reads for structure, and reproducible searches for a claimed census. A failed or unavailable probe leaves uncertainty, not a confirmed claim. Record grounding evidence with the revision it describes, separately from the human-facing design; **references/design-doc.md** defines the inherited `claims:` format and the **code map** that records where the relevant code lives, so later stages do not each re-read it. Correct the model of the problem plainly, without turning the discussion into a list of inaccuracies in the issue.
 
 Draft the design using **references/design-doc.md**. Settle purpose, scope, models, flows, and architectural direction enough to attempt contract tests. Specify useful **design properties with reasons**: rules that resolve families of cases. Inherit project principles and the human's decisions. Propose new properties explicitly; do not present inferred preferences as adopted principles. Ask for a missing preference when it changes a consequential choice, rather than blocking all work on a generic values questionnaire.
+
+**Split an issue only on evidence.** One issue is the default. Your sense of how big or slow the work is is not evidence: don't split for estimated effort, file counts or how large the change feels, and coupled work stays one issue however large it is (write-tests splits its authoring when needed). Propose a split only when one of these holds:
+
+- the issue bundles separate problems: groups of obligations that share no data model, owner or flow, so each could be designed, tested and shipped without the other;
+- the human asks for it, or the issue already names phases;
+- a later stage returns the work as unworkable in one pass and names the uncoupled seam it found.
+
+Cut along obligations and ownership so each piece leaves the system working and its promises observable on their own; a cut by layer (models, then API, then UI) delivers nothing checkable until the last piece lands. Settle in this pass only what the pieces share: the data model, the owners and the decisions that cross the cut, plus the order and dependencies between pieces. Each piece then gets its own discuss-issue pass before any tests, where the parent's decisions count as settled, not as proposals. The split is a §4 choice for the human.
 
 ## 3. Review, then patch or dissolve
 
@@ -64,6 +72,8 @@ Each decision states the problem, recommended change, the cases it resolves, its
 ## 5. Preserve the design and hand off
 
 The conversation is where discussion happens; the issue or supplied design document is where its state lives. For work heading to implementation, preserve one current **intent+design document** in the format in **references/design-doc.md**, with supporting grounding evidence. Use the issue thread when working on an issue and the task authorizes posting; otherwise leave a local document or draft. Use body files for multiline CLI posts.
+
+For an approved split, open one issue per piece when the task authorizes posting, each holding its scope, its obligations and a link back. The parent issue keeps the shared decisions, the order, and links to every piece; the next action is the first piece's discuss-issue pass. A piece that turns out to need a sibling's unsettled choice comes back to the parent as an amendment.
 
 Won't-fix and already-resolved outcomes need a short disposition, not a manufactured design. A narrow discussion can end with its answer and decisions. Do not automatically invoke tests or implementation.
 

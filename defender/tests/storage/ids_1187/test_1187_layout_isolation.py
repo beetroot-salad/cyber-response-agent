@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
-import ast
 import os
 import shutil
 import stat
@@ -12,7 +11,6 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from defender import _yaml
-from defender.tests.support.shared.contracts import _by_path
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.ids_1187 import _spec1187 as S
 
@@ -580,57 +578,6 @@ def test_two_episodes_get_two_fresh_uuid_folders_and_never_a_retry_suffix(data_r
     assert sorted(os.listdir(S.episodes_dir(data_root, A_ID))) == sorted([one, two])
 
 
-def _folders_made_by_path(root: Path) -> list[str]:
-    """Every call in the walk owner's source under `root` that makes a folder by its PATH."""
-    astlib = _by_path.import_lint_lib("_astlib")
-    found = []
-    for rel in astlib.source_files(root, (".venv", "__pycache__", "node_modules", "tests")):
-        if not S.owned(rel):
-            continue
-        _text, tree = astlib.read_and_parse(root / rel, rel)
-        module, package = astlib.module_and_package(rel, root="defender")
-        env = astlib.module_env(tree, module, package)
-        for node, values in S.scoped_nodes(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            called = astlib.callee(node, env)
-            path_maker = called == "os.makedirs" or (
-                called == "os.mkdir" and not astlib.has_kw(node, "dir_fd"))
-            if not path_maker and called is None and isinstance(
-                    node.func, ast.Attribute) and node.func.attr == "mkdir":
-                path_maker = (S.spells(node.func.value, "Path(", values)
-                              or astlib.has_kw(node, "parents") or astlib.has_kw(node, "exist_ok"))
-            if path_maker:
-                found.append(f"{rel}:{node.lineno} {ast.unparse(node)}")
-    return found
-
-
-def test_the_walk_owner_makes_no_folder_by_its_path(tmp_path):
-    found = _folders_made_by_path(DEFENDER)
-    assert found == [], "the walk owner makes a folder by its path:\n  " + "\n  ".join(found)
-
-    planted = tmp_path / "planted"
-    (planted / "run_repository").mkdir(parents=True)
-    (planted / "run_repository" / "_lookup.py").write_text(
-        "import os\n"
-        "from pathlib import Path\n"
-        "\n"
-        "\n"
-        "def claim(episodes, episode_id, fd, held):\n"
-        "    import os as _os\n"
-        "    _os.makedirs(episodes / episode_id, exist_ok=True)\n"
-        "    os.mkdir(episodes)\n"
-        "    Path(episodes).mkdir(parents=True, exist_ok=True)\n"
-        "    folder = Path(episodes)\n"
-        "    folder.mkdir()\n"
-        "    os.mkdir(episode_id, dir_fd=fd)\n"
-        "    held.mkdir(episode_id)\n",
-        encoding="utf-8")
-    reported = _folders_made_by_path(planted)
-    assert len(reported) == 4, reported
-    assert not any("dir_fd" in line or "held.mkdir" in line for line in reported), reported
-
-
 _CLAIM_CHILD = """
 import os, sys, uuid
 from pathlib import Path
@@ -837,44 +784,3 @@ def test_the_kinds_table_has_the_roster_row_and_drops_the_record_rows():
     assert rows["episode_runs"]["path"] == "runs/<uuid>/", rows["episode_runs"]
     gone = sorted({"tenant", "episode_runs_record"} & set(rows))
     assert gone == [], f"rows #1187 retires are still in the table: {gone}"
-
-
-def _roster_name_spellings(root: Path) -> list[str]:
-    """Find arms.json string literals outside docstrings in production source."""
-    astlib = _by_path.import_lint_lib("_astlib")
-    hits: list[str] = []
-    for rel in astlib.source_files(root, (".venv", "__pycache__", "node_modules", "tests")):
-        if rel == "episodes/_episode_paths.py":
-            continue
-        _text, tree = astlib.read_and_parse(root / rel, rel)
-        with astlib.scan_guard(rel):
-            docstrings = {
-                id(node.body[0].value) for node in ast.walk(tree)
-                if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
-                                     ast.AsyncFunctionDef))
-                and node.body and isinstance(node.body[0], ast.Expr)
-                and isinstance(node.body[0].value, ast.Constant)}
-            hits.extend(f"{rel}:{node.lineno}" for node in ast.walk(tree)
-                        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-                        and S.ROSTER_NAME in node.value and id(node) not in docstrings)
-    return sorted(hits)
-
-
-def test_no_production_module_spells_the_rosters_name_but_its_owner(tmp_path):
-    hits = _roster_name_spellings(DEFENDER)
-    assert hits == [], f"{S.ROSTER_NAME} is spelled outside its owner at: {hits}"
-
-    planted = tmp_path / "planted"
-    files = {
-        "episodes/_episode_paths.py": f'ARM_ROSTER_NAME = "{S.ROSTER_NAME}"\n',
-        "run_repository/_lookup.py": f'ROSTER = "{S.ROSTER_NAME}"\n',
-        "presentation/page.py": (
-            f'def roster(ep):\n    """Reads {S.ROSTER_NAME}."""\n'
-            f'    return f"{{ep}}/{S.ROSTER_NAME}"\n'),
-        "clean.py": f'"""Mentions {S.ROSTER_NAME} in a docstring only."""\nX = "family.yaml"\n',
-    }
-    for rel, text in files.items():
-        (planted / rel).parent.mkdir(parents=True, exist_ok=True)
-        (planted / rel).write_text(text, encoding="utf-8")
-    assert _roster_name_spellings(planted) == [
-        "presentation/page.py:3", "run_repository/_lookup.py:1"]

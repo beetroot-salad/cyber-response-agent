@@ -5,7 +5,7 @@ import ast
 
 import pytest
 
-from defender.tests.support.shared.contracts._by_path import load_lint_gate
+from _by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_lesson_text")
 
