@@ -3,22 +3,25 @@
 
 Walks the FIXTURE set (``evaluations/fixtures/held_out/``) and reports defender disposition
 correctness. A run is matched to its fixture by the held-out INDEX alone, a JSON Lines file
-the operator names (``--index F``), one ``{"slug", "run_id"}`` row per launch, oldest first.
-A run folder's name claims nothing (#1187): every run id is an opaque UUID.
+the operator names (``--index F``), oldest first. A run folder's name claims nothing (#1187):
+every run id is an opaque UUID, and the system alone mints it (#1279): a launch never names one.
 
-Ground truth never leaves the fixture dirs: the run dir is readable by the agent, so it
-carries no labels and no pointer back to its fixture. The index is host-written and kept
-outside every runs and episodes tree, where no box can write it.
+Rows are of three shapes. A launch ``{slug, launch_id, launched_at}`` is appended before the
+run starts; the id row ``{slug, launch_id, run_id}`` is appended once ``run.py`` announces the run
+(``run_id=<uuid>`` as its first stdout line); a legacy row ``{slug, run_id}`` (written before #1279)
+counts as a launch with its id, at its position. Ground truth never leaves the fixture dirs: the
+run dir is readable by the agent, so it carries no labels and no pointer back to its fixture. The
+index is host-written and kept outside every runs and episodes tree, where no box can write it.
 
 Launch one held-out run for an explicitly named tenant UUID::
 
     python3 evaluations/held_out.py launch <slug> --tenant <tenant-uuid> --index F
 
-It refuses an F under the resolved data root (including all tenant learning roots), or reached through a
-link; mints a UUID; APPENDS ``{slug, run_id}`` to F; and only then runs
-``run.py <fixture alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn`` (``--no-learn`` keeps
-a scored run out of the learning corpora). A run that crashes, hangs or is killed still has
-its row.
+It refuses an F under the resolved data root (including all tenant learning roots), or reached
+through a link; mints a launch id; APPENDS the launch row to F; runs
+``run.py <fixture alert> --tenant <tenant-uuid> --no-learn`` (``--no-learn`` keeps a scored run
+out of the learning corpora); and appends the id row as soon as the run announces its id, while it
+is still running. A run that fails before it announces an id still has its launch row.
 
 Score (an evaluation tool outside the application: it takes no tenant and never resolves
 ``DEFENDER_DATA_ROOT``; it scores exactly the runs dir it is handed)::
@@ -40,6 +43,8 @@ import os
 import stat
 import subprocess
 import sys
+import uuid
+from datetime import UTC, datetime
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -59,7 +64,7 @@ from defender.records._run_id import run_id_fault
 from defender.tenancy._tenant import (
     TenantId, TenantRefused, data_root_contains, data_root_description, resolve_data_root,
 )
-from defender.run_repository import RUN_LAYOUT, RunId, RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 from defender._io import read_text_utf8
 
@@ -69,8 +74,10 @@ RUN_PY = Path(__file__).resolve().parents[1] / "defender" / "run.py"
 #: record (#1187 recheck X2): counted wrong, so a crash before run setup cannot leave the
 #: denominator.
 NO_RUN_RECORD = "launched, no run record"
-#: Starts run.py for a launch: `spawn(argv, *, env=None) -> exit code`, `argv` the whole command
-#: line (the interpreter, then run.py and its arguments).
+NO_RUN = "launched, no run"
+#: Starts run.py for a launch: `spawn(argv, *, env=None, on_line) -> exit code`, `argv` the whole
+#: command line (the interpreter, then run.py and its arguments). It hands each line of the child's
+#: stdout to `on_line` (no terminator) as the line arrives, then answers the exit code.
 Spawn = Callable[..., int]
 
 
@@ -172,9 +179,11 @@ def _fixture(fixtures_dir: Path, slug: str) -> HeldOutAlert | None:
 
 
 def launch(slug: str, index: Path, fixtures_dir: Path, *, tenant_id: str, spawn: Spawn) -> int:
-    """Launch one held-out run of `slug` (Flow 5): refuse a bad F, mint a UUID, append
-    `{slug, run_id}` to F — durably, through F's folder held with no link followed — and only
-    then start run.py with that id. Returns run.py's exit code; a refusal is `IndexRefused`
+    """Launch one held-out run of `slug` (Flow 5): refuse a bad F, mint a launch id, append the
+    launch row to F — durably, through F's folder held with no link followed — and only then start
+    run.py. Its first stdout line announces the run's id (`run_id=<uuid>`); the id row is appended
+    at once, while the run goes on. A launch no id row names scores wrong. Returns run.py's exit
+    code (non-zero when the first line broke the announce contract); a refusal is `IndexRefused`
     (or `TenantRefused` for the data root), raised before anything is appended or started."""
     tenant_id = TenantId(tenant_id)
     data_root = resolve_data_root()
@@ -186,29 +195,68 @@ def launch(slug: str, index: Path, fixtures_dir: Path, *, tenant_id: str, spawn:
         if data_root_contains(data_root, absolute):
             raise IndexRefused(f"it is under the data root {data_root_description(data_root)}, where a box or the loop can "
                                "write it")
-        run_id = str(RunId.mint())
-        row = json.dumps({"slug": slug, "run_id": run_id})  # lint-jsonl-io: ok — one row through the held folder's no-follow append; `append_jsonl` follows the spelling
-        try:
-            held.write(leaf, row + "\n", mode="append", durable=True)
-        except OSError as exc:
-            raise IndexRefused(f"its row could not be appended: {exc.strerror or exc}") from None
-    print(f"{slug} {run_id}")
-    return spawn([sys.executable, str(RUN_PY), str(fixture.alert_path),
-                  "--tenant", tenant_id, "--run-id", run_id, "--no-learn"])
+        launch_id = str(uuid.uuid4())
+        _append(held, leaf, {"slug": slug, "launch_id": launch_id,
+                             "launched_at": datetime.now(UTC).isoformat()})
+        print(f"{slug} launch {launch_id}", flush=True)
+        seen = 0
+        broken: list[str] = []
+
+        def on_line(line: str) -> None:
+            nonlocal seen
+            seen += 1
+            if seen > 1:
+                print(line, flush=True)
+                return
+            run_id = line.removeprefix("run_id=") if line.startswith("run_id=") else None
+            if run_id is None or run_id_fault(run_id) is not None:
+                broken.append(line)
+                return
+            _append(held, leaf, {"slug": slug, "launch_id": launch_id, "run_id": run_id})
+
+        code = spawn([sys.executable, str(RUN_PY), str(fixture.alert_path),
+                      "--tenant", tenant_id, "--no-learn"], on_line=on_line)
+    if broken:
+        print(f"held_out launch: the announce contract was broken: run.py's first line was "
+              f"{broken[0]!r}, not run_id=<uuid>; no run id was recorded for launch {launch_id}",
+              file=sys.stderr)
+        return code or 1
+    return code
 
 
-def _spawn_run_py(argv: list[str], *, env: dict[str, str] | None = None) -> int:
-    """Run run.py to completion in its own process and answer its exit code."""
-    return subprocess.run(argv, env=env, check=False).returncode  # noqa: S603 — fixed argv
+def _append(held: _io.Held, leaf: str, row: dict) -> None:
+    """One durable row onto F through its held folder."""
+    text = json.dumps(row)  # lint-jsonl-io: ok — one row through the held folder's no-follow append; `append_jsonl` follows the spelling
+    try:
+        held.write(leaf, text + "\n", mode="append", durable=True)
+    except OSError as exc:
+        raise IndexRefused(f"its row could not be appended: {exc.strerror or exc}") from None
 
 
-def read_index(index: Path, runs_dir: Path) -> dict[str, str]:
-    """`{slug: run_id}` from F's newest row per slug (the last appended). F inside the runs
-    dir — judged at the real places of both, so a link a box planted inside its own run folder
-    never puts F inside — is refused: that tree is the boxes' own. So is an F that is absent,
-    holds a line that is not a row, or a row whose slug or run id is not text or whose run id
-    is not a run id: the index is host-written, and scoring fails closed on one it cannot
-    trust."""
+def _spawn_run_py(argv: list[str], *, env: dict[str, str] | None = None,
+                  on_line: Callable[[str], None]) -> int:
+    """Run run.py to completion in its own process: each stdout line goes to `on_line` as it
+    arrives (the pipe is read line by line, so the first reaches the launcher while the child
+    runs), then the exit code."""
+    with subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, text=True,  # noqa: S603 — fixed argv
+                          encoding="utf-8", errors="replace") as child:
+        assert child.stdout is not None
+        for line in child.stdout:
+            on_line(line.rstrip("\n"))
+        return child.wait()
+
+
+def read_index(index: Path, runs_dir: Path) -> dict[str, str | None]:
+    """`{slug: run_id}` from F's newest launch per slug, by file position (F is append-only;
+    `launched_at` is information only). The value is `None` when that launch has no id row: the
+    run never announced itself. A legacy `{slug, run_id}` row is a launch with its id.
+
+    F inside the runs dir — judged at the real places of both, so a link a box planted inside its
+    own run folder never puts F inside — is refused: that tree is the boxes' own. So is an F that
+    is absent, holds a line that is not a row, a row of none of the three shapes, an id row that
+    names no earlier launch of its slug or a launch already named, a repeated launch id, or a
+    run id that is not a run id: the index is host-written, and scoring fails closed on one it
+    cannot trust."""
     if _inside(index.resolve(), runs_dir.resolve()):
         raise IndexRefused(f"it is inside the runs dir {runs_dir}, which the boxes can write")
     if not index.is_file():
@@ -216,15 +264,62 @@ def read_index(index: Path, runs_dir: Path) -> dict[str, str]:
     rows, dropped = _io.read_jsonl_rows_report(index)
     if dropped:
         raise IndexRefused(f"{dropped} of its lines are not JSON objects")
-    newest: dict[str, str] = {}
+    launches: dict[str, str] = {}  # launch id -> slug
+    named: dict[str, str] = {}  # launch id -> run id
+    order: list[tuple[str, str | None, str | None]] = []  # (slug, launch id, legacy run id)
     for n, row in enumerate(rows, 1):
-        slug, run_id = row.get("slug"), row.get("run_id")
-        if not isinstance(slug, str) or not isinstance(run_id, str):
-            raise IndexRefused(f"row {n} does not carry a text slug and run_id")
-        if (why := run_id_fault(run_id)) is not None:
-            raise IndexRefused(f"row {n}'s run_id {run_id!r} is not a run id: {why}")
-        newest[slug] = run_id
+        _admit_row(n, row, launches, named, order)
+    newest: dict[str, str | None] = {}
+    for slug, launch_id, legacy_run_id in order:
+        newest[slug] = legacy_run_id if launch_id is None else named.get(launch_id)
     return newest
+
+
+def _admit_row(n: int, row: dict, launches: dict[str, str], named: dict[str, str],
+               order: list[tuple[str, str | None, str | None]]) -> None:
+    """Admit row `n` of F into the three tallies, or refuse it: exactly one of the three shapes
+    (legacy, launch, id), with the cross-row rules the shapes carry."""
+    keys = set(row)
+    slug = row.get("slug")
+    if not isinstance(slug, str):
+        raise IndexRefused(f"row {n} does not carry a text slug")
+    if keys == {"slug", "run_id"}:
+        order.append((slug, None, _run_id_of(n, row["run_id"])))
+    elif keys == {"slug", "launch_id", "launched_at"}:
+        launch_id = _launch_id_of(n, row["launch_id"])
+        if not isinstance(row["launched_at"], str) or not row["launched_at"]:
+            raise IndexRefused(f"row {n} does not carry a text launched_at")
+        if launch_id in launches:
+            raise IndexRefused(f"row {n} repeats launch id {launch_id}")
+        launches[launch_id] = slug
+        order.append((slug, launch_id, None))
+    elif keys == {"slug", "launch_id", "run_id"}:
+        launch_id = _launch_id_of(n, row["launch_id"])
+        if launches.get(launch_id) != slug:
+            raise IndexRefused(f"row {n} names launch {launch_id}, which no earlier launch "
+                               f"row of slug {slug!r} holds")
+        if launch_id in named:
+            raise IndexRefused(f"row {n} is a second id row for launch {launch_id}")
+        named[launch_id] = _run_id_of(n, row["run_id"])
+    else:
+        raise IndexRefused(f"row {n} is not a launch, an id or a legacy row (keys {sorted(keys)})")
+
+
+def _run_id_of(n: int, run_id: object) -> str:
+    if not isinstance(run_id, str):
+        raise IndexRefused(f"row {n} does not carry a text run_id")
+    if (why := run_id_fault(run_id)) is not None:
+        raise IndexRefused(f"row {n}'s run_id {run_id!r} is not a run id: {why}")
+    return run_id
+
+
+def _launch_id_of(n: int, launch_id: object) -> str:
+    try:
+        if isinstance(launch_id, str) and str(uuid.UUID(launch_id)) == launch_id:
+            return launch_id
+    except ValueError:
+        pass
+    raise IndexRefused(f"row {n}'s launch_id {launch_id!r} is not canonical UUID text")
 
 
 @model
@@ -259,18 +354,23 @@ def _unrecorded(run_dir: Path) -> str | None:
 
 
 def score(fixtures: list[HeldOutAlert], runs_dir: Path,
-          newest: Mapping[str, str] = MappingProxyType({})) -> Scored:
-    """Score each fixture from the run its newest index row names (`newest`, `{slug:
-    run_id}`), opened by id under `runs_dir`. A slug with no row is not run."""
+          newest: Mapping[str, str | None] = MappingProxyType({})) -> Scored:
+    """Score each fixture from the run its newest launch names (`newest`, `{slug: run_id}`),
+    opened by id under `runs_dir`. A slug with no launch is not run; one whose newest launch has
+    no run id (`None`) is wrong ("launched, no run")."""
     by_class: dict[str, list[tuple[str, str | None, str]]] = defaultdict(list)
     failures: list[tuple[str, str]] = []
     not_run: list[str] = []
     for fx in fixtures:
-        run_id = newest.get(fx.slug)
-        if run_id is None:
+        if fx.slug not in newest:
             not_run.append(fx.slug)
             continue
+        run_id = newest[fx.slug]
         true_disp = str(fx.ground_truth.get("disposition") or "?")
+        if run_id is None:
+            failures.append((fx.slug, f"{NO_RUN} (the launch announced no run id)"))
+            by_class[true_disp].append((fx.slug, None, "wrong"))
+            continue
         run_dir = runs_dir / run_id
         absent = _unrecorded(run_dir)
         if absent is not None:
@@ -285,7 +385,7 @@ def score(fixtures: list[HeldOutAlert], runs_dir: Path,
     return Scored(by_class, failures, not_run)
 
 
-def report(runs_dir: Path, newest: Mapping[str, str],
+def report(runs_dir: Path, newest: Mapping[str, str | None],
            fixtures_dir: Path = FIXTURES_DIR) -> int:
     fixtures = load_held_out_fixtures(fixtures_dir)
     if not fixtures:
