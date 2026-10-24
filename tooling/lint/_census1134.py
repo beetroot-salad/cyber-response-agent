@@ -8,9 +8,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender.tests.support.shared.contracts._by_path import import_lint_lib
-
-_astlib = import_lint_lib("_astlib")
+import _astlib
 
 HELD = "defender._io.Held"
 BOUND = "defender._io.Bound"
