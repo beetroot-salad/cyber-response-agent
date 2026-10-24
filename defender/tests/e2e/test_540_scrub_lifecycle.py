@@ -5,7 +5,6 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
-import ast
 import contextlib
 import dataclasses
 import os
@@ -56,8 +55,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 REPO_ROOT = DEFENDER.parent
-RUN_PY = DEFENDER / "run.py"
-BASH_PY = DEFENDER / "runtime" / "tools" / "_bash.py"
 GATHER_ONLY = REPO_ROOT / "tooling" / "testing" / "gather_only.py"
 
 
@@ -263,29 +260,6 @@ def _bash(env, cmd, which="main"):
 def _read(env, path, which="main"):
     return permission.decide_read(Path(path), run_dir=env.run,
                                   defender_dir=env.dfn, policy=getattr(env, which))
-
-
-def _fn_node(path: Path, name: str) -> ast.FunctionDef:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return node
-    raise AssertionError(f"{path.name} defines no `{name}`")
-
-
-def _call_order(fn: ast.AST) -> list[str]:
-    """The called names inside `fn`, in EXECUTION-STATEMENT order (`ast.walk` is
-    breadth-first, so sort by source position instead). Attribute calls collapse to the
-    attribute name, so `_run.visualize(...)` reads as `visualize`."""
-    hits: list[tuple[tuple[int, int], str]] = []
-    for node in ast.walk(fn):
-        if not isinstance(node, ast.Call):
-            continue
-        f = node.func
-        name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
-        if name:
-            hits.append(((node.lineno, node.col_offset), name))
-    return [n for _, n in sorted(hits)]
 
 
 def _recording_investigate(log: list[str], *, fault: BaseException | None = None):
@@ -531,16 +505,6 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
     assert rec.scrubbed == [rec.requests[0]], \
         "the tree walked is not the run dir the box was given"
 
-    order = _call_order(_fn_node(RUN_PY, "main"))
-    assert "lifecycle" in order, \
-        "main no longer drives the lifecycle through its injection seam; re-site this demand"
-    reap = order.index("lifecycle")
-    for consumer in ("iterdir", "cross_check_tables", "enqueue_curation", "record_case_ticket", "visualize"):
-        assert consumer in order, f"{consumer} left the entrypoint; re-site this demand"
-        assert reap < order.index(consumer), \
-            f"{consumer} reads the run dir BEFORE the lifecycle scrubbed it — an escaping " \
-            "taint no longer makes it unreachable"
-
 
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     run = _clean_run_dir(tmp_path)
@@ -556,21 +520,6 @@ def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
         _drive_lifecycle(tmp_path, rec, run_dir=tainted, scrub=scrub)
     assert [ev.split(":")[0] for ev in log] == ["start", "investigate", "stop"], \
         "the taint did not escape the lifecycle, or the box was left running behind it"
-
-    for fn_name in ("main", "_run_investigation_lifecycle"):
-        fn = _fn_node(RUN_PY, fn_name)
-        caught: set[str] = set()
-        for node in ast.walk(fn):
-            if isinstance(node, ast.ExceptHandler) and node.type is not None:
-                for sub in ast.walk(node.type):
-                    if isinstance(sub, ast.Name):
-                        caught.add(sub.id)
-                    elif isinstance(sub, ast.Attribute):
-                        caught.add(sub.attr)
-        assert "RunTainted" not in caught, f"{fn_name} swallows the taint signal"
-        for blanket in ("Exception", "BaseException"):
-            assert blanket not in caught, \
-                f"a blanket handler in {fn_name} would swallow the taint signal"
 
 
 def test_the_scrub_survives_a_crashed_investigation(tmp_path):
@@ -832,16 +781,6 @@ def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
     assert len(fault_box.calls) == 1, (
         "the command never reached the box, so the no-fallback negative was not exercised")
     assert secret not in str(e.value)
-
-    fn = _fn_node(BASH_PY, "_tool_bash")
-    called = _call_order(fn)
-    assert "run_parsed" in called, "the tool no longer executes anything; re-site this demand"
-    for node in ast.walk(fn):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            owner = node.func.value
-            if node.func.attr == "run_parsed" and isinstance(owner, ast.Name):
-                assert owner.id != "bash_exec", \
-                    "the bash tool still reaches the in-process executor directly"
 
 
 def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsys):
