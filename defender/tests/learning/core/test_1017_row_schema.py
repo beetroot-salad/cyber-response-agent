@@ -334,39 +334,3 @@ def test_the_surface_refuses_a_link_at_the_tables_name_and_reads_an_absent_table
 
     assert len(lead_repository.load_queries(elsewhere)) == 1, \
         "the positive control's regular table did not read"
-
-
-_ROW_MODULES = (
-    "runtime/record_query.py",
-    "runtime/lead_zero/_capture.py",
-    "runtime/query_tool.py",
-    "runtime/tools/_bash.py",
-    "learning/lead_repository.py",
-)
-
-
-def _row_literals(source: str) -> list[str | None]:
-    """The name of the enclosing function for every dict DISPLAY in `source` whose string
-    keys include both `lead_id` and `system_key` — the shape of a hand-spelled row."""
-    import ast
-
-    _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
-    tree = ast.parse(source)
-    parents: dict[ast.AST, ast.AST] = {}
-    for node in ast.walk(tree):
-        for child in ast.iter_child_nodes(node):
-            parents[child] = node
-    found: list[str | None] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Dict):
-            continue
-        keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
-        if not {"lead_id", "system_key"} <= keys:
-            continue
-        # BOTH def shapes: the census scans `query_tool.py`, whose writers are `async def`,
-        # and an owner the climb walked past reads as a module-level literal (`None`).
-        owner = node
-        while owner in parents and not isinstance(owner, _DEFS):
-            owner = parents[owner]
-        found.append(owner.name if isinstance(owner, _DEFS) else None)
-    return found

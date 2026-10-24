@@ -13,7 +13,9 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.tests.support.shared.contracts import _census1134 as C
+from defender.tests.support.shared.contracts._by_path import import_lint_lib
+
+C = import_lint_lib("_census1134")
 
 #: The `defender` package's own directory (a namespace package: located through a module in it).
 PACKAGE = Path(_io.__file__).resolve().parent
