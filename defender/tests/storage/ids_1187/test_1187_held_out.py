@@ -658,3 +658,34 @@ def test_launch_then_score_counts_a_launch_whose_run_never_started_as_wrong(scen
     res = _score(runs, index, scene.fixtures)
     res.assert_score({SLUG: "WRONG", OTHER: "OK"}, (1, 2))
     assert NO_RUN_RECORD in res.failures().get(SLUG, ""), res.out
+
+
+# #1279 O7 (P-E): a launch row precedes the spawn; a launch with no announced id scores wrong.
+
+def test_1279_o7_a_run_that_fails_before_announcing_its_id_scores_wrong_over_an_older_correct_run(
+        scene: Scene):
+    """O7: the newest row for the slug is a launch with no run id, so an older correct run cannot stand in."""
+    runs = scene.tmp / "runs"
+    runs.mkdir()
+    yesterday = S.new_id()
+    _run(runs, yesterday, says="malicious")
+    index = _index(scene.ops / INDEX_NAME, (SLUG, yesterday))
+    assert _score(runs, index, scene.fixtures).verdicts()[SLUG] == "OK", "precondition"
+
+    # The real run.py, spawned by the real default: the scene's tenant has no row, so run.py
+    # exits at tenant acceptance, before setup mints or announces an id.
+    launched = _cli(["launch", SLUG, "--tenant", LAUNCH_TENANT, "--index", index,
+                     "--fixtures-dir", scene.fixtures])
+    assert launched.crashed is None, launched.crashed
+    assert launched.rc != 0, f"a run.py that never started reported success: {launched.said}"
+
+    rows = [json.loads(line) for line in index.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[0] == {"slug": SLUG, "run_id": yesterday}
+    newest = [r for r in rows if r.get("slug") == SLUG][-1]
+    assert "run_id" not in newest, f"the launch recorded an id run.py never announced: {newest}"
+    assert newest.get("launched_at"), f"the launch row carries no launch time: {newest}"
+
+    scored = _score(runs, index, scene.fixtures)
+    assert scored.rc == 0, scored.said
+    assert scored.verdicts()[SLUG] == "WRONG", scored.out
+    assert scored.failures().get(SLUG, "").startswith("launched, no run"), scored.out

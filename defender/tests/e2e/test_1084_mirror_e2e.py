@@ -344,3 +344,46 @@ def test_1084_a_mirror_folder_the_owner_cannot_write_is_left_untouched_and_warne
         caplog, owned_tree.mirror / run_dir.name / PAGE)
     assert "Permission denied" in warned, f"the warning does not carry the error: {warned!r}"
     assert _fingerprint(owned_tree.mirror) == before, f"the {shape} mirror folder was written"
+
+
+# --------------------------------------------------------------------------------------
+# #1279 O2/O4 — the dev copy lands in the run's tenant area; outside dev it is skipped
+
+
+def _set_up_run_tenant(data_root: Path, run) -> None:
+    """The run's tenant exists in this data root, whether or not the copy accepts it."""
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    set_up_tenant(data_root, run.tenant_id)
+
+
+def test_1279_o2_the_dev_copy_lands_under_the_runs_tenant_area_not_the_flat_folder(
+        tmp_path, data_root, run_visualizations_dir):
+    """O2: on dev, run R of tenant T is copied to `<root>/<T>/runs/<R>/runtime.html` only."""
+    vr = _renderer()
+    run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
+    _set_up_run_tenant(data_root, run)
+
+    assert vr.publish_page(run) == "copied"
+
+    dest = run_visualizations_dir / run.tenant_id / "runs" / run_dir.name / PAGE
+    assert dest.is_file(), f"no copy at {dest}: {sorted(run_visualizations_dir.rglob('*'))}"
+    assert dest.read_bytes() == (run_dir / PAGE).read_bytes()
+    assert not (run_visualizations_dir / run_dir.name).exists(), "the copy still lands flat"
+    assert [p.name for p in run_visualizations_dir.iterdir()] == [run.tenant_id]
+
+
+def test_1279_o4_outside_dev_the_copy_is_skipped_and_the_run_page_is_still_saved(
+        tmp_path, data_root, run_visualizations_dir, monkeypatch):
+    """O4: production has no publish destination: the copy is skipped, the record kept, nothing published."""
+    vr = _renderer()
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "production")
+    run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
+    _set_up_run_tenant(data_root, run)
+
+    assert vr.publish_page(run) == "skipped"
+
+    _assert_record_written(run_dir)
+    assert not list(run_visualizations_dir.iterdir()), "a production run published a page"

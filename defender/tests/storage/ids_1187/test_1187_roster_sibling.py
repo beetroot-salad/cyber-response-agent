@@ -833,3 +833,20 @@ def test_natural_and_arm_stamps_carry_no_world_lineage(
     for stamp in (natural_stamp, arm_stamp):
         assert stamp.get("parent_run_id") is None, stamp
         assert stamp.get("fork_turn") is None, stamp
+
+
+def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_nothing(
+        tmp_path, data_root):
+    """O8: a setup-only dir already at the roster's arm id is refused, not resumed."""
+    scene = _Scene(tmp_path, data_root, B_ID)
+    scene.start_runs_by_hand()
+    existing = scene.ep / "runs" / scene.roster[WORLD_ID]
+    (existing / "gather_raw").mkdir(parents=True)
+    before = S.tree(existing)
+
+    rc, refused, said, rec = _sibling(B_ID, scene.episode_id)
+
+    assert refused is not None, f"setup materialised into an existing run dir: rc {rc} {rec.order}"
+    assert str(existing) in said, f"the refusal does not name the run dir: {said!r}"
+    assert "lifecycle" not in rec.order, rec.order
+    assert S.tree(existing) == before, "the refused setup changed the existing run dir"

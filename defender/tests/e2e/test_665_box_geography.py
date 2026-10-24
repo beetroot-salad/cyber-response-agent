@@ -415,3 +415,71 @@ def test_unsandboxed_opt_out_leg_runs_with_full_host_network_reachability(tmp_pa
     assert ex.sandboxed is False
     assert isinstance(ex.transport, box_mod._HostTransport), \
         "the opt-out did not run as a bare host subprocess"
+
+
+# --------------------------------------------------------------------------------------
+# #1279 O3 — no box mounts the publish root; O6 — a same-name container is never reaped
+
+_LANES_1279 = ["investigation", "request"]
+
+
+def _start_1279(lane: str, run_dir: Path, rec):
+    if lane == "investigation":
+        return box_mod.start_box(run_dir, DEFENDER, docker=rec)
+    return start_box_request(_request(run_dir), docker=rec)
+
+
+def _dev_publish_root_1279(monkeypatch, root: Path) -> Path:
+    """A dev deployment whose publish root is `root` (today's mirror override)."""
+    monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
+    monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(root))
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    return root
+
+
+def _names_path(message: str, path: Path) -> bool:
+    """`path` appears as a whole path, not only as the prefix of a longer one."""
+    import re
+
+    return re.search(re.escape(str(path)) + r"(?![^\s'\":,)])", message) is not None
+
+
+@pytest.mark.parametrize("lane", _LANES_1279)
+def test_1279_o3_a_mount_source_containing_the_publish_root_refuses_the_start_naming_both(
+        tmp_path, monkeypatch, lane):
+    """O3: the run dir (mounted in both lanes) contains the publish root → refused before create."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    root = _dev_publish_root_1279(monkeypatch, run_dir / "published")
+    rec = RecordingDocker()
+    with pytest.raises(Exception) as refused:  # the refusal's type is a design gap (#1279)
+        _start_1279(lane, run_dir, rec)
+    said = str(refused.value)
+    assert _names_path(said, root.resolve()), f"the refusal does not name the root: {said!r}"
+    assert _names_path(said, run_dir.resolve()), f"the refusal does not name the mount: {said!r}"
+    assert rec.create_argv is None, "a box was created over a mount holding the publish root"
+
+
+@pytest.mark.parametrize("lane", _LANES_1279)
+def test_1279_o3_a_publish_root_outside_every_mount_starts_the_box(tmp_path, monkeypatch, lane):
+    """O3 positive control: on dev, a root no mount source contains does not block the start."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    _dev_publish_root_1279(monkeypatch, tmp_path / "elsewhere" / "published")
+    rec = RecordingDocker()
+    _start_1279(lane, run_dir, rec)
+    assert rec.create_argv is not None, "a root outside every mount blocked the start"
+
+
+@pytest.mark.parametrize("lane", _LANES_1279)
+def test_1279_o6_a_finished_same_name_container_refuses_the_start_and_is_not_removed(
+        tmp_path, lane):
+    """O6: every box name is fresh, so even a finished same-name container is refused, never reaped."""
+    run_dir = make_run_dir(tmp_path)
+    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    rec = RecordingDocker(status="exited")
+    with pytest.raises(box_mod.BoxFault):
+        _start_1279(lane, run_dir, rec)
+    assert not any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls), (
+        "the start removed an existing container that holds its name")
+    assert rec.create_argv is None, "a box was created on a name another container holds"

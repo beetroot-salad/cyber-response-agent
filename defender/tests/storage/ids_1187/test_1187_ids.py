@@ -231,6 +231,53 @@ def test_1187_o2_run_py_refuses_a_pinned_id_that_is_not_a_canonical_uuid(
         f"the run went on past a refused id: {rec.order}")
     assert not Path(location_path(t.runs)).exists() or sorted(Path(location_path(t.runs)).iterdir()) == [], (
         f"a refused id left something in the runs folder: {sorted(Path(location_path(t.runs)).iterdir())}")
+# #1279 O5: no run id on the command line; the minted id is announced first on stdout.
+
+def test_1279_o5_run_py_rejects_run_id_on_the_command_line(tmp_path, data_root):
+    """O5: `--run-id` is no longer an argument; the run stops before setup."""
+    t = S.tenant(data_root)
+    alert = H.alert_file(tmp_path / "in")
+    run_id = S.new_id()
+
+    status, refusal, stderr, rec = _run_py(t, alert, run_id)
+
+    assert refusal is not None, f"--run-id was accepted: status {status}, order {rec.order}"
+    assert "--run-id" in f"{P.refusal_text(refusal)}\n{stderr}", (P.refusal_text(refusal), stderr)
+    assert rec.order == [], f"the run went on past a refused argument: {rec.order}"
+    runs = Path(location_path(t.runs))
+    assert not (runs / run_id).exists()
+    assert not runs.exists() or sorted(runs.iterdir()) == [], sorted(runs.iterdir())
+
+
+def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_box(tmp_path, data_root):
+    """O5: `run_id=<uuid>` is stdout's first line, written after setup and before the lifecycle."""
+    import contextlib
+    import io
+    import re
+
+    t = S.tenant(data_root)
+    alert = H.alert_file(tmp_path / "in")
+    rec = P.SiblingRecorder()
+    out = io.StringIO()
+    at_lifecycle: list[str] = []
+
+    def lifecycle(**kwargs):
+        at_lifecycle.append(out.getvalue())
+        return rec.lifecycle(**kwargs)
+
+    with contextlib.redirect_stdout(out):
+        status, refusal, stderr = P.drive_run_py(
+            [str(alert), "--tenant", t.id, "--no-learn"], rec, lifecycle=lifecycle)
+
+    assert refusal is None, (P.refusal_text(refusal), stderr)
+    assert status == 0, (status, stderr)
+    run_dir = Path(rec.run_dir)
+    assert at_lifecycle == [f"run_id={run_dir.name}\n"], (
+        f"stdout when the box was reached: {at_lifecycle!r}")
+    first = out.getvalue().splitlines()[0]
+    assert re.fullmatch(r"run_id=(.+)", first), first
+    assert S.is_canonical_uuid(first.removeprefix("run_id=")), first
+    assert run_dir.parent == Path(location_path(t.runs))
 # O1: the census. No production source composes, derives or bounds an id by meaning.
 
 #: Functions production must neither call nor pass around (C1 of the design): the stamp-label
