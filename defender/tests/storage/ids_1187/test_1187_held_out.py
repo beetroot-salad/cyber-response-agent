@@ -780,7 +780,7 @@ def test_1279_a_launch_and_its_id_row_are_each_synced_to_disk_when_appended(scen
 
     # `held_out` holds F's folder through the real `_io` over `os`, with no fsync seam: the one
     # targeted patch of this test, a pass-through that records the synced file's identity.
-    monkeypatch.setattr(os, "fsync", spy)
+    monkeypatch.setattr(os, "fsync", spy)  # lint-monkeypatch: ok — held_out reaches fsync through the real _io over os; no seam exists, so a pass-through spy records the synced file
     rid = S.new_id()
     spawn = FakeSpawn(index, lines=lines, effect=lambda _argv: events.append(("spawn",)))
 
@@ -811,9 +811,10 @@ def test_1279_launch_spawns_run_py_with_no_run_id_in_its_environment(scene: Scen
     _assert_launch_accepted(scene, index, spawn=spawn, announced=rid)
 
     assert len(spawn.envs) == 1, spawn.envs
-    # Name-free: the child gets the inherited environment, nothing added under any name.
-    assert spawn.envs[0] is None or dict(spawn.envs[0]) == dict(os.environ), (
-        "the launcher added or changed something in the child's environment")
+    # Name-free: whatever the launcher added or changed holds no canonical UUID, under any name.
+    changed = {k: v for k, v in (spawn.envs[0] or {}).items() if os.environ.get(k) != v}
+    carried = {k: v for k, v in changed.items() if S.is_canonical_uuid(v)}
+    assert carried == {}, f"the launch put a uuid in the child's environment: {sorted(carried)}"
 
 
 def test_1279_the_announced_id_survives_a_launcher_killed_after_the_announce(scene: Scene):

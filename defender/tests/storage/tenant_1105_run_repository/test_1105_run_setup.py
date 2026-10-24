@@ -249,7 +249,7 @@ def test_1279_o8_natural_setup_refuses_any_entry_at_its_minted_ids_sidecar_name(
     fixed = str(uuid.uuid4())
     # No seam fixes the id `create()` mints, and a sidecar can only be planted at a known id: the
     # one targeted patch of this test.
-    monkeypatch.setattr(RunId, "mint", classmethod(lambda cls: cls.parse(fixed)))
+    monkeypatch.setattr(RunId, "mint", classmethod(lambda cls: cls.parse(fixed)))  # lint-monkeypatch: ok — no seam fixes the id create() mints, and a sidecar can only be planted at a known id
     runs.mkdir(parents=True)
     sidecar = runs / f"{fixed}{suffix}"
     F.plant_entry(kind, sidecar, tmp_path / "elsewhere")

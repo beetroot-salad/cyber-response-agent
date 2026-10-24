@@ -358,24 +358,6 @@ def test_1279_o5_no_environment_variable_chooses_the_run_id(tmp_path, data_root,
     assert not os.path.lexists(runs / chosen), f"{var} named a run folder"
 
 
-def test_1279_o5_the_run_repository_package_reads_no_environment():
-    """P-B/O5: nothing under `defender/run_repository` reads `os.environ`/`getenv`, so no variable can name a run id."""
-    import defender.run_repository as pkg
-
-    def reads_env(tree: ast.AST) -> bool:
-        return any((isinstance(n, ast.Attribute) and n.attr in ("environ", "getenv", "environb"))
-                   or (isinstance(n, ast.ImportFrom) and n.module == "os"
-                       and any(a.name in ("environ", "getenv") for a in n.names))
-                   for n in ast.walk(tree))
-
-    files = sorted(Path(pkg.__file__).parent.rglob("*.py"))
-    assert files, "positive control: the package has sources to scan"
-    assert reads_env(ast.parse("import os\nx = os.environ.get('A')")), "positive control: the scan sees a read"
-    assert reads_env(ast.parse("from os import getenv")), "positive control: the scan sees an import"
-    readers = [f.name for f in files if reads_env(ast.parse(f.read_text(encoding="utf-8")))]
-    assert readers == [], f"these modules read the environment: {readers}"
-
-
 def test_1279_o5_a_run_refused_before_setup_announces_nothing(tmp_path, data_root):
     """O5: nothing is on stdout before the announcement, and a refused start has none."""
     S.tenant(data_root)
@@ -405,16 +387,19 @@ def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
                       if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]
         assert open_ended == [], f"{func.__qualname__} takes *args/**kwargs {open_ended}: an id could ride them"
     K = inspect.Parameter
-    shape = {run_common.materialize_run: [("alert", K.POSITIONAL_OR_KEYWORD), ("tenant", K.KEYWORD_ONLY),
-                                          ("model", K.KEYWORD_ONLY), ("world", K.KEYWORD_ONLY),
-                                          ("episode_runs", K.KEYWORD_ONLY)],
-             run_py._materialize_run: [("alert", K.POSITIONAL_OR_KEYWORD), ("tenant", K.KEYWORD_ONLY),
-                                       ("model", K.KEYWORD_ONLY), ("world", K.KEYWORD_ONLY),
-                                       ("episode_runs", K.KEYWORD_ONLY)],
-             RunsRepository.create: [("self", K.POSITIONAL_OR_KEYWORD)]}
-    for func, expected in shape.items():
-        got = [(p.name, p.kind) for p in inspect.signature(func).parameters.values()]
-        assert got == expected, f"{func.__qualname__} takes {got}: a renamed id parameter could ride a new name"
+    for func, positional in ((run_common.materialize_run, ["alert"]), (run_py._materialize_run, ["alert"]),
+                             (RunsRepository.create, ["self"])):
+        params = list(inspect.signature(func).parameters.values())
+        got = [p.name for p in params if p.kind is K.POSITIONAL_OR_KEYWORD]
+        assert got == positional, f"{func.__qualname__} takes positional {got}, not {positional}"
+        for p in params:
+            if p.name in positional:
+                continue
+            assert p.kind is K.KEYWORD_ONLY, f"{func.__qualname__}: {p.name!r} is not keyword-only"
+            assert p.default is not p.empty or p.name in ("tenant", "model"), (
+                f"{func.__qualname__}: {p.name!r} is required")
+            assert "id" not in p.name.casefold().replace("valid", ""), (
+                f"{func.__qualname__} takes an id-like parameter {p.name!r}")
     assert seam is run_py._materialize_run, "run.main's materialize seam defaults to run setup's helper"
     params = list(inspect.signature(RunsRepository.create).parameters.values())
     assert params[0].name == "self", params

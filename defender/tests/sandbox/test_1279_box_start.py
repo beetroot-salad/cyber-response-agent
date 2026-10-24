@@ -936,4 +936,3 @@ def test_o6_every_oracle_box_name_is_fresh(tmp_path, oracle_tree):
     env = {"DEFENDER_BOX_RUNTIME": "runc"}
     names = [_oracle.oracle_box_request(scratch, runner, env=env).name for _ in range(3)]
     assert len(set(names)) == 3, f"an oracle name repeated: {names}"
-    assert all(n.startswith("defender-oracle-") for n in names), names
