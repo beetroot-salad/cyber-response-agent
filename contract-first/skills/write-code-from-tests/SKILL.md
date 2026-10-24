@@ -36,7 +36,9 @@ Real code makes some checks possible for the first time. These are this stage's 
 - **Ownership of structured fields.** Take each value from its authoritative producer instead of reconstructing it; look for ownership declarations (such as `@owns <field>`) first. A checker and an emitter that must agree share one computation. Don't impose a new representation or architecture just to satisfy this rule; an unsettled ownership choice goes back to design.
 - **Deferred verification.** Exercise every assertion, claim and environment check the hand-off marked as owed, and record each one's ID, the check, what you saw, and the outcome. A green suite whose cases still stop before their intended assertions doesn't close them. A refuted assumption is a finding; an unavailable required check stays visibly incomplete.
 
-Fix causes, never tests. A test that looks wrong goes back as a finding with evidence. A bug found in review or CI gets a regression test, through write-tests' repair role, that fails without the fix.
+Fix causes, never tests. A test that looks wrong goes back as a finding with evidence.
+
+**Stale existing tests.** An existing test outside the contract map that goes red may pin behavior the design replaced. Never edit it. First rule out your own mistake: the failure must follow from a change the design makes. Collect every such red, then return them in one batch, each failure quoted, to write-tests' stale-test repair (write-tests §5), before the attack, since attackers must aim at the suite that ships. A stale red that first appears in CI takes the same route. A bug found in review or CI gets a regression test, through write-tests' repair role, that fails without the fix.
 
 For a named risk, an optional claims check can test what the new docstrings and comments promise, using **references/claims-adversary.md**. False prose gets corrected; code that breaks an intended guarantee gets fixed.
 
@@ -51,7 +53,7 @@ This is mandatory even for a small contract. Keep each exploit as a patch: a rep
 Group findings by cause; one model or flow change often dissolves several, though local bugs can still deserve local fixes. Route by kind:
 
 - **Code defect:** fix it under the settled design.
-- **Contract defect** (an attacker's hole, a wrong test, or a gap real code exposes): write-tests' repair author fixes it on the contract-only branch (write-tests §5, **write-tests/references/contract.md**). The repaired test must fail against the exploit that exposed it, and the affected attacker rechecks the changed tests. Bring only the reviewed test changes into the implementation branch, run them against your code, and disclose if the repair author saw the implementation. An old clean attack doesn't certify changed tests. Don't ask the human to ratify each assertion repair.
+- **Contract defect** (an attacker's hole, a wrong test, a stale existing test, or a gap real code exposes): write-tests' repair author fixes it on the contract-only branch (write-tests §5, **write-tests/references/contract.md**). The repaired test must fail against the exploit that exposed it, and the affected attacker rechecks the changed tests. Bring only the reviewed test changes into the implementation branch, run them against your code, and disclose if the repair author saw the implementation. An old clean attack doesn't certify changed tests. Don't ask the human to ratify each assertion repair.
 - **Design defect or open choice:** use discuss-issue's amendment protocol, framed as a demonstrated bug and the trade-offs of fixing it. Keep unaffected work; block only what depends on the choice.
 - **Factual question:** probe it. The human doesn't decide what existing code does.
 
