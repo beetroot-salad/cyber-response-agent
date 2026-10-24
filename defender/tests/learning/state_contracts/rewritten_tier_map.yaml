@@ -106,7 +106,6 @@ summary:
     "defender/tests/learning/curation/test_drain719_locks.py": 2
     "defender/tests/learning/curation/test_queue_drains_852.py": 2
     "defender/tests/learning/branch/test_1007_corpus.py": 1
-    "defender/tests/storage/test_1133_census.py": 1
     "defender/tests/learning/catalog/test_869_reporting.py": 1
     "defender/tests/learning/judge/test_921_launcher_frame.py": 1
     "defender/tests/learning/curation/test_author_atomic.py": 1
@@ -790,16 +789,6 @@ tests:
       - old: "assert 'defender: enqueued' in page.group_of(f'f-{E.GRADED_WORLD}-0-{i}').text()"
         new: same
       - old: "assert part in three, (part, three)"
-        new: same
-  - file: "defender/tests/storage/test_1133_census.py"
-    test: "test_o5_no_function_takes_a_path_below_the_episode_dir_but_the_allowlist"
-    fixture-only: true
-    reaches:
-      - "'_queue_trust_root' (named in a string) via PARAM_ALLOWLIST"
-    asserts:
-      - old: "assert not extra, report"
-        new: same
-      - old: "assert not stale, report"
         new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_the_module_touches_its_trees_only_through_the_handle"
