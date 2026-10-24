@@ -19,6 +19,7 @@ from pathlib import Path
 from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
 from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.tenancy._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
+from defender.configuration import publish_root
 from defender.run_repository import RUN_LAYOUT
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
@@ -38,7 +39,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender.runtime.model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
@@ -76,6 +77,53 @@ def _input_dir_source(run_dir: Path) -> Path:
     return where
 
 
+def _run_lane_mounts(
+    run_dir: Path, defender_dir: Path, tenant_agent: Path | None,
+) -> list[tuple[str, Path, str]]:
+    """The host trees the run lane mounts, each as `(what it is, its source, the remedy when no
+    shared mount covers it)`: the one list the lane's argv is rendered from and the publish-root
+    check judges (#1279 O3), so the check sees exactly what is mounted."""
+    mounts = [
+        ("run dir", run_dir, "Set DEFENDER_DATA_ROOT to a path"),
+        ("defender dir", defender_dir, "Check out the tree"),
+    ]
+    if tenant_agent is not None:
+        # The agent half lives under the data root, beside the run dir: moving it means moving
+        # the data root.
+        mounts.append(("tenant agent half", tenant_agent, "Set DEFENDER_DATA_ROOT to a path"))
+    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root.
+    mounts.append(("run clock directory", clock_dir(run_dir), "Set DEFENDER_DATA_ROOT to a path"))
+    return mounts
+
+
+def _refuse_a_start_that_conflicts(
+    docker: DockerFn, name: str, sources: Sequence[tuple[str, Path]], code_checkout: Path | None,
+) -> None:
+    """The two pre-create refusals (#1279 O3, O6), neither degraded by the unsandboxed opt-out.
+
+    O3: no mount source may overlap the host-wide publish root (the source contains it, it
+    contains the source, or they are equal; judged on resolved paths). The root is resolved from
+    the box's own code checkout, as the mirror resolves it, so a worktree is judged against its
+    main checkout's folder; in `dev` a root that cannot be determined refuses like an overlap.
+    Outside `dev` there is no root and nothing is checked. O6: a container already holding the
+    box's name. The overlap needs no daemon, so it is judged first."""
+    try:
+        root = publish_root.publish_root(code_checkout)
+    except publish_root.PublishRootRefused as e:
+        raise BoxStartConflict(f"the publish root could not be determined, so the box {name} "
+                               f"is not started: {e}") from e
+    if root is not None:
+        resolved_root = root.resolve()
+        for what, source in sources:
+            there = Path(source).resolve()
+            if there == resolved_root or there.is_relative_to(resolved_root) \
+                    or resolved_root.is_relative_to(there):
+                raise BoxStartConflict(
+                    f"the {what} {source} overlaps the publish root {root} — a published view "
+                    "is never inside a tree a box mounts, so the box is not started")
+    _refuse_an_existing_container(docker, name)
+
+
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
@@ -83,16 +131,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
 ) -> Create:
     # The uncovered-mount refusal runs before the image resolver: a topology fault must not be
     # masked by the resolver's file-read refusal on the same tree.
-    subjects = [
-        ("run dir", run_dir, "Set DEFENDER_DATA_ROOT to a path"),
-        ("defender dir", defender_dir, "Check out the tree"),
-    ]
-    if tenant_agent is not None:
-        # The agent half lives under the data root, beside the run dir: moving it means moving
-        # the data root.
-        subjects.append(("tenant agent half", tenant_agent, "Set DEFENDER_DATA_ROOT to a path"))
-    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root.
-    subjects.append(("run clock directory", clock_dir(run_dir), "Set DEFENDER_DATA_ROOT to a path"))
+    subjects = _run_lane_mounts(run_dir, defender_dir, tenant_agent)
     for subject, path, remedy in subjects:
         if mounts and not _covered(path, mounts):
             raise _uncovered_fault(subject, path, mounts, remedy)
@@ -393,10 +432,14 @@ def _start_boxed(
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
-        _reap_stale_before_create(docker, name)
+        _refuse_a_start_that_conflicts(
+            docker, name,
+            [(what, path) for what, path, _ in _run_lane_mounts(run_dir, defender_dir, tenant_agent)],
+            Path(defender_dir).parent)
     except BoxFault as e:
         # Every startup fault path writes the did-not-run marker, so the tree never reads as
-        # "not yet judged". This arm fires on any leaked container under a reused name.
+        # "not yet judged". This arm fires on a mount overlapping the publish root and on any
+        # container already holding the name.
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
     start_token = uuid.uuid4().hex
@@ -519,8 +562,11 @@ def _start_boxed_request(
             f"composed container name {request.name!r} fails the run-id grammar "
             f"(allowed: {RUN_ID_ALLOWED})"
         )
+    code = next((Path(m.source) for m in request.mounts if m.kind == "code"), None)
     try:
-        _reap_stale_before_create(docker, request.name)
+        _refuse_a_start_that_conflicts(
+            docker, request.name, [("mount source", Path(m.source)) for m in request.mounts],
+            None if code is None else code.parent)
     except BoxFault as e:
         # As in `_start_boxed`. A lane with no writable mount gets no marker.
         _did_not_run_for_request(request, f"box start refused before create: {e}")
@@ -576,7 +622,10 @@ def _probe_cwd_for_request(request: BoxRequest) -> Path:
 def _opt_out_or_raise(fault: BoxFault) -> None:
     """Without `DEFENDER_ALLOW_UNSANDBOXED=1` a startup fault aborts; with it, the caller
     degrades to `unboxed_executor` after a warning carrying the fault verbatim (so remedies
-    such as the image build command still reach the operator)."""
+    such as the image build command still reach the operator). A `BoxStartConflict` is never
+    degraded (#1279 A2): the opt-out is for "no sandbox here", not for a leak or a collision."""
+    if isinstance(fault, BoxStartConflict):
+        raise fault
     if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
         raise fault
     _logger.warning(
