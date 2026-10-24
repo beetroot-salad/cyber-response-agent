@@ -60,6 +60,13 @@ def sidecar_owner(name: str) -> str | None:
     return None
 
 
+def sidecar_names(run_id: RunId) -> tuple[str, ...]:
+    """Every host-only sidecar name beside the run folder of `run_id`, for each reserved suffix
+    (including a retired one): the names run setup finds absent before it makes the run (#1279
+    O8). Built from the one suffix list the sidecar clause above reads."""
+    return tuple(f"{run_id}{suffix}" for suffix in _SIDECAR_SUFFIXES)
+
+
 def run_name_fault(text: str) -> str | None:
     """Why `text` cannot name a run folder, or `None`: the run-id rule (`run_id_fault`: canonical
     lowercase UUID text) and the sidecar clause (D2.1, MF-21: a name shaped like a host-only

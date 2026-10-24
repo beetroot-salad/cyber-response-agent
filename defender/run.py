@@ -9,7 +9,7 @@ via `run_common.py`.
 Usage (every run names its tenant, and there is no default; on the host,
 clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
     `python3 defender/cli/tenant.py setup <tenant>`):
-    python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
+    python3 defender/run.py <alert.json> --tenant <tenant> [--no-learn] [--model M]
 
 Billing / credentials: the engine calls the first-party Anthropic REST API and
 needs a real billable API key. Inside a Claude Code session the *ambient*
@@ -100,13 +100,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "tenant's own episodes folder)")
     p.add_argument("--world", default=None,
                    help="which world of --episode's manifest this process is")
-    p.add_argument("--run-id", default=None,
-                   help="Pin the run id for a named A/B or live run (learning-loop "
-                        "commits reference it) instead of a freshly minted one: canonical "
-                        "lowercase UUID text only. An existing run dir under this id is "
-                        "RESUMED (setup finishes "
-                        "what an interrupted attempt left undone and re-stamps) — for the same "
-                        "alert; a different alert under a used id is refused")
     p.add_argument("--no-learn", action="store_true",
                    help="Skip enqueuing for learning (also skips catalog curation — the "
                         "flag now governs both lanes)")
@@ -598,7 +591,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 
 def _materialize_run(
-    alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None,
+    alert: Path, *, tenant: _tenant.Tenant, model: str | None,
     world: Any = None, episode_runs: Any = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
@@ -610,7 +603,7 @@ def _materialize_run(
     (a runs-base record naming another tenant, say) into a named `[run.py]` exit.
     """
     try:
-        run = _run.materialize_run(alert, run_id, tenant=tenant, model=model, world=world,
+        run = _run.materialize_run(alert, tenant=tenant, model=model, world=world,
                                    episode_runs=episode_runs)
     except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
@@ -680,20 +673,13 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
 
-def _case_input(ns: argparse.Namespace, world: Any,
-                episode_runs: Any) -> tuple[Path, str | None]:
-    """The alert this run investigates and its run id: a sibling's from its world (the source
-    run's alert, screened before the preflight like other argument errors) and the arm id its
-    episode's roster holds for it, else the operator's."""
+def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any) -> Path:
+    """The alert this run investigates: a sibling's from its world (the source run's alert,
+    screened before the preflight like other argument errors), else the operator's. The run's id
+    is no input: setup mints it, or for an arm reads the one its episode's roster holds."""
     if world is not None:
-        from defender.run_repository import RunRefused
-
-        try:
-            arm_id = episode_runs.arm_id(world.world_id)
-        except RunRefused as refused:
-            sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
-        return _screened_source_alert(episode_runs.episode), str(arm_id)
-    return ns.alert.resolve(), ns.run_id
+        return _screened_source_alert(episode_runs.episode)
+    return ns.alert.resolve()
 
 
 def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None) -> dict[str, Any]:
@@ -788,13 +774,16 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
 
         # The input is read after the tenant check and the role preflight: a tenant the check
         # refuses is told so before anything about its input is.
-        alert, run_id = _case_input(ns, world, episode_runs)
+        alert = _case_input(ns, world, episode_runs)
 
         # The handle, not just its directory: the post-run step saves the run page through it.
-        run = (materialize(alert, run_id, tenant=accepted, model=model) if world is None
-               else materialize(alert, run_id, tenant=accepted, model=model, world=world,
+        run = (materialize(alert, tenant=accepted, model=model) if world is None
+               else materialize(alert, tenant=accepted, model=model, world=world,
                                 episode_runs=episode_runs))
         run_dir = run.run_dir
+        # The run's id, announced as the first line of stdout (#1279 O5): a launcher that must
+        # record the run reads it here, before the ticket or the box exists.
+        print(f"run_id={run_dir.name}", flush=True)
 
         # Every log line from here on, the crash included, names this run and the tenant this
         # process resolved once above and hands inward as one value.

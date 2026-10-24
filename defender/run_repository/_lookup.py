@@ -254,17 +254,14 @@ class RunsRepository:
         with _hand_out(self._tenant.id, Path(_unwrap_runs_base(self._tenant.runs)), self._io, self._natural) as out:
             return [cast(Run, run) for run in out.values()]
 
-    def create(self, run_id: RunId, *, pinned: bool = False) -> Run:
-        """The `Run` run setup builds at `run_id` in the tenant's natural container (D-create
-        (a)): `<T>/runs` walked from the tenant's folder no-follow and made when absent (a
-        link or a non-directory at any level refuses, `TenantRefused`), then the handle. No
-        record is written (#1187 R1) and no claim is read: `pinned` (an id the caller named)
-        is told apart by run setup alone since #1187 R6 deleted the `_episodes` claims. The
-        run folder itself is not made here."""
-        del pinned
-        run_id = require_run_id(run_id)
+    def create(self) -> Run:
+        """The `Run` run setup builds at a freshly minted id in the tenant's natural container
+        (D-create (a)): `<T>/runs` walked from the tenant's folder no-follow and made when absent
+        (a link or a non-directory at any level refuses, `TenantRefused`), then the handle. The
+        id is minted here and never named by a caller (#1279 A3). No record is written (#1187
+        R1) and no claim is read. The run folder itself is not made here."""
         self._natural(create=True).close()
-        return Run.under(self._tenant.runs, run_id, io=self._io, tenant_id=self._tenant.id)
+        return Run.under(self._tenant.runs, RunId.mint(), io=self._io, tenant_id=self._tenant.id)
 
     def resolve(self, address: RunAddress) -> Run:
         """The run a stored `address` names, in this repository, refused as `open` refuses

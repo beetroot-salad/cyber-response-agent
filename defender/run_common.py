@@ -22,8 +22,7 @@ from defender.records import _provenance
 from defender.tenancy import _tenant  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
 from defender.run_repository import (  # noqa: E402
-    RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest,
-    run_name_fault,
+    RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest, sidecar_names,
 )
 from defender.presentation._page_failed import VisualizeFailed  # noqa: E402
 
@@ -40,43 +39,17 @@ def _alert_label(alert: Path) -> str:
     return alert.parent.name if alert.stem in _GENERIC_ALERT_STEMS else alert.stem
 
 
-def _setup_state(run: Run) -> str:
-    """What is under this run id already: `absent`, `setup` (only what setup writes; resumable)
-    or `ran` (a run has been in this tree; never materialised into again).
-
-    Judged by name without following links: a link at the run id is refused, and any sidecar
-    beside the directory counts as the run's trace."""
-    run_dir = run.run_dir
-    if not _io.entry_present(run_dir):
-        return "absent"
-    if not artifact_dir(run_dir):
-        sys.exit(f"{run_dir} is not a directory — refusing to materialise a run over it")
-    with _io.bind(run_dir) as tree:
-        listing = tree.entries()
-    if listing.reason is not None:
-        sys.exit(f"{run_dir} could not be listed ({listing.reason}) — refusing to resume it")
-    # Everything setup writes; anything else means a run has been here.
-    paths = RunPaths(run_dir)
-    setup_names = {paths.alert_input_dir.name, paths.gather_raw.name, paths.provenance.name}
-    extra = sorted(set(listing.entries or {}) - setup_names)
-    # The scrub verdict is written at box start, so even a box that died before writing into
-    # the tree leaves a sidecar.
-    if extra or any(_io.entry_present(p) for p in _sidecars(run)):
-        return "ran"
-    return "setup"
-
-
 def materialize_run(
-    alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None = None,
+    alert: Path, *, tenant: _tenant.Tenant, model: str | None = None,
     world: ResumeWorld | None = None, episode_runs: EpisodeRuns | None = None,
 ) -> Run:
-    """Build (or finish building) the run directory for `run_id` and return the tenant-bound
-    handle the run's later records are saved through."""
+    """Build the run directory of a fresh run and return the tenant-bound handle the run's later
+    records are saved through. No caller names the run's id (#1279 A3): the tenant's runs
+    repository mints it, or, for a sibling's arm, setup reads the one its episode's roster
+    published. A run dir or sidecar already at that id is refused; there is no resume (O8)."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     started_at = _started_at()
-    pinned = run_id is not None
-    admitted = _admit_run_id(run_id)
     front_door = _admit_input(alert, tenant=tenant, world=world)
     try:
         if world is not None:
@@ -84,35 +57,33 @@ def materialize_run(
                 raise TypeError("materialize_run(world=…) needs the sibling's episode view "
                                 "(`episode_runs=`): an arm is made only in its episode's "
                                 "container")
-            run = episode_runs.create(admitted)
+            run = episode_runs.create(episode_runs.arm_id(world.world_id))
             world_id: str | None = None
         else:
-            run = tenant.runs_repository().create(admitted, pinned=pinned)
+            run = tenant.runs_repository().create()
             world_id = None
     except RunRefused as refused:
         sys.exit(str(refused))
     run_dir = run.run_dir
-    paths = RunPaths(run_dir)
+    RunPaths(run_dir)
 
-    state = _setup_state(run)
-    if state == "ran":
-        sys.exit(
-            f"run dir already exists and a run has been in it: {run_dir} — a run id names "
-            "one investigation; pick a fresh id (only a directory holding nothing but what "
-            "setup writes is resumed)")
-    if state == "absent":
-        _clear_stale_sidecars(run)
-    # Judged component by component: a link at the run id or `gather_raw` is refused.
-    run.make_run_dir()
+    # A sidecar beside the dir is a trace of an earlier run at this id; nothing clears it.
+    for name in sidecar_names(RunId.parse(run_dir.name)):
+        if _io.entry_present(run_dir.parent / name):
+            sys.exit(f"run id already used: {run_dir.parent / name} exists beside {run_dir} — a run "
+                     "id names one investigation")
+    # Judged component by component, and exclusive at the run dir itself: anything already at
+    # the run id (a directory, a file, a link) is refused as found.
+    try:
+        run.make_run_dir()
+    except FileExistsError:
+        sys.exit(f"run dir already exists: {run_dir} — a run id names one investigation and a "
+                 "run dir is never resumed")
     _write_input_once(run, front_door)
     # Every executed run is stamped here, by its own process (branched siblings each reach
     # this, and `verify_family` compares their stamps), before the box exists: the run dir is
     # the box's rw bind, so a later stamp could have been moved by the run. There is no seam to
-    # hand a stamp in. A resumed setup is re-stamped, since no box has run in it yet.
-    if state == "setup":
-        # Anything else at the stamp's name is left for the guarded write to refuse.
-        with contextlib.suppress(OSError):
-            paths.provenance.unlink()
+    # hand a stamp in.
     _stamp(
         run, knowledge_dir=tenant.knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
@@ -124,41 +95,6 @@ def materialize_run(
 def _started_at() -> str:
     """When run setup started this run, as ISO-8601 UTC text to the second (#1187 O7)."""
     return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _admit_run_id(run_id: str | None) -> RunId:
-    """The run id this call will materialise, or the refusal — a fresh one when the operator
-    pinned none. An id carries no meaning (#1187 O1): it is minted from nothing."""
-    # `RunId` is the admission rule for minted and pinned ids alike: canonical lowercase UUID
-    # text, nothing else.
-    try:
-        admitted = RunId.mint() if run_id is None else RunId.parse(run_id)
-    except RunRefused as bad:
-        sys.exit(f"invalid run id: {bad}")
-    # The sidecar clause (D2.1): the repository's one answer to "may this text name a run?".
-    if (why := run_name_fault(str(admitted))) is not None:
-        sys.exit(f"invalid run id: {why}")
-    return admitted
-
-
-def _sidecars(run: Run) -> tuple[Path, ...]:
-    """The files beside the run dir, keyed by its run id: the run-end record, the scrub
-    verdict, the ticket receipt (#1107 moved it out of the tree) and the run -> case link
-    (#1235 did)."""
-    return (run.facts.run_end.path, run.facts.scrub_verdict.path,
-            run.observability.ticket_write.path, run.observability.session_pointer.path)
-
-
-def _clear_stale_sidecars(run: Run) -> None:
-    """Remove sidecars a previous attempt under this reused run id left beside its removed dir
-    — exact-run-id-keyed, never a glob. Only called when the dir is absent."""
-    for sidecar in _sidecars(run):
-        try:
-            sidecar.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            sys.exit(f"cannot clear a stale sidecar at {sidecar}: {e!r}")
 
 
 @_dataclasses.dataclass(frozen=True)

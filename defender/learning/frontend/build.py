@@ -7,9 +7,6 @@ from pathlib import Path
 from string import Template
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from defender.tenancy._tenant import Tenant
-
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
 
@@ -29,6 +26,9 @@ from defender.presentation.visualize_primitives import (  # noqa: E402
     pretty_json_html,
 )
 from defender.presentation.visualize_run import CSS as RUN_CSS  # noqa: E402
+
+if TYPE_CHECKING:
+    from defender.tenancy._tenant import Tenant
 
 GROUP_STAGE = {"defender": "stage-defender", "actor": "stage-actor", "environment": "stage-oracle"}
 
