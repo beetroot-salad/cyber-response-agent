@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from defender.tenancy._tenant import Tenant
 
 #: The published run page's file name: the publish area's own, not a path into a run.
-RUN_PAGE_NAME = "runtime.html"
+RUN_PAGE_NAME = "runtime.html"  # lint-run-records: ok — the published copy's own name in the publish area, not a record in a run
 
 _MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
 
