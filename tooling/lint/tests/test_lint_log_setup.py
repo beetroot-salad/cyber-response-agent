@@ -5,7 +5,7 @@ import ast
 
 import pytest
 
-from defender.tests.support.shared.contracts._by_path import import_lint_lib, load_lint_gate
+from _by_path import import_lint_lib, load_lint_gate
 
 _GATE = load_lint_gate("lint_log_setup")
 _AST = import_lint_lib("_astlib")
