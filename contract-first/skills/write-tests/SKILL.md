@@ -68,6 +68,15 @@ Group findings by cause before acting; one cause usually explains several. Then 
 - **A design defect or open choice:** propose the change that dissolves the whole family, through discuss-issue's amendment protocol. A proposal is not adopted until the human rules on it.
 - **An implementation defect, on a repair run:** return it to the code stage; don't bend the design around it.
 
+**Stale existing tests (only when the code stage returns them).** The fold reaches existing tests near the new cases. A test elsewhere that pins behavior the design replaced shows up only when real code makes it fail, and letting it fail is the reliable census: reading cannot prove which tests encoded the old behavior. The code stage returns these reds in one batch, each with its quoted failure. A fresh author, **Sonnet at medium effort**, decides each from the design and the test, not from the implementation:
+
+- **update**: the test pins behavior the design changes. Rewrite its expectation to the new behavior and cite the design element;
+- **retire**: the test pins only behavior the design removes. Delete it and cite the design element; move any assertion that still guards surviving behavior to a test that stays;
+- **design gap**: the design neither keeps nor changes what the test pins. Route it as a design defect below; don't decide it here;
+- **implementation defect**: the design keeps that behavior. Return it to the code stage with the test unchanged.
+
+Updates and retirements are contract repairs: they get map rows, land on the contract-only branch, and the fidelity reviewer checks that each traces to a design change and drops nothing that survives. The batch is an expected census, not a defect finding, so it doesn't count toward §6's repair rounds; a fix that the stale-test review itself sends back does.
+
 Test mechanics and local technical choices stay with agents when settled intent decides them. Bring the human only consequential choices, consolidated: **"This is a bug; here are the trade-offs of fixing it,"** with a recommendation and real alternatives. Never a question per edge case, never "do you want this correct", never reopening approved intent. Record rulings with their scope. After an amendment, repair what it touched and invalidate the reviews whose inputs changed; keep the rest.
 
 ## 6. Readiness

@@ -64,7 +64,7 @@ with diagrams, see [docs/design.md](docs/design.md).
 
 | Skill | What it does |
 |---|---|
-| `/contract-first:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows and architecture. Hands off an intent+design doc with probed claims. Also handles design amendments that tests or code expose. |
+| `/contract-first:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows and architecture. Hands off an intent+design doc with probed claims, or splits an issue too large for one pass into several. Also handles design amendments that tests or code expose. |
 | `/contract-first:write-tests` | Sketches the contract, spikes a throwaway implementation to settle the design, authors tests with Sonnet and reviews their fidelity with Opus. Commits the tests before any implementation, with a compact coverage and review record. |
 | `/contract-first:write-code-from-tests` | Implements against the committed contract, then has two or three Sonnet attackers try to keep it green with wrong variants of that code. Reconciles findings, ships, and repairs CI. |
 | `/contract-first:finalize` | Reviews the shipped PR **cold**, fixes or files what it finds, traces escaped bugs back to the stage that should have caught them, and re-greens the PR. |

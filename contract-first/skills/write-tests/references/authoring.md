@@ -28,6 +28,8 @@ Work in four steps: decide the cases, survey the existing suite, fold, then writ
 - **new file**, only for a surface no existing file covers;
 - **conflict**: an existing test pins behavior the design changes. Update it as part of the contract and flag it in the map for review; never change it quietly. A conflict the design didn't list is a gap to report.
 
+Don't sweep the rest of the suite for tests of replaced behavior. Those fail once real code exists, and the code stage returns them (SKILL.md §5, stale existing tests).
+
 **4. Write.** Make sure fixture data actually reaches the condition each test claims to exercise.
 
 Choose seams and machinery within existing conventions. Surface any choice that would impose a new architecture, state owner or lifecycle. A missing target import is expected before implementation, never a reason to commit a skeleton.
