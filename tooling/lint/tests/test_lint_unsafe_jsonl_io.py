@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 
-from defender.tests.support.shared.contracts._by_path import load_lint_gate
+from _by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_unsafe_jsonl_io")
 

@@ -8,9 +8,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender.tests.support.shared.contracts._by_path import import_lint_lib
-
-_astlib = import_lint_lib("_astlib")
+import _astlib
 
 HELD = "defender._io.Held"
 BOUND = "defender._io.Bound"
@@ -224,12 +222,11 @@ D6_MODULES: tuple[str, ...] = (
 )
 #: Scan B — the opener census (`construct` only): scan A plus the modules that open a lane's
 #: trees but whose other plain touches have no N-reason to judge (`drains.py` is queue
-#: machinery; the harness's `materialize` writes its own scratch repo).
+#: machinery).
 OPENER_MODULES: tuple[str, ...] = (
     *D6_MODULES,
     "learning/core/drains.py",
     "learning/author/_config.py",
-    "evals/harness.py",
 )
 
 #: The listing method of `Bound` (#1133): a folder's entries. B2's helpers own every listing

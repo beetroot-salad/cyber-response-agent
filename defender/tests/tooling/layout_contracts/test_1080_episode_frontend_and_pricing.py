@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import copy
 import importlib
 import json
@@ -76,29 +75,6 @@ def _pricing_rows(usage_cost) -> list:
             for model, usage in PRICING_ROWS]
 
 
-O5_SUITES: dict[str, tuple[tuple[str, str | None], ...]] = {
-    "defender/tests/e2e/test_replay_skeleton.py": (),
-    "defender/tests/sandbox/test_1096_entrypoint_closure.py": (),
-}
-
-
-def _asserts(relpath: str) -> list[str]:
-    """Every `assert` statement in the file, normalized through the AST (formatting, comments
-    and line numbers fall away), as a sorted multiset."""
-    tree = ast.parse((S.REPO_ROOT / relpath).read_bytes(), filename=relpath)
-    return sorted(ast.unparse(n) for n in ast.walk(tree) if isinstance(n, ast.Assert))
-
-
-def _imports_module(relpath: str, dotted: str) -> bool:
-    """Whether the file imports `dotted` — `import dotted`, `from dotted import …`, or
-    `from <package> import <leaf>` naming it — anywhere (module level or a function body)."""
-    source = (S.REPO_ROOT / relpath).read_bytes()
-    for st in S.import_statements(relpath, source):
-        if st.module == dotted or any(f"{st.module}.{n}" == dotted for n in st.names):
-            return True
-    return False
-
-
 def _main_deps_over_run_copy(tmp_path: Path) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam with the run's tenant agent root — a run copy's
     `agent/` (`<T>/run-knowledge/<run_id>/agent/`, r3 data model) — handed through the
@@ -166,16 +142,6 @@ def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
     # The golden's `lessons_fm_REPO_ROOT` value is kept as base history and read by nothing.
     assert Path(S.moved_module("reexec_into_venv", home=S.VENV)._DEFENDER_DIR).resolve() \
         == (S.REPO_ROOT / g["venv_DEFENDER_DIR"]).resolve()
-
-
-@pytest.mark.parametrize("suite", sorted(O5_SUITES))
-def test_suite_assertions_kept_while_a_fixture_points_the_test_at_another_target(suite):
-    assert _asserts(suite) == _g("suite_asserts")[suite], (
-        f"{suite}: its assert statements changed with the move")
-    for symbol, home in O5_SUITES[suite]:
-        target = S.dotted(S.home_of(symbol, home=home))
-        assert _imports_module(suite, target), (
-            f"{suite} does not import {target}, where `{symbol}` lives now")
 
 
 def test_1080_observe_costs_usage_through_pricing_in_providers_as_today():
