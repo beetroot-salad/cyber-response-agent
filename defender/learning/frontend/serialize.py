@@ -192,13 +192,11 @@ def dump_contract(view: dict) -> str:
 def main(argv: list[str]) -> int:
     use_utf8_stdio()
     view = stamped_view()
-    if "--stdout" in argv[1:]:
-        sys.stdout.write(dump_contract(view))
-    else:
-        out = HERE.parent / "lessons.json"
-        out.write_text(dump_contract(view), encoding="utf-8")
-        counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
-        print(f"wrote {out.relative_to(REPO_ROOT)} — {counts}")
+    if "--stdout" not in argv[1:]:
+        print("serialize.py: only --stdout is supported; the pages are published per tenant by build.py",
+              file=sys.stderr)
+        return 2
+    sys.stdout.write(dump_contract(view))
     return 0
 
 

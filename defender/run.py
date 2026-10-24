@@ -866,7 +866,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
                 _logger.info("enqueued for catalog curation")
 
             try:
-                visualize(run, update_ticket=ns.update_ticket)
+                visualize(run, tenant=accepted, update_ticket=ns.update_ticket)
             except _run.VisualizeFailed:
                 _logger.warning("the run page was not saved", exc_info=True)
             return _exit_code(summary)

@@ -328,7 +328,7 @@ def _prepend(head: str, tail: str | None) -> str:
     return f"{head}{os.pathsep}{tail}" if tail else head
 
 
-def visualize(run: Run, *, update_ticket: bool = False) -> None:
+def visualize(run: Run, *, tenant: _tenant.Tenant, update_ticket: bool = False) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
@@ -337,7 +337,7 @@ def visualize(run: Run, *, update_ticket: bool = False) -> None:
         from defender.presentation import visualize_run as vr
     except Exception as e:
         raise VisualizeFailed("the renderer could not be loaded") from e
-    vr.publish_page(run, update_ticket=update_ticket)
+    vr.publish_page(run, tenant=tenant, update_ticket=update_ticket)
 
 
 def cross_check_tables(run_dir: Path) -> None:

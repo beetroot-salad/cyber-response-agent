@@ -5,6 +5,10 @@ import json
 import sys
 from pathlib import Path
 from string import Template
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from defender.tenancy._tenant import Tenant
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
@@ -18,6 +22,7 @@ if __name__ == "__main__":
     reexec_into_venv(__file__)
 
 from defender.learning.core.config import LoopPaths  # noqa: E402
+from defender.presentation.publisher import NoPublishRoot, Publisher  # noqa: E402
 from defender.learning.frontend import serialize, serialize_queues  # noqa: E402
 from defender.presentation.visualize_primitives import (  # noqa: E402
     esc_untrusted,
@@ -517,26 +522,25 @@ def render(view: dict) -> str:
     )
 
 
-def main(paths: LoopPaths) -> int:
-    """Both pages, into this directory, for the explicitly selected tenant."""
-    queues = serialize_queues.stamped_view(paths)
+def main(tenant: Tenant) -> int:
+    """Both pages and their contracts, published into the accepted tenant's learning area (#1279
+    O1). Refuses outside `dev`, where there is no publish destination (O4), before building."""
+    publisher = Publisher.for_tenant(tenant)
+    queues = serialize_queues.stamped_view(LoopPaths.for_tenant(tenant))
     view = serialize.stamped_view()
 
-    json_out = HERE.parent / "lessons.json"
-    json_out.write_text(serialize.dump_contract(view), encoding="utf-8")
-
-    html_out = HERE.parent / "lessons.html"
-    html_out.write_text(render(view), encoding="utf-8")
+    pages = {
+        "lessons.json": serialize.dump_contract(view),
+        "lessons.html": render(view),
+        "queues.json": serialize_queues.dump_contract(queues),
+        "queues.html": render_queues(queues),
+    }
+    for name, text in pages.items():
+        publisher.learning_page(name).write(text)
 
     counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
-    print(f"wrote {json_out.relative_to(REPO_ROOT)} + {html_out.relative_to(REPO_ROOT)} — {counts}")
-
-    q_json = HERE.parent / "queues.json"
-    q_json.write_text(serialize_queues.dump_contract(queues), encoding="utf-8")
-    q_html = HERE.parent / "queues.html"
-    q_html.write_text(render_queues(queues), encoding="utf-8")
     dead = {ch["name"]: len(ch["deadletter"]) for ch in queues["channels"]}
-    print(f"wrote {q_json.relative_to(REPO_ROOT)} + {q_html.relative_to(REPO_ROOT)} — dead letters {dead}")
+    print(f"published {publisher.learning_page('lessons.html').path.parent} — {counts}, dead letters {dead}")
     return 0
 
 
@@ -544,9 +548,12 @@ if __name__ == "__main__":
     from defender._log import configure_from_env
     configure_from_env()
     import argparse
-    from defender.learning.core.cli import command_line_paths
+    from defender.learning.core.cli import command_line_tenant
 
     parser = argparse.ArgumentParser(description="Build this tenant's learning queue pages")
     parser.add_argument("--tenant", required=True)
     args = parser.parse_args()
-    sys.exit(main(command_line_paths(parser, args.tenant)))
+    try:
+        sys.exit(main(command_line_tenant(parser, args.tenant)))
+    except NoPublishRoot as refused:
+        parser.exit(2, f"{parser.prog}: {refused}\n")
