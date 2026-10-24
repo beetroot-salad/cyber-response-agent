@@ -684,6 +684,10 @@ jobs:
       - name: Tenant-delivery fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_delivery_architecture.py
 
+      # Agent retries (#631): every production pydantic_ai Agent(...) passes retries=.
+      - name: Agent retries fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_agent_retries.py
+
       # Episode paths (#1133, #1187): episode trees are reached only through the Episode handle and
       # the runs repository's walk. The migrated modules make no episode I/O but the declared
       # residue, the handle does I/O only through hold / hold_new, no function takes a path below

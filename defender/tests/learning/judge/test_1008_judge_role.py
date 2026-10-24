@@ -1,7 +1,6 @@
 """#1008 — the family judge stops borrowing the questioner's key and claims its own."""
 from __future__ import annotations
 
-import ast
 import dataclasses
 import difflib
 
@@ -11,18 +10,6 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135
 
-GRANT_KEYWORDS = ("tools", "bash_shapes", "write_shapes", "verb_grant",
-                  "read_allow_override", "corpus_dirs")
-
-RUN_STAGE = "defender.learning._pydantic_stage.run_stage"
-AGENT_DEFINITION = "defender.runtime.agent_definition.AgentDefinition"
-JUDGE_DEPS = "defender.learning.judge.run.JudgeDeps"
-QUESTIONER_DEPS = "defender.learning.branch.questioner.QuestionerDeps"
-JUDGE_MODEL_ACCESSOR = "defender.learning.core.config.judge_model"
-JUDGE_EFFORT_ACCESSOR = "defender.learning.core.config.judge_effort"
-
-JUDGE_RUN = T.DEFENDER / "learning" / "judge" / "run.py"
-JUDGE_PKG = T.DEFENDER / "learning" / "judge" / "__init__.py"
 JUDGE_ROLE_PROMPT = T.DEFENDER / "learning" / "judge" / "role.md"
 
 
@@ -53,150 +40,6 @@ def _questioner_def():
 def _grant_gate():
     """The #575 grant gate's module — for its `_named_programs` extractor, IMPORTED not copied."""
     return T.mod("tests.runtime.permissions.test_grant_gate_575")
-
-
-def _astlib():
-    """The gates' own scope-aware AST resolver, IMPORTED the way the gates reach it."""
-    from defender.tests.support.shared.contracts._by_path import import_lint_lib
-
-    return import_lint_lib("_astlib")
-
-
-def _function(tree: ast.AST, name: str) -> ast.FunctionDef | None:
-    return next((n for n in ast.walk(tree)
-                 if isinstance(n, ast.FunctionDef) and n.name == name), None)
-
-
-def _calls(node: ast.AST, dotted: str, tree: ast.AST | None = None) -> list[ast.Call]:
-    """Every call under `node` whose callee RESOLVES to `dotted`, however it is spelled."""
-    A = _astlib()
-    env = A.module_env(tree if tree is not None else node)
-    return [n for n in ast.walk(node)
-            if isinstance(n, ast.Call) and A.callee(n, env) == dotted]
-
-
-def _keywords(call: ast.Call) -> dict[str, str]:
-    """The call's NAMED keyword arguments: name -> the unparsed source of its value."""
-    return {kw.arg: ast.unparse(kw.value) for kw in call.keywords if kw.arg is not None}
-
-
-def _splats(call: ast.Call) -> int:
-    """How many `**mapping` arguments the call carries — keywords `_keywords` cannot see."""
-    return sum(1 for kw in call.keywords if kw.arg is None)
-
-
-def _origin_of(tree: ast.AST, node: ast.expr) -> str | None:
-    """Where the name at `node` actually came from, resolved in ITS OWN scope."""
-    A = _astlib()
-    return A.origin(node, A.module_env(tree))
-
-
-def _keyword_node(call: ast.Call, name: str) -> ast.expr | None:
-    return next((kw.value for kw in call.keywords if kw.arg == name), None)
-
-
-def _called_origin(tree: ast.AST, call: ast.Call, keyword: str) -> str | None:
-    """The origin of the CLASS or FUNCTION invoked by `call`'s `keyword=` argument."""
-    node = _keyword_node(call, keyword)
-    if not isinstance(node, ast.Call):
-        return None
-    return _origin_of(tree, node.func)
-
-
-def _self_test_the_extractor() -> None:
-    """The resolver's own positive control, run at every site that uses it."""
-    source = (
-        "from a.b import AgentDefinition\n"
-        "from a.b import SomeDeps\n"
-        "from c.d import OtherDeps as SomeDepsAliased\n"
-        "from e.f import run_stage\n"
-        "from e.f import run_stage as _rs\n"
-        "import e.f as stage_mod\n"
-        "def bare():\n"
-        "    return run_stage(stage='b', deps=SomeDeps(), tools=T)\n"
-        "def attribute():\n"
-        "    return stage_mod.run_stage(stage='a', deps=SomeDeps())\n"
-        "def aliased():\n"
-        "    return _rs(stage='x', deps=SomeDeps())\n"
-        "def shadowed():\n"
-        "    from g.h import OtherDeps as SomeDeps\n"
-        "    return run_stage(stage='s', deps=SomeDeps())\n"
-        "def looped():\n"
-        "    for SomeDeps in (1, 2):\n"
-        "        pass\n"
-        "    return run_stage(stage='l', deps=SomeDeps())\n"
-        "def defs():\n"
-        "    D = AgentDefinition(role=R, model=m, tools=ToolSet(), deps_cls=X)\n"
-        "    S = AgentDefinition(role=R, **SURFACES)\n"
-        "    return D, S\n"
-    )
-    tree = ast.parse(source)
-    assert _function(tree, "bare") is not None, "the walk cannot find a function by name"
-
-    # 1. THREE SPELLINGS, ONE FUNCTION. A census that reads source text counts one of these
-    #    three; the widening call then lives in either of the other two.
-    assert len(_calls(tree, "e.f.run_stage")) == 5, (
-        "the call census does not resolve every spelling of one callee — bare name, attribute "
-        "form and aliased import are the three this file has shipped a miss on")
-
-    # 2. Keyword reading, and the `**mapping` a keyword sweep cannot see.
-    defn_call, splatted = _calls(_function(tree, "defs"), "a.b.AgentDefinition", tree)
-    assert set(_keywords(defn_call)) == {"role", "model", "tools", "deps_cls"}
-    assert "tools" in _keywords(defn_call), "the reader would not report a grant keyword"
-    assert _splats(defn_call) == 0
-    assert set(_keywords(splatted)) == {"role"}, "the splat leaked into the named keywords"
-    assert _splats(splatted) == 1, "the reader cannot see a `**mapping` argument at all"
-
-    resolved = {name: _called_origin(tree, _calls(_function(tree, name), "e.f.run_stage",
-                                                  tree)[0], "deps")
-                for name in ("bare", "attribute", "aliased", "shadowed", "looped")}
-    assert resolved["bare"] == "a.b.SomeDeps"
-    assert resolved["attribute"] == "a.b.SomeDeps"
-    assert resolved["aliased"] == "a.b.SomeDeps"
-    assert resolved["shadowed"] == "g.h.OtherDeps", (
-        "a function-local import shadowing the module-level one resolves to the module's "
-        "binding — the resolver is not scope-aware, and the seam checks prove nothing")
-    assert resolved["looped"] is None, (
-        "a `for` target rebinding the name resolves to the import it shadows")
-
-    # And an alias does not HIDE an origin either — the same fact from the other side: a seam
-    # that imports the wrong class under the right name answers with the wrong origin.
-    assert _origin_of(tree, ast.parse("SomeDepsAliased", mode="eval").body) == "c.d.OtherDeps"
-
-
-def _assert_sole_unwidened_seam(path, fn_name: str, deps_origin: str) -> None:
-    """One production seam drives ONE `run_stage`, with these deps and no call-time widening."""
-    _self_test_the_extractor()
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    seam = _function(tree, fn_name)
-    assert seam is not None, (
-        f"{path} declares no `{fn_name}` — the production seam moved, and this check would "
-        "otherwise pass by finding nothing")
-
-    module_calls = _calls(tree, RUN_STAGE)
-    seam_calls = _calls(seam, RUN_STAGE, tree)
-    assert len(module_calls) == 1, (
-        f"{path} makes {len(module_calls)} calls that resolve to {RUN_STAGE}; this seam drives "
-        "exactly one, and a second is a lane this check does not read")
-    moved = (f"the module's one `run_stage` call is not inside `{fn_name}` — the shipped call "
-             "moved out of the seam this check inspects")
-    assert len(seam_calls) == 1, moved
-    assert seam_calls[0] is module_calls[0], moved
-
-    call = module_calls[0]
-    spelled = _keywords(call)
-    assert _called_origin(tree, call, "deps") == deps_origin, (
-        f"{path.name}'s seam builds deps that resolve to "
-        f"{_called_origin(tree, call, 'deps')}, not {deps_origin} — the deps class is what "
-        f"selects the definition, so this is the line that decides the role. (It is spelled "
-        f"{spelled.get('deps')}, which is why the SPELLING is not what is checked.)")
-    widened = sorted(set(spelled) & {"tools", "verbs"})
-    assert widened == [], (
-        f"{path.name}'s seam passes {widened} to `run_stage`, which overrides the registered "
-        "definition at call time — a grant handed to a role from outside its own definition")
-    assert _splats(call) == 0, (
-        f"{path.name}'s seam splats a mapping into `run_stage`, so `tools=`/`verbs=` ride in "
-        "unread by the check above")
 
 
 def test_1008_the_family_judge_is_registered_under_its_own_role_key():

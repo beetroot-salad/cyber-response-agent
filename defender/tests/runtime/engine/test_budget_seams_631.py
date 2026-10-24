@@ -483,21 +483,8 @@ def test_retired_learning_state_override_cannot_redirect_tenant_state(
 
 
 def test_every_agent_construction_pins_retries_explicitly(tmp_path):
-    """Every Agent construction site passes `retries` explicitly: the framework default is None, which resolves..."""
-    sites = []
-    for src in (DEFENDER / "runtime" / "driver" / "__init__.py",
-                REPO_ROOT / "experiments" / "gather-verifiable-code-289" / "run_arms.py"):
-        tree = ast.parse(src.read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and (
-                (isinstance(node.func, ast.Name) and node.func.id == "Agent")
-                or (isinstance(node.func, ast.Attribute) and node.func.attr == "Agent")
-            ):
-                sites.append((src.name, node.lineno, {kw.arg for kw in node.keywords}))
-    assert sites, "no Agent(...) construction site found — re-scope this demand"
-    for name, lineno, kwargs in sites:
-        assert "retries" in kwargs, f"{name}:{lineno} omits retries="
-
+    """Two consecutive denied tool calls do not abort the run: the retry ceiling is pinned. (That every
+    `Agent(...)` passes `retries=` is `tooling/lint/lint_agent_retries.py`.)"""
     assert driver.DEFAULT_TOOL_RETRIES == 10
 
     run_dir = _run_dir(tmp_path, "retries")
