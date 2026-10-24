@@ -16,6 +16,7 @@ import pytest
 
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, current_commit
+import contextlib
 
 WORKTREE = Path(__file__).resolve().parents[4]
 OID = "0123456789abcdef0123456789abcdef01234567"
@@ -90,10 +91,8 @@ def test_r6_a_killed_child_takes_its_grandchildren_and_the_launch_does_not_wait_
         assert not _alive(grandchild), "the child's grandchild outlived the kill"
     finally:
         if pidfile.exists():
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.kill(int(pidfile.read_text()), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
 
 
 # --- a child that takes the lock while being stopped is never killed ---------------------------

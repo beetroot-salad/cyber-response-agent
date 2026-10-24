@@ -38,7 +38,8 @@ def test_r6_the_workspace_map_of_a_run_reads_the_export_that_run_read(tmp_path, 
     expected = export_dir(t.tenant, first) / "agent"
     agent_line = next(line for line in text.splitlines() if line.startswith("- AGENT_DIR:"))
     assert agent_line == f"- AGENT_DIR: `{expected}`", agent_line
-    assert second not in text and str(t.clone) not in text
+    assert second not in text
+    assert str(t.clone) not in text
 
 
 # --- the CLIs that show knowledge read `current`'s export, not the clone ------------------------
@@ -108,4 +109,5 @@ def test_r6_the_publish_child_honors_its_issuer_config_argument(p4_tenant, tmp_p
                                 "--issuer-config", str(missing)])
     line = capsys.readouterr().out.strip().splitlines()[-1]
     assert rc == 0
-    assert line.startswith("misconfigured") and str(missing) in line, line
+    assert line.startswith("misconfigured"), line
+    assert str(missing) in line, line

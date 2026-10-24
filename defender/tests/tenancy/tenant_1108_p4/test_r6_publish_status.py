@@ -28,14 +28,16 @@ def test_r6_a_launch_time_publish_records_a_misconfiguration_and_a_success_clear
     line = B.run_child(tenant, missing)
     assert B.outcome_class(line) == "misconfigured", line
     refused = _status(tenant)
-    assert refused and refused.get("refused"), f"a misconfiguration is invisible to check: {refused}"
+    assert refused, f"a misconfiguration is invisible to check: {refused}"
+    assert refused.get("refused"), f"a misconfiguration is invisible to check: {refused}"
 
     merged = tenant.merge(B.MERGE_FILES)
     good = B.write_issuer_config(tmp_path / "operator")
     line = B.run_child(tenant, good)
     assert B.outcome_class(line) == "fresh", line
     published = _status(tenant)
-    assert published and published.get("published") == merged, published
+    assert published, published
+    assert published.get("published") == merged, published
     assert "refused" not in published, f"a good publish left the refusal standing: {published}"
 
 
@@ -45,7 +47,8 @@ def test_r6_a_git_fetch_that_cannot_connect_is_a_transient_outage(tenant, tmp_pa
     line = B.run_child(tenant, good)
     assert B.outcome_class(line) == "stale:transient", line
     recorded = _status(tenant)
-    assert recorded and recorded.get("kind") == "transient", recorded
+    assert recorded, recorded
+    assert recorded.get("kind") == "transient", recorded
 
 
 def test_r6_a_busy_lock_is_not_recorded_as_a_refusal_and_keeps_the_earlier_record(tenant):
@@ -53,12 +56,12 @@ def test_r6_a_busy_lock_is_not_recorded_as_a_refusal_and_keeps_the_earlier_recor
 
     status.record_refused(tenant.tenant, RuntimeError("a real refusal"), by="r6")
     before = _status(tenant)
-    assert before and before["refused"] == "a real refusal"
+    assert before
+    assert before["refused"] == "a real refusal"
     status.record_refused(tenant.tenant, LockBusy("lock busy"), by="r6-later")
     assert _status(tenant) == before
-    with pytest.raises(LockBusy):
-        with status.recording(tenant.tenant, by="r6-later"):
-            raise LockBusy("lock busy")
+    with pytest.raises(LockBusy), status.recording(tenant.tenant, by="r6-later"):
+        raise LockBusy("lock busy")
     assert _status(tenant) == before
 
 
@@ -77,4 +80,5 @@ def test_r6_batch_reset_keeps_the_lane_folders_a_running_box_has_bound(tenant):
     assert lane.stat().st_ino == inode, "reset replaced the lane folder (a bound box is stale)"
     (lane / "new.md").write_text("fresh draft\n", encoding="utf-8")
     batch.reset()
-    assert lane.stat().st_ino == inode and not (lane / "new.md").exists()
+    assert lane.stat().st_ino == inode
+    assert not (lane / "new.md").exists()

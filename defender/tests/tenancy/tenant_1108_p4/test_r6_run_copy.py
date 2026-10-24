@@ -29,7 +29,7 @@ from defender.tests.tenancy.tenant_1108_p4.test_run_copy import (
     _boxed_lifecycle,
     _dead_process,
     _Investigation,
-    boxed_only,  # noqa: F401 — fixture
+    boxed_only,  # noqa: F401, F811 — fixture
 )
 
 pytestmark = pytest.mark.e2e
@@ -97,7 +97,8 @@ def test_r6_a_dead_owners_copy_at_the_run_id_is_replaced_by_a_fresh_one(tenant):
     copy = run_knowledge.copy_for_run(tenant.tenant, _source(tenant), run_id)
     assert copy.root.name == run_id
     assert not (old / "stage" / "agent" / "marker.md").exists(), "the dead run's files survive"
-    assert (old / "stage" / "agent").is_dir() and any((old / "stage" / "agent").rglob("*.md"))
+    assert (old / "stage" / "agent").is_dir()
+    assert any((old / "stage" / "agent").rglob("*.md"))
     assert (old / "settings").is_dir()
     assert [p.name for p in B.run_copies(tenant).iterdir()] == [run_id]
 
@@ -110,7 +111,8 @@ def test_r6_a_relaunch_of_a_killed_runs_id_starts_over_a_fresh_copy(tenant, tmp_
                    argv_extra=("--run-id", run_id),
                    during=lambda seen: (B.copy_root(tenant, seen.run_dir) / "stage" / "agent"
                                         / "marker.md").exists())
-    assert out.reached and out.rc == 0, out.text()
+    assert out.reached, out.text()
+    assert out.rc == 0, out.text()
     assert out.seen[0].during is False, "the dead run's file is in the new run's copy"
 
 
@@ -167,7 +169,8 @@ def test_r6_the_host_knowledge_source_record_exists_when_the_lifecycle_starts(te
     assert out.rc == 0, out.text()
     record = out.seen[0].during
     assert isinstance(record, dict), "no host record when the run's lifecycle started"
-    assert record["kind"] == "fresh" and record["commit"] == tenant.commit
+    assert record["kind"] == "fresh"
+    assert record["commit"] == tenant.commit
 
 
 def test_r6_a_run_that_cannot_write_its_host_knowledge_record_does_not_start(tenant, tmp_path):
@@ -184,20 +187,22 @@ def test_r6_a_run_that_cannot_write_its_host_knowledge_record_does_not_start(ten
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    materialize=materialize_then_block)
     assert not out.reached, f"the run started without its knowledge record: {out.text()}"
-    assert out.refusal and "knowledge record" in out.refusal, out.text()
+    assert out.refusal, out.text()
+    assert "knowledge record" in out.refusal, out.text()
 
 
 # --- surfaces-04: the production dev-issuer-config constant lies under no box mount source ----
 
 def test_r6_the_dev_issuer_config_constant_lies_under_no_box_mount_source(tenant, tmp_path,
-                                                                        boxed_only):
+                                                                        boxed_only):  # noqa: F811 — fixture
     from defender.learning.author.version_control.issuer import DEV_ISSUER_CONFIG
 
     assert DEV_ISSUER_CONFIG == WORKTREE / "playground-issuer" / "client" / "issuer.json"
     docker, investigation = RecordingDocker(), _Investigation()
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    lifecycle=_boxed_lifecycle(docker, investigation))
-    assert out.reached and investigation.calls == 1, out.text()
+    assert out.reached, out.text()
+    assert investigation.calls == 1, out.text()
     sources = [Path(m["source"]) for m in docker.mounts()]
     assert T.exposes(sources, T.DEFENDER), "control: the product tree is mounted"
     assert not T.exposes(sources, DEV_ISSUER_CONFIG), (

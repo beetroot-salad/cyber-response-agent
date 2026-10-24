@@ -62,11 +62,11 @@ def _record_status(record_text: str) -> KnowledgeStatus | None:
         return None
     kind, commit = obj.get("kind"), obj.get("commit")
     stale_kind, reason = obj.get("stale_kind"), obj.get("reason")
-    if kind not in KINDS or not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
+    if not isinstance(kind, str) or kind not in KINDS or not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
         return None
     if (kind == STALE) != (stale_kind is not None):
         return None
-    if stale_kind is not None and stale_kind not in STALE_KINDS:
+    if stale_kind is not None and (not isinstance(stale_kind, str) or stale_kind not in STALE_KINDS):
         return None
     if reason is not None and not isinstance(reason, str):
         return None

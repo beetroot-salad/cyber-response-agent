@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 
 import httpx
-import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
@@ -20,7 +19,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     remote_branches,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
-from defender.tests.tenancy.tenant_1108_p4.test_drains import thresholds  # noqa: F401 — fixture
+from defender.tests.tenancy.tenant_1108_p4.test_drains import thresholds  # noqa: F401, F811 — fixture
 
 
 def _retained(paths) -> list:
@@ -31,7 +30,7 @@ def _retained(paths) -> list:
 
 
 def test_r6_a_failing_redelivery_serves_no_new_work_and_keeps_the_retained_record(
-        p4_tenant, tmp_path, thresholds, caplog):
+        p4_tenant, tmp_path, thresholds, caplog):  # noqa: F811 — fixture
     t = p4_tenant
     bind_forge(t)
     paths = drain_paths(t, product_repo(tmp_path))

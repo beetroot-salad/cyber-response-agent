@@ -4,7 +4,6 @@ a run with no stamp and no record is a pre-P4 run (shows nothing)."""
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -66,7 +65,9 @@ def test_r6_a_well_formed_host_record_is_read_as_it_says(case):
 def test_r6_a_host_record_of_the_wrong_shape_is_unreadable_never_fresh(case):
     got = knowledge_status(BAD[case], stamp_names_source=False)
     assert got == UNREADABLE, f"{BAD[case]} was read as {got}"
-    assert got.stale and got.stale_kind == "operator" and got.commit is None
+    assert got.stale
+    assert got.stale_kind == "operator"
+    assert got.commit is None
 
 
 def test_r6_a_run_with_no_record_and_no_stamp_is_a_pre_p4_run_that_shows_nothing(tmp_path):

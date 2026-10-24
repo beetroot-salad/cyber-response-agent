@@ -11,7 +11,6 @@ import json
 import logging
 import ssl
 import threading
-from pathlib import Path
 
 import httpx
 import pytest
@@ -37,7 +36,7 @@ def vc():
 def _cert(cn: str, *, san: bool):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     builder = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
                .public_key(key.public_key()).serial_number(x509.random_serial_number())
                .not_valid_before(now - datetime.timedelta(minutes=5))

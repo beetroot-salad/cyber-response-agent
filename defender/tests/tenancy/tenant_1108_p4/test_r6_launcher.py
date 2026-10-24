@@ -66,7 +66,8 @@ def test_r6_the_run_records_a_publish_seam_that_raises_anything_as_a_failed_chil
 
     with B.run_tenant(tmp_path, data_root) as t:
         out = B.launch(t, tmp_path, publish=broken)
-        assert out.reached and out.rc == 0, out.text()
+        assert out.reached, out.text()
+        assert out.rc == 0, out.text()
         source = B.knowledge_source(out)
         assert (source["kind"], source["stale_kind"]) == ("stale", "operator"), source
         assert "publish child failed" in source["reason"]
@@ -87,7 +88,8 @@ def test_r6_a_report_line_is_one_line_whatever_the_detail_says():
 
     for kind in publish.REPORT_CLASSES:
         line = publish.report(kind, "first line\nsecond line\r\nthird")
-        assert "\n" not in line and "\r" not in line, line
+        assert "\n" not in line, line
+        assert "\r" not in line, line
 
 
 def test_r6_the_childs_network_bound_sits_well_inside_the_launchers_budget():
@@ -95,7 +97,7 @@ def test_r6_the_childs_network_bound_sits_well_inside_the_launchers_budget():
     from defender.runtime import publish_launch
 
     budget = inspect.signature(publish_launch.launch_publish).parameters["budget"].default
-    assert publish.CHILD_NETWORK_TIMEOUT * 2 <= budget, (publish.CHILD_NETWORK_TIMEOUT, budget)
+    assert budget >= publish.CHILD_NETWORK_TIMEOUT * 2, (publish.CHILD_NETWORK_TIMEOUT, budget)
 
 
 def test_r6_a_lock_busy_is_a_transient_outage_not_an_operator_fault():

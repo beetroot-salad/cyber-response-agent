@@ -59,7 +59,8 @@ def test_r6_a_clone_missing_one_half_of_its_tree_is_refused_at_run_start(
         tmp_path, data_root, half):
     with B.run_tenant(tmp_path, data_root) as t:
         control = B.launch(t, tmp_path / "control", publish=lambda *a, **k: B.fresh(t.commit))
-        assert control.reached and control.rc == 0, control.text()
+        assert control.reached, control.text()
+        assert control.rc == 0, control.text()
         shutil.rmtree(Path(t.clone) / half)
         out = B.launch(t, tmp_path / "broken", publish=lambda *a, **k: B.fresh(t.commit))
         assert not out.reached, f"a run started over a clone with no {half}/: {out.text()}"

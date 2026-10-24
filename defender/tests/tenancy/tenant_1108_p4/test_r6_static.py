@@ -8,7 +8,6 @@ import re
 
 from defender._git import REPO_ROOT
 from defender.tests.tenancy.tenant_1108_p4.test_dev_compose import (
-    COMPOSE_DIR,
     ISSUER_STATE,
     KNOWLEDGE_DATA,
     _host_path,
