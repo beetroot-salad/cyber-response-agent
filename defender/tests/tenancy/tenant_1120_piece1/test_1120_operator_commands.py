@@ -442,8 +442,8 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     outputs = [frontend / n for n in ("lessons.json", "lessons.html", "queues.json", "queues.html")]
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
     try:
-        proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root,
-                            DEFENDER_LEARNING_STATE_DIR=str(poison), DEFENDER_DEPLOYMENT="dev")
+        proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root, DEFENDER_DEPLOYMENT="dev",
+                            DEFENDER_LEARNING_STATE_DIR=str(poison))
         out = H.output(proc)
         assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
         assert "tenant" in out.lower(), out

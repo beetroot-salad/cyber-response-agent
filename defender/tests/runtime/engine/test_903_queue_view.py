@@ -867,7 +867,7 @@ def test_1279_o1_the_cli_builds_the_selected_tenants_state_not_an_ambient_one(
     before = _in_tree_pages()
     try:
         proc = _build_cli(tenant.id, data_root, DEFENDER_DEPLOYMENT="dev",
-                          DEFENDER_LEARNING_STATE_DIR=str(poison))
+                            DEFENDER_LEARNING_STATE_DIR=str(poison))
         assert proc.returncode == 0, H.output(proc)
 
         area = run_visualizations_dir / tenant.id / "learning"

@@ -1851,7 +1851,7 @@ tests:
       - old: "assert 'href=\"lessons.html\"' in build.render_queues(view)"
         new: same
   - file: "defender/tests/runtime/engine/test_903_queue_view.py"
-    test: "test_main_writes_the_queue_pages_beside_the_lessons_pages"
+    test: "test_main_publishes_the_four_pages_into_the_tenants_publish_area"
     fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
