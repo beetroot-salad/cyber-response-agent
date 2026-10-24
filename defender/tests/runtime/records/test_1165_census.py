@@ -162,6 +162,17 @@ RESIDUE = {
     ("box._oracle", "start_oracle_box", "shutil.rmtree"): (1, "nonrecord", ('runner',)),
     ("box._oracle", "start_oracle_box.discard", "shutil.rmtree"): (2, "nonrecord", ('runner', 'scratch')),
     ("box._oracle", "stop_oracle_box", "shutil.rmtree"): (1, "nonrecord", ('folder',)),
+    # #1108 P4: the run copy's host-side lifecycle (`<tenant>/run-knowledge/<run_id>/`, outside any
+    # run dir): built as a dot-named temporary holding its owner record, renamed into place,
+    # removed by name under the held folder; and the host-held knowledge-source record beside the
+    # run dir (U12). None is a run-dir record, so each is non-record I/O.
+    ("runtime.run_knowledge", "_remove_copy", "os.open"): (1, "nonrecord", ('folder',)),
+    ("runtime.run_knowledge", "_remove_copy", "shutil.rmtree"): (1, "nonrecord", ('name',)),
+    ("runtime.run_knowledge", "_remove_copy", "os.unlink"): (1, "nonrecord", ('name',)),
+    ("runtime.run_knowledge", "copy_for_run", "hold_new"): (1, "nonrecord", ('copies',)),
+    ("runtime.run_knowledge", "copy_for_run", ".mkdir"): (1, "nonrecord", ('held',)),
+    ("runtime.run_knowledge", "copy_for_run", "os.rename"): (1, "nonrecord", ('copies / temporary',)),
+    ("runtime.run_knowledge", "write_host_record", "write_guarded"): (1, "nonrecord", ('path',)),
     ("runtime.driver", "_stop_before_main", "write_guarded"): (1, "retiring"),
     # #1255 extracted the existing empty tool-trace fallback; #1165 N-c still
     # retires this projection separately. Its record target and count are unchanged.

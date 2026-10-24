@@ -33,8 +33,12 @@ def test_learning_reads_and_deletes_use_the_same_workspace_in_each_layout(tmp_pa
     deps = _curator(tmp_path / layout)
     lesson = deps.corpus_dir / "old.md"
     lesson.write_text("old lesson")
-    assert deps.view.to_model(lesson) == "/workspace/defender/lessons/old.md"
-    assert "old lesson" in _tool_read_file(deps, "/workspace/defender/lessons/old.md")
+    # #1108 P4 (O1): the lessons are the tenant's, so the model names them under its agent tree
+    # (`/agent/lessons/...`), not under the product checkout's `/workspace/defender/lessons`.
+    assert deps.view.to_model(lesson) == "/agent/lessons/old.md"
+    assert "old lesson" in _tool_read_file(deps, "/agent/lessons/old.md")
+    # The host-fallback bash transport only maps the `/workspace` spelling; the model-facing
+    # name above is what the tools report, the checkout spelling is what this transport runs.
     assert "old lesson" in _tool_bash(deps, "cat defender/lessons/old.md")
     _tool_bash(deps, "rm /workspace/defender/lessons/old.md")
     assert not lesson.exists()

@@ -447,6 +447,9 @@ PARAM_ALLOWLIST = frozenset({
     ("run", "_Investigate.__call__", "alert_path", _ALERT),
     ("run", "_drive_investigation", "alert_path", _ALERT),
     ("run", "_materialize_run", "alert", _ALERT),
+    ("run", "_materialize_run", "settings",
+     "the run copy's settings file: a host path of the tenant's settings dir the builder copies "
+     "into the run dir (#1108 P4), not a path below an episode dir"),
 })
 PARAM_TOLERATED = frozenset({
     ("run", "resume_world", "manifest"),
