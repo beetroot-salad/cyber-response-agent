@@ -688,6 +688,11 @@ jobs:
       - name: Agent retries fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_agent_retries.py
 
+      # Scrub order (#540): the box lifecycle scrubs the run folder before any reader of it, no
+      # handler swallows the taint signal, and the bash tool has no in-process fallback.
+      - name: Scrub-order fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_scrub_order.py
+
       # Episode paths (#1133, #1187): episode trees are reached only through the Episode handle and
       # the runs repository's walk. The migrated modules make no episode I/O but the declared
       # residue, the handle does I/O only through hold / hold_new, no function takes a path below
