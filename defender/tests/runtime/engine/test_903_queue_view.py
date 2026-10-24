@@ -775,7 +775,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
         assert _channel(queues, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
         # The quarantine dir is the tenant's own LoopPaths' (host-wide until #1108 P4), not the
         # fixture's: its rows are not asserted here.
-        assert "tainted" in queues["quarantine"]
+        assert Path(queues["quarantine"]["tainted"]["dir"]) == LoopPaths.for_tenant(tenant).quarantine_dir
         assert _embedded_data((area / "queues.html").read_text(encoding="utf-8")) == queues
         lessons = json.loads((area / "lessons.json").read_text(encoding="utf-8"))
         assert set(lessons["groups"]) == {"defender", "actor", "environment", "questioner"}

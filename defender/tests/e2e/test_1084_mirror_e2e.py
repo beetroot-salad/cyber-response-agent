@@ -435,3 +435,31 @@ def test_1279_o4_outside_dev_the_copy_is_skipped_and_the_run_page_is_still_saved
     _assert_record_written(run_dir)
     assert not list(run_visualizations_dir.iterdir()), "a non-dev run published a page"
     assert _warnings(caplog) == [], "a skipped copy was warned about"
+
+
+def test_1279_a7_a_refused_root_resolution_fails_the_copy_not_the_run(
+        tmp_path, run_visualizations_dir, monkeypatch, caplog):
+    """A7: in dev a refused root resolution (`PublishRootRefused`) is logged and reported as a
+    failed or skipped copy like the mirror's other faults; the run page record is kept and the run
+    is not failed. Reached here through the one refusal `publish_page` can be steered into without a
+    patch -- the override unset under pytest (the owner's detector); a worktree with an unfollowable
+    `.git` pointer is the same exception from `publish_root(start=<worktree>)`, pinned in
+    test_1084_mirror.py. Control: with the override set the same run copies."""
+    vr = _renderer()
+    run_dir = driven_run(tmp_path)
+    run = tenant_run(run_dir)
+    tenant = tenant_of(run)
+    assert vr.publish_page(run, tenant=tenant) == "copied", "positive control: dev with a root publishes"
+    shutil.rmtree(run_visualizations_dir)
+    run_visualizations_dir.mkdir()
+    (run_dir / PAGE).unlink()
+    monkeypatch.delenv(ENV)
+    caplog.set_level(logging.DEBUG)
+
+    assert vr.publish_page(run, tenant=tenant) in ("failed", "skipped")
+
+    _assert_record_written(run_dir)
+    assert not list(run_visualizations_dir.iterdir()), "a refused resolution published a page"
+    caplog.clear()
+    run_common.visualize(run, tenant=tenant)  # a refused copy is not a failed render: no VisualizeFailed
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING], "the refusal was not logged"

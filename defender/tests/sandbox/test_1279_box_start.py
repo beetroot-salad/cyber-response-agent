@@ -300,12 +300,13 @@ def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
 
 
 @pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
-def test_a7_in_dev_a_refused_root_resolution_refuses_the_start_never_no_root(
+def test_o3_the_refusal_class_is_non_degradable_when_the_root_owner_refuses_the_pytest_detector(
         tmp_path, monkeypatch, opt_out):
-    """A7: in `dev`, a root that cannot be resolved (here: no code mount to resolve it from, and
-    the override unset under pytest, which the owner refuses) is an O3 refusal, not "no root" --
-    and the opt-out does not degrade it. The same request starts with the override set (control),
-    and outside `dev`, where there is no root to resolve."""
+    """The refusal class is non-degradable: a root resolution the owner refuses (here only its
+    pytest detector: no code mount to resolve from, the override unset) refuses the start, the
+    opt-out does not degrade it, and it is no "no root". This is NOT the A7 coverage -- the
+    worktree-pointer and main-without-defender cases below are. Control: the same request starts
+    with the override set, and outside `dev`, where there is no root to resolve."""
     req = X.request_lane(tmp_path)
     request = _request_without_a_code_mount(req)
 
@@ -326,6 +327,31 @@ def test_a7_in_dev_a_refused_root_resolution_refuses_the_start_never_no_root(
     outside = RecordingDocker()
     box_mod.start_box(request, docker=outside)
     assert outside.create_argv is not None, "outside dev there is no root to fail to resolve"
+
+
+@pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
+@pytest.mark.parametrize("broken", X.BREAKAGES)
+def test_a7_in_dev_an_undeterminable_main_checkout_refuses_the_start(
+        tmp_path, monkeypatch, broken, opt_out):
+    """A7: a worktree whose `.git` pointer cannot be followed (gitdir leads nowhere), or whose
+    main checkout has no `defender/`, makes the root unresolvable. In `dev` with the override unset
+    the start is refused as an O3 refusal -- plain and with the opt-out -- and nothing is created.
+    Positive control: the intact pointer starts the same lane."""
+    X.dev_default_root(monkeypatch)
+    _, good_wt = X.fake_main_and_worktree(tmp_path / "good")
+    good = RecordingDocker()
+    replace(X.run_lane(tmp_path / "lane-good"), defender_dir=good_wt / "defender").start(good)
+    assert good.create_argv is not None, "control: the intact worktree did not start"
+
+    _, wt = X.fake_main_and_worktree(tmp_path / "bad", broken=broken)
+    lane = replace(X.run_lane(tmp_path / "lane-bad"), defender_dir=wt / "defender")
+    if opt_out:
+        X.allow_unsandboxed(monkeypatch)
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()):
+        lane.start(rec)
+    assert not X.created(rec.calls)
+    assert not X.removed(rec.calls)
 
 
 # ---------------------------------------------------------------------------------------

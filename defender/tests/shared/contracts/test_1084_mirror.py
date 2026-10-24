@@ -176,7 +176,7 @@ def _break_commondir_content(main: Path, wt: Path, admin: Path) -> None:
 
 
 def _break_git_file_undecodable(main: Path, wt: Path, admin: Path) -> None:
-    """Bytes that are not UTF-8 in the pointer: malformed, so a fallback — not a raise (#1084
+    """Bytes that are not UTF-8 in the pointer: malformed, so a refusal (A7) (#1084
     adversary H9)."""
     (wt / ".git").write_bytes(b"gitdir: \xff\xfe\n")
 
@@ -192,10 +192,13 @@ def _break_commondir_undecodable(main: Path, wt: Path, admin: Path) -> None:
 ], ids=["commondir-names-a-checkout-without-defender", "git-file-without-gitdir-prefix",
         "gitdir-points-nowhere", "commondir-missing", "commondir-names-elsewhere",
         "git-file-undecodable", "commondir-undecodable"])
-def test_1084_a_mismatched_or_malformed_chain_falls_back_to_start_and_warns(
+def test_1279_a7_a_mismatched_or_malformed_chain_is_refused_not_a_fallback_to_start(
         tmp_path, warned, no_override, breakage):
-    """Positive control first, on the SAME layout: well-formed, the worktree resolves to the main
-    checkout with nothing warned."""
+    """#1279 A7 (conflict updated: #1084 warned and fell back to `start`): in dev a worktree whose
+    chain cannot be followed, or leads to a checkout with no `defender/`, makes the main checkout
+    undeterminable, so `publish_root(start=<worktree>)` raises `PublishRootRefused` -- it does not
+    answer the worktree's own folder. Positive control first, on the SAME layout: well-formed, the
+    worktree resolves to the main checkout with nothing warned."""
     vr = _renderer()
     main = _checkout(tmp_path / "main")
     wt = tmp_path / "trees" / "wt"
@@ -204,11 +207,8 @@ def test_1084_a_mismatched_or_malformed_chain_falls_back_to_start_and_warns(
     assert warned() == [], "positive control: a well-formed chain is not warned"
 
     breakage(main, wt, admin)
-    got = vr.publish_root(start=wt)
-    assert _same(got, wt / MIRROR), f"a broken chain resolved to {got}, not the fallback"
-    notices = warned()
-    assert len(notices) == 1, f"the fallback was not ONE logged warning: {notices!r}"
-    assert str(wt) in notices[0], f"the warning does not name the fallback folder: {notices!r}"
+    with pytest.raises(vr.PublishRootRefused):
+        vr.publish_root(start=wt)
 
 
 def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, warned, no_override):

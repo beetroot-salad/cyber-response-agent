@@ -775,16 +775,21 @@ while not os.path.exists(sys.argv[2]):
 
 
 def test_1279_a6_the_default_spawn_streams_the_announce_while_the_child_is_alive(scene: Scene):
-    """A6/P-E: through the REAL default spawn (`held_out._spawn_run_py`), `launch` has appended the
-    id row while the child is still running. The child blocks on a sentinel that a watcher creates
-    only after it sees the id row in F; a spawn that replays output after exit never gets there
-    (the child gives up with 9, the watcher with no id row, and both fail the test)."""
+    """A6/P-E: through the REAL default spawn (`held_out._spawn_run_py`, which is `main`'s default
+    `spawn`, asserted below), `launch` has appended the id row while the child is still running.
+    The child blocks on a sentinel that a watcher creates after it sees the id row in F; a spawn
+    that replays output after exit never gets there: the watcher times out with no id row (so
+    `seen_while_alive` stays empty and the assertion fails), and the child gives up at its own
+    deadline (exit 9, with the id row appended only afterwards)."""
+    import inspect
     import sys
     import threading
     import time
 
     from evaluations import held_out
 
+    assert inspect.signature(held_out.main).parameters["spawn"].default is held_out._spawn_run_py, (
+        "the launch command's default spawn is not the one this test drives")
     index = scene.ops / INDEX_NAME
     rid = S.new_id()
     child = scene.tmp / "announcing_child.py"
@@ -793,14 +798,20 @@ def test_1279_a6_the_default_spawn_streams_the_announce_while_the_child_is_alive
     seen_while_alive: list[list[dict]] = []
 
     def watch() -> None:
-        deadline = time.monotonic() + 6
-        while time.monotonic() < deadline:
-            rows = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
-            if any("run_id" in row for row in rows):
-                seen_while_alive.append(rows)
-                break
-            time.sleep(0.02)
-        sentinel.write_text("go", encoding="utf-8")
+        try:
+            deadline = time.monotonic() + 6
+            while time.monotonic() < deadline:
+                try:
+                    rows = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
+                except ValueError:  # a line caught half-written; look again
+                    time.sleep(0.02)
+                    continue
+                if any("run_id" in row for row in rows):
+                    seen_while_alive.append(rows)
+                    break
+                time.sleep(0.02)
+        finally:  # whatever happened, never leave the child blocked
+            sentinel.write_text("go", encoding="utf-8")
 
     def default_spawn_of_a_stand_in_child(argv: Sequence[str], **kw: Any) -> int:
         # The default spawn is the thing under test; only run.py is swapped for a tiny child.

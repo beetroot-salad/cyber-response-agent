@@ -60,10 +60,17 @@ def dev_default_root(monkeypatch: Any) -> None:
     monkeypatch.delenv(ALLOW_ENV, raising=False)
 
 
-def fake_main_and_worktree(base: Path) -> tuple[Path, Path]:
+BREAKAGES = ("dangling-gitdir", "main-without-defender")
+
+
+def fake_main_and_worktree(base: Path, *, broken: str | None = None) -> tuple[Path, Path]:
     """A main checkout (`.git` a directory, a `defender/`) and one worktree of it (`.git` a file
     pointing back, with a `defender/` holding the product check file), written the way git
-    leaves them (as test_1084_mirror's layouts). Returns `(main, worktree)`."""
+    leaves them (as test_1084_mirror's layouts). Returns `(main, worktree)`.
+
+    `broken` makes the main checkout undeterminable (A7): "dangling-gitdir" points the worktree's
+    `.git` file at an admin dir that does not exist; "main-without-defender" leaves the pointer
+    intact but the checkout it leads to has no `defender/`."""
     import shutil
 
     main, wt = base / "main", base / "trees" / "wt"
@@ -80,6 +87,12 @@ def fake_main_and_worktree(base: Path) -> tuple[Path, Path]:
     # What a real start reads back from its code mount: the product check file and the image inputs.
     for name in (box_mod.CODE_CHECK_FILE, *HASH_INPUTS):
         shutil.copyfile(B.DEFENDER / name, wt / "defender" / name)
+    if broken == "dangling-gitdir":
+        (wt / ".git").write_text(f"gitdir: {base / 'nowhere' / '.git' / 'worktrees' / 'wt'}\n", encoding="utf-8")
+    elif broken == "main-without-defender":
+        (main / "defender").rmdir()
+    elif broken is not None:
+        raise ValueError(broken)
     return main, wt
 
 
