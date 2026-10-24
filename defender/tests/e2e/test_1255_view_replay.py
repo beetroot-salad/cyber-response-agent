@@ -16,7 +16,6 @@ from defender.run_repository import RUN_LAYOUT  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.box import BoxSpec  # noqa: E402
 from defender.tests.support.runtime.state import _1255_view as V
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._fold_936 import (  # noqa: E402
     CLASS_LESSON,
     CLASS_SELECTOR,
@@ -155,16 +154,28 @@ def _outside(text: str, evidence: list[str]) -> str:
 
 def test_b4_evidence_naming_this_runs_own_trees_is_shown_byte_for_byte(tmp_path, monkeypatch):
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
-    run_id = "20261015t120000z-view-evid-own"
+    # #1279 A3: setup mints the run id, so the evidence naming this run's folder is planted into
+    # the alert after the run exists, at the place the view reads the alert from.
+    run_dir = V.natural_run(layout, ALERT, "view-evid-own")
     old = f"{location_path(layout.data_root)}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
-    own = _own_tree_evidence(layout, Path(location_path(layout.tenant.runs)) / fixture_uuid(run_id))
+    own = _own_tree_evidence(layout, run_dir)
     planted = [f"cat {p}" for p in (old, *own.values())]
     doc = json.loads(ALERT)
     for i, line in enumerate(planted):
         doc[f"process_args_evidence_{i}"] = line
-    run_dir = V.natural_run(layout, json.dumps(doc, indent=2).encode("utf-8"), run_id)
-    assert run_dir == Path(location_path(layout.tenant.runs)) / fixture_uuid(run_id), (
-        f"fixture: the run folder is not where the evidence named it ({run_dir})")
+    # The run's input is write-once and digest-checked, so the doc is re-admitted through run
+    # start's own front door and both files are replaced together (host-side fixture surgery).
+    from defender import run_common
+
+    staged = location_path(layout.data_root).parent / "alert-view-evid-own-planted.json"
+    staged.write_bytes(json.dumps(doc, indent=2).encode("utf-8"))
+    door = run_common._admit_input(staged, tenant=layout.tenant, world=None)
+    for sealed in (run_dir / RUN_LAYOUT.alert, run_dir / RUN_LAYOUT.alert_record):
+        sealed.chmod(0o644)  # setup seals the input read-only; a non-root runner cannot rewrite it
+    (run_dir / RUN_LAYOUT.alert).write_bytes(door.raw)
+    (run_dir / RUN_LAYOUT.alert_record).write_text(door.record, encoding="utf-8")
+    assert run_dir.parent == Path(location_path(layout.tenant.runs)), (
+        f"fixture: the run folder is not in the tenant's runs ({run_dir})")
     main = V.Recorder([
         Turn(tool_calls=[("read_file", {"path": V.MODEL_ALERT})]),
         Turn(text="done"),

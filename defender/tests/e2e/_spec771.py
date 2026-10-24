@@ -493,13 +493,14 @@ def write_guarded(path: Path, text: str, *, mode: str = "replace", **kw: Any) ->
     return _io.write_guarded(path, text, mode=mode, **kw)  # type: ignore[attr-defined]
 
 
-def guarded_mkdir(path: Path, *, base: Path) -> None:
+def guarded_mkdir(path: Path, *, base: Path, exclusive: bool = False) -> None:
     """`defender._io.guarded_mkdir` — the parents-creating half of M3. Separate from
     `write_guarded` because B8 shows the leaf's own `O_NOFOLLOW` cannot protect a component:
-    the rule is stated over the whole call and is DEPTH-AGNOSTIC (firm consensus #13)."""
+    the rule is stated over the whole call and is DEPTH-AGNOSTIC (firm consensus #13).
+    `exclusive` is forwarded as given (#1279 A5): the final component must be this call's own."""
     from defender import _io
 
-    return _io.guarded_mkdir(path, base=base)  # type: ignore[attr-defined]
+    return _io.guarded_mkdir(path, base=base, exclusive=exclusive)  # type: ignore[attr-defined]
 
 
 def sweep_staged(tree: Path) -> list[Path]:
