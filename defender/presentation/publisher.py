@@ -20,10 +20,12 @@ from typing import TYPE_CHECKING
 
 from defender.configuration import _env, publish_root
 from defender.presentation import _mirror_write
-from defender.run_repository import RunPaths
 
 if TYPE_CHECKING:
     from defender.tenancy._tenant import Tenant
+
+#: The published run page's file name: the publish area's own, not a path into a run.
+RUN_PAGE_NAME = "runtime.html"
 
 _MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
 
@@ -60,7 +62,7 @@ class Publisher:
         return cls(root, str(tenant.id))
 
     def run_page(self, run_id: str) -> Target:
-        return Target(RunPaths(self.root / self.tenant_id / "runs" / run_id).runtime_html, self.root)
+        return Target(self.root / self.tenant_id / "runs" / run_id / RUN_PAGE_NAME, self.root)
 
     def learning_page(self, name: str) -> Target:
         if Path(name).name != name or name in ("", ".", ".."):
