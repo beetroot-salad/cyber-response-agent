@@ -102,18 +102,24 @@ def issuer_login(
     *,
     issuer_config: Path | None = None,
     transport: httpx.BaseTransport | None = None,
+    binding: ForgeBinding | None = None,
+    config: IssuerConfig | None = None,
 ) -> ForgejoIdentity:
     """Log in to the issuer with the AppRole pair of the config file the forge binding names
     (`issuer_config`, an in-process stand-in for it) and return the tenant's identity: tokens for the forge binding's `issuer_role`, for its `audience`, checked by
     `ForgejoIdentity` as bound to this tenant. A missing or malformed config file, or a tenant
     row with no forge binding, is refused before any request (O9). A refused login is a
     `ForgejoAuthError` naming the HTTP status only; an unreachable issuer keeps its transport
-    fault as the cause (a caller tells an outage from a refusal by it)."""
-    try:
-        binding = read_forge_binding(tenant)
-    except TenantRefused as unbound:
-        raise DeliveryRefused(str(unbound)) from unbound
-    config = read_issuer_config(issuer_config_path(binding, issuer_config))
+    fault as the cause (a caller tells an outage from a refusal by it). A caller that has read
+    the `binding` and its `config` already hands them in, so they are read once, never twice
+    with a window between."""
+    if binding is None:
+        try:
+            binding = read_forge_binding(tenant)
+        except TenantRefused as unbound:
+            raise DeliveryRefused(str(unbound)) from unbound
+    if config is None:
+        config = read_issuer_config(issuer_config_path(binding, issuer_config))
     login = _client(config, transport)
     try:
         response = login.post(
@@ -142,10 +148,16 @@ def issuer_login(
     token = auth.get("client_token") if isinstance(auth, dict) else None
     if not isinstance(token, str) or not token:
         raise ForgejoAuthError("the issuer's AppRole login returned no client token")
-    return ForgejoIdentity(
-        tenant_id=str(tenant.id),
-        issuer=f"{config.address}{IDENTITY_PATH}",
-        role=binding.issuer_role,
-        audience=binding.audience,
-        client=_client(config, transport, headers={"X-Vault-Token": token}),
-    )
+    client = _client(config, transport, headers={"X-Vault-Token": token})
+    try:
+        return ForgejoIdentity(
+            tenant_id=str(tenant.id),
+            issuer=f"{config.address}{IDENTITY_PATH}",
+            role=binding.issuer_role,
+            audience=binding.audience,
+            client=client,
+        )
+    except BaseException:
+        # Never left open holding the issuer token when the identity is refused.
+        client.close()
+        raise

@@ -58,6 +58,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 from defender.records import _alert_input, _provenance
 from defender.records._locations import DataRoot
 from defender.episodes._episode_handle import Episode
+from defender.episodes._knowledge_pin import pin_text
 from defender._io import (
     NotPlainEntry,
 )
@@ -174,19 +175,25 @@ def source_input(source: Run) -> tuple[bytes, str]:
         raise SourceInputReplaced(f"[branch] {replaced}") from replaced
 
 
-def _copy_source_input(episode: Episode, raw: bytes, record_text: str) -> None:
+def _copy_source_input(episode: Episode, raw: bytes, record_text: str,
+                       knowledge_commit: str | None = None) -> None:
     """Put the source run's alert and its record in the episode, once (A1): the judge's whole
-    input about the alert, and every sibling's own."""
+    input about the alert, and every sibling's own; and the family's knowledge pin, when the
+    launcher decided one (`episodes._knowledge_pin`)."""
     episode.source_alert.create(raw)
     episode.source_record.create(record_text)
+    if knowledge_commit is not None:
+        episode.knowledge_pin.create(pin_text(knowledge_commit))
 
 
 def prepare_episode(
     runs: RunsRepository, source: Run, *,
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
+    knowledge_commit: str | None = None,
 ) -> EpisodeRuns:
-    """Claim a fresh episode, copy the source's input into it, prime the family's base into it
-    once, and hand back its view held open: the launcher's door, whose caller closes it."""
+    """Claim a fresh episode, copy the source's input (and the family's knowledge pin,
+    `knowledge_commit`) into it, prime the family's base into it once, and hand back its view
+    held open: the launcher's door, whose caller closes it."""
     # Judged before an episode is claimed, so a refused source leaves no debris.
     raw, record_text = source_input(source)
     try:
@@ -195,7 +202,7 @@ def prepare_episode(
         raise LauncherRefused(f"[branch] a fresh episode could not be claimed: {refused}") \
             from refused
     try:
-        _copy_source_input(view.episode, raw, record_text)
+        _copy_source_input(view.episode, raw, record_text, knowledge_commit)
         _prime_once(view.episode, view.episode_id, source.run_dir, prime)
     except BaseException:
         view.close()
@@ -317,34 +324,46 @@ def sibling_argv(
 
 def _pinned_export(tenant: RunTenant, source: Run) -> Any:
     """The export every sibling is pinned to and the questioner's corpus is read from (flow 7,
-    O-PIN): the knowledge commit the source run's stamp names, materialised from the tenant
-    clone when absent. A stamp naming `unversioned` or `unavailable` knowledge has no commit
-    to pin to, so it refuses — `--allow-dirty` does not waive it (OD9) — as does a commit the
-    clone cannot materialise; both before anything is spent. A stamp from before knowledge was
-    recorded (#1204: no knowledge, or `null`) is pinned to the tenant's published `current`;
-    pre-flight still refuses such a source unless `--allow-dirty` waives it."""
+    O-PIN): the knowledge commit the source run's HOST-HELD knowledge record names (U12, beside
+    the run folder, where no box writes), materialised from the tenant clone when absent —
+    never its provenance stamp, which sits in the box's rw bind (the stamp is compared against
+    this pin at pre-flight, never read for it). A record that cannot be read has no commit to
+    pin to, so it refuses — `--allow-dirty` does not waive it (OD9) — as does a commit the
+    clone cannot materialise; both before anything is spent. Only a source from before records
+    were written (no record, and a stamp naming no knowledge source) is judged by its stamp, as
+    before: a commit it names, a refusal for `unversioned`/`unavailable`, or with none recorded
+    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`)."""
     from defender.learning.author.version_control import (
         DeliveryRefused,
         LockBusy,
         current_export,
         materialise_export,
     )
-
-    stamp = _stamp_of(source) or {}
-    revision = _provenance.KnowledgeRevision.from_wire(stamp.get("knowledge"))
+    status = source.knowledge_status()
+    commit = None if status is None else status.commit
     try:
-        if revision is None:
-            return current_export(tenant.tenant)
-        if revision.commit is None:
-            why = (f"unavailable knowledge ({revision.unavailable})"
-                   if revision.unavailable is not None else "unversioned knowledge")
+        if status is None:
+            # A source from before host records: its stamp is all there is (#1204's rules).
+            revision = _provenance.KnowledgeRevision.from_wire(
+                (_stamp_of(source) or {}).get("knowledge"))
+            if revision is None:
+                return current_export(tenant.tenant)
+            if revision.commit is None:
+                why = (f"unavailable knowledge ({revision.unavailable})"
+                       if revision.unavailable is not None else "unversioned knowledge")
+                raise LauncherRefused(
+                    f"[branch] source run {source.run_dir}'s stamp names {why}: there is no "
+                    "knowledge commit to pin its siblings to, so the family cannot be launched "
+                    "(not waived by --allow-dirty)")
+            commit = revision.commit
+        elif commit is None:
             raise LauncherRefused(
-                f"[branch] source run {source.run_dir}'s stamp names {why}: there is no "
-                "knowledge commit to pin its siblings to, so the family cannot be launched "
-                "(not waived by --allow-dirty)")
-        return materialise_export(tenant.tenant, revision.commit)
+                f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
+                "is no knowledge commit to pin its siblings to, so the family cannot be "
+                "launched (not waived by --allow-dirty)")
+        return materialise_export(tenant.tenant, commit)
     except (DeliveryRefused, LockBusy) as refused:
-        at = "" if revision is None else f" ran at knowledge commit {revision.commit}, which"
+        at = "" if commit is None else f" ran at knowledge commit {commit}, which"
         raise LauncherRefused(
             f"[branch] source run {source.run_dir}{at} cannot be pinned to a knowledge "
             f"export: {refused}") from refused
@@ -573,7 +592,7 @@ def _launch(  # noqa: PLR0913 — see `main`
 
         roster = read_roster(adapters_under(_DEFENDER_DIR))
 
-    view = prepare_episode(runs, source)
+    view = prepare_episode(runs, source, knowledge_commit=pinned.commit)
     episode = view.episode
     # Set once the first sibling is about to start: past it, the abort message below ("no
     # sibling started") would be false, so anything raised later is re-raised unchanged.

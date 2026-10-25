@@ -74,7 +74,7 @@ def opened_delivery(
     with contextlib.ExitStack() as owned:
         if identity is None:
             identity = issuer_login(tenant, issuer_config=issuer_config,
-                                    transport=issuer_transport)
+                                    transport=issuer_transport, binding=binding)
             owned.callback(identity.client.close)
         if client is None:
             import httpx

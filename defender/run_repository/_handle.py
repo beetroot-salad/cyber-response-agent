@@ -374,6 +374,16 @@ class Run:
     def subcollections(self) -> tuple[str, ...]:
         return GROUPS
 
+    def knowledge_status(self) -> Any:
+        """How this run came by its tenant knowledge, and which commit it read (#1108 P4, U12):
+        `records._knowledge_status`'s rule over the host-held record beside the run folder,
+        where no box writes — the one source of a run's knowledge commit for anything that
+        acts on it. `None` for a run from before records were written."""
+        from defender.records._knowledge_status import read_knowledge_status
+
+        paths = RunPaths(self.run_dir)
+        return read_knowledge_status(paths.knowledge_source(), paths.provenance)
+
     @property
     def id(self) -> RunId:
         """The address's run half, as a `RunId` (the run folder's own name, which the

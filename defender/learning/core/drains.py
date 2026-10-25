@@ -638,10 +638,14 @@ def _validate_merge_mode() -> None:
     merge_mode()
 
 
-#: Each lane's branch prefix on the tenant repository: its writer lease and its retained
-#: deliveries are its own (the other lane delivers under its own drain lock).
-AUTHOR_BRANCH_PREFIX = "lessons/"
-LEAD_AUTHOR_BRANCH_PREFIX = "lead-author/"
+def _branch_prefix(label: DrainLabel) -> str:
+    """Each lane's branch prefix on the tenant repository, by its label: its writer lease and
+    its retained deliveries are its own (the other lane delivers under its own drain lock). The
+    author lane's is delivery's own lessons prefix. Read once per tick, by `_run_tenant_batch`,
+    for both the no-network pre-check and the delivery it opens."""
+    from defender.learning.author.version_control.delivery import LESSONS_BRANCH_PREFIX
+
+    return LESSONS_BRANCH_PREFIX if label is AUTHOR_DRAIN_LABEL else "lead-author/"
 
 
 class _Refused(Exception):
@@ -664,7 +668,7 @@ def _classified_refusal(message: str, fault: BaseException) -> _Refused:
 
 @contextlib.contextmanager
 def _open_delivery(
-    paths: LoopPaths, *, prefix: str, client: httpx.Client | None,
+    paths: LoopPaths, *, client: httpx.Client | None,
     identity: ForgejoIdentity | None, issuer_config: Path | None,
     issuer_transport: httpx.BaseTransport | None,
 ) -> Iterator[TenantDelivery]:
@@ -692,7 +696,7 @@ def _open_delivery(
         except (vc.DeliveryRefused, vc.ForgejoAuthError) as refused:
             raise _classified_refusal(
                 f"the tenant {tenant.id}'s delivery refused: {refused}", refused) from None
-        yield dataclasses.replace(delivery, branch_prefix=prefix)
+        yield delivery
 
 
 def _record_pending_delivery(
@@ -797,11 +801,12 @@ def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
     A tick with nothing retained and nothing queued opens nothing. A refusal while opening is
     the stage's refusal, before any claim, box or model call (O9); an outage there skips the
     tick."""
-    prefix = AUTHOR_BRANCH_PREFIX if label is AUTHOR_DRAIN_LABEL else LEAD_AUTHOR_BRANCH_PREFIX
+    prefix = _branch_prefix(label)
     if not state.deliveries(prefix) and not has_work(state):
         _logger.info(f"{label}: nothing queued and no curator at threshold — skipping")
         return 0
-    with open_delivery() as delivery:
+    with open_delivery() as opened:
+        delivery = dataclasses.replace(opened, branch_prefix=prefix)
         return _run_opened_batch(paths, state, delivery, label=label, has_work=has_work,
                                  do_work=do_work, start_box=start_box, stop_box=stop_box)
 
@@ -912,7 +917,7 @@ def author_drain(
     seam = trigger_author
 
     def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
-        return _open_delivery(paths, prefix=AUTHOR_BRANCH_PREFIX, client=client,
+        return _open_delivery(paths, client=client,
                               identity=identity, issuer_config=issuer_config,
                               issuer_transport=issuer_transport)
 
@@ -966,7 +971,7 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     lead_step, pitfalls_step = run_lead_author, run_pitfalls
 
     def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
-        return _open_delivery(paths, prefix=LEAD_AUTHOR_BRANCH_PREFIX, client=client,
+        return _open_delivery(paths, client=client,
                               identity=identity, issuer_config=issuer_config,
                               issuer_transport=issuer_transport)
 

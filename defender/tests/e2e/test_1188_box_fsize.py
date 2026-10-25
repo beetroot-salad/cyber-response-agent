@@ -103,13 +103,16 @@ def _start_investigation(
     run_dir: Path, rec: AliasProbeDocker, *, tenant_agent: Path | None = None,
 ) -> None:
     """No `spec=`: the env-resolved default every investigation gets."""
-    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec)
+    staged = {} if tenant_agent is None else {"staged_token": tenant_agent.parent / "token"}
+    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec, **staged)
 
 
 def _tenant_agent(base: Path) -> Path:
-    """A tenant's agent half, as `run.py` always passes one:"""
-    agent = base / f"tenant-agent-{uuid.uuid4().hex[:8]}"
-    agent.mkdir(parents=True)
+    """A tenant's agent half, as `run.py` always passes one: a run copy's `stage/agent/`, its
+    startup token beside it (`stage/token`)."""
+    from defender.tests.support.tenancy._run_copy_stage import new_staged_agent
+
+    agent, _token = new_staged_agent(base)
     (agent / ".tenant-id").write_text(tenant_id_file_text(TenantId(fixture_uuid("tenant:fsize-test"))), encoding="utf-8")
     return agent
 
@@ -273,9 +276,10 @@ _Exec = _AgentExec | _DockerExec
 def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
     """A REAL investigation box on a fresh run dir, with a tenant agent half as `run.py` always starts one;"""
     run_dir = _run_dir(base)
+    agent = _tenant_agent(base)
     box = box_mod.start_box(
         run_dir, DEFENDER, spec=box_mod.BoxSpec(runtime=runtime),
-        tenant_agent=_tenant_agent(base), docker=box_mod._docker,
+        tenant_agent=agent, staged_token=agent.parent / "token", docker=box_mod._docker,
     )
     try:
         # A startup fault under DEFENDER_ALLOW_UNSANDBOXED=1 degrades to the host executor,

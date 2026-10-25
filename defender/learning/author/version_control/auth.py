@@ -20,6 +20,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from defender.tenancy._tenant import ISSUER_ROLE
+
 TOKEN_TTL = 600
 CLOCK_SKEW = 30
 
@@ -109,7 +111,7 @@ class ForgejoIdentity:
             raise ForgejoAuthError(
                 "Vault issuer must be an HTTPS URL without credentials"
             )
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", self.role):
+        if not ISSUER_ROLE.fullmatch(self.role):
             raise ForgejoAuthError("Vault identity role must be a plain name")
         if not self.tenant_id or not self.audience:
             raise ForgejoAuthError(

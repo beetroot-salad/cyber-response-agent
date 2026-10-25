@@ -435,9 +435,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     def scrub_tree(tree: Path) -> None:
         scrub(tree, write_verdict=write_verdict)
 
-    # The startup token of the run copy's stage (#1108 P4, U9): a `RunTenant` built over a run
-    # copy carries it, and `start_box` checks the stage and reads it back; a tenant with no stage
-    # (no run copy) has none, and the box is started as before.
+    # The startup token of the run copy's stage (#1108 P4, U9): the `RunTenant` run start builds
+    # over its run copy carries it, and `start_box` checks the stage and reads it back. A run box
+    # is never started over a tenant with no run copy (`start_box` refuses one).
     token = getattr(tenant, "stage_token", None)
     staged = {} if token is None else {"staged_token": token}
     box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
@@ -493,6 +493,29 @@ def _resolve_run_tenant(
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 
 
+def _family_pin(ns: argparse.Namespace, pin: str | None, episode: Any) -> str | None:
+    """The commit a sibling (`--episode`) reads: its family's knowledge pin, read from the
+    episode, where only its launcher writes (`episodes._knowledge_pin`), so a sibling started or
+    resumed by hand reads its family's knowledge, never a newer `current`. A `--knowledge-commit`
+    naming another commit refuses. An episode with no pin (launched before the pin was
+    recorded) keeps `pin` as given, as before. An ordinary run's `pin` is kept."""
+    if episode is None:
+        return pin
+    from defender.episodes._knowledge_pin import PinUnreadable, read_pin
+
+    try:
+        family = read_pin(episode.view())
+    except PinUnreadable as unreadable:
+        sys.exit(f"[run.py] --episode {ns.episode}: the family's knowledge pin is unreadable: "
+                 f"{unreadable}")
+    if family is None:
+        return pin
+    if pin is not None and pin != family:
+        sys.exit(f"[run.py] --episode {ns.episode}: --knowledge-commit {pin} is not the family's "
+                 f"knowledge commit {family}")
+    return family
+
+
 def _knowledge_pin(ns: argparse.Namespace) -> str | None:
     """`--knowledge-commit`, held to a full commit id (O-PIN), or `None` for an unpinned run."""
     if ns.knowledge_commit is None:
@@ -508,13 +531,17 @@ def _publish_report(
 ) -> run_knowledge.PublishReport:
     """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
     — the tenant id and the data root (O8: no login material passes through the run process)
-    — and its one report line is read back. A child that cannot be spawned or raises is U11's
-    `stale:operator`, never fresh."""
+    — and its one report line is read back. The real launcher never raises and records every
+    outcome itself; a seam that raises is U11's `stale:operator`, never fresh, recorded by the
+    same recorder the launcher uses."""
     try:
         launch = publish if publish is not None else _default_publish()
         line = launch(str(tenant.id), data_root=_tenant.data_root_for_child(data_root))
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
-        return run_knowledge.child_failed(f"{type(failed).__name__}: {failed}")
+        from defender.tenancy._publish_status import record_report
+
+        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
+        record_report(tenant, line, by="launch-time publish")
     return run_knowledge.read_publish_report(line)
 
 
@@ -872,6 +899,8 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
         contextlib.nullcontext() if episode_runs is None else episode_runs)
     with door:
         episode = None if episode_runs is None else episode_runs.episode
+        # A sibling's knowledge is its family's: the pin its launcher recorded in the episode.
+        pin = _family_pin(ns, pin, episode)
         # One readiness check, shared by the old-manifest judge (only for a manifest recording
         # no corpus patterns) and the run; resolved over the run's own copy of its knowledge.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(

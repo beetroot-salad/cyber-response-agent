@@ -19,6 +19,10 @@ from _harness_util import LocalTenant
 
 from defender import _git
 from defender._model import model
+# The branch prefix the author lane's batches take (the author drain's: delivery's own).
+from defender.learning.author.version_control.delivery import (
+    LESSONS_BRANCH_PREFIX as AUTHOR_BRANCH_PREFIX,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -27,8 +31,6 @@ HERE = Path(__file__).resolve().parent
 RESULTS_DIR = HERE / "results"
 
 MANIFEST_SEED = "eval-harness"
-#: The branch prefix the author lane's batches take (the author drain's).
-AUTHOR_BRANCH_PREFIX = "lessons/"
 
 
 @model(frozen=True)

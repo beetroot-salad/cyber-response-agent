@@ -46,8 +46,9 @@ FOREIGN_HOST_PATH = "/srv/acme-prod/defender-data/acme/runs/20250101t000000z-old
 def _unboxed(layout: V.Layout, run_dir: Path, monkeypatch) -> object:
     """Start production's explicitly permitted fallback without a Docker daemon."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    agent, token = layout.staged()
     return box_mod.start_box(run_dir, layout.checkout, spec=SPEC, docker=V.FakeDocker(),
-                             tenant_agent=layout.agent, tenant_id=layout.tenant.id)
+                             tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
 
 
 def _drive(layout: V.Layout, run_dir: Path, main, monkeypatch, **kw) -> dict:

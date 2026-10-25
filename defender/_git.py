@@ -91,6 +91,24 @@ def git(
                 pass_fds=pass_fds).stdout.strip()
 
 
+class _NetworkGroup:
+    """Whether this process's network git calls join its own process group rather than each
+    starting a session of its own (`join_caller_group`)."""
+
+    joined = False
+
+
+_NETWORK_GROUP = _NetworkGroup()
+
+
+def join_caller_group() -> None:
+    """From now on, this process's network git calls run in its own process group: for a
+    disposable child (the launch-time publish child) whose parent kills that group whole when
+    the child ends, however it ends — a SIGKILL included, which no `finally` survives. Each
+    call then kills git alone on its way out; what git started dies with the group."""
+    _NETWORK_GROUP.joined = True
+
+
 def git_network(
     args: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float,
     pass_fds: Sequence[int] = (),
@@ -102,19 +120,26 @@ def git_network(
     interrupt raised into the wait) that whole group is killed before anything surfaces. A
     kill of git alone (`subprocess.run(timeout=)`) leaves its helper running, orphaned, still
     talking to the remote (#1108 amendment 3, C4). A non-zero exit raises `GitError`; the
-    timeout, `GitTimeout`. `pass_fds` are descriptors git and its children inherit."""
+    timeout, `GitTimeout`. `pass_fds` are descriptors git and its children inherit. In a
+    process that joined its caller's group (`join_caller_group`), git runs in that group and
+    only git is killed here; its helpers die when the group is killed."""
+    joined = _NETWORK_GROUP.joined
     with subprocess.Popen(  # noqa: S603 — fixed argv
             ["git", *args], cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=tuple(pass_fds),
-            start_new_session=True) as proc:
+            start_new_session=not joined) as proc:
         try:
             out, err = proc.communicate(timeout=timeout)
         finally:
-            # The group is git's own session (`start_new_session`), its id git's pid. On a
-            # timeout, exception or interrupt git is not yet reaped, so the id is still its
-            # own; after git's exit (reaped) it is held by any member still alive, and with
-            # none the kill finds no group.
-            kill_group(proc.pid)
+            if joined:
+                if proc.returncode is None:
+                    proc.kill()
+            else:
+                # The group is git's own session (`start_new_session`), its id git's pid. On a
+                # timeout, exception or interrupt git is not yet reaped, so the id is still its
+                # own; after git's exit (reaped) it is held by any member still alive, and with
+                # none the kill finds no group.
+                kill_group(proc.pid)
     if proc.returncode != 0:
         raise GitError(args, proc.returncode, err.decode("utf-8", "surrogateescape"))
     return out.decode("utf-8", "surrogateescape").strip()

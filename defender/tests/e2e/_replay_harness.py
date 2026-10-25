@@ -531,9 +531,20 @@ def production_unboxed_box(run_dir: Path, defender_dir: Path, run_tenant: Any) -
     is hidden: the opt-out's "running UNSANDBOXED" warning and the startup fault's did-not-run
     scrub marker beside the run folder (`RunPaths.scrub_verdict`) are production's, and land in
     every replay that takes this default."""
+    token = getattr(run_tenant, "stage_token", None)
+    agent = Path(run_tenant.agent)
+    if token is None:
+        # A run box is started over a run copy (`start_box` refuses a bare agent folder): a
+        # replay tenant with none gets its agent half staged beside the run folder.
+        from defender.tests.support.tenancy._run_copy_stage import staged_agent
+
+        import tempfile
+
+        agent, token = staged_agent(agent, Path(tempfile.mkdtemp(prefix="replay-run-copy-")))
     with _unsandboxed_allowed():
         return box_mod.start_box(run_dir, defender_dir, docker=_no_docker_daemon,
-                                 tenant_agent=run_tenant.agent, tenant_id=run_tenant.tenant_id)
+                                 tenant_agent=agent, tenant_id=run_tenant.tenant_id,
+                                 staged_token=token)
 
 
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM

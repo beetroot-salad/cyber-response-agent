@@ -825,8 +825,21 @@ def _pass_lessons_commit(bound: Bound, world_ids: list[str]) -> str | None:
 
 
 def _pass_knowledge(bound: Bound, world_ids: list[str]) -> object:
-    """The knowledge stamp (wire) every post-move lesson body in this pass is read at: the first
-    graded world's stamp that records one, resolved once, as `_pass_lessons_commit` is."""
+    """The knowledge (stamp wire) every post-move lesson body in this pass is read at: the
+    family's knowledge pin, which its launcher created in the episode, where no box writes
+    (`episodes._knowledge_pin`) — never a sibling's provenance stamp, which sits in its box's rw
+    bind. A pin that cannot be read gives none (bodies shown as unreadable). Only an episode
+    launched before the pin was recorded falls back to the first graded world's stamp that
+    records one, as before."""
+    from defender.episodes._knowledge_pin import PinUnreadable, read_pin
+    from defender.records._provenance import KnowledgeRevision
+
+    try:
+        commit = read_pin(bound)
+    except PinUnreadable:
+        return None
+    if commit is not None:
+        return KnowledgeRevision.at(commit).as_wire()
     for world_id in world_ids:
         knowledge = render_mod._read_provenance(
             bound.under(LAYOUT.world(world_id).dir)).get("knowledge")

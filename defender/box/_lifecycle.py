@@ -705,8 +705,12 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
         # lint-default: ok — the env lever is this default's single source; `spec=` must stay
         # distinguishable from unset for the BoxRequest ambiguity check.
         spec = BoxSpec.from_env(os.environ)
-    if tenant_agent is None and staged_token is not None:
-        raise TypeError("staged_token needs tenant_agent")
+    if (tenant_agent is None) != (staged_token is None):
+        # A run box's agent folder is always a run copy's `stage/agent/` (#1108 P4, U9): the
+        # stage's token is what proves the bind is this run's copy, so there is no tenant
+        # agent without one (and the retired `.tenant-id` check has no case left to cover).
+        raise TypeError("a run box's tenant_agent and staged_token come together: the agent "
+                        "folder is a run copy's stage/agent/, its token beside it")
     if staged_token is not None:
         _judge_stage(run_dir, tenant_agent, staged_token, write_verdict)
     try:

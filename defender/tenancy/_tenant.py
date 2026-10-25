@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
 import stat
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -802,6 +803,9 @@ def tenant_id_file_text(tenant_id: TenantId) -> str:
 #: The row field holding the binding.
 _FORGE_FIELD = "forge"
 _FORGE_KEYS = ("origin", "audience", "issuer_role", "issuer_config")
+#: An issuer role name: what `ForgejoIdentity` will accept, judged when the binding is read, so a
+#: bad one is a refused binding before any login, never a login whose identity is then refused.
+ISSUER_ROLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -821,8 +825,8 @@ class ForgeBinding:
 def read_forge_binding(tenant: Tenant) -> ForgeBinding:
     """The tenant row's `forge: {origin, audience, issuer_role, issuer_config}`, read from the
     row file NOW (an operator may bind or re-bind after the tenant was accepted). Absent, any
-    of the four missing or not a non-empty string, or an `issuer_config` that is not an
-    absolute path, is `TenantRefused` naming the row."""
+    of the four missing or not a non-empty string, an `issuer_role` that is not a plain name,
+    or an `issuer_config` that is not an absolute path, is `TenantRefused` naming the row."""
     path = _unwrap_tenant_root(tenant.tenant_root) / ROW_NAME
     try:
         with _real_io.bind(path.parent) as bound:
@@ -845,6 +849,9 @@ def read_forge_binding(tenant: Tenant) -> ForgeBinding:
     bad = [key for key, value in found.items() if not isinstance(value, str) or not value]
     if bad:
         raise TenantRefused(f"{path}'s forge binding lacks {', '.join(bad)}")
+    if not ISSUER_ROLE.fullmatch(str(found["issuer_role"])):
+        raise TenantRefused(f"{path}'s forge binding names an issuer_role that is not a plain "
+                            "name (letters, digits, `_` and `-`, at most 128)")
     issuer_config = Path(str(found["issuer_config"]))
     if not issuer_config.is_absolute():
         raise TenantRefused(

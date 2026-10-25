@@ -16,6 +16,15 @@ Second round:
   tenant template ships it;
 - removing a batch's draft never raises; a missing alert is refused before any publish; two
   launches into one held-out index cannot interleave their pin read and append.
+
+Third round:
+- the child's own report, whenever it printed one, is the outcome, even after the launcher
+  asked it to stop; the launcher never raises, and kills the child's whole group when it ends;
+- an `issuer_role` that is not a plain name is a refused binding, before any login;
+- a run box is always started over a run copy;
+- a run's knowledge commit comes from its host-held record; the family's, from the episode's
+  knowledge pin, which a sibling's start and the judge both read;
+- a batch reads its base's files once per head.
 """
 from __future__ import annotations
 
@@ -208,15 +217,19 @@ def test_a_zero_budget_is_already_out_not_unbounded(child_tenant, tmp_path):
 
 
 @pytest.mark.parametrize("budget", [0.0, -1.0])
-def test_the_launcher_refuses_a_budget_that_is_not_positive(tmp_path, budget):
+def test_the_launcher_refuses_a_budget_that_is_not_positive_and_records_it(p4_tenant, budget):
     from defender.runtime import publish_launch
     from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
 
     spawn = _RecordingSpawn()
-    with pytest.raises(ValueError, match="positive"):
-        publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=budget,
-                                      spawn=spawn)
+    line = publish_launch.launch_publish(p4_tenant.tenant_id, data_root=p4_tenant.data_root,
+                                         budget=budget, spawn=spawn)
     assert spawn.calls == [], "a child was started with no time to run in"
+    assert line.startswith("stale:operator publish child failed:"), line
+    assert "positive" in line, line
+    status = _status(p4_tenant)
+    assert status is not None
+    assert status.get("kind") == "operator", status
 
 
 def test_the_launcher_and_run_start_build_one_failed_child_line():
@@ -339,3 +352,218 @@ def test_an_exclusively_held_index_folder_excludes_another_process(tmp_path):
         free = subprocess.run([sys.executable, "-c", probe, str(tmp_path)], check=False)  # noqa: S603
     assert busy.returncode == 7, "another process took the folder while it was held"
     assert free.returncode == 0, "control: the folder is free once released"
+
+
+# --- third round: the child's word wins; one group per publish ----------------------------------
+
+def test_a_child_that_finishes_after_the_stop_is_reported_as_it_said(p4_tenant):
+    """The launcher's wait runs out and it asks the child to stop; the child (on the lock, so
+    it ignores the request) finishes and reports `fresh`. That report is the outcome, and the
+    launcher records nothing over it."""
+    from defender.runtime import publish_launch
+
+    commit = p4_tenant.commit
+    child = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+             f"time.sleep(1.5); print('fresh {commit}')")
+    line = publish_launch.launch_publish(
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=0.5,
+        command=[sys.executable, "-c", child, "--"])
+    assert line == f"fresh {commit}", line
+    status = _status(p4_tenant)
+    assert status is None or "refused" not in status, (
+        f"the launcher recorded an outage over the child's own report: {status}")
+
+
+def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
+    """A child that started a process in its own group (as its network git does) and exited:
+    the launcher kills the group, so nothing it started outlives the publish."""
+    import os
+
+    from defender.runtime import publish_launch
+
+    pid_file = tmp_path / "left.pid"
+    child = ("import subprocess, sys; "
+             "p = subprocess.Popen(['sleep', '30']); "
+             f"open({str(pid_file)!r}, 'w').write(str(p.pid)); "
+             "print('stale:transient the forge is down')")
+    line = publish_launch.launch_publish(
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
+        command=[sys.executable, "-c", child, "--"])
+    assert line == "stale:transient the forge is down", line
+    left = int(pid_file.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(left, 0)
+        except ProcessLookupError:
+            break
+        with open(f"/proc/{left}/stat", encoding="utf-8") as stat:
+            if stat.read().split(")")[-1].split()[0] == "Z":
+                break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("a process the child started outlived the publish")
+
+
+# --- third round: the binding is judged once, when read ----------------------------------------
+
+def test_an_issuer_role_that_is_not_a_plain_name_is_a_refused_binding(p4_tenant):
+    from defender.tenancy._tenant import TenantRefused, read_forge_binding
+
+    bind_forge(p4_tenant, issuer_role="tenant role!")
+    with pytest.raises(TenantRefused, match="issuer_role"):
+        read_forge_binding(p4_tenant.tenant)
+
+
+# --- third round: a run box is always a run copy's ----------------------------------------------
+
+def test_a_run_box_over_a_bare_agent_folder_is_refused(tmp_path):
+    from defender.box import BoxSpec
+    from defender.box import _lifecycle
+
+    agent = tmp_path / "agent"
+    agent.mkdir()
+    with pytest.raises(TypeError, match="run copy"):
+        _lifecycle._start_run_box(tmp_path / "run", tmp_path, BoxSpec(), _no_docker, agent,
+                                  None, None)
+
+
+# --- third round: knowledge commits from host-held records --------------------------------------
+
+_A = "a" * 40
+_B = "b" * 40
+
+
+def _run_with_record(tmp_path: Path, *, record: str, stamp: str):
+    import json
+
+    from defender.run_repository import Run
+
+    import dataclasses
+
+    from defender._git import REPO_ROOT
+    from defender.records import _provenance
+
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    # A real stamp, in the shape every reader accepts, naming `stamp` as its knowledge.
+    real = dataclasses.replace(_provenance.capture_tree(REPO_ROOT),
+                               knowledge=_provenance.KnowledgeRevision.at(stamp))
+    (run_dir / "provenance.json").write_text(real.as_json(
+        knowledge_source={"kind": "fresh", "commit": stamp, "stale_kind": None}),
+        encoding="utf-8")
+    assert _provenance.read(run_dir / "provenance.json") is not None, "control: a readable stamp"
+    (run_dir.parent / "r1.knowledge-source.json").write_text(json.dumps(
+        {"kind": "fresh", "commit": record, "stale_kind": None, "reason": None}), encoding="utf-8")
+    return Run(run_dir, runs_base=None)
+
+
+def test_a_runs_knowledge_commit_is_its_host_records_not_its_stamps(tmp_path):
+    run = _run_with_record(tmp_path, record=_A, stamp=_B)
+    status = run.knowledge_status()
+    assert status is not None
+    assert status.commit == _A, "the run's knowledge commit was taken from its box-writable stamp"
+
+
+def test_the_branch_pin_is_the_source_runs_recorded_commit(p4_tenant, tmp_path):
+    from types import SimpleNamespace
+
+    from defender.learning.branch.cli import _pinned_export
+
+    source = _run_with_record(tmp_path, record=p4_tenant.commit, stamp=_B)
+    pinned = _pinned_export(SimpleNamespace(tenant=p4_tenant.tenant), source)  # type: ignore[arg-type]
+    assert pinned.commit == p4_tenant.commit, "the family was pinned to the commit a box wrote"
+
+
+class _Episode:
+    def __init__(self, folder: Path) -> None:
+        self._folder = folder
+
+    def view(self):
+        from defender import _io
+
+        return _io.bind(self._folder).__enter__()
+
+
+def _pinned_episode(tmp_path: Path, commit: str | None) -> _Episode:
+    from defender.episodes._knowledge_pin import pin_text
+
+    folder = tmp_path / "episode"
+    folder.mkdir(parents=True)
+    if commit is not None:
+        (folder / "knowledge_pin.json").write_text(pin_text(commit), encoding="utf-8")
+    return _Episode(folder)
+
+
+def test_a_sibling_reads_its_familys_pin_without_the_flag(tmp_path):
+    from argparse import Namespace
+
+    from defender.run import _family_pin
+
+    assert _family_pin(Namespace(episode="e"), None, _pinned_episode(tmp_path, _A)) == _A
+
+
+def test_a_sibling_whose_flag_names_another_commit_is_refused(tmp_path):
+    from argparse import Namespace
+
+    from defender.run import _family_pin
+
+    with pytest.raises(SystemExit, match="not the family"):
+        _family_pin(Namespace(episode="e"), _B, _pinned_episode(tmp_path, _A))
+
+
+def test_a_sibling_of_an_episode_launched_before_pins_keeps_its_flag(tmp_path):
+    from argparse import Namespace
+
+    from defender.run import _family_pin
+
+    assert _family_pin(Namespace(episode="e"), _B, _pinned_episode(tmp_path, None)) == _B
+    assert _family_pin(Namespace(episode="e"), None, _pinned_episode(tmp_path / "x", None)) is None
+
+
+def test_the_judge_reads_lesson_bodies_at_the_familys_pin_not_a_siblings_stamp(tmp_path):
+    import json
+
+    from defender.episodes._episode_paths import LAYOUT
+    from defender.learning.judge import _pass_knowledge
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    world = fixture_uuid("world:judge-pin")
+    episode = _pinned_episode(tmp_path, _A)
+    world_dir = episode._folder / LAYOUT.world(world).dir
+    world_dir.mkdir(parents=True)
+    (world_dir / "provenance.json").write_text(json.dumps({"knowledge": {"commit": _B}}),
+                                               encoding="utf-8")
+    assert _pass_knowledge(episode.view(), [world]) == {"commit": _A}, (
+        "the judge read lesson bodies at the commit a sibling's box wrote")
+
+
+# --- third round: a batch reads its base once per head ------------------------------------------
+
+def test_a_batch_reads_its_bases_files_once_per_head():
+    from types import SimpleNamespace
+
+    from defender.learning.author.version_control.batch import Batch
+
+    class _Repo:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def entries(self, commit, _paths, *, recursive):
+            self.reads += 1
+            return [("100644", "blob", f"oid-{commit}", "agent/a.md")]
+
+        def blobs(self, oids):
+            return {oid: oid.encode() for oid in oids}
+
+    repo = _Repo()
+    line = SimpleNamespace(head="c1")
+    batch = SimpleNamespace(repository=repo, _line=line, _blobs_at=None)
+    first = Batch._head_blobs(batch)  # type: ignore[arg-type]
+    Batch._head_blobs(batch)  # type: ignore[arg-type]
+    assert repo.reads == 1, "the same head was read from git twice"
+    first["a.md"] = b"changed"
+    assert Batch._head_blobs(batch)["a.md"] == b"oid-c1", "a caller's edit reached the cache"  # type: ignore[arg-type]
+    line.head = "c2"
+    assert Batch._head_blobs(batch)["a.md"] == b"oid-c2"  # type: ignore[arg-type]
+    assert repo.reads == 2

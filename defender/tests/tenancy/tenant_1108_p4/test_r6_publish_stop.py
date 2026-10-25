@@ -124,7 +124,9 @@ def test_r6_a_child_that_takes_the_lock_after_being_asked_to_stop_is_let_finish(
     line = B.launcher()(tenant.tenant_id, data_root=tenant.data_root, budget=1.5,
                         command=[sys.executable, "-c", code, str(marks)])
     assert (marks / "finished").exists(), "a child holding the tenant lock was killed"
-    assert B.outcome_class(line) == "stale:transient", line  # it did not finish within the budget
+    # The child's own report is the outcome, however the wait ended (PR #1288 review): it
+    # published, so `current` names its commit, and calling that run stale would be false.
+    assert B.outcome_class(line) == "fresh", line
 
 
 # --- a child in its locked phase ignores SIGTERM and finishes (B02) -----------------------------

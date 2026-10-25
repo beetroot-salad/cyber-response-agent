@@ -120,8 +120,7 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
 ) -> str:
     try:
         binding = read_forge_binding(tenant)
-        issuer_config = issuer_config_path(binding, issuer_config)
-        read_issuer_config(issuer_config)
+        config = read_issuer_config(issuer_config_path(binding, issuer_config))
     except (DeliveryRefused, TenantRefused) as misconfigured:
         return report(MISCONFIGURED, str(misconfigured))
     timeout = CHILD_NETWORK_TIMEOUT if network_timeout is None else network_timeout
@@ -131,7 +130,7 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
             with _deadline(budget):
                 if identity is None:
                     identity = issuer_login(
-                        tenant, issuer_config=issuer_config, transport=issuer_transport
+                        tenant, binding=binding, config=config, transport=issuer_transport
                     )
                     owned.callback(identity.client.close)
                 if client is None:

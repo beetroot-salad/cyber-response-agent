@@ -37,6 +37,16 @@ class Batch:
     repository: GitRepository = field(repr=False)
     committer: CommitMaker = field(repr=False)
     _line: _Line = field(repr=False)
+    #: The base's `agent/` blobs and the commit they were read at: a commit is immutable, so
+    #: they are read from git once per head, not once per `change_set`, `base` and `reset`.
+    _blobs_at: tuple[str, dict[str, bytes]] | None = field(default=None, repr=False)
+
+    def _head_blobs(self) -> dict[str, bytes]:
+        """`agent_blobs` at the batch's head, read once per head (a fresh mapping each call)."""
+        head = self._line.head
+        if self._blobs_at is None or self._blobs_at[0] != head:
+            self._blobs_at = (head, agent_blobs(self.repository, head))
+        return dict(self._blobs_at[1])
 
     def box_request(self) -> box.BoxRequest:
         """The drain box: product code read-only (`code`), the draft's root read-only (`staged`),
@@ -72,7 +82,7 @@ class Batch:
         one touching a forbidden name refuses the claim whole."""
         with _refusals():
             draft = _regular_files(self.draft_root / "agent")
-            base = agent_blobs(self.repository, self._line.head)
+            base = self._head_blobs()
             changes = []
             for rel in sorted(draft.keys() | base.keys()):
                 if draft.get(rel) == base.get(rel):
@@ -88,7 +98,7 @@ class Batch:
         `change_set` derives against and `reset` restores."""
         with _refusals():
             return {f"agent/{rel}": data
-                    for rel, data in agent_blobs(self.repository, self._line.head).items()}
+                    for rel, data in self._head_blobs().items()}
 
     def commit(self, change_set: ChangeSet, message: str) -> str:
         """The commit-maker: commit `change_set` on the batch branch, returning the commit."""
@@ -99,7 +109,7 @@ class Batch:
         additions removed, its deletions and edits restored, links and FIFOs removed without
         being followed or opened. The lanes stay, so a running box keeps its binds."""
         with _refusals():
-            files = agent_blobs(self.repository, self._line.head)
+            files = self._head_blobs()
             _resync(self.draft_root / "agent", files, _folders_of(files, self.lanes))
 
     def discard(self) -> None:

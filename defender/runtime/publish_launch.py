@@ -30,6 +30,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from defender.execution._process_group import kill_group
 from defender.run_common import provider_scrubbed_environ
 from defender.runtime import run_knowledge
 from defender.tenancy._exports import knowledge_lock_holder
@@ -87,8 +88,24 @@ def launch_publish(
 ) -> str:
     """Run the publish child for `tenant_id` under `data_root` and return its report line (module
     doc). `command` replaces the child's argv prefix (the launcher appends `<tenant id>
-    --data-root <root> --budget <seconds>`); `spawn` is `subprocess.Popen`'s stand-in. A
-    `budget` that is not positive is a caller's error (`ValueError`): there is no wait to give."""
+    --data-root <root> --budget <seconds>`); `spawn` is `subprocess.Popen`'s stand-in.
+
+    The child's own report, whenever it printed one, is the outcome, however the wait ended
+    (the child recorded it). Only a child with no valid report gets the launcher's line, which
+    the launcher records. It never raises: a fault of the launcher itself (a budget that is
+    not positive among them) is U11's failed line, recorded, never a run start's to catch."""
+    try:
+        return _launch_child(tenant_id, data_root=data_root, budget=budget, command=command,
+                       spawn=spawn)
+    except Exception as failed:  # noqa: BLE001 — U11: whatever fails here is a failed publish child, recorded
+        return _recorded(tenant_id, data_root, run_knowledge.failed_line(
+            f"the launcher failed: {type(failed).__name__}: {failed}"))
+
+
+def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
+    tenant_id: str, *, data_root: Path, budget: float, command: Sequence[str] | None,
+    spawn: Spawn | None,
+) -> str:
     if not budget > 0:
         raise ValueError(f"the launch-time publish budget must be positive, not {budget!r}")
     prefix = list(command) if command is not None else [sys.executable, "-m", CHILD_MODULE]
@@ -103,18 +120,25 @@ def launch_publish(
         return _recorded(tenant_id, data_root, run_knowledge.failed_line(
             f"it could not be started: {type(unstarted).__name__}: "
             f"{getattr(unstarted, 'strerror', None) or unstarted}"))
+    late = False
     try:
-        out, err = proc.communicate(timeout=budget)
-    except subprocess.TimeoutExpired:
-        if not _holds_lock(proc, tenant_id, data_root):
-            _stop(proc, tenant_id, data_root)
-            return _recorded(
-                tenant_id, data_root,
-                f"{STALE_TRANSIENT} the launch-time publish did not finish its network phase "
-                f"within the {budget:g}s budget")
-        out, err = proc.communicate()
+        try:
+            out, err = proc.communicate(timeout=budget)
+        except subprocess.TimeoutExpired:
+            late = not _holds_lock(proc, tenant_id, data_root)
+            out, err = _stop(proc, tenant_id, data_root) if late else proc.communicate()
+    finally:
+        # One publish is one process group (the child's session; its network git joins it):
+        # whatever the child left running dies with it, however it ended.
+        kill_group(proc.pid)
     line, failed = _read_report(proc.returncode, out, err)
-    return _recorded(tenant_id, data_root, line) if failed else line
+    if not failed:
+        return line
+    if late:
+        # Stopped in its network phase with nothing to say (a stopped child prints nothing).
+        line = (f"{STALE_TRANSIENT} the launch-time publish did not finish its network phase "
+                f"within the {budget:g}s budget")
+    return _recorded(tenant_id, data_root, line)
 
 
 def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:
@@ -125,25 +149,26 @@ def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:
         return tenant is not None and knowledge_lock_holder(tenant) == proc.pid
     except OSError:
         return False
-def _stop(proc: Any, tenant_id: str, data_root: Path) -> None:
-    """Ask the child to end (it unwinds its network calls, killing their process groups),
-    then kill it — unless it took the lock meanwhile, in which case it is let finish."""
+
+
+def _stop(proc: Any, tenant_id: str, data_root: Path) -> tuple[Any, Any]:
+    """Ask the child to end (it unwinds its network calls), then kill its whole process group
+    — unless it took the lock meanwhile, in which case it is let finish. Returns everything
+    the child wrote, so a report it printed after all (it finished on the lock) is read."""
     try:
         proc.send_signal(signal.SIGTERM)
-        proc.communicate(timeout=_STOP_GRACE)
-        return
+        return proc.communicate(timeout=_STOP_GRACE)
     except subprocess.TimeoutExpired:
         pass
     except ProcessLookupError:
-        return
+        return proc.communicate()
     if _holds_lock(proc, tenant_id, data_root):
-        proc.communicate()
-        return
+        return proc.communicate()
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         proc.kill()
-    proc.communicate()
+    return proc.communicate()
 
 
 def _read_report(
