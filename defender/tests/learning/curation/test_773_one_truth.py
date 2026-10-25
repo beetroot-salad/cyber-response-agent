@@ -47,30 +47,21 @@ def _rewriting_scene(tmp_path, edit):
     return sc
 
 
-def test_a_concurrent_edit_that_strips_the_citations_mid_read_is_not_committed(tmp_path):
-    """While the drain reads `l1.md`'s citations, another writer strips them (after the
-    second read."""
+def test_the_citations_are_read_from_the_bytes_the_commit_carries(tmp_path):
+    """One truth by construction (PR #1288 review): a lesson's citations are read from the very
+    bytes its commit carries (the claim's change set), never by re-reading the file. So no
+    writer moving the file between reads can make the commit and its citations disagree, and
+    there is no read of it through the corpus to race at all. Were one made, this writer would
+    strip the citations from the file on disk."""
     stripped = S.lesson(body="no citations any more")
-    sc = _rewriting_scene(tmp_path, lambda n: n == 2 and (
-        sc.corpus / "l1.md").write_text(stripped, encoding="utf-8"))
+    sc = _rewriting_scene(tmp_path, lambda n: (sc.corpus / "l1.md").write_text(
+        stripped, encoding="utf-8"))
 
     assert sc.run() == 0
-    assert sc.cfg.corpus.reads > 2, "the drain never re-read the file, so the row is vacuous"
-    assert sc.head_files() == []
-    assert sc.category_of("f1") != "consumed_committed"
+    assert sc.cfg.corpus.reads == 0, "the drain read the lesson's citations from the file again"
+    assert sc.head_files() == [LESSON], "the cited lesson did not land"
+    assert sc.category_of("f1") == "consumed_committed"
     assert sc.draft_drift() == []
-
-
-def test_a_file_that_never_holds_still_under_the_citation_read_refuses_the_tick(tmp_path):
-    """A writer that rewrites `l1.md` after every read, each version still citing f1."""
-    sc = _rewriting_scene(tmp_path, lambda n: (sc.corpus / "l1.md").write_text(
-        S.lesson("f1", body=f"version {n}"), encoding="utf-8"))
-
-    assert sc.run() == 2
-    assert sc.head_files() == []
-    assert sc.pending_by_id()["f1"].get("attempts") == 1
-    assert any("kept changing" in str(r.get("reason"))
-               for r in S.stuck_records(sc.paths, sc.channel))
 
 
 def test_a_mode_only_change_is_put_back_and_the_tree_is_clean_after_the_tick(tmp_path):

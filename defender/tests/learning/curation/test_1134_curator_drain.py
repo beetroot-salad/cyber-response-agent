@@ -360,21 +360,19 @@ def _journal(sc, log: list, **kw) -> None:
 
 
 @pytest.mark.parametrize("refused", [True, False], ids=["refused", "control"])
-def test_attribution_asks_cfg_corpus_and_a_refused_read_cites_nothing(tmp_path, refused):
-    """Attribution reads the lesson through the lane's held corpus: a refused read cites nothing
-    (rc 2, nothing lands); readable, it lands (#1134, P4 O7)."""
+def test_attribution_reads_the_claims_own_bytes_never_the_corpus_again(tmp_path, refused):
+    """Attribution reads a lesson's citations from the claim's change set — the bytes its commit
+    carries, read once from the draft with no link followed — never through the lane's held
+    corpus a second time (PR #1288 review). So a corpus read that would be refused is never
+    made, and the cited lesson lands either way (#1134, P4 O7)."""
+    log: list = []
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}))
-    _journal(sc, [], refuse=(PLANTED,) if refused else ())
+    _journal(sc, log, refuse=(PLANTED,) if refused else ())
 
     got = _run(sc)
 
-    if refused:
-        assert got == ("rc", 2), got
-        assert sc.pending_by_id()["f1"].get("attempts") == 1
-        assert sc.head_files() == []
-    else:
-        assert got == ("rc", 0), got
-        assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
+    assert got == ("rc", 0), got
+    assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
 
 
 @pytest.mark.parametrize("mode", ["same mode", "made executable"])
