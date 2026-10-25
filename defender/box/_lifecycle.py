@@ -127,20 +127,18 @@ def _refuse_a_start_that_conflicts(
     contains the source, or they are equal; judged on resolved paths). The root is this
     process's, asked exactly as the publisher asks (A8), so the check judges the folder pages
     land in. With no root there is nothing to compare: outside `dev` silently, and in `dev` with
-    a warning naming why the root could not be determined (A9) — this process then publishes
-    nothing. O6: a container already holding the box's name. The overlap needs no daemon, so it
+    a warning that no publish folder is set (A9, A11) — this process then publishes nothing. O6: a container already holding the box's name. The overlap needs no daemon, so it
     is judged first."""
     root = publish_root.publish_root()
     if isinstance(root, publish_root.NoRoot):
-        if root.kind == "undeterminable":
-            _logger.warning("box %s: the publish root could not be determined, so no mount is "
-                            "checked against it: %s", name, root.reason)
+        if root.kind == "unset":
+            _logger.warning("box %s: no publish root, so no mount is checked against it: %s",
+                            name, root.reason)
     else:
         resolved_root = root.resolve()
         for what, source in sources:
             there = Path(source).resolve()
-            if there == resolved_root or there.is_relative_to(resolved_root) \
-                    or resolved_root.is_relative_to(there):
+            if there.is_relative_to(resolved_root) or resolved_root.is_relative_to(there):
                 raise BoxStartConflict(
                     f"the {what} {source} overlaps the publish root {root} — a published view "
                     "is never inside a tree a box mounts, so the box is not started")
@@ -150,13 +148,11 @@ def _refuse_a_start_that_conflicts(
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
-    *, tenant_agent: Path | None = None, lane: Sequence[_LaneMount] | None = None,
+    *, lane: Sequence[_LaneMount],
 ) -> Create:
-    """The run box's create argv, its binds rendered from `lane`: the run lane's mount list as
-    `_start_boxed` already built it for the publish-root check, so the argv mounts exactly what
-    was judged. A direct call without it builds the same list from the run's geography."""
-    if lane is None:
-        lane = _run_lane_mounts(run_dir, defender_dir, tenant_agent)
+    """The run box's create argv, its binds rendered from `lane`: the run lane's mount list
+    (`_run_lane_mounts`) as `_start_boxed` built it for the publish-root check, so the argv
+    mounts exactly what was judged."""
     # The uncovered-mount refusal runs before the image resolver: a topology fault must not be
     # masked by the resolver's file-read refusal on the same tree.
     for m in lane:
@@ -169,7 +165,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     # Only the bind SOURCES name host paths; the daemon needs them, and the box never sees them.
     env_pairs = {**infra_env(Path(MODEL_DEFENDER), Path(MODEL_RUN)), **_LOCALE_ENV,
                  **CLOCK_ENV, **_BOX_MARK_ENV}
-    if tenant_agent is not None:
+    if any(m.target == MODEL_AGENT for m in lane):
         env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
     _input_dir_source(run_dir)
     argv = [
@@ -449,7 +445,7 @@ def _start_boxed(
     start_token = uuid.uuid4().hex
     create = _create_argv(
         name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
-        tenant_agent=tenant_agent, lane=lane,
+        lane=lane,
     )
     try:
         # Confirm the image before the create, so a missing image is its own refusal (with

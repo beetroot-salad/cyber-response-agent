@@ -50,20 +50,26 @@ def materialize_run(
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     started_at = _started_at()
+    # An arm's identity is settled before its input is read: an arm whose roster is refused is
+    # told so before anything about its alert is. Its handle makes nothing on disk.
+    arm: Run | None = None
+    if world is not None:
+        if episode_runs is None:
+            raise TypeError("materialize_run(world=…) needs the sibling's episode view "
+                            "(`episode_runs=`): an arm is made only in its episode's container")
+        try:
+            arm = episode_runs.create(episode_runs.arm_id(world.world_id))
+        except RunRefused as refused:
+            sys.exit(f"[run.py] {refused}")
     front_door = _admit_input(alert, tenant=tenant, world=world)
-    try:
-        if world is not None:
-            if episode_runs is None:
-                raise TypeError("materialize_run(world=…) needs the sibling's episode view "
-                                "(`episode_runs=`): an arm is made only in its episode's "
-                                "container")
-            run = episode_runs.create(episode_runs.arm_id(world.world_id))
-            world_id: str | None = None
-        else:
+    world_id: str | None = None
+    if arm is not None:
+        run = arm
+    else:
+        try:
             run = tenant.runs_repository().create()
-            world_id = None
-    except RunRefused as refused:
-        sys.exit(str(refused))
+        except RunRefused as refused:
+            sys.exit(str(refused))
     run_dir = run.run_dir
 
     # A sidecar beside the dir is a trace of an earlier run at this id; nothing clears it.

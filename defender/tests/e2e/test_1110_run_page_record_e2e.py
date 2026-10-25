@@ -331,7 +331,7 @@ def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
         assert blocker.read_bytes() == b"a file, not a folder\n"
     else:
         warned = _warnings(caplog)
-        assert any("is unset under pytest" in w for w in warned), (
+        assert any("DEFENDER_RUN_VISUALIZATIONS_DIR is unset" in w for w in warned), (
             f"the refused copy was not warned with the resolver's reason; warnings: {warned!r}")
 
     monkeypatch.setenv(MIRROR_ENV, str(run_visualizations_dir))

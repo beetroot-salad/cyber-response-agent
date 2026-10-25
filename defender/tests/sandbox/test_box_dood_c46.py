@@ -11,6 +11,7 @@ from defender.box import (
     BoxSpec,
     _covered,
     _create_argv,
+    _run_lane_mounts,
     _daemon_source,
     _render_argv,
     start_box,
@@ -72,10 +73,7 @@ def test_an_uncovered_path_is_left_alone_by_the_pure_helper():
 
 def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
     """The load-bearing assertion. source= must be the DAEMON's path; target=, --workdir and the env must stay..."""
-    argv = _create_argv(
-        "defender-run-r1", Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"),
-        PINNED, MOUNTS,
-    ).argv
+    argv = _create_argv("defender-run-r1", Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"), PINNED, MOUNTS, lane=_run_lane_mounts(Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"), None)).argv
     joined = " ".join(argv)
     assert (
         "type=bind,source=/home/dev/projects/repo/.defender-runs/r1,"
@@ -93,9 +91,7 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
 
 
 def test_create_argv_is_untouched_when_there_is_no_mount_table():
-    argv = _create_argv(
-        "defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), PINNED, (),
-    ).argv
+    argv = _create_argv("defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), PINNED, (), lane=_run_lane_mounts(Path("/tmp/defender-runs/r1"), Path("/srv/defender"), None)).argv
     joined = " ".join(argv)
     # #1255 P1: no table, no translation of the SOURCE; the target is the model view's path.
     assert "type=bind,source=/tmp/defender-runs/r1,target=/runs/current" in joined
@@ -105,10 +101,7 @@ def test_create_argv_is_untouched_when_there_is_no_mount_table():
 def test_create_argv_refuses_a_run_dir_off_every_shared_mount():
     """The pre-fix failure surfaced as docker's "bind source path does not exist", which reads like a bug rather..."""
     with pytest.raises(BoxFault) as e:
-        _create_argv(
-            "defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/workspace/defender"),
-            BoxSpec(), MOUNTS,
-        )
+        _create_argv("defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/workspace/defender"), BoxSpec(), MOUNTS, lane=_run_lane_mounts(Path("/tmp/defender-runs/r1"), Path("/workspace/defender"), None))
     assert "C46" in str(e.value)
     assert "/workspace" in str(e.value)
 
@@ -167,10 +160,7 @@ def test_a_normalized_traversal_that_stays_inside_still_translates():
 def test_create_argv_refuses_a_traversal_run_dir():
     """The traversal has to be refused by the ARGV BUILDER, not merely reported uncovered by the pure helper: the..."""
     with pytest.raises(BoxFault) as e:
-        _create_argv(
-            "defender-run-r1", Path("/workspace/../etc/runs/r1"), Path("/workspace/defender"),
-            BoxSpec(), MOUNTS,
-        )
+        _create_argv("defender-run-r1", Path("/workspace/../etc/runs/r1"), Path("/workspace/defender"), BoxSpec(), MOUNTS, lane=_run_lane_mounts(Path("/workspace/../etc/runs/r1"), Path("/workspace/defender"), None))
     assert "C46" in str(e.value)
 
 

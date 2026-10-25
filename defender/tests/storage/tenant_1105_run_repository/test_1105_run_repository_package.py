@@ -184,7 +184,7 @@ def test_1105_a_failed_first_import_through_the_door_propagates_and_is_retried()
 def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_path):
     from defender.run_repository import RunId
     from defender.box import BoxSpec
-    from defender.box._lifecycle import _create_argv
+    from defender.box._lifecycle import _create_argv, _run_lane_mounts
 
     t = H.tenant(tmp_path / "data", H.T_ID)
     runs = H.runs_folder(t)
@@ -195,8 +195,7 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     plant_alert(runs / rid)
     run = t.runs_repository().open(RunId.parse(rid))
     assert getattr(run, "run_dir", None) == runs / rid, f"runs.open handed out {run!r}"
-    create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER,
-                          BoxSpec(runtime="runc", rootfs="busybox"), tenant_agent=t.agent)
+    create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER, BoxSpec(runtime="runc", rootfs="busybox"), lane=_run_lane_mounts(run.run_dir, H.DEFENDER, t.agent))
     argv = create.argv
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     binds = []

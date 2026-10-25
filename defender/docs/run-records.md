@@ -88,7 +88,7 @@ unreachable by root containment rather than by a named deny.
 | policy_denials | 1 | `policy_denials.jsonl` | — | — | run.tables.policy_denials |  |
 | lessons_loaded | 1 | `lessons_loaded.jsonl` | — | lessons_loaded.jsonl | run.observability.lessons_loaded | receipt of corpus consumption; `hooks/record_lesson_load` is the reader-side classifier |
 | ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`run_repository/_layout.py:231-233`) and the read cap survive |
-| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `run_repository/_layout.py`, the comment on `WIRE_LOG_DIR`) | — | run.observability.runtime_html | copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110) |
+| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `run_repository/_layout.py`, the comment on `WIRE_LOG_DIR`) | — | run.observability.runtime_html | copied to `<publish root>/<tenant>/runs/<run id>/` on `dev` deployments only, written as the publish folder's owner (`visualize_run.mirror_page`, #1084/#1110/#1279) |
 | box_sentinel | 1 | `.box-sentinel` | — | — | run.observability.box_sentinel | `unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family |
 | provenance | 1 | `provenance.json` | outright | provenance.json | run.facts.provenance | stamped by the host at materialize time |
 | run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |
@@ -142,7 +142,7 @@ Marked here so a reader does not mistake these for a kind this page owns.
   in-run receipt of consumption and is a run record; the corpora themselves are not.
 - **Eval case inputs and result trees** (`evals/`).
 - **Rendered pages outside a run or episode** (`queues.html`, `lessons.html`) and the untracked
-  `run-visualizations/<tenant>/` publish area at the main checkout's top level (#1084, #1279); no box may mount it.
+  `<publish root>/<tenant>/` publish area, the folder `DEFENDER_RUN_VISUALIZATIONS_DIR` names on `dev` (#1084, #1279); no box may mount it.
 - The corpus curators' own wire traces under `_pending/wire_logs/`, learning state rather than a
   run record; the review step's scratch `served/` tree, which is not the episode's.
 - Repo and worktree files, git plumbing, container identity files, stdio and subprocess pipes,

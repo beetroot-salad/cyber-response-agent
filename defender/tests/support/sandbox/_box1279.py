@@ -52,10 +52,9 @@ def allow_unsandboxed(monkeypatch: Any) -> None:
     monkeypatch.setenv(ALLOW_ENV, "1")
 
 
-def dev_undeterminable_root(monkeypatch: Any) -> None:
-    """A dev deployment with the publish-root override UNSET (the conftest sets it for every
-    test): under pytest the root owner answers "undeterminable" (its guard against the real
-    checkout), the A9 case; the opt-out unset."""
+def dev_unset_root(monkeypatch: Any) -> None:
+    """A dev deployment whose publish folder is UNSET (the conftest sets it for every test): the
+    root owner answers "unset" (A9, A11); the opt-out unset."""
     monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
     monkeypatch.delenv(PUBLISH_ROOT_ENV, raising=False)
     monkeypatch.delenv(ALLOW_ENV, raising=False)

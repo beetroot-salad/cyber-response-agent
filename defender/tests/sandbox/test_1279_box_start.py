@@ -310,12 +310,12 @@ def test_a8_a_request_with_no_code_mount_is_still_judged(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
-def test_a9_in_dev_an_undeterminable_root_starts_the_box_and_warns_naming_the_cause(
+def test_a9_in_dev_an_unset_root_starts_the_box_and_warns_naming_the_setting(
         tmp_path, monkeypatch, caplog, lane_kind, opt_out):
-    """A9: in `dev` a root the owner cannot determine (here its pytest guard: the override unset)
-    is nowhere to publish, not a conflict. The box starts, plain and with the opt-out, and a
-    warning names the box and the cause, so a skipped check never passes as a clear one.
-    Control: outside `dev` it starts with no such warning."""
+    """A9/A11: in `dev` with no publish folder set there is nowhere to publish, not a conflict.
+    The box starts, plain and with the opt-out, and a warning names the box and the setting, so a
+    skipped check never passes as a clear one. Control: outside `dev` it starts with no such
+    warning."""
     if lane_kind == "run":
         lane = X.run_lane(tmp_path)
         start, name = lane.start, box_mod.container_name(lane.run_dir.name)
@@ -324,18 +324,18 @@ def test_a9_in_dev_an_undeterminable_root_starts_the_box_and_warns_naming_the_ca
         def start(docker: RecordingDocker) -> None:
             box_mod.start_box(req.request(), docker=docker)
         name = X.REQUEST_NAME
-    X.dev_undeterminable_root(monkeypatch)
+    X.dev_unset_root(monkeypatch)
     if opt_out:
         X.allow_unsandboxed(monkeypatch)
     rec = RecordingDocker()
     with caplog.at_level("WARNING", logger="defender.box._lifecycle"):
         start(rec)
-    assert rec.create_argv is not None, "an undeterminable root refused the start"
+    assert rec.create_argv is not None, "an unset root refused the start"
     warned = [r.getMessage() for r in caplog.records if r.name == "defender.box._lifecycle"
-              and "publish root could not be determined" in r.getMessage()]
-    assert len(warned) == 1, f"no single warning that the root could not be determined: {caplog.text}"
+              and "no publish root" in r.getMessage()]
+    assert len(warned) == 1, f"no single warning that there is no publish root: {caplog.text}"
     assert name in warned[0], f"the warning does not name the box {name}: {warned[0]}"
-    assert "unset under pytest" in warned[0], f"the warning does not name the cause: {warned[0]}"
+    assert "DEFENDER_RUN_VISUALIZATIONS_DIR" in warned[0], f"the warning does not name the setting: {warned[0]}"
 
     caplog.clear()
     monkeypatch.delenv(X.DEPLOYMENT_ENV, raising=False)
@@ -343,7 +343,7 @@ def test_a9_in_dev_an_undeterminable_root_starts_the_box_and_warns_naming_the_ca
     with caplog.at_level("WARNING", logger="defender.box._lifecycle"):
         start(outside)
     assert outside.create_argv is not None
-    assert "publish root could not be determined" not in caplog.text, "outside dev there is no root to miss"
+    assert "no publish root" not in caplog.text, "outside dev there is no root to miss"
 
 
 # ---------------------------------------------------------------------------------------

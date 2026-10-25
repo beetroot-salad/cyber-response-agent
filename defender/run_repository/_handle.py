@@ -394,7 +394,12 @@ class Run:
         `gather_raw` is then made inside the folder this call made. The container is never handed
         out for it (#1105 PR 2, J15)."""
         base = _unwrap_runs_base(self._runs_base_for("make_run_dir", "gather_raw"))
-        self._io.guarded_mkdir(self.run_dir, base=base, exclusive=True)
+        if Path(self.run_dir).parent != Path(base):
+            raise ValueError(f"run.make_run_dir: {self.run_dir} is not a folder of its runs "
+                             f"container {base}")
+        # Made by name off the container's no-follow handle: the run folder is one name, so
+        # "already there" can only be that name (#1279 O8).
+        self._io.hold_new(Path(base), Path(self.run_dir).name, exclusive=True).close()
         self._io.guarded_mkdir(RunPaths(self.run_dir).gather_raw, base=base)
 
     @contextlib.contextmanager

@@ -380,7 +380,7 @@ def _ensure_dir_component(component: Path) -> None:
 
 
 
-def guarded_mkdir(path: Path, *, base: Path, exclusive: bool = False) -> None:
+def guarded_mkdir(path: Path, *, base: Path) -> None:
     """`mkdir(parents=True, exist_ok=True)`, refusing a symlinked component at any depth below
     `base` (a plain `mkdir(parents=True)` would silently traverse one).
 
@@ -389,11 +389,8 @@ def guarded_mkdir(path: Path, *, base: Path, exclusive: bool = False) -> None:
     component below it is judged. Checking up to `/` instead would refuse common host setups
     (`/tmp` is a symlink on macOS) with no security gain. `base` is required so each call site
     names the tree it trusts. Containment is judged lexically; `resolve()` would collapse the
-    very symlinks being refused.
-
-    `exclusive` makes the final component this call's own: whatever already holds that name (a
-    directory, a file, a link followed or dangling) is a `FileExistsError`, left as found and never
-    followed. The folders above it are made and judged as in the default mode (#1279 A5)."""
+    very symlinks being refused. (An exclusive create of one folder is `_io.hold_new(parent,
+    name, exclusive=True)`, which takes a name, not a path.)"""
     path = Path(path)
     base = Path(base)
     try:
@@ -418,11 +415,9 @@ def guarded_mkdir(path: Path, *, base: Path, exclusive: bool = False) -> None:
         os.makedirs(base, exist_ok=True)
     accum = base
     parts = rest.parts
-    for part in parts[:-1] if exclusive and parts else parts:
+    for part in parts:
         accum = accum / part
         _ensure_dir_component(accum)
-    if exclusive and parts:
-        os.mkdir(accum / parts[-1])  # lint-unguarded-tree-write: ok — this is the guarded mkdir the gate points other callers at
 
 
 

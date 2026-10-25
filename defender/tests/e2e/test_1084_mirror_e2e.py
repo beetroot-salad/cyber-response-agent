@@ -460,14 +460,11 @@ def test_1279_o4_outside_dev_the_copy_is_skipped_and_the_run_page_is_still_saved
     assert all(r.levelno == logging.INFO for r in skips), [r.getMessage() for r in skips]
 
 
-def test_1279_a9_an_undeterminable_root_fails_the_copy_not_the_run(
+def test_1279_a9_an_unset_root_in_dev_fails_the_copy_not_the_run(
         tmp_path, run_visualizations_dir, monkeypatch, caplog):
-    """A9: in dev a root the owner cannot determine is a failed copy, logged at WARNING naming the
-    cause, like the mirror's other faults; the run page record is kept and the run is not failed.
-    Reached here through the one cause `publish_page` can be steered into without a patch -- the
-    override unset under pytest (the owner's guard); a worktree with an unfollowable `.git`
-    pointer is the same "undeterminable" answer, pinned in test_1084_mirror.py. Control: with the
-    override set the same run copies."""
+    """A9/A11: in dev with no publish folder set, the copy is failed, logged at WARNING naming the
+    setting, like the mirror's other faults; the run page record is kept and the run is not
+    failed. Control: with the folder set the same run copies."""
     vr = _renderer()
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
@@ -480,7 +477,7 @@ def test_1279_a9_an_undeterminable_root_fails_the_copy_not_the_run(
     caplog.set_level(logging.DEBUG)
 
     assert vr.publish_page(run, tenant=tenant) == "failed"
-    assert any("unset under pytest" in w for w in _warnings(caplog)), "the failed copy did not name its cause"
+    assert any(f"{ENV} is unset" in w for w in _warnings(caplog)), "the failed copy did not name the setting"
 
     _assert_record_written(run_dir)
     assert not list(run_visualizations_dir.iterdir()), "a refused resolution published a page"

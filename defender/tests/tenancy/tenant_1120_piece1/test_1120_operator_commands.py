@@ -336,9 +336,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         f"start_box was handed {agent}, not the data root's {H.agent_dir(data_root)}")
 
     # #1187: the recorder's run folder is `fixture_uuid("run")` — read it off the recorder.
-    argv = box_mod._create_argv(
-        "defender-run-spec1120", rec.run_dir_at, H.DEFENDER,
-        box_mod.DEFAULT_SPEC, (), tenant_agent=agent).argv
+    argv = box_mod._create_argv("defender-run-spec1120", rec.run_dir_at, H.DEFENDER, box_mod.DEFAULT_SPEC, (), lane=box_mod._run_lane_mounts(rec.run_dir_at, H.DEFENDER, agent)).argv
     mounts = _mount_specs(argv)
     agent_mounts = [m for m in mounts if m.get("target") == MODEL_AGENT]
     assert len(agent_mounts) == 1, mounts
@@ -368,8 +366,7 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
     off_mount = tmp_path / "data"
     agent = H.agent_dir(off_mount)
     with pytest.raises(box_mod.BoxFault) as refused:
-        box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
-                             box_mod.DEFAULT_SPEC, mounts, tenant_agent=agent)
+        box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER, box_mod.DEFAULT_SPEC, mounts, lane=box_mod._run_lane_mounts(run_dir, H.DEFENDER, agent))
     text = str(refused.value)
     assert str(agent) in text, f"the refusal does not name the agent half {agent}:\n{text}"
     assert "tenants root" not in text, (
@@ -379,8 +376,7 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
         f"agent half now lives:\n{text}")
 
     plant_alert_with_record(run_dir, {})
-    box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
-                         box_mod.DEFAULT_SPEC, mounts, tenant_agent=H.agent_dir(on_mount))
+    box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER, box_mod.DEFAULT_SPEC, mounts, lane=box_mod._run_lane_mounts(run_dir, H.DEFENDER, H.agent_dir(on_mount)))
 
 
 #: #1255 K3's preload/clock env keys — `test_1255_clock_box._PRELOAD_KEY`'s pattern, kept in step
@@ -402,9 +398,7 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     assert "DEFENDER_DIR" in rendered, rendered
 
     plant_alert_with_record(tmp_path / "run", {})
-    argv = box_mod._create_argv(
-        "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
-        box_mod.DEFAULT_SPEC, ()).argv
+    argv = box_mod._create_argv("defender-run-spec1120", tmp_path / "run", H.DEFENDER, box_mod.DEFAULT_SPEC, (), lane=box_mod._run_lane_mounts(tmp_path / "run", H.DEFENDER, None)).argv
     env_keys = {v.partition("=")[0] for f, v in zip(argv, argv[1:], strict=False) if f == "--env"}
     assert H.DATA_ROOT_ENV not in env_keys, env_keys
     assert not [k for k in env_keys if "TENANT" in k.upper()], env_keys

@@ -39,13 +39,13 @@ produces.
 ## Build
 
 ```bash
-DEFENDER_DEPLOYMENT=dev python3 defender/learning/frontend/build.py --tenant <tenant-uuid>
+DEFENDER_DEPLOYMENT=dev DEFENDER_RUN_VISUALIZATIONS_DIR=<folder> python3 defender/learning/frontend/build.py --tenant <tenant-uuid>
 ```
 
 Publishes four artifacts into the tenant's area under the publish root
-(`<publish root>/<tenant>/learning/`, #1279; the root is `run-visualizations/` at the main checkout,
-or `DEFENDER_RUN_VISUALIZATIONS_DIR`). Outside a `dev` deployment there is no publish root and the
-build refuses. Never into this directory: every box mounts `defender/`.
+(`<publish root>/<tenant>/learning/`, #1279; the root is the folder `DEFENDER_RUN_VISUALIZATIONS_DIR`
+names, which a `dev` deployment must set). Outside `dev`, or with the folder unset, there is no
+publish root and the build refuses. Never into this directory: every box mounts `defender/`.
 
 - `lessons.json` / `queues.json` — the two view **contracts**
 - `lessons.html` / `queues.html` — **self-contained** pages (open in a browser, no server),

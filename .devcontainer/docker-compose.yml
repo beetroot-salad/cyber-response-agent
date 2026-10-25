@@ -26,10 +26,13 @@ services:
       # the devcontainer's ONLY data root, not an alternative to a code default. It must be a
       # path this container shares with the host docker daemon (DooD, C46), which /workspace is.
       DEFENDER_DATA_ROOT: /workspace/.defender-data
-      # This box is a dev deployment: each run page is also copied to the main
-      # checkout's `run-visualizations/` (#1110). Unset means `production`, which
-      # the runtime image deliberately leaves it as.
+      # This box is a dev deployment: each run page and learning page is also
+      # published under DEFENDER_RUN_VISUALIZATIONS_DIR (#1110, #1279). Unset means
+      # `production`, which the runtime image deliberately leaves it as.
       DEFENDER_DEPLOYMENT: dev
+      # Where dev publishes (#1279 A11): named here, never worked out from a checkout.
+      # No box mounts the workspace root, so a folder at its top level is safe.
+      DEFENDER_RUN_VISUALIZATIONS_DIR: /workspace/run-visualizations
     volumes:
       - ../:/workspace # Mount full workspace directory
       # Docker-outside-of-Docker: hand the dev container the HOST daemon so it can

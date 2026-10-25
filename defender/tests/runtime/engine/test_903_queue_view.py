@@ -908,11 +908,10 @@ def test_1279_o4_the_learning_build_outside_dev_refuses_naming_the_deployment(
 
 
 @pytest.mark.usefixtures("frontend_outputs_lock")
-def test_1279_a9_the_learning_build_with_an_undeterminable_root_refuses_naming_the_cause(
+def test_1279_a11_the_learning_build_in_dev_with_no_folder_set_refuses_naming_the_setting(
         data_root, run_visualizations_dir):
-    """A9: in dev, a root the owner cannot determine (the override empty under pytest, its guard)
-    is nowhere to publish: the build refuses cleanly, naming the cause, with no traceback, and
-    writes nothing."""
+    """A9/A11: in dev with no publish folder set there is nowhere to publish: the build refuses
+    cleanly, naming the setting, with no traceback, and writes nothing."""
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
@@ -921,11 +920,11 @@ def test_1279_a9_the_learning_build_with_an_undeterminable_root_refuses_naming_t
     before = _in_tree_pages()
     try:
         proc = _build_cli(t.id, data_root, DEFENDER_DEPLOYMENT="dev",
-                          DEFENDER_RUN_VISUALIZATIONS_DIR="", PYTEST_CURRENT_TEST="a9-build")
+                          DEFENDER_RUN_VISUALIZATIONS_DIR="")
         out = H.output(proc)
         H.assert_ran(proc)
         assert proc.returncode == 2, f"the build did not refuse: {out}"
-        assert "unset under pytest" in out, f"the refusal does not name the cause: {out}"
+        assert "DEFENDER_RUN_VISUALIZATIONS_DIR is unset" in out, f"the refusal does not name the setting: {out}"
         assert not list(run_visualizations_dir.iterdir()), "a refused build published a page"
         assert _in_tree_pages() == before, "a refused build wrote into the source tree"
     finally:

@@ -45,22 +45,21 @@ class PlantAfterRunDirIo:
 
 class PlantBeforeRunDirIo(PlantAfterRunDirIo):
     """A pass-through over the real `defender._io` that calls `plant(run_dir)` right BEFORE the
-    first real run-dir `guarded_mkdir` (not `gather_raw`): between any check of the id and the
-    make, so only an exclusive make refuses what it finds."""
+    run dir's exclusive `hold_new` (#1279 rev 5): between any check of the id and the make, so
+    only an exclusive make refuses what it finds."""
 
     def __getattr__(self, name: str) -> Any:
-        if name != "guarded_mkdir":
+        if name != "hold_new":
             return super().__getattr__(name)
         real = getattr(_io, name)
 
-        def guarded_mkdir(path: Path, *args: Any, **kwargs: Any) -> Any:
-            path = Path(path)
-            if self.planted_in is None and path.name != RUN_LAYOUT.gather_raw.name:
-                self.planted_in = path
-                self._plant(path)
-            return real(path, *args, **kwargs)
+        def hold_new(parent: Path, child: str, *args: Any, **kwargs: Any) -> Any:
+            if self.planted_in is None:
+                self.planted_in = Path(parent) / child
+                self._plant(self.planted_in)
+            return real(parent, child, *args, **kwargs)
 
-        return guarded_mkdir
+        return hold_new
 
 
 #: What can sit at a sidecar's (or a run dir's) name besides a plain file; `plant_entry` makes each.
