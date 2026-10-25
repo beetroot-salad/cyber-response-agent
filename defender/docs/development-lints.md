@@ -63,6 +63,7 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | Scrub order (#540): in the entrypoint the box lifecycle runs before any reader of the run folder; no handler swallows the run-tainted signal; the bash tool never calls the in-process executor | none (no baseline) |
 | Isolated modules (#1092, #983): the box image scripts import only the standard library with no package-relative import; the tacit-knowledge registry adapter makes no filesystem write | none (no baseline) |
 | Venv guard (#1080): `execution/_venv.py` imports only the standard library; every script that re-executes into the venv calls the guard at module scope before any other `defender.*` import | none (no baseline) |
+| Close single read (#991): the close makes one read and one parse of the investigation companion, the challenge gate makes none, and the parse sits in the guard that turns a fault into a refusal | none (no baseline) |
 | Episode trees are reached only through the Episode handle and the runs repository's walk: no episode I/O in the migrated modules but the declared residue, no path-taking parameter or path maker outside the allowlists, no production code opens or re-binds an episode by path | none (the script's tables are the allowlists) |
 | Episode ids carry no composed meaning (no `{episode_id}-…` build, banned id derivers, labelled `RunId.mint`); the walk owner makes no folder by its path; the arm roster's file name is spelled only in the episode layout | none (no baseline) |
 | No newly-introduced dead code (wraps vulture) | baseline only |
