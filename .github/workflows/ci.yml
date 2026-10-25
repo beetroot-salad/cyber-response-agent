@@ -703,6 +703,11 @@ jobs:
       - name: Venv-guard fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_venv_guard.py
 
+      # Close single read (#991): the close reads and parses the investigation companion once, the
+      # challenge gate reads nothing, and the one parse is guarded.
+      - name: Close single-read fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_close_single_read.py
+
       # Episode paths (#1133, #1187): episode trees are reached only through the Episode handle and
       # the runs repository's walk. The migrated modules make no episode I/O but the declared
       # residue, the handle does I/O only through hold / hold_new, no function takes a path below
