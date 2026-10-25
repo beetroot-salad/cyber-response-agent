@@ -3,11 +3,17 @@
 The deployment rule is stated here and nowhere else (O4): only a `dev` deployment has a publish
 root, until blob serving exists. The publisher lays tenant areas over this root, and box start
 compares what it mounts against it, so neither resolves a destination on its own.
+
+The owner never raises (#1279 rev 4, A9): it answers a root, or `NoRoot` saying why. Every
+caller asks the same question, with no start, so box start judges mounts against exactly the
+folder this process publishes into (A8).
 """
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from defender._io import read_text_utf8
 from defender.configuration import _env
@@ -20,41 +26,49 @@ PUBLISH_DIR_NAME = "run-visualizations"
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 
 
-class PublishRootRefused(Exception):
-    """The publish root cannot be determined safely: under pytest it was about to resolve to a
-    real checkout, or a worktree's main checkout cannot be found (A7)."""
+class CheckoutUndeterminable(Exception):
+    """A worktree's main checkout cannot be found: its `.git` pointer cannot be followed, or it
+    leads somewhere without `defender/`."""
 
 
-def publish_root(start: Path | None = None) -> Path | None:
-    """The publish root, or `None` outside `dev`.
+@dataclass(frozen=True)
+class NoRoot:
+    """There is nowhere to publish: `not-dev` (the deployment rule), or `undeterminable` (dev,
+    but the default root cannot be found; `reason` names the cause)."""
+
+    kind: Literal["not-dev", "undeterminable"]
+    reason: str
+
+
+def publish_root() -> Path | NoRoot:
+    """The publish root of this process, or `NoRoot`.
 
     Order: the deployment rule, applied first so no checkout is read outside `dev`; the
-    `PUBLISH_DIR_ENV` override; else `<main checkout>/run-visualizations/`, the main checkout
-    reached from `start` (by default this package's checkout), so a worktree publishes into the
-    one folder the operator opens. Found by reading `.git` rather than running git, which as root
-    in a user-owned repo depends on `safe.directory` and inherited `GIT_DIR`.
-
-    Raises `PublishRootRefused` when a worktree's main checkout cannot be determined: falling back
-    to `start` would judge mounts, and publish pages, against the wrong folder.
-    """
-    if _env.deployment() != "dev":
-        return None
+    `PUBLISH_DIR_ENV` override; else `<main checkout>/run-visualizations/` of this package's
+    checkout, so a worktree publishes into the one folder the operator opens. Under pytest the
+    default is never used: a test that reaches it would write into the real checkout."""
+    deployment = _env.deployment()
+    if deployment != "dev":
+        return NoRoot("not-dev", f"this deployment counts as {deployment!r}, and only "
+                                 f"{_env.DEPLOYMENT_ENV}=dev has a publish destination")
     override = os.environ.get(PUBLISH_DIR_ENV)
     if override:
         return Path(override)
-    if start is None:
-        if "PYTEST_CURRENT_TEST" in os.environ:
-            raise PublishRootRefused(
-                f"{PUBLISH_DIR_ENV} is unset under pytest; refusing the real checkout's "
-                f"{PUBLISH_DIR_NAME}/")
-        start = _DEFENDER_DIR.parent
-    return _main_checkout(start) / PUBLISH_DIR_NAME
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return NoRoot("undeterminable", f"{PUBLISH_DIR_ENV} is unset under pytest; refusing the "
+                                        f"real checkout's {PUBLISH_DIR_NAME}/")
+    try:
+        return main_checkout(_DEFENDER_DIR.parent) / PUBLISH_DIR_NAME
+    except CheckoutUndeterminable as e:
+        return NoRoot("undeterminable", str(e))
 
 
-def _main_checkout(start: Path) -> Path:
+def main_checkout(start: Path) -> Path:
     """`start`, or the main checkout its `.git` file points back to. No `.git` at all (an image
-    build) or a `.git` directory is `start` itself; a pointer that cannot be followed, or that
-    lands somewhere without `defender/`, is refused."""
+    build) or a `.git` directory is `start` itself. Found by reading `.git` rather than running
+    git, which as root in a user-owned repo depends on `safe.directory` and inherited `GIT_DIR`.
+    Raises `CheckoutUndeterminable` rather than fall back to `start`, which would publish where
+    the operator is not looking."""
     dot_git = start / ".git"
     if dot_git.is_dir() or not dot_git.exists():
         return start
@@ -68,5 +82,5 @@ def _main_checkout(start: Path) -> Path:
         if not (main / "defender").is_dir():
             raise ValueError(f"{main} (from {dot_git}) holds no defender/")
     except (OSError, ValueError) as exc:
-        raise PublishRootRefused(f"main checkout of {start} undeterminable: {exc}") from exc
+        raise CheckoutUndeterminable(f"main checkout of {start} undeterminable: {exc}") from exc
     return main

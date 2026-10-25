@@ -42,7 +42,7 @@ def _run(runs: Path, name: str | None = None, *, says: str | None = None) -> Pat
 
 
 def _scored(tmp_path: Path, runs: Path, fixtures: Path,
-            *rows: tuple[str, str] | dict) -> tuple[dict[str, str], list[str], str]:
+            *rows: tuple[str, str]) -> tuple[dict[str, str], list[str], str]:
     """Score `runs` through `held_out.main` with an index holding `rows` (`(slug, run_id)`,
     oldest first) in the operator's folder. Returns `({slug: "OK" | "WRONG"}, not-run slugs,
     stdout)`."""
@@ -50,9 +50,8 @@ def _scored(tmp_path: Path, runs: Path, fixtures: Path,
 
     index = tmp_path / "ops" / "held-out-index.jsonl"
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text("".join(
-        json.dumps(row if isinstance(row, dict) else {"slug": row[0], "run_id": row[1]}) + "\n"
-        for row in rows), encoding="utf-8")
+    index.write_text("".join(json.dumps({"slug": s, "run_id": r}) + "\n" for s, r in rows),
+                     encoding="utf-8")
     out, err = io.StringIO(), io.StringIO()
     try:
         with redirect_stdout(out), redirect_stderr(err):
@@ -219,25 +218,3 @@ def test_divergent_fixture_set_warns_that_it_was_never_netted(tmp_path: Path, ca
     assert "NOT held out of learning" in capsys.readouterr().err
     assert warn_if_outside_the_net(HELD_OUT_FIXTURES) is False
     assert capsys.readouterr().err == ""
-
-
-def test_1279_a_newer_launch_with_no_id_row_scores_wrong_over_an_older_correct_run(tmp_path: Path):
-    """#1279 O7: the slug's newest launch row names no run, so an older correct run (legacy row
-    or a launch with its id row) does not stand in; a slug whose own newest launch has its id row
-    scores that run."""
-    runs = tmp_path / "runs"
-    correct = _run(runs, says="benign")
-    other_run = _run(runs, says="benign")
-    fixtures = _fixture_set(tmp_path / "held-out", {SLUG: "benign", f"{SLUG}-v2": "benign"})
-    old, new, v2 = (str(uuid.uuid4()) for _ in range(3))
-    verdicts, not_run, said = _scored(
-        tmp_path, runs, fixtures,
-        (SLUG, correct.name),
-        {"slug": SLUG, "launch_id": old, "launched_at": "2026-10-24T10:00:00+00:00"},
-        {"slug": SLUG, "launch_id": old, "run_id": correct.name},
-        {"slug": SLUG, "launch_id": new, "launched_at": "2026-10-24T11:00:00+00:00"},
-        {"slug": f"{SLUG}-v2", "launch_id": v2, "launched_at": "2026-10-24T11:30:00+00:00"},
-        {"slug": f"{SLUG}-v2", "launch_id": v2, "run_id": other_run.name})
-    assert verdicts == {SLUG: "WRONG", f"{SLUG}-v2": "OK"}, said
-    assert "launched, no run" in said, said
-    assert not_run == [], said

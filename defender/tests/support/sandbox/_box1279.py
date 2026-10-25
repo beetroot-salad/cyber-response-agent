@@ -52,25 +52,19 @@ def allow_unsandboxed(monkeypatch: Any) -> None:
     monkeypatch.setenv(ALLOW_ENV, "1")
 
 
-def dev_default_root(monkeypatch: Any) -> None:
+def dev_undeterminable_root(monkeypatch: Any) -> None:
     """A dev deployment with the publish-root override UNSET (the conftest sets it for every
-    test), so the root owner's own default resolution answers; the opt-out unset."""
+    test): under pytest the root owner answers "undeterminable" (its guard against the real
+    checkout), the A9 case; the opt-out unset."""
     monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
     monkeypatch.delenv(PUBLISH_ROOT_ENV, raising=False)
     monkeypatch.delenv(ALLOW_ENV, raising=False)
 
 
-BREAKAGES = ("dangling-gitdir", "main-without-defender")
-
-
-def fake_main_and_worktree(base: Path, *, broken: str | None = None) -> tuple[Path, Path]:
+def fake_main_and_worktree(base: Path) -> tuple[Path, Path]:
     """A main checkout (`.git` a directory, a `defender/`) and one worktree of it (`.git` a file
     pointing back, with a `defender/` holding the product check file), written the way git
-    leaves them (as test_1084_mirror's layouts). Returns `(main, worktree)`.
-
-    `broken` makes the main checkout undeterminable (A7): "dangling-gitdir" points the worktree's
-    `.git` file at an admin dir that does not exist; "main-without-defender" leaves the pointer
-    intact but the checkout it leads to has no `defender/`."""
+    leaves them (as test_1084_mirror's layouts). Returns `(main, worktree)`."""
     import shutil
 
     main, wt = base / "main", base / "trees" / "wt"
@@ -87,12 +81,6 @@ def fake_main_and_worktree(base: Path, *, broken: str | None = None) -> tuple[Pa
     # What a real start reads back from its code mount: the product check file and the image inputs.
     for name in (box_mod.CODE_CHECK_FILE, *HASH_INPUTS):
         shutil.copyfile(B.DEFENDER / name, wt / "defender" / name)
-    if broken == "dangling-gitdir":
-        (wt / ".git").write_text(f"gitdir: {base / 'nowhere' / '.git' / 'worktrees' / 'wt'}\n", encoding="utf-8")
-    elif broken == "main-without-defender":
-        (main / "defender").rmdir()
-    elif broken is not None:
-        raise ValueError(broken)
     return main, wt
 
 

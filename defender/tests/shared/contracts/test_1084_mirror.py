@@ -15,7 +15,8 @@ MIRROR = "run-visualizations"
 
 def _renderer():
     """The publish root's one owner (#1279 A4): tenant-free, below `presentation`. It answers the
-    root, or `None` outside `dev`; the old `visualize_run.mirror_root` is retired into it."""
+    root, or `NoRoot` saying why (rev 4, A9); the old `visualize_run.mirror_root` is retired into
+    it. Its worktree lookup, `main_checkout(start)`, is tested directly (rev 4)."""
     return importlib.import_module("defender.configuration.publish_root")
 
 
@@ -31,6 +32,12 @@ def _same(a: Path, b: Path) -> bool:
     """Path identity by where the kernel would land, so a result spelled with `..` (or not)
     compares by the directory it names — not by its spelling."""
     return a.resolve() == b.resolve()
+
+
+def _assert_no_root(vr, got, kind: str) -> None:
+    """The owner answered "no root" of `kind` (rev 4, A9), not a path."""
+    assert isinstance(got, vr.NoRoot), f"a root was answered: {got}"
+    assert got.kind == kind, got
 
 
 # fake layouts — written the way git writes them (trailing newlines included)
@@ -81,37 +88,22 @@ def warned(caplog):
     return read
 
 
-# D4 — the override, and its identity with the name the conftest sets
-
-
-def test_1084_the_override_wins_even_over_an_explicit_start(tmp_path, monkeypatch):
-    """With the override set, `publish_root(start=<a well-formed main checkout>)` returns
-    `Path(<override>)` exactly — the setting is step (1), ahead of any layout."""
-    vr = _renderer()
-    main = _checkout(tmp_path / "main")
-    elsewhere = tmp_path / "elsewhere" / "pages"
-    monkeypatch.setenv(ENV, str(elsewhere))
-    assert vr.publish_root(start=main) == elsewhere
-
-    monkeypatch.delenv(ENV)
-    assert _same(vr.publish_root(start=main), main / MIRROR)
+# D4 — the override
 
 
 def test_1084_the_override_is_read_at_call_time_not_at_import(tmp_path, monkeypatch):
+    """The override is step (1), read each call. Unset, under pytest the owner answers
+    "undeterminable" rather than the real checkout's folder."""
     vr = _renderer()
-    main = _checkout(tmp_path / "main")
-    monkeypatch.delenv(ENV, raising=False)
-    assert _same(vr.publish_root(start=main), main / MIRROR)
-
     first, second = tmp_path / "first", tmp_path / "second"
     monkeypatch.setenv(ENV, str(first))
-    assert vr.publish_root(start=main) == first
+    assert vr.publish_root() == first
     monkeypatch.setenv(ENV, str(second))
-    assert vr.publish_root(start=main) == second
-    assert vr.publish_root() == second, "the no-`start` call reads the same moment's setting"
+    assert vr.publish_root() == second
 
     monkeypatch.delenv(ENV)
-    assert _same(vr.publish_root(start=main), main / MIRROR)
+    got = vr.publish_root()
+    _assert_no_root(vr, got, "undeterminable")
 
 
 # M1 — the git-less resolution over fake layouts (O1/D3, and O2's default path)
@@ -121,7 +113,7 @@ def test_1084_a_main_checkout_resolves_to_its_own_top_level_folder(tmp_path, war
     """`start/.git` is a directory → `start` is the main checkout → `start/run-visualizations`,
     and nothing is warned (a well-formed layout is not warned about)."""
     main = _checkout(tmp_path / "main")
-    got = _renderer().publish_root(start=main)
+    got = _renderer().main_checkout(main) / MIRROR
     assert got.name == MIRROR
     assert _same(got, main / MIRROR)
     assert warned() == []
@@ -133,7 +125,7 @@ def test_1084_a_worktree_resolves_to_the_main_checkouts_folder_not_its_own(
     main = _checkout(tmp_path / "main")
     wt = tmp_path / "trees" / "wt"
     _worktree(main, wt, relative=relative)
-    got = _renderer().publish_root(start=wt)
+    got = _renderer().main_checkout(wt) / MIRROR
     assert got.name == MIRROR
     assert _same(got, main / MIRROR), f"resolved {got}, not the main checkout's folder"
     assert not _same(got, wt / MIRROR)
@@ -144,7 +136,7 @@ def test_1084_no_git_at_all_falls_back_to_start_without_a_warning(tmp_path, warn
     """(3) an image build has no `.git`: the answer is `start/run-visualizations`, and that is
     an expected layout, not a malformed one — nothing is warned."""
     image = _checkout(tmp_path / "image", git_dir=False)
-    got = _renderer().publish_root(start=image)
+    got = _renderer().main_checkout(image) / MIRROR
     assert _same(got, image / MIRROR)
     assert warned() == []
 
@@ -176,7 +168,7 @@ def _break_commondir_content(main: Path, wt: Path, admin: Path) -> None:
 
 
 def _break_git_file_undecodable(main: Path, wt: Path, admin: Path) -> None:
-    """Bytes that are not UTF-8 in the pointer: malformed, so a refusal (A7) (#1084
+    """Bytes that are not UTF-8 in the pointer: malformed, so a refusal (#1279) (#1084
     adversary H9)."""
     (wt / ".git").write_bytes(b"gitdir: \xff\xfe\n")
 
@@ -195,23 +187,23 @@ _BREAKAGES = pytest.mark.parametrize("breakage", [
 
 
 @_BREAKAGES
-def test_1279_a7_a_mismatched_or_malformed_chain_is_refused_not_a_fallback_to_start(
+def test_1279_a_mismatched_or_malformed_chain_is_refused_not_a_fallback_to_start(
         tmp_path, warned, no_override, breakage):
-    """#1279 A7 (conflict updated: #1084 warned and fell back to `start`): in dev a worktree whose
-    chain cannot be followed, or leads to a checkout with no `defender/`, makes the main checkout
-    undeterminable, so `publish_root(start=<worktree>)` raises `PublishRootRefused` -- it does not
-    answer the worktree's own folder. Positive control first, on the SAME layout: well-formed, the
+    """#1279 (conflict updated: #1084 warned and fell back to `start`): a worktree whose chain
+    cannot be followed, or leads to a checkout with no `defender/`, makes the main checkout
+    undeterminable, so `main_checkout(<worktree>)` raises `CheckoutUndeterminable` -- it does not
+    answer the worktree itself; the owner turns that into "undeterminable" (rev 4, A9). Positive control first, on the SAME layout: well-formed, the
     worktree resolves to the main checkout with nothing warned."""
     vr = _renderer()
     main = _checkout(tmp_path / "main")
     wt = tmp_path / "trees" / "wt"
     admin = _worktree(main, wt)
-    assert _same(vr.publish_root(start=wt), main / MIRROR), "positive control: well-formed"
+    assert _same(vr.main_checkout(wt) / MIRROR, main / MIRROR), "positive control: well-formed"
     assert warned() == [], "positive control: a well-formed chain is not warned"
 
     breakage(main, wt, admin)
-    with pytest.raises(vr.PublishRootRefused):
-        vr.publish_root(start=wt)
+    with pytest.raises(vr.CheckoutUndeterminable):
+        vr.main_checkout(wt)
 
 
 def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, warned, no_override):
@@ -222,28 +214,26 @@ def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, war
     other = _checkout(tmp_path / "other")
     wt = tmp_path / "trees" / "wt"
     admin = _worktree(main, wt)
-    assert _same(vr.publish_root(start=wt), main / MIRROR), "positive control: `../..`"
+    assert _same(vr.main_checkout(wt) / MIRROR, main / MIRROR), "positive control: `../..`"
 
     (admin / "commondir").write_text(f"{os.path.relpath(other / '.git', admin)}\n",
                                      encoding="utf-8")
-    assert _same(vr.publish_root(start=wt), other / MIRROR)
+    assert _same(vr.main_checkout(wt) / MIRROR, other / MIRROR)
     assert warned() == []
 
 
 # O3 — the detector
 
 
-def test_1084_under_pytest_without_the_override_the_default_resolution_is_refused(
-        tmp_path, monkeypatch):
+def test_1084_under_pytest_without_the_override_the_default_is_undeterminable(tmp_path, monkeypatch):
+    """Under pytest with the override unset the owner never answers the real checkout's folder:
+    it answers "undeterminable", naming the cause (rev 4, A9: nowhere to publish, not an error)."""
     vr = _renderer()
-    assert issubclass(vr.PublishRootRefused, Exception)
     monkeypatch.delenv(ENV, raising=False)
     assert "PYTEST_CURRENT_TEST" in os.environ, "precondition: the detector's input is present"
-    with pytest.raises(vr.PublishRootRefused):
-        vr.publish_root()
-
-    main = _checkout(tmp_path / "main")
-    assert _same(vr.publish_root(start=main), main / MIRROR)
+    got = vr.publish_root()
+    _assert_no_root(vr, got, "undeterminable")
+    assert "unset under pytest" in got.reason, got
 
     elsewhere = tmp_path / "pages"
     monkeypatch.setenv(ENV, str(elsewhere))
@@ -252,11 +242,11 @@ def test_1084_under_pytest_without_the_override_the_default_resolution_is_refuse
 
 def test_1084_an_empty_override_is_not_an_override(monkeypatch):
     """The override counts only when non-empty: `DEFENDER_RUN_VISUALIZATIONS_DIR=` must not
-    become `Path("")` (the cwd) — under pytest it is refused like an unset one."""
+    become `Path("")` (the cwd) — under pytest it answers like an unset one."""
     vr = _renderer()
     monkeypatch.setenv(ENV, "")
-    with pytest.raises(vr.PublishRootRefused):
-        vr.publish_root()
+    got = vr.publish_root()
+    _assert_no_root(vr, got, "undeterminable")
 
 
 # #1279 A4/O4 — the deployment rule is stated once, in the owner
@@ -266,7 +256,9 @@ def test_1084_an_empty_override_is_not_an_override(monkeypatch):
                          ids=["unset", "production", "typo", "empty"])
 def test_1279_outside_dev_there_is_no_publish_root_even_when_one_is_configured(
         tmp_path, monkeypatch, deployment):
-    """O4/A4: only `dev` has a publish root; the override does not conjure one elsewhere."""
+    """O4/A4: only `dev` has a publish root; the override does not conjure one elsewhere. The
+    rule is applied first: outside `dev` the answer is "not-dev" even where `dev` would be
+    "undeterminable" (the override unset under pytest), so no checkout is read."""
     from defender.configuration import _env
 
     vr = _renderer()
@@ -278,30 +270,8 @@ def test_1279_outside_dev_there_is_no_publish_root_even_when_one_is_configured(
         monkeypatch.delenv(_env.DEPLOYMENT_ENV)
     else:
         monkeypatch.setenv(_env.DEPLOYMENT_ENV, deployment)
-    assert vr.publish_root() is None
-    main = _checkout(tmp_path / "main")
-    assert vr.publish_root(start=main) is None, "the default layout gave a root outside dev"
-
-
-@pytest.mark.parametrize("deployment", [None, "production"], ids=["unset", "production"])
-@_BREAKAGES
-def test_1279_a7_outside_dev_a_broken_worktree_pointer_gives_no_root_and_no_exception(
-        tmp_path, monkeypatch, no_override, breakage, deployment):
-    """A7: the deployment rule is applied first, so outside `dev` the owner answers `None`
-    without reading any checkout: the same broken worktree that is refused in dev (above) neither
-    raises nor yields a root. Positive control: in dev (the autouse) it is refused."""
-    from defender.configuration import _env
-
-    vr = _renderer()
-    main = _checkout(tmp_path / "main")
-    wt = tmp_path / "trees" / "wt"
-    admin = _worktree(main, wt)
-    breakage(main, wt, admin)
-    with pytest.raises(vr.PublishRootRefused):
-        vr.publish_root(start=wt)
-
-    if deployment is None:
-        monkeypatch.delenv(_env.DEPLOYMENT_ENV)
-    else:
-        monkeypatch.setenv(_env.DEPLOYMENT_ENV, deployment)
-    assert vr.publish_root(start=wt) is None
+    got = vr.publish_root()
+    _assert_no_root(vr, got, "not-dev")
+    monkeypatch.delenv(ENV)
+    got = vr.publish_root()
+    _assert_no_root(vr, got, "not-dev")

@@ -236,7 +236,8 @@ def test_o3_outside_dev_there_is_no_publish_root_and_nothing_is_checked(tmp_path
 
 
 # ---------------------------------------------------------------------------------------
-# A7: box start resolves the root through the owner, from the box's own code mount
+# A8: box start judges against the root this process publishes into, whatever its code mount
+# A9: in dev, a root that cannot be determined starts the box, with a warning naming the cause
 # ---------------------------------------------------------------------------------------
 
 
@@ -246,142 +247,49 @@ def _agent_at(path: Path) -> Path:
     return path
 
 
-def test_a7_a_worktrees_box_resolves_the_root_to_the_main_checkouts_folder(tmp_path, monkeypatch):
-    """A7: with the override unset, a box whose code mount is a worktree's `defender/` is judged
-    against `<main checkout>/run-visualizations/`, as the mirror resolves it: a mount in the
-    worktree's own `run-visualizations/` is clear, one in the main checkout's is refused."""
-    main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
-    X.dev_default_root(monkeypatch)
-    lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
-
-    own = replace(lane, agent=_agent_at(wt / "run-visualizations" / "agent"))
-    clear = RecordingDocker()
-    own.start(clear)
-    assert clear.create_argv is not None, "the worktree's own folder was taken as the publish root"
-
-    root = main / "run-visualizations"
-    inside = replace(lane, agent=_agent_at(root / "agent"))
-    rec = RecordingDocker()
-    with pytest.raises(X.conflict_type()) as refused:
-        inside.start(rec)
-    assert X.names_path(str(refused.value), root) or X.names_path(str(refused.value), root.resolve()), (
-        f"the refusal does not name the main checkout's root {root}: {refused.value}")
-    assert X.names_path(str(refused.value), root / "agent") or X.names_path(
-        str(refused.value), (root / "agent").resolve()), f"it does not name the mount: {refused.value}"
-    assert not X.created(rec.calls)
-    assert not X.removed(rec.calls)
-
-
-def test_a7_a_mount_above_the_resolved_root_is_refused_and_a_clear_one_starts(tmp_path, monkeypatch):
-    """A7 + A1: the main checkout itself, mounted, contains the resolved root (the other direction)."""
-    main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
-    X.dev_default_root(monkeypatch)
-    lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
-    clear = RecordingDocker()
-    lane.start(clear)
-    assert clear.create_argv is not None, "control: a clear worktree box did not start"
-
-    above = replace(lane, agent=_agent_at(main))
-    rec = RecordingDocker()
-    with pytest.raises(X.conflict_type()) as refused:
-        above.start(rec)
-    assert X.names_path(str(refused.value), main.resolve()) or X.names_path(
-        str(refused.value), main), f"the refusal does not name the mount {main}: {refused.value}"
-    assert not X.created(rec.calls)
-
-
-def _request_in_a_worktree(tmp_path: Path, main: Path, wt: Path, *, data: Path | None = None,
-                           lane_dir: Path | None = None) -> box_mod.BoxRequest:
-    """A request whose code mount and code root are the worktree's `defender/`; `data` / `lane_dir`
-    relocate the read-only data tree / the writable lane (created if absent)."""
+def _request_in_a_worktree(tmp_path: Path, wt: Path, *, data: Path | None = None) -> box_mod.BoxRequest:
+    """A request whose code mount and code root are the worktree's `defender/`; `data` relocates
+    the read-only data tree (created if absent)."""
     base = X.request_lane(Path(tempfile.mkdtemp(prefix="req-", dir=tmp_path)))
-    moved = replace(base, code=wt / "defender", data=data or base.data, lane=lane_dir or base.lane)
-    for folder in (moved.data, moved.lane):
-        folder.mkdir(parents=True, exist_ok=True)
+    moved = replace(base, code=wt / "defender", data=data or base.data)
+    moved.data.mkdir(parents=True, exist_ok=True)
     return replace(moved.request(), workdir=wt, defender_dir=wt / "defender")
 
 
-@pytest.mark.parametrize("mount", ["data", "writable"])
-def test_a7_a_worktrees_request_box_resolves_the_root_to_the_main_checkouts_folder(
-        tmp_path, monkeypatch, mount):
-    """A7: the request lane resolves the root from its `kind="code"` mount as the run lane does:
-    with the override unset, a mount in the main checkout's `run-visualizations/` is refused naming
-    root and mount, one in the worktree's own is clear."""
+@pytest.mark.parametrize("lane_kind", ["run", "request"])
+def test_a8_a_box_is_judged_against_this_processes_root_not_its_code_mounts_checkout(
+        tmp_path, monkeypatch, lane_kind):
+    """A8: a box whose code mount is a worktree is judged against the root the starting process
+    publishes into (here the override), not against the folder its code mount's main checkout
+    would give. A mount in that checkout's `run-visualizations/` starts; one in the process's root
+    is refused naming both, and nothing is created or removed."""
     main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
-    X.dev_default_root(monkeypatch)
-    root = main / "run-visualizations"
+    root = X.dev_root(monkeypatch, tmp_path / "process" / "pub")
+    code_side = main / "run-visualizations" / "mount"
+    if lane_kind == "run":
+        lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
+        def start(folder: Path, docker: RecordingDocker) -> None:
+            replace(lane, agent=_agent_at(folder)).start(docker)
+    else:
+        def start(folder: Path, docker: RecordingDocker) -> None:
+            box_mod.start_box(_request_in_a_worktree(tmp_path, wt, data=folder), docker=docker)
 
-    def lane_at(folder: Path) -> box_mod.BoxRequest:
-        key = "data" if mount == "data" else "lane_dir"
-        return _request_in_a_worktree(tmp_path, main, wt, **{key: folder})
-
-    own = lane_at(wt / "run-visualizations" / "mount")
     clear = RecordingDocker()
-    box_mod.start_box(own, docker=clear)
-    assert clear.create_argv is not None, "the worktree's own folder was taken as the publish root"
+    start(code_side, clear)
+    assert clear.create_argv is not None, "the code mount's checkout folder was taken as the root"
 
-    inside = lane_at(root / "mount")
     rec = RecordingDocker()
     with pytest.raises(X.conflict_type()) as refused:
-        box_mod.start_box(inside, docker=rec)
+        start(root / "mount", rec)
     said = str(refused.value)
-    assert X.names_path(said, root) or X.names_path(said, root.resolve()), (
-        f"the refusal does not name the main checkout's root {root}: {said}")
-    assert X.names_path(said, root / "mount") or X.names_path(said, (root / "mount").resolve()), (
-        f"it does not name the mount: {said}")
+    assert X.names_path(said, root), f"the refusal does not name the process's root {root}: {said}"
+    assert X.names_path(said, root / "mount"), f"it does not name the mount: {said}"
     assert not X.created(rec.calls)
     assert not X.removed(rec.calls)
 
 
-@pytest.mark.parametrize("above", ["the main checkout", "the root itself"])
-def test_a7_a_request_mount_equal_to_or_above_the_resolved_root_is_refused_and_a_clear_one_starts(
-        tmp_path, monkeypatch, above):
-    """A7 + A1: in the request lane the main checkout (containing the resolved root) or the root
-    itself, mounted, is refused; the same layout with a clear data tree starts."""
-    main, wt = X.fake_main_and_worktree(tmp_path / "checkouts")
-    X.dev_default_root(monkeypatch)
-    clear = RecordingDocker()
-    box_mod.start_box(_request_in_a_worktree(tmp_path, main, wt), docker=clear)
-    assert clear.create_argv is not None, "control: a clear worktree request did not start"
-
-    mounted = main if above == "the main checkout" else main / "run-visualizations"
-    rec = RecordingDocker()
-    with pytest.raises(X.conflict_type()) as refused:
-        box_mod.start_box(
-            _request_in_a_worktree(tmp_path, main, wt, data=mounted), docker=rec)
-    said = str(refused.value)
-    assert X.names_path(said, mounted) or X.names_path(said, mounted.resolve()), (
-        f"the refusal does not name the mount {mounted}: {said}")
-    assert not X.created(rec.calls)
-
-
-def test_a7_a_request_resolves_the_root_from_its_code_mount_not_from_its_workdir(
-        tmp_path, monkeypatch):
-    """A7: with the workdir in another checkout, the root is still the code mount's
-    main checkout's: a mount under it is refused, one under the workdir checkout's root starts."""
-    main, wt = X.fake_main_and_worktree(tmp_path / "code-side")
-    other_main, other_wt = X.fake_main_and_worktree(tmp_path / "workdir-side")
-    X.dev_default_root(monkeypatch)
-
-    def at(folder: Path) -> box_mod.BoxRequest:
-        req = _request_in_a_worktree(tmp_path, main, wt, data=folder)
-        return replace(req, workdir=other_wt)
-
-    elsewhere = RecordingDocker()
-    box_mod.start_box(at(other_main / "run-visualizations" / "mount"), docker=elsewhere)
-    assert elsewhere.create_argv is not None, "control: the workdir checkout's folder was taken as the root"
-
-    root = main / "run-visualizations"
-    rec = RecordingDocker()
-    with pytest.raises(X.conflict_type()) as refused:
-        box_mod.start_box(at(root / "mount"), docker=rec)
-    assert X.names_path(str(refused.value), root) or X.names_path(str(refused.value), root.resolve()), (
-        f"the refusal does not name the code mount's checkout root {root}: {refused.value}")
-    assert not X.created(rec.calls)
-
-
 def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
-    """A caller-composed request that names no code tree: nothing to resolve the root from."""
+    """A caller-composed request that names no code tree: A8 needs none."""
     mounts = (
         box_mod.Mount(source=req.data, target=req.data, writable=False, kind="data"),
         box_mod.Mount(source=req.lane, target=req.lane, writable=True),
@@ -390,85 +298,52 @@ def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
                               require_sandbox=False)
 
 
-@pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
-def test_o3_the_refusal_class_is_non_degradable_when_the_root_owner_refuses_the_pytest_detector(
-        tmp_path, monkeypatch, opt_out):
-    """The refusal class is non-degradable: a root resolution the owner refuses (here only its
-    pytest detector: no code mount to resolve from, the override unset) refuses the start, the
-    opt-out does not degrade it, and it is no "no root". This is NOT the A7 coverage -- the
-    worktree-pointer and main-without-defender cases below are. Control: the same request starts
-    with the override set, and outside `dev`, where there is no root to resolve."""
+def test_a8_a_request_with_no_code_mount_is_still_judged(tmp_path, monkeypatch):
+    """A8: the root does not come from a mount, so a request with no code mount is judged too."""
     req = X.request_lane(tmp_path)
-    request = _request_without_a_code_mount(req)
+    X.dev_root(monkeypatch, req.data / "pub")
+    rec = RecordingDocker()
+    with pytest.raises(X.conflict_type()):
+        box_mod.start_box(_request_without_a_code_mount(req), docker=rec)
+    assert not X.created(rec.calls)
 
-    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
-    clear = RecordingDocker()
-    box_mod.start_box(request, docker=clear)
-    assert clear.create_argv is not None, "control: the request does not start even with a root"
 
-    X.dev_default_root(monkeypatch)
+@pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
+@pytest.mark.parametrize("lane_kind", ["run", "request"])
+def test_a9_in_dev_an_undeterminable_root_starts_the_box_and_warns_naming_the_cause(
+        tmp_path, monkeypatch, caplog, lane_kind, opt_out):
+    """A9: in `dev` a root the owner cannot determine (here its pytest guard: the override unset)
+    is nowhere to publish, not a conflict. The box starts, plain and with the opt-out, and a
+    warning names the box and the cause, so a skipped check never passes as a clear one.
+    Control: outside `dev` it starts with no such warning."""
+    if lane_kind == "run":
+        lane = X.run_lane(tmp_path)
+        start, name = lane.start, box_mod.container_name(lane.run_dir.name)
+    else:
+        req = X.request_lane(tmp_path)
+        def start(docker: RecordingDocker) -> None:
+            box_mod.start_box(req.request(), docker=docker)
+        name = X.REQUEST_NAME
+    X.dev_undeterminable_root(monkeypatch)
     if opt_out:
         X.allow_unsandboxed(monkeypatch)
     rec = RecordingDocker()
-    with pytest.raises(X.conflict_type()):
-        box_mod.start_box(request, docker=rec)
-    assert not X.created(rec.calls)
+    with caplog.at_level("WARNING", logger="defender.box._lifecycle"):
+        start(rec)
+    assert rec.create_argv is not None, "an undeterminable root refused the start"
+    warned = [r.getMessage() for r in caplog.records if r.name == "defender.box._lifecycle"
+              and "publish root could not be determined" in r.getMessage()]
+    assert len(warned) == 1, f"no single warning that the root could not be determined: {caplog.text}"
+    assert name in warned[0], f"the warning does not name the box {name}: {warned[0]}"
+    assert "unset under pytest" in warned[0], f"the warning does not name the cause: {warned[0]}"
 
+    caplog.clear()
     monkeypatch.delenv(X.DEPLOYMENT_ENV, raising=False)
     outside = RecordingDocker()
-    box_mod.start_box(request, docker=outside)
-    assert outside.create_argv is not None, "outside dev there is no root to fail to resolve"
-
-
-@pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
-@pytest.mark.parametrize("broken", X.BREAKAGES)
-def test_a7_in_dev_an_undeterminable_main_checkout_refuses_the_start(
-        tmp_path, monkeypatch, broken, opt_out):
-    """A7: a worktree whose `.git` pointer cannot be followed (gitdir leads nowhere), or whose
-    main checkout has no `defender/`, makes the root unresolvable. In `dev` with the override unset
-    the start is refused as an O3 refusal -- plain and with the opt-out -- and nothing is created.
-    Positive control: the intact pointer starts the same lane."""
-    X.dev_default_root(monkeypatch)
-    _, good_wt = X.fake_main_and_worktree(tmp_path / "good")
-    good = RecordingDocker()
-    replace(X.run_lane(tmp_path / "lane-good"), defender_dir=good_wt / "defender").start(good)
-    assert good.create_argv is not None, "control: the intact worktree did not start"
-
-    _, wt = X.fake_main_and_worktree(tmp_path / "bad", broken=broken)
-    lane = replace(X.run_lane(tmp_path / "lane-bad"), defender_dir=wt / "defender")
-    if opt_out:
-        X.allow_unsandboxed(monkeypatch)
-    rec = RecordingDocker()
-    with pytest.raises(X.conflict_type()):
-        lane.start(rec)
-    assert not X.created(rec.calls)
-    assert not X.removed(rec.calls)
-
-
-@pytest.mark.parametrize("opt_out", [False, True], ids=["plain", "opt-out"])
-@pytest.mark.parametrize("deployment", [None, "production"], ids=["unset", "production"])
-@pytest.mark.parametrize("broken", X.BREAKAGES)
-def test_a7_outside_dev_a_broken_worktree_never_affects_the_start(
-        tmp_path, monkeypatch, broken, deployment, opt_out):
-    """A7: the deployment rule is applied first, so outside `dev` (override unset) a box whose
-    code mount is a broken worktree starts, plain and with the opt-out: the owner returns no root
-    without reading the checkout. Control: the same layout in dev is refused."""
-    _, wt = X.fake_main_and_worktree(tmp_path / "bad", broken=broken)
-    lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
-    X.dev_default_root(monkeypatch)
-    with pytest.raises(X.conflict_type()):
-        lane.start(RecordingDocker())
-
-    monkeypatch.delenv(X.PUBLISH_ROOT_ENV, raising=False)
-    if deployment is None:
-        monkeypatch.delenv(X.DEPLOYMENT_ENV, raising=False)
-    else:
-        monkeypatch.setenv(X.DEPLOYMENT_ENV, deployment)
-    if opt_out:
-        X.allow_unsandboxed(monkeypatch)
-    rec = RecordingDocker()
-    lane.start(rec)
-    assert rec.create_argv is not None, "a non-dev start was refused over a broken worktree"
+    with caplog.at_level("WARNING", logger="defender.box._lifecycle"):
+        start(outside)
+    assert outside.create_argv is not None
+    assert "publish root could not be determined" not in caplog.text, "outside dev there is no root to miss"
 
 
 # ---------------------------------------------------------------------------------------

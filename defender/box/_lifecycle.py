@@ -97,22 +97,23 @@ def _run_lane_mounts(
 
 
 def _refuse_a_start_that_conflicts(
-    docker: DockerFn, name: str, sources: Sequence[tuple[str, Path]], code_checkout: Path | None,
+    docker: DockerFn, name: str, sources: Sequence[tuple[str, Path]],
 ) -> None:
     """The two pre-create refusals (#1279 O3, O6), neither degraded by the unsandboxed opt-out.
 
     O3: no mount source may overlap the host-wide publish root (the source contains it, it
-    contains the source, or they are equal; judged on resolved paths). The root is resolved from
-    the box's own code checkout, as the mirror resolves it, so a worktree is judged against its
-    main checkout's folder; in `dev` a root that cannot be determined refuses like an overlap.
-    Outside `dev` there is no root and nothing is checked. O6: a container already holding the
-    box's name. The overlap needs no daemon, so it is judged first."""
-    try:
-        root = publish_root.publish_root(code_checkout)
-    except publish_root.PublishRootRefused as e:
-        raise BoxStartConflict(f"the publish root could not be determined, so the box {name} "
-                               f"is not started: {e}") from e
-    if root is not None:
+    contains the source, or they are equal; judged on resolved paths). The root is this
+    process's, asked exactly as the publisher asks (A8), so the check judges the folder pages
+    land in. With no root there is nothing to compare: outside `dev` silently, and in `dev` with
+    a warning naming why the root could not be determined (A9) — this process then publishes
+    nothing. O6: a container already holding the box's name. The overlap needs no daemon, so it
+    is judged first."""
+    root = publish_root.publish_root()
+    if isinstance(root, publish_root.NoRoot):
+        if root.kind == "undeterminable":
+            _logger.warning("box %s: the publish root could not be determined, so no mount is "
+                            "checked against it: %s", name, root.reason)
+    else:
         resolved_root = root.resolve()
         for what, source in sources:
             there = Path(source).resolve()
@@ -434,8 +435,7 @@ def _start_boxed(
     try:
         _refuse_a_start_that_conflicts(
             docker, name,
-            [(what, path) for what, path, _ in _run_lane_mounts(run_dir, defender_dir, tenant_agent)],
-            Path(defender_dir).parent)
+            [(what, path) for what, path, _ in _run_lane_mounts(run_dir, defender_dir, tenant_agent)])
     except BoxFault as e:
         # Every startup fault path writes the did-not-run marker, so the tree never reads as
         # "not yet judged". This arm fires on a mount overlapping the publish root and on any
@@ -562,11 +562,9 @@ def _start_boxed_request(
             f"composed container name {request.name!r} fails the run-id grammar "
             f"(allowed: {RUN_ID_ALLOWED})"
         )
-    code = next((Path(m.source) for m in request.mounts if m.kind == "code"), None)
     try:
         _refuse_a_start_that_conflicts(
-            docker, request.name, [("mount source", Path(m.source)) for m in request.mounts],
-            None if code is None else code.parent)
+            docker, request.name, [("mount source", Path(m.source)) for m in request.mounts])
     except BoxFault as e:
         # As in `_start_boxed`. A lane with no writable mount gets no marker.
         _did_not_run_for_request(request, f"box start refused before create: {e}")

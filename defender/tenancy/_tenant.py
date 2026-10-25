@@ -839,14 +839,3 @@ def resolve_data_root() -> DataRoot:
 def data_root_from_path(path: Path) -> DataRoot:
     """Mark an explicit host-selected root; acceptance still performs every check."""
     return DataRoot(path)
-
-
-def data_root_contains(root: DataRoot, path: Path) -> bool:
-    """Whether an already absolute candidate is at or below the configured root."""
-    location = _unwrap_data_root(root)
-    return path == location or location in path.parents
-
-
-def data_root_description(root: DataRoot) -> str:
-    """Explicit owner display of a configured root for operator refusals."""
-    return str(_unwrap_data_root(root))

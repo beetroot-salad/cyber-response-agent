@@ -524,7 +524,8 @@ def render(view: dict) -> str:
 
 def main(tenant: Tenant) -> int:
     """Both pages and their contracts, published into the accepted tenant's learning area (#1279
-    O1). Refuses outside `dev`, where there is no publish destination (O4), before building."""
+    O1). Refuses before building when there is nowhere to publish: outside `dev` (O4), or a
+    `dev` root that cannot be determined (A9)."""
     publisher = Publisher.for_tenant(tenant)
     queues = serialize_queues.stamped_view(LoopPaths.for_tenant(tenant))
     view = serialize.stamped_view()

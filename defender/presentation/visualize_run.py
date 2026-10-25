@@ -115,14 +115,17 @@ def mirror_page(page: str, run_id: str, tenant: Tenant) -> CopyOutcome:
     Copies the page to the tenant's publish area (`Publisher.run_page`), written as the publish
     folder's owner (#1084), only on a `dev` deployment (#1110) — the rule lives in the publish
     root's owner, so no caller can reach the copy without it. Best-effort, and never raises:
-    everything after the publisher is built sits in one `try`. A skipped copy is logged at INFO;
-    a failed one at WARNING, naming the destination when one resolved and the error's reason.
+    everything after the deployment rule sits in one `try`. A skipped copy (not `dev`) is logged
+    at INFO; a failed one — a `dev` root that cannot be determined, or a failed write — at
+    WARNING, naming the destination when one resolved and the error's reason.
     """
     dest: Path | None = None
     try:
         try:
             publisher = Publisher.for_tenant(tenant)
         except NoPublishRoot as none:
+            if none.no_root.kind != "not-dev":
+                raise  # a dev root that cannot be determined is a failed copy (#1279 A9)
             _logger.info("page not copied: %s", none)
             return "skipped"
         target = publisher.run_page(run_id)

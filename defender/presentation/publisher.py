@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from defender.configuration import _env, publish_root
+from defender.configuration import publish_root
 from defender.presentation import _mirror_write
 
 if TYPE_CHECKING:
@@ -31,7 +31,12 @@ _MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
 
 
 class NoPublishRoot(Exception):
-    """This deployment has no publish destination."""
+    """There is nowhere to publish (#1279 A9): `no_root` says why — not a `dev` deployment, or
+    a `dev` root that cannot be determined."""
+
+    def __init__(self, no_root: publish_root.NoRoot) -> None:
+        super().__init__(f"nothing to publish into: {no_root.reason}")
+        self.no_root = no_root
 
 
 @dataclass(frozen=True)
@@ -51,14 +56,12 @@ class Publisher:
     tenant_id: str
 
     @classmethod
-    def for_tenant(cls, tenant: Tenant, *, start: Path | None = None) -> Publisher:
-        """The publisher for `tenant`; refuses outside `dev`, where there is no root (O4).
-        `publish_root.PublishRootRefused` propagates when the root cannot be determined."""
-        root = publish_root.publish_root(start)
-        if root is None:
-            raise NoPublishRoot(
-                f"nothing to publish into: this deployment counts as {_env.deployment()!r}, "
-                f"and only {_env.DEPLOYMENT_ENV}=dev has a publish destination")
+    def for_tenant(cls, tenant: Tenant) -> Publisher:
+        """The publisher for `tenant`; `NoPublishRoot` when there is nowhere to publish: outside
+        `dev` (O4), or in `dev` when the root cannot be determined (A9)."""
+        root = publish_root.publish_root()
+        if isinstance(root, publish_root.NoRoot):
+            raise NoPublishRoot(root)
         return cls(root, str(tenant.id))
 
     def run_page(self, run_id: str) -> Target:

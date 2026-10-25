@@ -28,16 +28,12 @@ copied there and no run records a pointer back to its fixture. Two consequences:
 
 - **Scoring** (`evaluations/held_out.py`) walks THESE dirs and finds each fixture's
   run through the held-out index — a JSON Lines file you name, kept outside every
-  runs and episodes tree, one `{slug, run_id}` row per launch — never by a run
-  folder's name, which is an opaque UUID (#1187). Launch a scored run as:
-
-  ```bash
-  python3 evaluations/held_out.py launch <slug> --tenant <tenant-uuid> --index <F>
-  ```
-
-  which appends the row first, then runs
-  `run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant <tenant-uuid> --no-learn`; the id row
-  is appended when run.py announces its run id (`run_id=<uuid>`, its first stdout line).
+  runs and episodes tree, one `{slug, run_id}` row per run — never by a run
+  folder's name, which is an opaque UUID (#1187). Run a scored run as
+  `run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant <tenant-uuid> --no-learn`
+  and append its row to the index yourself, from the run id it announces as its first stdout
+  line (`run_id=<uuid>`). Nothing writes rows for you: a run that crashes before announcing its
+  id leaves no row, and the slug's older row (if any) is scored instead.
 
 - **Contamination** is stopped at the two entrances to learning, and both checks
   are label-free:

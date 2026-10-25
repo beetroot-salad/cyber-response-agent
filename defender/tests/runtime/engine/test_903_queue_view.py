@@ -907,6 +907,31 @@ def test_1279_o4_the_learning_build_outside_dev_refuses_naming_the_deployment(
         _restore_in_tree_pages(before)
 
 
+@pytest.mark.usefixtures("frontend_outputs_lock")
+def test_1279_a9_the_learning_build_with_an_undeterminable_root_refuses_naming_the_cause(
+        data_root, run_visualizations_dir):
+    """A9: in dev, a root the owner cannot determine (the override empty under pytest, its guard)
+    is nowhere to publish: the build refuses cleanly, naming the cause, with no traceback, and
+    writes nothing."""
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    t = set_up_tenant(data_root, H.TID)
+    Path(location_path(t.learning)).mkdir(parents=True, exist_ok=True)
+    before = _in_tree_pages()
+    try:
+        proc = _build_cli(t.id, data_root, DEFENDER_DEPLOYMENT="dev",
+                          DEFENDER_RUN_VISUALIZATIONS_DIR="", PYTEST_CURRENT_TEST="a9-build")
+        out = H.output(proc)
+        H.assert_ran(proc)
+        assert proc.returncode == 2, f"the build did not refuse: {out}"
+        assert "unset under pytest" in out, f"the refusal does not name the cause: {out}"
+        assert not list(run_visualizations_dir.iterdir()), "a refused build published a page"
+        assert _in_tree_pages() == before, "a refused build wrote into the source tree"
+    finally:
+        _restore_in_tree_pages(before)
+
+
 # --------------------------------------------------------------------------------------
 # O8 — the writers stamp what they write
 
