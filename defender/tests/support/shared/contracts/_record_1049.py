@@ -1,12 +1,9 @@
 """Shared machinery for #1049's episode-tree reader spec — NO test scripts."""
 from __future__ import annotations
 
-import ast
 import contextlib
 import errno
-import inspect
 import os
-import textwrap
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -347,46 +344,5 @@ def restore_tree(root: Path) -> None:
 # --------------------------------------------------------------------------------------
 # AST censuses — over the SOURCE of the target, resolved by symbol.
 # --------------------------------------------------------------------------------------
-
-
-def parsed(obj: Any) -> ast.AST:
-    """The AST of a function's or class's own source (dedented, so a method parses)."""
-    return ast.parse(textwrap.dedent(inspect.getsource(obj)))
-
-
-def called_names(tree: ast.AST) -> set[str]:
-    """Every `f(...)` / `x.f(...)` callee name in `tree`."""
-    out: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            f = node.func
-            if isinstance(f, ast.Name):
-                out.add(f.id)
-            elif isinstance(f, ast.Attribute):
-                out.add(f.attr)
-    return out
-
-
-
-def path_typed_parameters(fn: ast.FunctionDef) -> list[str]:
-    """The parameters of `fn` that could carry a ROOT: annotated `Path` or `PathLike`, or
-    named like a root (`path`, `root`, `episode_dir`, `world_dir`, `run_dir`, `*_path`)."""
-    rooty = {"path", "root", "episode_dir", "world_dir", "run_dir"}
-    out = []
-    a = fn.args
-    for p in (*a.posonlyargs, *a.args, *a.kwonlyargs):
-        names = {n.id for n in ast.walk(p.annotation) if isinstance(n, ast.Name)} if p.annotation else set()
-        attrs = {n.attr for n in ast.walk(p.annotation) if isinstance(n, ast.Attribute)} if p.annotation else set()
-        typed = bool({"Path", "PathLike"} & (names | attrs))
-        if typed or p.arg in rooty or p.arg.endswith("_path"):
-            out.append(p.arg)
-    return out
-
-
-def function_def(tree: ast.AST, name: str) -> ast.FunctionDef:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return node
-    raise AssertionError(f"no function {name!r} in the parsed source")
 
 
