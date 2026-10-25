@@ -144,17 +144,28 @@ _SKIP = S.JUNK_DIRS | {"tests"}
 
 
 def _copy_tree(root: Path) -> Path:
-    """`defender/` copied to `<root>/defender` (tests and caches left out, no `.venv`), its
-    lesson corpus replaced by `_CORPUS`. Returns `root`, the copy's checkout root."""
+    """`defender/` copied to `<root>/defender` (tests and caches left out, no `.venv`), and a
+    run-copy-shaped agent root `<root>/agent` whose `lessons/` holds `_CORPUS`. Returns `root`,
+    the copy's checkout root.
+
+    #1108 P4 (O1, O2): the product tree carries no corpus, so the copy holds none either (a
+    leftover `lessons*/` in this checkout is left out rather than removed after the fact); the
+    lessons engine reads `$DEFENDER_AGENT_DIR/lessons` (`_agent_root`)."""
     root.mkdir(parents=True, exist_ok=True)
     dst = root / "defender"
     shutil.copytree(S.DEFENDER, dst, symlinks=True,
-                    ignore=lambda _d, names: [n for n in names if n in _SKIP])
-    shutil.rmtree(dst / "lessons")
-    (dst / "lessons").mkdir()
+                    ignore=lambda d, names: [n for n in names if n in _SKIP or (
+                        Path(d) == S.DEFENDER and n.startswith("lessons"))])
+    corpus = _agent_root(root) / "lessons"
+    corpus.mkdir(parents=True)
     for name, text in _CORPUS.items():
-        (dst / "lessons" / name).write_text(text, encoding="utf-8")
+        (corpus / name).write_text(text, encoding="utf-8")
     return root
+
+
+def _agent_root(root: Path) -> Path:
+    """The agent root beside a tree copy: what `DEFENDER_AGENT_DIR` names for its lessons shim."""
+    return root / "agent"
 
 
 @contextlib.contextmanager

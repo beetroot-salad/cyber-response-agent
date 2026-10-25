@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
 import stat
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -190,6 +191,14 @@ class _TenantLayout:
         return self.tenant_root / "drafts"
 
     @property
+    def run_knowledge(self) -> Path:
+        return self.tenant_root / "run-knowledge"
+
+    @property
+    def publish_status(self) -> Path:
+        return self.tenant_root / "publish-status.json"
+
+    @property
     def knowledge_lock(self) -> Path:
         return self.tenant_root / "knowledge.lock"
 
@@ -343,6 +352,28 @@ class Tenant:
         return DraftsRoot(self._layout.drafts)
 
     @property
+    def run_knowledge(self) -> Path:
+        """Host-made per-run copies of one export (`<run_id>/{owner, settings/, stage/}`,
+        #1108 P4 U9): what a run reads, removed when the run ends and swept by a publish once
+        their owner is dead."""
+        return self._layout.run_knowledge
+
+    def export_folder(self, commit: str) -> Path:
+        """`<T>/exports/<commit>/`, the published export of one commit, for a reader that judges
+        it itself (a run's copy, a map of what a run read). `commit` must be one path segment:
+        anything else is `TenantRefused`, never joined (callers hold it to a commit id first)."""
+        if not commit or "/" in commit or commit in (".", ".."):
+            raise TenantRefused(f"{commit!r} does not name an export (one commit id, no path)")
+        return self._layout.exports / commit
+
+    @property
+    def publish_status(self) -> Path:
+        """The outcome of the tenant's last publish attempt, by any trigger (a run launch, a
+        drain start, `tenant.py update`): its refusal, or the commit it published. What
+        `tenant.py check` reports a stalled publish from (#1108 P4 O-SEE)."""
+        return self._layout.publish_status
+
+    @property
     def knowledge_lock(self) -> KnowledgeLock:
         """The per-tenant lock over the knowledge clone and its exports: held for a
         fast-forward, export publication, filter configuration and draft build or sweep,
@@ -382,6 +413,11 @@ class Tenant:
 
         return RunsRepository(self)
 
+    def learning_state_exists(self) -> bool:
+        """Whether the tenant's learning state root is there (any entry, a link included):
+        without one no drain has run or can run (only `tenant.py setup` creates it)."""
+        return self._layout.learning.is_symlink() or self._layout.learning.exists()
+
     def learning_paths(self, paths_type: type[LoopPaths], *, repo_root: Path) -> LoopPaths:
         """Build learning configuration where the tenant's record root is owned."""
         return paths_type(repo_root=repo_root, state_dir=self.learning, tenant=self)
@@ -393,6 +429,21 @@ class Tenant:
         while preserving request-time validation rather than reusing an acceptance snapshot.
         """
         return requested_tenant(self.data_root, raw_id)
+
+
+def clone_halves(tenant: Tenant) -> tuple[Path, Path]:
+    """`(agent/, settings/)` of `tenant`'s clone working tree. No run reads them (#1108 P4, O-B:
+    run start hands its run copy's roots); they are the default roots of a tenant record resolved
+    over the tenant's own folder by a caller that names no export (REPLAY-WT)."""
+    return tenant.agent, tenant.settings
+
+
+def exports_folder_of(data_root: DataRoot, tenant_id: str) -> Path:
+    """`<T>/exports/` of the tenant `tenant_id` names under `data_root`, before (or without)
+    accepting it: a launcher that pins its runs to one commit reads the pointer there, and each
+    run it starts accepts the tenant itself (#1108 P4 OD10). The data root and the tenant id
+    meet the layout's own guards."""
+    return _TenantPaths(data_root, tenant_id).exports
 
 
 def requested_tenant_id(raw: object) -> TenantId:
@@ -409,14 +460,23 @@ def requested_tenant_id(raw: object) -> TenantId:
 
 def accept_tenant(
     data_root: DataRoot, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
+    clone_tree: bool = True,
 ) -> Tenant:
     """`raw_id` under `data_root`, checked whole — the ONE acceptance of a tenant, and the
     only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
-    FIRST check that fails, in this order:"""
+    FIRST check that fails, in this order:
+
+    `clone_tree=False` is run start's acceptance (#1108 P4, flow 3: "accept tenant" first). A run
+    reads its own copy of an export and nothing of the clone's working tree (P-1), and the run
+    copy's settings are held to `check_run_settings`. The folder rules still judge the clone
+    whenever it has a working tree, so a tenant whose folder is faulted is refused at run start
+    with the tenant check's own reason (#1222 A5), snapshot or none; only a clone whose working
+    tree is gone altogether (both halves absent, its git objects kept: R-I5) is not asked."""
     tenant_id = TenantId(raw_id)
     paths = _TenantPaths(data_root, tenant_id)
     row = _read_row(paths)
-    _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted)
+    _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted,
+                      clone_tree=clone_tree)
     return Tenant(id=tenant_id, data_root=data_root, row=row, _token=_ACCEPTED)
 
 
@@ -486,6 +546,7 @@ def provision_learning(
 
 def _accept_knowledge(
     paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot],
+    clone_tree: bool = True,
 ) -> None:
     """Steps 3-7 of `accept_tenant` over an id and root its layout class already guarded.
     The knowledge folder is neither followed nor resolved: the walk opens `<T>` and
@@ -496,8 +557,9 @@ def _accept_knowledge(
     knowledge_name = paths.knowledge.relative_to(root).as_posix()
     with _real_io.bind(root) as bound:
         _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
-        _check_knowledge(bound.under(knowledge_name), paths.knowledge,
-                         tenant_id=paths.tenant_id)
+        if clone_tree or _has_working_tree(bound, knowledge_name):
+            _check_knowledge(bound.under(knowledge_name), paths.knowledge,
+                             tenant_id=paths.tenant_id)
     root_real = _resolve_or_refuse(root)
     settings_real = root_real / paths.settings.relative_to(root)
     halves_real = (settings_real, root_real / paths.agent.relative_to(root))
@@ -518,6 +580,14 @@ def _accept_knowledge(
                 f"{mounted}, which a box mounts, lies inside tenant {paths.tenant_id!r}'s "
                 f"knowledge folder {paths.knowledge} — a run's writes would land in the "
                 "tenant's repo; keep the runs base and every mounted tree outside it")
+
+
+def _has_working_tree(bound: _real_io.Bound, knowledge_name: str) -> bool:
+    """Whether the knowledge folder has either half of a working tree (judged no-follow): any
+    entry at `settings` or `agent`, sound or not, counts, so only a tree that is gone
+    altogether escapes the folder rules."""
+    return any(not _real_io.stat_entry(bound, f"{knowledge_name}/{half}").absent
+               for half in (SETTINGS_HALF, AGENT_HALF))
 
 
 def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
@@ -591,6 +661,20 @@ def _check_knowledge(
         raise TenantRefused(
             f"{tenant_id_file} names tenant {claimed!r}, not {tenant_id!r} — this knowledge "
             "folder is another tenant's")
+
+
+def check_run_settings(settings: Path) -> None:
+    """The settings rules a run holds its copy of an export's `settings/` to (#1108 P4): the
+    `REQUIRED_SETTINGS` are plain files and the two mapping files stand — the refusals
+    acceptance gives a tenant's own folder, each naming what to fix. `TenantRefused` at the
+    first rule that fails. Reads only."""
+    settings = Path(settings)
+    with _real_io.bind(settings) as bound:
+        for rel in REQUIRED_SETTINGS:
+            _required_setting(_real_io.stat_entry(bound, rel), settings / rel)
+        mapping_faults = _alert_input.settings_reasons(bound)
+    if mapping_faults:
+        raise TenantRefused("; ".join(mapping_faults))
 
 
 def _required_setting(found: _real_io.StatRead, path: Path) -> None:
@@ -710,6 +794,70 @@ def tenant_id_file_text(tenant_id: TenantId) -> str:
     """What `agent/.tenant-id` holds for `tenant_id`, as `read_tenant_id_file` reads it back:
     the id and one newline."""
     return f"{TenantId(tenant_id)}\n"
+
+
+# ==========================================================================================
+# The forge binding (#1108 P4): operator configuration in the row, never tenant content.
+# ==========================================================================================
+
+#: The row field holding the binding.
+_FORGE_FIELD = "forge"
+_FORGE_KEYS = ("origin", "audience", "issuer_role", "issuer_config")
+#: An issuer role name: what `ForgejoIdentity` will accept, judged when the binding is read, so a
+#: bad one is a refused binding before any login, never a login whose identity is then refused.
+ISSUER_ROLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+
+
+@dataclasses.dataclass(frozen=True)
+class ForgeBinding:
+    """Where the tenant's repository is served and how its delivery identity is minted: the
+    repository's network `origin`, the Forgejo integration's `audience`, the issuer role
+    that signs the tenant's tokens, and `issuer_config`, the absolute path of the operator's
+    issuer client config file holding this tenant's AppRole login (P-4: a path, handed by
+    the row, never the login material itself). Not secret."""
+
+    origin: str
+    audience: str
+    issuer_role: str
+    issuer_config: Path
+
+
+def read_forge_binding(tenant: Tenant) -> ForgeBinding:
+    """The tenant row's `forge: {origin, audience, issuer_role, issuer_config}`, read from the
+    row file NOW (an operator may bind or re-bind after the tenant was accepted). Absent, any
+    of the four missing or not a non-empty string, an `issuer_role` that is not a plain name,
+    or an `issuer_config` that is not an absolute path, is `TenantRefused` naming the row."""
+    path = _unwrap_tenant_root(tenant.tenant_root) / ROW_NAME
+    try:
+        with _real_io.bind(path.parent) as bound:
+            answer = bound.read(ROW_NAME)
+    except OSError as unreadable:
+        raise TenantRefused(f"{path}: {unreadable}") from unreadable
+    if answer.text is None:
+        raise TenantRefused(f"{path}: {'absent' if answer.absent else answer.reason}")
+    obj, bad_json = _real_io.load_json_artifact(answer.text)
+    if bad_json is not None or not isinstance(obj, dict):
+        raise TenantRefused(f"{path} is not a JSON object")
+    forge = obj.get(_FORGE_FIELD)
+    if forge is None:
+        raise TenantRefused(
+            f"{path} has no forge binding "
+            "(`forge: {origin, audience, issuer_role, issuer_config}`): "
+            "the tenant's repository is not bound to a forge")
+    fields = forge if isinstance(forge, dict) else {}
+    found = {key: fields.get(key) for key in _FORGE_KEYS}
+    bad = [key for key, value in found.items() if not isinstance(value, str) or not value]
+    if bad:
+        raise TenantRefused(f"{path}'s forge binding lacks {', '.join(bad)}")
+    if not ISSUER_ROLE.fullmatch(str(found["issuer_role"])):
+        raise TenantRefused(f"{path}'s forge binding names an issuer_role that is not a plain "
+                            "name (letters, digits, `_` and `-`, at most 128)")
+    issuer_config = Path(str(found["issuer_config"]))
+    if not issuer_config.is_absolute():
+        raise TenantRefused(
+            f"{path}'s forge binding names a relative issuer_config: it must be an absolute path")
+    return ForgeBinding(origin=str(found["origin"]), audience=str(found["audience"]),
+                        issuer_role=str(found["issuer_role"]), issuer_config=issuer_config)
 
 
 # ==========================================================================================
@@ -845,6 +993,12 @@ def data_root_contains(root: DataRoot, path: Path) -> bool:
     """Whether an already absolute candidate is at or below the configured root."""
     location = _unwrap_data_root(root)
     return path == location or location in path.parents
+
+
+def data_root_for_child(root: DataRoot) -> Path:
+    """Explicit owner export of a configured root to a child process, which is handed
+    identifiers only (the tenant id and this root, #1108 P4 O8) and accepts the tenant itself."""
+    return _unwrap_data_root(root)
 
 
 def data_root_description(root: DataRoot) -> str:

@@ -1,126 +1,56 @@
-"""Pitfalls curation mode (leads/pitfalls_curator.py): commit-gate verification, threshold/rotation, and the systemless-batch drop."""
+"""Pitfalls curation mode (leads/pitfalls_curator.py): commit-gate verification, threshold/rotation, and the systemless-batch drop.
+
+#1108 P4 (O7, amendments 2-3): the lane works over a git-free draft of a P3 batch, never a product
+worktree. Every gate case drives the REAL tick (`run_pitfalls`) with the spawn faked as an edit of
+the draft's `agent/skills/`, and reads what landed from the batch branch (`agent/...`, OD6).
+ASSUMED SEAM (S-H, `_curator1134`): `pitfalls_curator.run_pitfalls(*, paths, state, trees, batch)`.
+`paths.repo_root` is the product checkout holding the adapters only (#1172).
+"""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from defender.tests.support.learning.curation._claim1175 import claim_git
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
 from defender.learning.core import persist  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
-from defender.tests.support.learning.curation._lead_author_1134 import lane_tree_for, lead_trees
 from defender.learning.core.state import PITFALLS
-
-
-def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd,
-                          capture_output=True, text=True, check=True)
-
-
-@pytest.fixture
-def tmp_git_repo(tmp_path: Path) -> Path:
-    """A clean git repo with a seeded skills tree (committed) — stands in for a fresh
-    ``lead-author/<id>`` worktree. The curator runs no git, so tests then make
-    *working-tree* edits and call ``_verify_pitfalls_state`` / drive ``run_pitfalls``
-    over them, asserting the loop's gate + commit behavior."""
-    return seed_skills_repo(tmp_path / "repo")
 
 
 DECLARED = frozenset({"elastic", "wazuh"})
 
 
-def test_verify_pitfalls_state_accepts_execution_md(tmp_git_repo: Path):
-    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
-        "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"
-    )
-    changed = pitfalls_curator._verify_pitfalls_state(
-        tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-        tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-    assert changed == ["defender/skills/elastic/execution.md"]
+def _lane(tmp_path: Path, files: dict[str, str] | None = None, *,
+          adapters: tuple[str, ...] = ()) -> C.DraftLane:
+    """The seeded skills tree as the tenant's `agent/skills` (plus `files`, agent-relative, in
+    the same export commit), started as a batch with the lead lane `skills`; the product
+    checkout holds the seeded adapters (`elastic`, `wazuh`) plus `adapters`, committed."""
+    seeded = seed_skills_repo(tmp_path / "seed")
+    agent = tmp_path / "agent-src"
+    shutil.copytree(seeded / "defender" / "skills", agent / "skills")
+    for rel, text in (files or {}).items():
+        C.put(agent / rel, text)
+    product = tmp_path / "product"
+    shutil.copytree(seeded / "defender" / "integrations", product / "defender" / "integrations")
+    for name in adapters:
+        (product / "defender" / "integrations" / f"{name}_adapter.py").write_text("VERBS = {}\n")
+    for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"),
+                 ("config", "user.name", "t"), ("add", "-A"), ("commit", "-q", "-m", "adapters")):
+        subprocess.run(["git", *args], cwd=product, check=True)
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=product)
 
 
-def test_verify_pitfalls_state_rejects_non_execution_md(tmp_git_repo: Path):
-    """A SKILL.md edit is in lead-author scope but NOT pitfalls scope — rejected."""
-    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
-    skill.write_text(skill.read_text() + "\nedit\n")
-    with pytest.raises(LeadAuthorError, match="non-execution.md"):
-        pitfalls_curator._verify_pitfalls_state(
-            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-
-
-def _commit_outside(repo: Path) -> Path:
-    """A committed file outside `skills/`, for a stray edit. An edit, not a new file: the lanes
-    list untracked files only under `skills/` (#1175 N1 — the agent cannot write elsewhere)."""
-    stray = repo / "defender" / "other" / "stray.md"
-    stray.parent.mkdir(parents=True, exist_ok=True)
-    stray.write_text("committed\n")
-    _run_git(repo, "add", "--", str(stray))
-    _run_git(repo, "commit", "-q", "-m", "outside skills")
-    return stray
-
-
-def test_verify_pitfalls_state_rejects_stray(tmp_git_repo: Path):
-    _commit_outside(tmp_git_repo).write_text("x")
-    with pytest.raises(LeadAuthorError, match="outside"):
-        pitfalls_curator._verify_pitfalls_state(
-            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-
-
-def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
-    ex = tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md"
-    ex.write_text("# e\n")
-    _run_git(tmp_git_repo, "add", "-A")
-    _run_git(tmp_git_repo, "commit", "-q", "-m", "add exec")
-    ex.unlink()
-    with pytest.raises(LeadAuthorError, match="deleted"):
-        pitfalls_curator._verify_pitfalls_state(
-            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-
-
-def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
-    _commit_outside(tmp_git_repo).write_text("stray")
-    skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
-    skill.write_text(skill.read_text() + "\nedit\n")
-    with pytest.raises(LeadAuthorError, match="outside"):
-        pitfalls_curator._verify_pitfalls_state(
-            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-
-
-def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
-    """Two execution.md edits that interleave across git's status-class boundary → the"""
-    cmdb = tmp_git_repo / "defender" / "skills" / "cmdb"
-    cmdb.mkdir(parents=True)
-    (cmdb / "SKILL.md").write_text("---\nname: defender-cmdb\n---\n# cmdb\n")
-    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
-    _run_git(tmp_git_repo, "add",
-             "defender/skills/elastic/execution.md", "defender/skills/cmdb/SKILL.md")
-    _run_git(tmp_git_repo, "commit", "-q", "-m", "seed execution.md")
-    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text(
-        "# e edited\n"
-    )
-    (cmdb / "execution.md").write_text("# c\n")
-    changed = pitfalls_curator._verify_pitfalls_state(
-        tmp_git_repo, baseline_stray=[], systems=DECLARED | {"cmdb"}, reducer_offered=False,
-        tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-    assert changed == [
-        "defender/skills/cmdb/execution.md",
-        "defender/skills/elastic/execution.md",
-    ]
-
-
-def _seed_pitfalls(state, n: int) -> None:
+def _seed_pitfalls(state, n: int, *, system: str = "elastic", start: int = 0) -> None:
     """``n`` queued pitfalls, each a DISTINCT mistake — one `stderr_digest` per row, since
     #840 collapses repeats of one digest into a single record and the threshold counts
     records. These cases are about the gate and the rotation, not the collapse."""
@@ -128,69 +58,153 @@ def _seed_pitfalls(state, n: int) -> None:
         [
             {
                 "schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
-                "system": "elastic", "query_id": "elastic.esql", "goal": "g",
+                "system": system, "query_id": f"{system}.esql", "goal": "g",
                 "executed_query": "bad pipe",
                 "stderr_digest": f"exit=1; mismatched input at token {i}",
                 "error_class": "agent-fixable",
             }
-            for i in range(n)
+            for i in range(start, start + n)
         ],
         state=state,
     )
 
 
-def test_run_pitfalls_below_threshold_is_noop(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+def _tick(lane: C.DraftLane, edit, monkeypatch, *, systems: tuple[str, ...] = ("elastic",),
+          invoke=None) -> tuple[int, object]:
+    """One REAL pitfalls tick at threshold 2 over the draft: two distinct queued mistakes per
+    system in `systems`, the spawn faked as `edit(<the draft's agent/skills>)` (it runs no git)."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    state = open_state(lane.paths)
+    for k, system in enumerate(systems):
+        _seed_pitfalls(state, 2, system=system, start=2 * k)
+
+    def agent(handoffs, **_kw):
+        edit(lane.skills_dir)
+        return 0
+
+    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
+                                       batch=lane.batch, invoke=invoke or agent)
+    return rc, state
+
+
+def _refused(lane: C.DraftLane, edit, match: str, monkeypatch, *, errors=LeadAuthorError,
+             **kw) -> None:
+    """The gate refused the tick naming `match`, and nothing landed on the batch branch."""
+    with pytest.raises(errors, match=match):
+        _tick(lane, edit, monkeypatch, **kw)
+    assert lane.landed() == []
+
+
+def test_verify_pitfalls_state_accepts_execution_md(tmp_path: Path, monkeypatch):
+    lane = _lane(tmp_path)
+    rc, _ = _tick(lane, lambda sk: (sk / "elastic" / "execution.md").write_text(
+        "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"), monkeypatch)
+    assert rc == 0
+    assert lane.landed() == ["agent/skills/elastic/execution.md"]
+
+
+def test_verify_pitfalls_state_rejects_non_execution_md(tmp_path: Path, monkeypatch):
+    """A SKILL.md edit is in lead-author scope but NOT pitfalls scope — rejected."""
+    _refused(_lane(tmp_path), lambda sk: (sk / "elastic" / "SKILL.md").write_text(
+        (sk / "elastic" / "SKILL.md").read_text() + "\nedit\n"), "non-execution.md", monkeypatch)
+
+
+def _stray_errors():
+    """An edit outside the lane's `skills/`: after P4 the ChangeSet's lane check may be the
+    refuser before the lane's own gate (either refusal, both naming it outside)."""
+    from defender.learning.author.version_control import DeliveryRefused
+
+    return (LeadAuthorError, DeliveryRefused)
+
+
+def test_verify_pitfalls_state_rejects_stray(tmp_path: Path, monkeypatch):
+    lane = _lane(tmp_path, {"other/stray.md": "committed\n"})
+    _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("x"), "outside",
+             monkeypatch, errors=_stray_errors())
+
+
+def test_verify_pitfalls_state_rejects_deletion(tmp_path: Path, monkeypatch):
+    lane = _lane(tmp_path, {"skills/elastic/execution.md": "# e\n"})
+    _refused(lane, lambda sk: (sk / "elastic" / "execution.md").unlink(), "deleted", monkeypatch)
+
+
+def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_path: Path, monkeypatch):
+    lane = _lane(tmp_path, {"other/stray.md": "committed\n"})
+
+    def edit(sk: Path) -> None:
+        (sk.parent / "other" / "stray.md").write_text("stray")
+        (sk / "elastic" / "SKILL.md").write_text((sk / "elastic" / "SKILL.md").read_text() + "\nedit\n")
+
+    _refused(lane, edit, "outside", monkeypatch, errors=_stray_errors())
+
+
+def test_verify_pitfalls_state_returns_sorted_changed(tmp_path: Path, monkeypatch):
+    """Two execution.md edits that interleave across git's status-class boundary land, sorted."""
+    lane = _lane(tmp_path, {"skills/cmdb/SKILL.md": "---\nname: defender-cmdb\n---\n# cmdb\n",
+                            "skills/elastic/execution.md": "# e\n"}, adapters=("cmdb",))
+
+    def edit(sk: Path) -> None:
+        (sk / "elastic" / "execution.md").write_text("# e edited\n")
+        (sk / "cmdb" / "execution.md").write_text("# c\n")
+
+    rc, _ = _tick(lane, edit, monkeypatch, systems=("elastic", "cmdb"))
+    assert rc == 0
+    assert lane.landed() == [
+        "agent/skills/cmdb/execution.md",
+        "agent/skills/elastic/execution.md",
+    ]
+
+
+def test_run_pitfalls_below_threshold_is_noop(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
-    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
-    state = open_state(paths)
+    lane = _lane(tmp_path)
+    state = open_state(lane.paths)
     _seed_pitfalls(state, 2)
     called = []
-    rc = pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=lambda *a, **k: called.append(1) or 0,
-                                       trees=lead_trees(paths))
+    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
+                                       batch=lane.batch,
+                                       invoke=lambda *a, **k: called.append(1) or 0)
     assert rc == 0
     assert called == []
     assert len(persist.read_pitfalls(state)) == 2
 
 
-def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
-    state = open_state(paths)
-    _seed_pitfalls(state, 2)
+def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_path: Path, monkeypatch):
+    """At threshold the curator is handed the system's execution.md, its fold lands on the batch
+    branch through the commit-maker, and the rows rotate (#1108 P4 O7: closes F-LEAD's pitfalls
+    row). The handoff path's exact prefix is the open handoff-spelling gap; only its tail and the
+    absence of the product spelling are pinned."""
+    lane = _lane(tmp_path)
 
-    def fake_invoke(handoffs, *, state, repo_root, box=None):
+    def fake_invoke(handoffs, **_kw):
         assert handoffs[0]["system"] == "elastic"
-        assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
+        assert handoffs[0]["path"].endswith("skills/elastic/execution.md")
+        assert not handoffs[0]["path"].startswith("defender/")
         assert len(handoffs[0]["failures"]) == 2
-        p = repo_root / "defender" / "skills" / "elastic" / "execution.md"
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p = lane.skills_dir / "elastic" / "execution.md"
         p.write_text("# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n")
         return 0
 
-    rc = pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=fake_invoke, trees=lead_trees(paths))
+    rc, state = _tick(lane, None, monkeypatch, invoke=fake_invoke)
     assert rc == 0
-    log = _run_git(tmp_git_repo, "log", "--oneline", "-1").stdout
-    assert "execution.md pitfalls" in log
+    assert lane.landed() == ["agent/skills/elastic/execution.md"]
+    assert "execution.md pitfalls" in lane.message()
     assert persist.read_pitfalls(state) == []
-    consumed = [json.loads(ln) for ln in (location_path(paths.state_root) / PITFALLS.consumed).read_text().splitlines()]
+    consumed = [json.loads(ln) for ln in (location_path(lane.paths.state_root) / PITFALLS.consumed).read_text().splitlines()]
     assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}
 
 
-def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
-    state = open_state(paths)
-    _seed_pitfalls(state, 2)
-    rc = pitfalls_curator.run_pitfalls(
-        paths=paths, state=state, invoke=lambda handoffs, *, state, repo_root, box=None: 0, trees=lead_trees(paths)
-    )
+def test_run_pitfalls_no_edit_tick_still_rotates(tmp_path: Path, monkeypatch):
+    lane = _lane(tmp_path)
+    rc, state = _tick(lane, lambda sk: None, monkeypatch)
     assert rc == 0
     assert persist.read_pitfalls(state) == []
-    assert _run_git(tmp_git_repo, "status", "--porcelain").stdout == ""
+    assert lane.commits() == []
 
 
-def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git_repo: Path):
-    """#855 F-06, the offline half."""
+def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path():
+    """#855 F-06, the offline half. The handoff path's prefix is the open handoff-spelling gap
+    (#1108 P4): its tail is pinned, and it never names the product tree."""
     rows = [
         {"system": s, "query_id": f"{s}.esql", "goal": "g", "executed_query": "x",
          "stderr_digest": f"exit=64; boom {s}"}
@@ -198,43 +212,41 @@ def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git
     ]
     handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
     assert [h["system"] for h in handoffs] == ["elastic"]
-    assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
+    assert handoffs[0]["path"].endswith("skills/elastic/execution.md")
+    assert not handoffs[0]["path"].startswith("defender/")
 
 
-def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(tmp_git_repo: Path):
+def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(
+    tmp_path: Path, monkeypatch,
+):
     """The last gate on the same class (#855 F-06), and it asks about the DIRECTORY's"""
-    ghost = tmp_git_repo / "defender" / "skills" / "ghost"
-    ghost.mkdir(parents=True)
-    (ghost / "execution.md").write_text("# ghost\n## Common pitfalls\n- invented\n")
-    with pytest.raises(LeadAuthorError, match="undeclared system"):
-        pitfalls_curator._verify_pitfalls_state(
-            tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
+    _refused(_lane(tmp_path), lambda sk: C.put(sk / "ghost" / "execution.md",
+                                                "# ghost\n## Common pitfalls\n- invented\n"),
+             "undeclared system", monkeypatch)
 
     # Positive control on the same gate: the fixture's real system dir takes a NEW execution.md.
-    (ghost / "execution.md").unlink()
-    ghost.rmdir()
-    (tmp_git_repo / "defender" / "skills" / "elastic" / "execution.md").write_text("# e\n")
-    assert pitfalls_curator._verify_pitfalls_state(
-        tmp_git_repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-        tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo)) == [
-        "defender/skills/elastic/execution.md"
-    ]
+    control = _lane(tmp_path / "control")
+    rc, _ = _tick(control, lambda sk: (sk / "elastic" / "execution.md").write_text("# e\n"),
+                  monkeypatch)
+    assert rc == 0
+    assert control.landed() == ["agent/skills/elastic/execution.md"]
 
 
-def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
+def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
-    state = open_state(paths)
+    lane = _lane(tmp_path)
+    state = open_state(lane.paths)
     persist.append_pitfalls(
         [{"pitfall_id": f"r:{i}", "system": ""} for i in range(2)], state=state
     )
     called: list[int] = []
-    rc = pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=lambda *a, **k: called.append(1) or 0,
-                                       trees=lead_trees(paths))
+    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
+                                       batch=lane.batch,
+                                       invoke=lambda *a, **k: called.append(1) or 0)
     assert rc == 0
     assert called == []
     assert persist.read_pitfalls(state) == []
+    assert lane.commits() == []
 
 
 def _state(tmp_path: Path):

@@ -24,6 +24,9 @@ from defender.tests.support.shared.contracts import _tacit983 as scene
 
 DEFENDER = REPO_ROOT / "defender"
 ADAPTERS = DEFENDER / "integrations"
+#: #1108 P4 (O1, O-U5): the registry is tenant knowledge; the committed fixture tenant's agent
+#: half carries the one this repo ships (the product tree carries none).
+FIXTURE_AGENT = REPO_ROOT / "knowledge" / "tenant-fixture" / "agent"
 
 SYSTEM = scene.REGISTRY_SYSTEM
 LOOKUP = "lookup"
@@ -178,10 +181,13 @@ def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
 
 
 def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
-    """A `VerbContext` pointing at a throwaway tree and a fixed moment."""
+    """A `VerbContext` pointing at a throwaway tree and a fixed moment. #1108 P4 (O1, O4): the
+    registry is the run's AGENT knowledge (`<agent root>/skills/tacit-knowledge/registry.yaml`,
+    the run copy's), so the throwaway tree is the run tenant's agent root — never
+    `defender_dir`, which stays this checkout (and holds no registry)."""
     return VerbContext(
-        defender_dir=root, run_dir=tmp_path / "run", env={}, as_of=as_of,
-        tenant=_tenants1106.fixture_run_tenant(),
+        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, as_of=as_of,
+        tenant=_tenants1106.fixture_run_tenant(agent_root=root),
     )
 
 
@@ -277,18 +283,25 @@ def test_registry_lookup_is_a_rostered_gather_verb():
 
 def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
     """The committed registry loads clean through its own loader, and its companion `SKILL.md`
-    is the per-system reference every other system of record ships."""
-    path = registry().registry_path(DEFENDER)
-    assert path == DEFENDER / "skills" / SYSTEM / "registry.yaml"
+    is the per-system reference every other system of record ships. #1108 P4 (O1, O-U5): both
+    are tenant knowledge — the committed fixture tenant's `agent/skills/tacit-knowledge/`, where
+    the system skills moved — and the product tree holds neither
+    (`tenant_1108_p4/test_layout` owns the product tree)."""
+    path = registry().registry_path(FIXTURE_AGENT)
+    assert path == FIXTURE_AGENT / "skills" / SYSTEM / "registry.yaml"
     assert path.is_file(), "the registry file itself is part of this change"
-    assert (DEFENDER / "skills" / SYSTEM / "SKILL.md").is_file()
+    assert (FIXTURE_AGENT / "skills" / SYSTEM / "SKILL.md").is_file(), (
+        "the fixture tenant's tacit-knowledge registry ships no per-system SKILL.md")
+    assert not registry().registry_path(DEFENDER).exists(), (
+        "the product tree still carries a tacit-knowledge registry (#1108 P4: tenant knowledge)")
 
     entries = registry().load_entries(path)
     assert all(set(e) == set(registry().ENTRY_FIELDS) for e in entries)
 
 
 def test_no_run_path_writes_the_registry(tmp_path):
-    target = registry().registry_path(DEFENDER)
+    # #1108 P4 (O4): the registry a run reads is its tenant's (the fixture tenant's here).
+    target = registry().registry_path(FIXTURE_AGENT)
     assert target.is_file(), "a negative reachability claim about a file that does not exist"
 
     run_dir = tmp_path / "run"

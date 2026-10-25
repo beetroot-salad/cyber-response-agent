@@ -5,7 +5,6 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 import contextlib
 import fcntl
-import json
 import re
 import threading
 from dataclasses import replace
@@ -14,41 +13,52 @@ from pathlib import Path
 import pytest
 
 from defender import _git
-from defender._git import GitError
-from defender._io import append_jsonl
-from defender.learning.author.branch import BranchError
+from defender import box as box_mod
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.learning.leads.pitfalls_curator import PitfallsDisposition
-from defender import box as box_mod
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._declared870 import (
+    REDUCER_REL,
     Spawn,
     commit_all,
     consumed_by_id,
-    curate_execution_md,
+    curate_agent_execution_md,
     graveyard_by_id,
     pitfall_row,
     queue_ids,
+    reducer_surface_text,
+    seed_agent_files,
+    seed_product,
     seed_tree,
     shim_row,
     write_reducer_surface,
 )
+from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.learning.curation._lead_author_1134 import (
+    draft_lead_deps,
+    product_lane,
+)
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.tests.support.sandbox._spec791 import (
-    SpecBranch,
     author_markers,
     loop_paths,
     marker_body,
-    noop_scrub,
-    noop_start_box,
-    noop_stop_box,
 )
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    LEAD_PREFIX,
+    BoxSpy,
+    draft_entries,
+    drain_paths,
+    product_repo,
+    remote_branches,
+)
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests.support.learning.curation._lead_author_1134 import lead_deps, lead_trees
-from defender.learning.core.state import FINDINGS, LEAD_QUEUE_LOCK, PITFALLS
+from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS
 
 
 # --- substrate -------------------------------------------------------------------------------
@@ -60,56 +70,7 @@ SHA = "abc123"
 COMMITTED_ID = "p:committed:0"
 HELD_ID = "p:held:0"
 
-RETAINED = (
-    "1 served marker(s) left in inflight/, 1 committed pitfall row(s) left queued, "
-    "1 held row(s) not bumped"
-)
-
 _SENTINEL_RE = re.compile(r"\Acommit: (?P<sha>\S+)\nat: \S+\ncommit_made: (?P<made>True|False)\n\Z")
-
-
-class _Branch(SpecBranch):
-    """`SpecBranch` plus what this spec needs"""
-
-    def __init__(
-        self, base: Path, *, prefix: str = "lead-author/",
-        fail: BaseException | None = None, commits: int = 1,
-        deliver_fail: BaseException | None = None, deliver_result: str | None = "delivered",
-    ) -> None:
-        super().__init__(base)
-        self.branch_prefix = prefix
-        self._fail = fail
-        self._commits = commits
-        self._deliver_fail = deliver_fail
-        self._deliver_result = deliver_result
-        self.batch_ids: list[str] = []
-        self.delivered: list[str] = []
-
-    @property
-    def quarantine_dir(self) -> Path:
-        return self._base / "quarantine"
-
-    @property
-    def batch_id(self) -> str:
-        assert len(self.batch_ids) == 1, f"expected one batch, saw {self.batch_ids}"
-        return self.batch_ids[0]
-
-    def start_batch(self, batch_id: str) -> Path:
-        self.batch_ids.append(batch_id)
-        return super().start_batch(batch_id)
-
-    def finish_batch(self, batch_id: str, wt: Path):
-        self.events.append("finish")
-        if self._fail is not None:
-            raise self._fail
-        return f"PR/{batch_id}" if self._commits else None
-
-    def deliver(self, batch_id: str):
-        self.events.append("deliver")
-        self.delivered.append(batch_id)
-        if self._deliver_fail is not None:
-            raise self._deliver_fail
-        return f"PR/{batch_id}" if self._deliver_result is not None else None
 
 
 def _queued_run(case_id: str, name: str, paths: LoopPaths) -> Path:
@@ -121,8 +82,7 @@ def _queued_run(case_id: str, name: str, paths: LoopPaths) -> Path:
 
 
 def _address(run_dir: Path) -> tuple[str, str]:
-    """The `(tenant_id, run_id)` a curation row names for the run at `run_dir` (#1105 PR 2
-    declared change 8: the row is the run's address, where it named its folder)."""
+    """The `(tenant_id, run_id)` a curation row names for the run at `run_dir`."""
     row = _state1135.curation_row("", run_dir)
     return row["tenant_id"], row["run_id"]
 
@@ -148,7 +108,7 @@ def _disposition(sha: str | None = SHA) -> PitfallsDisposition:
 def _serving(served: list[Path], *, done: bool = True, before=None):
     """A `run_lead_author` fake that simulates a served run"""
 
-    def serve(_paths, _state, run, *, box=None, on_done):
+    def serve(_paths, _state, run, *, box=None, on_done, **_kw):
         served.append(run.run_dir)
         if before is not None:
             before()
@@ -162,7 +122,7 @@ def _curating(curated: list[PitfallsDisposition], disposition: PitfallsDispositi
     """A `run_pitfalls` fake that simulates a curation: it hands its partition to the drain
     through `on_curated` and returns 0, exactly as the real curator does in deferred mode."""
 
-    def curate(_paths, _state, *, box=None, on_curated):
+    def curate(_paths, _state, *, box=None, on_curated, **_kw):
         curated.append(disposition)
         on_curated(disposition)
         return 0
@@ -174,15 +134,42 @@ def _no_curation(*_a, **_kw) -> int:
     return 0
 
 
-def _tick(paths: LoopPaths, *, branch, run_lead_author, run_pitfalls, scrub=noop_scrub) -> int:
+@pytest.fixture
+def tenant(tmp_path: Path, data_root: Path):
+    """#1108 P4: the lane drains into the fixture tenant's repo, published for real and bound
+    to its forge (`tenant_1108_p4/_support.py`). Its id is D9's, so the runs the curation rows
+    name (`_state1135.curation_run_dir`) are this tenant's."""
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        yield t
+
+
+def _tenant_paths(t, tmp_path: Path) -> LoopPaths:
+    """The tenant's learning paths over a scratch product checkout (`drain_paths`)."""
+    return drain_paths(t, product_repo(tmp_path))
+
+
+def _tick(t, paths: LoopPaths, *, run_lead_author, run_pitfalls, box: BoxSpy | None = None) -> int:
+    """One lead-author tick through the P4 drain seams (`client=`/`identity=` over the tenant's
+    forge and issuer fakes, the batch's box via `BoxSpy`): the `branch=`/`scrub=` seams are
+    gone with the product-repo delivery."""
+    spy = box if box is not None else BoxSpy()
     return drains.lead_author_drain(
-        paths, run_lead_author=run_lead_author, run_pitfalls=run_pitfalls, branch=branch,
-        start_box=noop_start_box, stop_box=noop_stop_box, scrub=scrub,
+        paths, run_lead_author=run_lead_author, run_pitfalls=run_pitfalls,
+        client=t.forge.client, identity=t.vault.identity(), start_box=spy.start,
+        stop_box=spy.stop,
     )
 
 
-def _tainting(_tree, **_kw):
-    raise box_mod.RunTainted("planted link")
+def _nothing_delivered(t) -> None:
+    """No `lead-author/` branch reached the tenant origin and no PR was asked for."""
+    assert remote_branches(t.remote, LEAD_PREFIX) == {}, "a batch reached the tenant origin"
+    assert t.forge.creates == [], "a PR was opened"
+
+
+def _inflight_attempts(paths: LoopPaths, case: str) -> int:
+    return int(marker_body(location_path(paths.state_root) / "author-queue" / "inflight"
+                           / f"{case}.json").get("attempts", 0))
 
 
 def _rows_by_id(paths: LoopPaths) -> dict[str, dict]:
@@ -205,16 +192,6 @@ def _done_sha(run_dir: Path) -> str:
 def _inflight(paths: LoopPaths) -> list[str]:
     d = location_path(paths.state_root) / "author-queue" / "inflight"
     return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
-
-
-def _inflight_attempts(paths: LoopPaths, case: str) -> int:
-    return int(marker_body(location_path(paths.state_root) / "author-queue" / "inflight" / f"{case}.json").get("attempts", 0))
-
-
-def _pending_deliveries(paths: LoopPaths) -> list[dict]:
-    d = location_path(paths.state_root) / "_pending_delivery"
-    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob("*.json"))] \
-        if d.is_dir() else []
 
 
 @contextlib.contextmanager
@@ -262,28 +239,6 @@ def _bounded(fn, *, holder, seconds: float = 15.0):
     return out.get("value")
 
 
-def _assert_nothing_consumed(
-    paths: LoopPaths, run_dir: Path, case: str, queue_before: bytes,
-) -> None:
-    """O1's shared-state clause, in one place so every pre-apply exit asserts the same thing"""
-    assert _inflight(paths) == [f"{case}.json"], "the served marker left inflight/"
-    claimed = marker_body(location_path(paths.state_root) / "author-queue" / "inflight" / f"{case}.json")
-    assert (claimed["tenant_id"], claimed["run_id"]) == _address(run_dir)
-    assert author_markers(paths) == [], "the claim was handed back to the top level"
-    assert not (location_path(paths.state_root) / "author-queue" / "failed").exists(), "the served run was dead-lettered"
-    assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before, (
-        "the pitfalls queue changed on a tick that consumed nothing (a rotation, or a bumped "
-        f"`{pitfalls_curator.OFFERS_DECLINED_KEY}`)"
-    )
-    assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
-    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists(), "a row reached the consumed ledger"
-    assert not _done(run_dir).exists(), (
-        "the done sentinel was written under the shared run dir — the reclaimed marker will "
-        "be served as 'already processed' next tick and unlinked anyway"
-    )
-    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, "the queue went quiet on retained work"
-
-
 def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> None:
     """O3's census, in one place"""
     assert author_markers(paths) == [], "the served marker is back at the top level"
@@ -304,78 +259,28 @@ def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> N
     assert graveyard_by_id(paths) == {}
 
 
-# --- O1 — nothing is consumed before the tree passes the scrub --------------------------------
-
-
-@pytest.mark.parametrize("fault", ["run_tainted_from_scrub", "box_fault_from_teardown"])
-def test_952_o1_a_batch_whose_tree_never_passes_the_scrub_consumes_nothing(
-    tmp_path: Path, capsys, fault: str,
-):
-    """O1, the exits BEFORE the apply."""
-    paths = loop_paths(tmp_path)
-    run_dir = _queued_run("case-1", "run-1", paths)
-    queue_before = _seed_pitfalls(paths)
-    served: list[Path] = []
-    curated: list[PitfallsDisposition] = []
-    branch = _Branch(tmp_path / "worktrees")
-    scrub, stop_box = noop_scrub, noop_stop_box
-    if fault == "run_tainted_from_scrub":
-        expected_type: type[BaseException] = box_mod.RunTainted
-        scrub = _tainting
-    else:
-        expected_type = box_mod.BoxFault
-
-        def stop_box(_box, **_kw):
-            raise box_mod.BoxFault("docker stop hung")
-
-    with pytest.raises(expected_type):
-        drains.lead_author_drain(
-            paths, run_lead_author=_serving(served),
-            run_pitfalls=_curating(curated, _disposition()), branch=branch,
-            start_box=noop_start_box, stop_box=stop_box, scrub=scrub,
-        )
-
-    assert served == [run_dir.resolve()]
-    assert curated == [_disposition()]
-    assert "finish" not in branch.events, "finish_batch ran on a tree the scrub never cleared"
-    assert "cleanup" in branch.events
-    _assert_nothing_consumed(paths, run_dir, "case-1", queue_before)
-    assert _inflight_attempts(paths, "case-1") == 1, "the serve was not counted as an attempt"
-    assert _pending_deliveries(paths) == [], "an unsound batch was recorded for delivery"
-
-    err = capsys.readouterr().err
-    summary = (
-        f"lead_author_drain: batch not consumed — left for the next tick's reclaim, up to: "
-        f"{RETAINED}"
-    )
-    assert sum(line.endswith(summary) for line in err.splitlines()) == 1, (
-        f"the retained summary must be logged exactly once on a pre-apply exit:\n{err}"
-    )
-    assert "finish_batch failed" not in err
-    assert "work stays queued" not in err
-
-
 # --- O3 — a batch whose tree passed the scrub consumes exactly what it served ----------------
 
 
-@pytest.mark.parametrize(
-    ("commits", "done"),
-    [(1, True), (0, True), (1, False)],
-    ids=["pr-opened", "zero-commits-finish-returns-none", "clean-path-no-sentinel"],
-)
+@pytest.mark.parametrize("done", [True, False],
+                         ids=["sentinel-handed-over", "clean-path-no-sentinel"])
 def test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served(
-    tmp_path: Path, commits: int, done: bool,
+    tmp_path: Path, tenant, done: bool,
 ):
-    """O3, the positive control for every O1 negative."""
-    paths = loop_paths(tmp_path)
+    """O3, the positive control for every O1 negative — over the P4 lane (#1108): the batch is a
+    draft of the tenant's repo; a tick whose serve and curation leave the draft unchanged has
+    nothing to deliver (no `lead-author/` branch, no PR), discards its draft, and consumes
+    exactly what it served. (The batch-with-commits row is P4's: `tenant_1108_p4/test_writers.py`
+    lead-lane rows.)"""
+    paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     _seed_pitfalls(paths)
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
-    branch = _Branch(tmp_path / "worktrees", commits=commits)
+    box = BoxSpy()
 
     rc = _tick(
-        paths, branch=branch,
+        tenant, paths, box=box,
         run_lead_author=_serving(served, done=done),
         run_pitfalls=_curating(curated, _disposition()),
     )
@@ -383,100 +288,35 @@ def test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served(
     assert rc == 0
     assert served == [run_dir.resolve()]
     assert curated == [_disposition()]
-    assert branch.events == ["lease-check", "start", "finish", "cleanup"]
+    assert len(box.requests) == 1, "the batch's box was not started once"
+    assert draft_entries(tenant) == [], "the batch's draft was not discarded"
+    _nothing_delivered(tenant)
     _assert_consumed(paths, run_dir, done=done)
-    assert _pending_deliveries(paths) == [], "a landed batch left a delivery record"
-
-
-def test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_failure(
-    tmp_path: Path, capsys,
-):
-    """O1 + O2 + O7, the `BranchError` arm."""
-    paths = loop_paths(tmp_path)
-    run_dir = _queued_run("case-1", "run-1", paths)
-    _seed_pitfalls(paths)
-    served: list[Path] = []
-    curated: list[PitfallsDisposition] = []
-    branch = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
-
-    rc = _tick(
-        paths, branch=branch,
-        run_lead_author=_serving(served), run_pitfalls=_curating(curated, _disposition()),
-    )
-
-    assert rc == 0
-    assert served == [run_dir.resolve()], "the serve never ran — every clause below is vacuous"
-    assert curated == [_disposition()]
-    assert branch.events == ["lease-check", "start", "finish", "cleanup"]
-    _assert_consumed(paths, run_dir)
-    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False, "consumed work still wakes the lane"
-    records = _pending_deliveries(paths)
-    assert [r["branch"] for r in records] == [f"lead-author/{branch.batch_id}"]
-    assert records[0]["batch_id"] == branch.batch_id
-    assert records[0]["reason"] == "push rejected"
-    assert records[0]["label"] == "lead_author_drain", "the record names the wrong lane"
-
-    err = capsys.readouterr().err
-    expected = (
-        f"lead_author_drain: finish_batch failed: push rejected — commit retained on local "
-        f"branch lead-author/{branch.batch_id}; delivery is retried next tick, before "
-        "anything new is served"
-    )
-    assert any(line.endswith(expected) for line in err.splitlines()), \
-        f"the failure line does not say what was retained and what happens next:\n{err}"
-    assert "work stays queued" not in err, "the old line claims a re-queue that never happens"
-    assert "nothing consumed" not in err, "the line denies a consumption that happened"
-    assert "batch produced no commits" not in err, \
-        "a tick with a retained commit reported itself as commit-less"
-    assert "opened PR" not in err
-
-
-def test_952_o1_a_git_fault_from_finish_batch_propagates_after_the_consumption(
-    tmp_path: Path, capsys,
-):
-    """O1 is about the scrub, not the push"""
-    paths = loop_paths(tmp_path)
-    run_dir = _queued_run("case-1", "run-1", paths)
-    _seed_pitfalls(paths)
-    branch = _Branch(tmp_path / "worktrees", fail=GitError(["push"], 128, "the remote hung up"))
-
-    with pytest.raises(GitError):
-        _tick(
-            paths, branch=branch,
-            run_lead_author=_serving([]), run_pitfalls=_curating([], _disposition()),
-        )
-
-    assert branch.events == ["lease-check", "start", "finish", "cleanup"]
-    _assert_consumed(paths, run_dir)
-    err = capsys.readouterr().err
-    assert "batch not consumed" not in err
-    assert "inflight" not in err
 
 
 def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfalls_rotation(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, tenant,
 ):
     """M1's apply order — sentinels, then unlinks, then the pitfalls rotation, then the decline bumps — observed through a REAL fault at the third step"""
     monkeypatch.setenv("LEARNING_REPO_LOCK_WAIT_SECONDS", "0")
-    paths = loop_paths(tmp_path)
+    paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     queue_before = _seed_pitfalls(paths)
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
-    branch = _Branch(tmp_path / "worktrees")
 
     with _held(location_path(paths.state_root) / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
         _bounded(
             lambda: _tick(
-                paths, branch=branch,
+                tenant, paths,
                 run_lead_author=_serving(served),
                 run_pitfalls=_curating(curated, _disposition()),
             ),
             holder=holder,
         )
 
-    assert branch.events == ["lease-check", "start", "cleanup"], \
-        "the push ran ahead of, or despite, an apply that did not complete"
+    # The push never ran ahead of, or despite, an apply that did not complete.
+    _nothing_delivered(tenant)
     # Before the rotation: applied.
     assert _done_sha(run_dir) == SHA
     assert author_markers(paths) == []
@@ -489,221 +329,25 @@ def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfall
 
 
 def test_952_m1_a_malformed_lock_wait_refuses_the_tick_before_any_work(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, tenant,
 ):
     from defender.learning.core.config import FatalConfigError
 
     monkeypatch.setenv("LEARNING_REPO_LOCK_WAIT_SECONDS", "soon")
-    paths = loop_paths(tmp_path)
+    paths = _tenant_paths(tenant, tmp_path)
     _queued_run("case-1", "run-1", paths)
     served: list[Path] = []
-    branch = _Branch(tmp_path / "worktrees")
+    box = BoxSpy()
 
     with pytest.raises(FatalConfigError):
-        _tick(paths, branch=branch, run_lead_author=_serving(served), run_pitfalls=_no_curation)
+        _tick(tenant, paths, box=box, run_lead_author=_serving(served),
+              run_pitfalls=_no_curation)
 
     assert served == []
-    assert branch.events == []
+    assert box.requests == [], "a box started for a refused tick"
+    assert draft_entries(tenant) == [], "a draft was built for a refused tick"
+    _nothing_delivered(tenant)
     assert author_markers(paths) == ["case-1.json"]
-
-
-# --- O7 — delivery is the drain's own retry ---------------------------------------------------
-
-
-def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
-    tmp_path: Path, capsys,
-):
-    paths = loop_paths(tmp_path)
-    _queued_run("case-1", "run-1", paths)
-    served: list[Path] = []
-    failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
-    assert _tick(
-        paths, branch=failing, run_lead_author=_serving(served), run_pitfalls=_no_curation,
-    ) == 0
-    assert len(_pending_deliveries(paths)) == 1
-    retained = failing.batch_id
-    capsys.readouterr()
-
-    second = _queued_run("case-2", "run-2", paths)
-    landing = _Branch(tmp_path / "worktrees")
-    assert _tick(
-        paths, branch=landing, run_lead_author=_serving(served), run_pitfalls=_no_curation,
-    ) == 0
-
-    assert landing.events == ["deliver", "lease-check", "start", "finish", "cleanup"], \
-        "delivery must come first, and must not replace the serve"
-    assert landing.delivered == [retained]
-    assert served[-1] == second.resolve(), "the second tick did not go on to serve new work"
-    assert _pending_deliveries(paths) == []
-    err = capsys.readouterr().err
-    assert (
-        f"lead_author_drain: delivered retained branch lead-author/{retained}: opened PR "
-        f"PR/{retained}"
-    ) in err
-    assert served.count(served[0]) == 1, "the retained batch's run was served again"
-
-
-def test_952_o7_a_delivery_that_keeps_failing_holds_the_writer_lease(tmp_path: Path, capsys):
-    """O7's ceiling. While the retained branch cannot be delivered, the lane is PARKED"""
-    paths = loop_paths(tmp_path)
-    _queued_run("case-1", "run-1", paths)
-    served: list[Path] = []
-    failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
-    assert _tick(
-        paths, branch=failing, run_lead_author=_serving(served), run_pitfalls=_no_curation,
-    ) == 0
-    retained = failing.batch_id
-    _queued_run("case-2", "run-2", paths)
-    capsys.readouterr()
-
-    for _ in range(3):
-        parked = _Branch(tmp_path / "worktrees", deliver_fail=BranchError("token expired"))
-        assert _tick(
-            paths, branch=parked, run_lead_author=_serving(served), run_pitfalls=_no_curation,
-        ) == 0
-        assert parked.events == ["deliver"], "a parked tick minted a batch or checked the lease"
-        assert parked.delivered == [retained]
-    assert len(served) == 1, "an agent ran while delivery was failing"
-    assert author_markers(paths) == ["case-2.json"]
-    assert len(_pending_deliveries(paths)) == 1
-    err = capsys.readouterr().err
-    assert err.count(
-        f"lead_author_drain: delivery of retained branch lead-author/{retained} failed again: "
-        "token expired — it holds the writer lease; nothing served this tick"
-    ) == 3
-
-    landing = _Branch(tmp_path / "worktrees")
-    assert _tick(
-        paths, branch=landing, run_lead_author=_serving(served), run_pitfalls=_no_curation,
-    ) == 0
-    assert landing.events == ["deliver", "lease-check", "start", "finish", "cleanup"]
-    assert len(served) == 2
-    assert _pending_deliveries(paths) == []
-
-
-def test_952_o7_a_retained_branch_with_nothing_to_deliver_is_forgotten(tmp_path: Path, capsys):
-    """`deliver` answering `None` — the branch is gone, or has nothing ahead of `origin/main`
-    any more — is not a failure: the record is dropped, the log says so, and the tick goes on."""
-    paths = loop_paths(tmp_path)
-    _queued_run("case-1", "run-1", paths)
-    failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
-    assert _tick(paths, branch=failing, run_lead_author=_serving([]), run_pitfalls=_no_curation) == 0
-    retained = failing.batch_id
-
-    branch = _Branch(tmp_path / "worktrees", deliver_result=None)
-    assert _tick(paths, branch=branch, run_lead_author=_serving([]), run_pitfalls=_no_curation) == 0
-
-    assert branch.events == ["deliver"], "with nothing queued the tick stops at the wake gate"
-    assert _pending_deliveries(paths) == []
-    err = capsys.readouterr().err
-    assert (
-        f"lead_author_drain: retained branch lead-author/{retained} has nothing left to "
-        "deliver — record dropped"
-    ) in err
-
-
-def test_952_o7_each_lane_delivers_only_its_own_records(tmp_path: Path):
-    paths = loop_paths(tmp_path)
-    _queued_run("case-1", "run-1", paths)
-    failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
-    assert _tick(paths, branch=failing, run_lead_author=_serving([]), run_pitfalls=_no_curation) == 0
-    assert len(_pending_deliveries(paths)) == 1
-
-    append_jsonl(location_path(paths.state_root) / FINDINGS.queue, [{"finding_id": f"f{i}"} for i in range(5)])
-    lessons = _Branch(tmp_path / "worktrees", prefix="lessons/", deliver_fail=BranchError("no"))
-    rc = drains.author_drain(
-        paths, trigger_author=lambda *_a, **_kw: None, branch=lessons,
-        start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
-    )
-    assert rc == 0
-    assert lessons.events == ["lease-check", "start", "finish", "cleanup"], \
-        "the lessons lane touched the lead-author lane's record"
-    assert len(_pending_deliveries(paths)) == 1
-
-
-# --- O8 — every serve is an attempt -----------------------------------------------------------
-
-
-def test_952_o8_a_batch_that_never_passes_the_scrub_is_quarantined_at_the_ceiling(
-    tmp_path: Path, monkeypatch,
-):
-    """O8. A run whose curation taints every tree is reclaimed from `inflight/` one tick after another — and each reclaim is one more attempt on the..."""
-    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
-    paths = loop_paths(tmp_path)
-    run_dir = _queued_run("case-1", "run-1", paths)
-    served: list[Path] = []
-
-    for expected in (1, 2, 3):
-        with pytest.raises(box_mod.RunTainted):
-            _tick(
-                paths, branch=_Branch(tmp_path / "worktrees"), scrub=_tainting,
-                run_lead_author=_serving(served), run_pitfalls=_no_curation,
-            )
-        assert len(served) == expected
-        assert _inflight(paths) == ["case-1.json"]
-        assert _inflight_attempts(paths, "case-1") == expected
-
-    # The fourth reclaim quarantines at the claim, before the serve seam is reached: the
-    # scrub is the ordinary one here, so a serve would have been consumed and would show.
-    assert _tick(
-        paths, branch=_Branch(tmp_path / "worktrees"),
-        run_lead_author=_serving(served), run_pitfalls=_no_curation,
-    ) == 0
-    assert len(served) == 3, "the run was served past the ceiling"
-    assert _inflight(paths) == []
-    assert not _done(run_dir).exists()
-    failed = marker_body(location_path(paths.state_root) / "author-queue" / "failed" / "case-1.json")
-    assert failed["failed"] == "served 3 time(s) without being recorded done"
-    assert (failed["tenant_id"], failed["run_id"]) == _address(run_dir)
-    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
-
-
-# --- O6 — a fresher same-case request survives a failed push --------------------------------
-
-
-def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
-    tmp_path: Path,
-):
-    """O6 + M2. The claim frees the top-level slot so a re-ask landing mid-serve has somewhere to go."""
-    paths = loop_paths(tmp_path)
-    first = _queued_run("case-A", "run-1", paths)
-    second = _state1135.curation_run_dir("run-2")
-    served: list[Path] = []
-
-    def re_ask() -> None:
-        # The operator re-investigates the case while the lane is curating it...
-        _state1135.enqueue_case(_state1135.state_for_paths(paths), "case-A", second)
-
-    failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
-    assert _tick(
-        paths, branch=failing, run_pitfalls=_no_curation,
-        run_lead_author=_serving(served, before=re_ask),
-    ) == 0
-    assert served == [first.resolve()]
-
-    assert author_markers(paths) == ["case-A.json"]
-    fresher = marker_body(location_path(paths.state_root) / "author-queue" / "case-A.json")
-    assert (fresher["tenant_id"], fresher["run_id"]) == _address(second), (
-        "the failed push replaced the fresher curation request with the stale run dir"
-    )
-    assert "attempts" not in fresher
-    assert _inflight(paths) == [], "the consumed claim was left in inflight/"
-    assert _done_sha(first) == SHA
-    assert not (location_path(paths.state_root) / "author-queue" / "failed").exists()
-
-    landing = _Branch(tmp_path / "worktrees")
-    assert _tick(
-        paths, branch=landing, run_pitfalls=_no_curation, run_lead_author=_serving(served),
-    ) == 0
-    assert served == [first.resolve(), second.resolve()], \
-        "the second tick must serve the fresher request, and the stale run only once"
-    assert landing.events == ["deliver", "lease-check", "start", "finish", "cleanup"]
-    assert author_markers(paths) == []
-    assert _inflight(paths) == []
-    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
-
-
-# --- O2 — the lessons lane's failure line makes no claim about markers or pitfalls ------------
 
 
 # --- O5 / M4 — the curators' switch: consume now, or hand the consumption back ---------------
@@ -733,15 +377,30 @@ def _curator_deps(repo: Path, state: Path, **overrides):
     return replace(deps, **seams)
 
 
-_CATALOG = "defender/skills/gather/queries"
+#: The catalog in a batch draft (OD6): the lane commits `agent/...` (#1108 P4).
+_DRAFT_CATALOG = "agent/skills/gather/queries"
 
 
-def _promoting_agent(repo: Path):
+def _draft_curator_deps(lane, **overrides):
+    """`_curator_deps` over a batch draft (#1108 P4, O7, OD12 class ii): the production
+    lead-author deps over the draft of `seed_skills_repo`'s tree (`product_lane`, ASSUMED SEAM
+    S-H `build_lead_author_deps(..., batch=)`), the two tables bypassed (their own suite)."""
+    seams = dict(
+        extract=lambda _rd: ([], [_lead()]),
+        synthesize=lambda executed, skills=None, where=None, catalog=None, systems=None: [],
+        discover_system_drafts=lambda: [],
+    )
+    seams.update(overrides)
+    return draft_lead_deps(lane, **seams)
+
+
+def _promoting_draft_agent(root: Path):
+    """`_promoting_agent` in the draft: promote `wazuh.newthing` out of `_draft/`."""
     def agent(_rd, _handoffs, _pending, *, box=None) -> int:
-        (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
+        (root / _DRAFT_CATALOG / "wazuh" / "newthing.md").write_text(
             query_template("wazuh.newthing", "established"), encoding="utf-8",
         )
-        (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
+        (root / _DRAFT_CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
         return 0
 
     return agent
@@ -760,15 +419,16 @@ def _without_at(text: str) -> str:
 def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
     tmp_path: Path, deferred: bool,
 ):
-    """O5 + M4, the `_run_locked` write site (after the commit)."""
-    repo = seed_skills_repo(tmp_path / "repo")
+    """O5 + M4, the `_run_locked` write site (after the commit). #1108 P4: over a batch draft;
+    the commit is the batch branch's."""
+    lane = product_lane(tmp_path, seed_skills_repo(tmp_path / "repo"))
     run_dir = _state1135.curation_run_dir("lead-run")
-    deps = _curator_deps(
-        repo, tmp_path / "state",
-        invoke_agent=_promoting_agent(repo),
+    deps = _draft_curator_deps(
+        lane,
+        invoke_agent=_promoting_draft_agent(lane.root),
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
     )
-    head_before = _git.git_head_sha(repo)
+    head_before = lane.tip()
     captured: list[str | None] = []
 
     run = _state1135.run_of(run_dir)
@@ -777,8 +437,9 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
         else lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
-    sha = _git.git_head_sha(repo)
+    sha = lane.tip()
     assert sha != head_before, "the commit is not deferred — only the sentinel is"
+    assert "agent/skills/gather/queries/wazuh/newthing.md" in lane.landed()
     if deferred:
         assert not _done(run_dir).exists(), "deferred mode still wrote the sentinel"
         assert captured == [sha]
@@ -835,6 +496,19 @@ def pitfalls_repo(tmp_path: Path, monkeypatch) -> Path:
     return repo
 
 
+@pytest.fixture
+def pitfalls_lane(tmp_path: Path, monkeypatch):
+    """`pitfalls_repo` after P4 (O7, OD12 class ii): a batch draft of the tenant carrying the
+    reducer add-on (elastic's marker and skill, `gather`), over a product checkout with the
+    elastic and cmdb adapters; threshold 1."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
+    files = seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
+                             non_systems=("gather",))
+    files[REDUCER_REL.removeprefix("agent/")] = reducer_surface_text()
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files)
+
+
 def _three_way_batch(paths: LoopPaths) -> None:
     """One row per partition: a declared-system row the curator teaches (committed), a reducer
     row the curator is offered and declines (held), and an undeclared-system row nothing can
@@ -850,20 +524,24 @@ def _three_way_batch(paths: LoopPaths) -> None:
 
 
 def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_nothing_committed(
-    pitfalls_repo: Path, tmp_path: Path,
+    pitfalls_lane, tmp_path: Path,
 ):
-    """O5 + M4 + O4 at the pitfalls curator."""
-    paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
+    """O5 + M4 + O4 at the pitfalls curator, over a batch draft (#1108 P4; ASSUMED SEAM S-H
+    `run_pitfalls(..., batch=)`)."""
+    lane = pitfalls_lane
+    paths = lane.paths
     _three_way_batch(paths)
-    head_before = _git.git_head_sha(pitfalls_repo)
-    spawn = Spawn(curate_execution_md("elastic"))
+    head_before = lane.tip()
+    spawn = Spawn(curate_agent_execution_md("elastic"), root=lane.root)
     captured: list[PitfallsDisposition] = []
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append,
-                                         trees=lead_trees(paths)) == 0
+    with C.draft_trees(lane) as trees:
+        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append,
+                                             trees=trees, batch=lane.batch) == 0
 
-    sha = _git.git_head_sha(pitfalls_repo)
+    sha = lane.tip()
     assert sha != head_before, "the commit is not deferred — only the consumption is"
+    assert "agent/skills/elastic/execution.md" in lane.landed()
     assert [h.get("surface") for h in spawn.handoffs] == ["system", "reducer"], \
         "the reducer offer was never made, so the held arm is vacuous"
     assert captured == [
@@ -948,11 +626,9 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
 # --- O5 / M5 — the drain holds the per-author queue lock for the whole tick ------------------
 
 
-def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
-    """O5 + M5. Deferring the sentinel to the drain opens a gap — the remaining serves, the pitfalls curation, box teardown — in which a by-hand..."""
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
-                     skills=("elastic",), catalog=("elastic",))
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path, tenant):
+    """O5 + M5. Deferring the sentinel to the drain opens a gap — the remaining serves, the pitfalls curation, box teardown — in which a by-hand run would re-serve; the drain holds the per-author queue lock for its whole tick (over the P4 tenant lane, #1108)."""
+    paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     by_hand = _state1135.curation_run_dir("by-hand")
     (by_hand / "gather_raw").mkdir()
@@ -963,39 +639,36 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
         mid_serve.append(lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths))
 
     assert _tick(
-        paths, branch=_Branch(tmp_path / "worktrees"), run_pitfalls=_no_curation,
+        tenant, paths, run_pitfalls=_no_curation,
         run_lead_author=_serving(served, before=probe),
     ) == 0
     assert served == [run_dir.resolve()]
     assert mid_serve == [lead_author.QUEUE_LOCK_SKIP_RC], \
         "a by-hand run started during a drain tick did not skip on the queue lock"
+    assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
     assert author_markers(paths) == [], "the tick must still serve under the lock it holds"
     assert _inflight(paths) == [], "the tick must still consume under the lock it holds"
 
     # Positive control: the lock the tick held IS the file a by-hand run locks. Held here the
-    # way a second process would hold it, the same call skips; released, it does not.
+    # way a second process would hold it, the same call skips; and once the tick is over the
+    # file is free (a non-blocking exclusive lock on it succeeds).
     with _held((location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"):
         assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL,
                                paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
-    assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
-    assert (by_hand / "lead_author" / "pitfalls_collected").is_file(), \
-        "outside a tick the by-hand run must serve, not skip"
 
 
-def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: Path, capsys):
-    """M5's other direction"""
-    paths = loop_paths(tmp_path)
+def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: Path, capsys, tenant):
+    """M5's other direction (over the P4 tenant lane, #1108): a tick that finds the queue lock held claims nothing, builds no draft and starts no box."""
+    paths = _tenant_paths(tenant, tmp_path)
     _queued_run("case-1", "run-1", paths)
     _queued_run("case-2", "run-2", paths)
     served: list[Path] = []
-    branch = _Branch(tmp_path / "worktrees")
+    box = BoxSpy()
 
     with _held((location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"):
-        rc = _tick(
-            paths, branch=branch, run_pitfalls=_no_curation,
-            run_lead_author=_serving(served),
-        )
+        rc = _tick(tenant, paths, box=box, run_pitfalls=_no_curation,
+                   run_lead_author=_serving(served))
 
     assert rc == 0
     assert served == [], "the tick served under a lock another run holds"
@@ -1004,15 +677,14 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
     for name in ("case-1.json", "case-2.json"):
         assert "attempts" not in marker_body(location_path(paths.state_root) / "author-queue" / name), \
             "a skip spent one of the request's attempts"
-    assert "start" not in branch.events, "a skipped tick minted a batch"
+    assert box.requests == [], "a skipped tick started a batch box"
+    assert draft_entries(tenant) == [], "a skipped tick built a draft"
+    _nothing_delivered(tenant)
     err = capsys.readouterr().err
     assert "lead_author_drain: another lead-author run holds the queue lock — skipping" in err
 
     # Positive control: released, the same tick serves.
-    assert _tick(
-        paths, branch=_Branch(tmp_path / "worktrees"), run_pitfalls=_no_curation,
-        run_lead_author=_serving(served),
-    ) == 0
+    assert _tick(tenant, paths, run_pitfalls=_no_curation, run_lead_author=_serving(served)) == 0
     assert len(served) == 2
     assert author_markers(paths) == []
 
@@ -1045,74 +717,78 @@ def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
 # --- the adversary round: ways the suite above was greened while betraying intent -----------
 
 
-class _ProbingBranch(_Branch):
-    """`_Branch` whose `finish_batch` first records what a by-hand run answers at that
-    moment — after the consumption, but still inside the tick M5's lock spans."""
+class _ProbingBox(BoxSpy):
+    """`BoxSpy` whose batch-end stop first records what a by-hand run answers at that moment —
+    after the serves and the curation, still inside the tick M5's lock spans."""
 
-    def __init__(self, base: Path, *, probe, **kw) -> None:
-        super().__init__(base, **kw)
+    def __init__(self, probe) -> None:
+        super().__init__()
         self._probe = probe
         self.probed: list[int] = []
 
-    def finish_batch(self, batch_id: str, wt: Path):
+    def stop(self, box, **kw) -> None:
         self.probed.append(self._probe())
-        return super().finish_batch(batch_id, wt)
+        super().stop(box, **kw)
 
 
-def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path: Path):
-    """Kills C. A lock released right after `do_work` greened the M5 test, which only probes from inside the serve."""
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
-                     skills=("elastic",), catalog=("elastic",))
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path: Path, tenant):
+    """Kills C. A lock released right after `do_work` greened the M5 test, which only probes from inside the serve. Over the P4 tenant lane (#1108) the lock is probed during the pitfalls curation, at the batch box's stop, and at every forge request the tick makes after its serve (delivery): a by-hand run skips at each."""
+    paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     by_hand = _state1135.curation_run_dir("by-hand")
     (by_hand / "gather_raw").mkdir()
     served: list[Path] = []
     in_curation: list[int] = []
+    at_forge: list[int] = []
 
     def probe() -> int:
         return lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths)
 
-    def curate(_paths, _state, *, box=None, on_curated):
+    def curate(_paths, _state, *, box=None, on_curated, **_kw):
         in_curation.append(probe())
         return 0
 
-    branch = _ProbingBranch(tmp_path / "worktrees", probe=probe)
-    assert _tick(paths, branch=branch, run_lead_author=_serving(served), run_pitfalls=curate) == 0
+    box = _ProbingBox(probe)
+    tenant.forge.on_request = lambda _req: at_forge.append(probe()) if served else None
+    assert _tick(tenant, paths, box=box, run_lead_author=_serving(served), run_pitfalls=curate) == 0
+    tenant.forge.on_request = None
 
     assert served == [run_dir.resolve()]
     assert in_curation == [lead_author.QUEUE_LOCK_SKIP_RC], \
         "a by-hand run during the pitfalls curation did not skip on the queue lock"
-    assert branch.probed == [lead_author.QUEUE_LOCK_SKIP_RC], \
-        "a by-hand run during finish_batch did not skip on the queue lock"
+    assert box.probed, "the batch's box was never stopped"
+    assert set(box.probed) == {lead_author.QUEUE_LOCK_SKIP_RC}, \
+        "a by-hand run at the batch's end did not skip on the queue lock"
+    assert set(at_forge) <= {lead_author.QUEUE_LOCK_SKIP_RC}, \
+        "a by-hand run during the batch's delivery did not skip on the queue lock"
     assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
     assert author_markers(paths) == []
     assert _inflight(paths) == []
     assert _done_sha(run_dir) == SHA
 
-    assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
-    assert (by_hand / "lead_author" / "pitfalls_collected").is_file()
+    # Positive control: after the tick the lock is free (held here, the probe skips; the
+    # non-blocking hold itself would raise were the tick still holding it).
+    with _held((location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"):
+        assert probe() == lead_author.QUEUE_LOCK_SKIP_RC
 
 
-def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Path):
-    """Kills D. Unlinking the claims BEFORE writing the sentinels greened the ordering test, which faults at the rotation and so only ever sees steps 1–2..."""
-    paths = loop_paths(tmp_path)
+def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Path, tenant):
+    """Kills D. Unlinking the claims BEFORE writing the sentinels greened the ordering test, which faults at the rotation and so only ever sees steps 1–2. Over the P4 tenant lane (#1108): nothing is delivered for a batch whose apply did not complete."""
+    paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     queue_before = _seed_pitfalls(paths)
     (run_dir / "lead_author").write_text("not a directory\n", encoding="utf-8")
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
-    branch = _Branch(tmp_path / "worktrees")
 
     with pytest.raises(OSError, match="lead_author"):
         _tick(
-            paths, branch=branch,
+            tenant, paths,
             run_lead_author=_serving(served), run_pitfalls=_curating(curated, _disposition()),
         )
 
     assert served == [run_dir.resolve()]
-    assert branch.events == ["lease-check", "start", "cleanup"], \
-        "the push ran on a batch whose apply did not complete"
+    _nothing_delivered(tenant)
     assert (run_dir / "lead_author").is_file(), "the blocking file was clobbered"
     assert _inflight(paths) == ["case-1.json"], \
         "the claim was unlinked ahead of a sentinel write that then failed"
@@ -1120,3 +796,81 @@ def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Pa
     assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before
     assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
+
+
+# --- O8 / O6 — restored over the P4 tenant lane (#1108), with a fault that is neither a scrub
+#     nor a push ------------------------------------------------------------------------------
+
+
+class _StopFaulting(BoxSpy):
+    """The batch box's stop fails (a `BoxFault`, as a box that will not stop raises, #1195): the
+    tick halts after its serves and before the apply, so nothing it served is consumed."""
+
+    def stop(self, box, **kw) -> None:
+        super().stop(box, **kw)
+        raise box_mod.BoxFault("could not stop the box (injected)")
+
+
+def test_952_o8_every_serve_is_an_attempt_and_the_run_is_quarantined_at_the_ceiling(
+    tmp_path: Path, monkeypatch, tenant,
+):
+    """O8. A run whose batch never reaches the apply (here its box never stops) is reclaimed from `inflight/` one tick after another, and each reclaim is one more attempt on the request: at `LEAD_AUTHOR_MAX_RETRIES` serves the next tick quarantines it at the claim, before the serve seam, rather than serving it forever."""
+    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
+    paths = _tenant_paths(tenant, tmp_path)
+    run_dir = _queued_run("case-1", "run-1", paths)
+    served: list[Path] = []
+
+    for expected in (1, 2, 3):
+        with pytest.raises(box_mod.BoxFault):
+            _tick(tenant, paths, box=_StopFaulting(), run_lead_author=_serving(served),
+                  run_pitfalls=_no_curation)
+        assert len(served) == expected
+        assert _inflight(paths) == ["case-1.json"]
+        assert _inflight_attempts(paths, "case-1") == expected
+        _nothing_delivered(tenant)
+
+    # The fourth reclaim quarantines at the claim, before the serve seam is reached: the box
+    # stops cleanly here, so a serve would have been consumed and would show.
+    assert _tick(tenant, paths, run_lead_author=_serving(served), run_pitfalls=_no_curation) == 0
+    assert len(served) == 3, "the run was served past the ceiling"
+    assert _inflight(paths) == []
+    assert not _done(run_dir).exists()
+    failed = marker_body(location_path(paths.state_root) / "author-queue" / "failed" / "case-1.json")
+    assert failed["failed"] == "served 3 time(s) without being recorded done"
+    assert (failed["tenant_id"], failed["run_id"]) == _address(run_dir)
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
+
+
+def test_952_o6_a_transient_serve_failure_neither_destroys_nor_supersedes_a_fresher_request(
+    tmp_path: Path, tenant,
+):
+    """O6 + M2. The claim frees the top-level slot so a re-ask landing mid-serve has somewhere to go. The serve then fails transiently (the lead-author step's retry signal, not a scrub or a push): the stale claim is not re-queued over the fresher request, which survives with no attempt spent, and the next tick serves it, and the stale run never again."""
+    paths = _tenant_paths(tenant, tmp_path)
+    first = _queued_run("case-A", "run-1", paths)
+    second = _state1135.curation_run_dir("run-2")
+    served: list[Path] = []
+
+    def failing_serve(_paths, _state, run, *, box=None, on_done, **_kw):
+        served.append(run.run_dir)
+        # The operator re-investigates the case while the lane is curating it...
+        _state1135.enqueue_case(_state1135.state_for_paths(paths), "case-A", second)
+        raise drains._LeadAuthorRetry("lead-author hit a transient (injected)")
+
+    assert _tick(tenant, paths, run_pitfalls=_no_curation, run_lead_author=failing_serve) == 0
+    assert served == [first.resolve()]
+
+    assert author_markers(paths) == ["case-A.json"]
+    fresher = marker_body(location_path(paths.state_root) / "author-queue" / "case-A.json")
+    assert (fresher["tenant_id"], fresher["run_id"]) == _address(second), (
+        "the failed serve replaced the fresher curation request with the stale run")
+    assert "attempts" not in fresher
+    assert _inflight(paths) == [], "the failed claim was left in inflight/"
+    assert not _done(first).exists()
+    assert not (location_path(paths.state_root) / "author-queue" / "failed").exists()
+
+    assert _tick(tenant, paths, run_pitfalls=_no_curation, run_lead_author=_serving(served)) == 0
+    assert served == [first.resolve(), second.resolve()], \
+        "the second tick must serve the fresher request, and the stale run only once"
+    assert author_markers(paths) == []
+    assert _inflight(paths) == []
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False

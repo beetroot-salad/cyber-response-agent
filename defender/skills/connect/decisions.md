@@ -63,7 +63,8 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   thinner in the offline learning loop. That's a cost to weigh, not a
   disqualifier.
 
-- **Human review gate.** connect branches and stages; it does not merge
+- **Human review gate.** connect branches the product half and proposes the tenant
+  half (`tenant.py propose`, a review PR on the tenant forge); it does not merge
   or push. Generated code does not go live without a human reading the
   diff.
 

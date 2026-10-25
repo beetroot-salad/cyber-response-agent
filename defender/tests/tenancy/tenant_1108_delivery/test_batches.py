@@ -60,11 +60,22 @@ def test_start_batch_makes_a_git_free_draft_of_the_export_commit_and_no_checkout
     assert branch_tip(clone, batch.branch) is None, "the batch's branch exists before any commit"
     assert git(clone, "status", "--porcelain") == ""
 
-    assert batch.draft_root == location_path(tenant.tenant_root) / "drafts" / "fresh"
+    # Amendment A / U9: the draft is `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`; the
+    # batch's `draft_root` is its `stage/` (the root the box mounts as `staged`), and the owner
+    # record sits beside it, never inside what the box sees.
+    folder = location_path(tenant.tenant_root) / "drafts" / "fresh"
+    assert batch.draft_root == folder / "stage"
     assert _drafts(tenant) == ["fresh"], "a temporary entry was left beside the draft"
-    assert sorted(p.name for p in batch.draft_root.iterdir()) == ["agent"]
-    assert not list(batch.draft_root.rglob(".git"))
-    assert odd_entries(batch.draft_root) == []
+    assert sorted(p.name for p in folder.iterdir()) == ["owner", "stage"]
+    assert (folder / "owner").is_file()
+    assert (folder / "owner").stat().st_size > 0, "the owner record is empty"
+    staged = {p.name for p in batch.draft_root.iterdir()}
+    assert "agent" in staged, staged
+    # Beside `agent/` the stage holds at most the box token (each box start plants its own).
+    assert len(staged - {"agent"}) <= 1, staged
+    assert all((batch.draft_root / n).is_file() for n in staged - {"agent"}), staged
+    assert not list(folder.rglob(".git"))
+    assert odd_entries(folder) == []
     assert files_under(batch.draft_root / "agent") == agent_blobs(clone, expected) \
         == files_under(batch.export.path / "agent")
     assert _changes(batch.change_set()) == {}
@@ -200,16 +211,25 @@ def test_a_killed_draft_build_leaves_only_a_temporary_the_next_publish_or_start_
     assert _drafts(tenant) == ([] if by == "publish" else ["next"])
 
 
-def test_a_crash_after_the_draft_exists_leaves_its_id_refused_for_good(repo, tmp_path):
+def test_a_crash_after_the_draft_exists_refuses_its_id_until_a_publish_sweeps_the_dead_owners_draft(
+        repo, tmp_path):
+    """Re-spelled for amendment A / U9 + O-SWEEP (was `..._leaves_its_id_refused_for_good`): a
+    crashed build's draft names its (now dead) owner. While it stands, its id is refused; the
+    next publish, under the tenant lock, sweeps it because its owner is dead. A draft this live
+    process owns survives the same publish (positive control)."""
     tenant = repo[0]
     code, out, err = _build_elsewhere(repo, tmp_path, "crashed", "crash")
     assert code == -signal.SIGKILL, f"{code} {out} {err}"
-    draft = files_under(location_path(tenant.tenant_root) / "drafts" / "crashed")
-    assert "agent/lessons/seed.md" in draft, draft
+    drafts = location_path(tenant.tenant_root) / "drafts"
+    draft = files_under(drafts / "crashed")
+    assert "stage/agent/lessons/seed.md" in draft, draft
+    assert "owner" in draft, draft
     d = delivery(repo, ForgeHTTP())
-    for _ in range(2):
-        with pytest.raises(target().DeliveryRefused):
-            d.start_batch("crashed", lanes=LANES)
-        d.publish()
-    assert files_under(location_path(tenant.tenant_root) / "drafts" / "crashed") == draft
-    assert d.start_batch("other", lanes=LANES).draft_root == location_path(tenant.tenant_root) / "drafts" / "other"
+    with pytest.raises(target().DeliveryRefused):
+        d.start_batch("crashed", lanes=LANES)
+    assert files_under(drafts / "crashed") == draft, "a refused start touched the standing draft"
+    other = d.start_batch("other", lanes=LANES)
+    assert other.draft_root == drafts / "other" / "stage"
+    d.publish()
+    assert _drafts(tenant) == ["other"], "the dead owner's draft was not swept (or the live one was)"
+    assert files_under(other.draft_root / "agent")

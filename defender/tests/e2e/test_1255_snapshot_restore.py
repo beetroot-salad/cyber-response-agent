@@ -24,6 +24,7 @@ from defender.integrations.faults import TransportFault  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.tenancy import _tenants1106
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION,
     LEGACY_BRANCH_CALL,
@@ -276,17 +277,23 @@ DENIED = Turn(tool_calls=[("query", {"system": "identity", "verb": "list-authori
 
 
 def _planted_tree(root: Path) -> Path:
-    """Create a checkout mirror with fixture lessons for the restored file checks."""
+    """Create a checkout mirror, and plant the scene's lessons for the restored file checks.
+
+    #1108 P4 (O1, O4): the lessons a run matches its writes against are its TENANT's
+    (`agent/lessons/`, from the export the run reads), never the checkout's — so the three
+    lessons go into the fixture tenant's agent half (the replays run as that tenant, and the
+    harness publishes its folder before each drive); the checkout mirror carries none."""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in DEFENDER.iterdir():
         if entry.name in {".venv", "__pycache__", "tests", "fixtures-e2e", "lessons"}:
             continue
         (tree / entry.name).symlink_to(entry)
-    (tree / "lessons").mkdir()
-    _write_lesson(tree / "lessons", "compute-class-1255", nodes=("type: compute, slot: class",))
-    _write_lesson(tree / "lessons", "identity-class-1255", nodes=("type: identity, slot: class",))
-    _write_lesson(tree / "lessons", "approved-source-1255",
+    lessons = Path(location_path(_tenants1106.fixture_tenant().agent)) / "lessons"
+    lessons.mkdir(exist_ok=True)
+    _write_lesson(lessons, "compute-class-1255", nodes=("type: compute, slot: class",))
+    _write_lesson(lessons, "identity-class-1255", nodes=("type: identity, slot: class",))
+    _write_lesson(lessons, "approved-source-1255",
                   edges=("anchor_kind: approved-source-list",))
     return tree
 

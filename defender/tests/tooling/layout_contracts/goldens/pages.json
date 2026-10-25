@@ -695,6 +695,7 @@
    "assert gather_replay.calls == 2",
    "assert lead_row.is_file()",
    "assert len(rows) == 1",
+   "assert lesson.read_text(encoding='utf-8').strip() in handed, f\"MAIN's recorded `cat /agent/lessons/{lesson.name}` came back without the golden's lesson: the run did not read its tenant's agent tree\"",
    "assert m is not None",
    "assert m is not None",
    "assert m is not None",

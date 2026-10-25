@@ -1,185 +1,40 @@
-"""Unit tests for the shared git transaction layer (``_author_shared``)."""
+"""Unit tests for the author's shared result gates and the state lock (``_author_shared``)."""
 from __future__ import annotations
 
 import errno
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from defender import _flock
-from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
 from defender.learning.core import state as state_mod
 from defender.learning.core.state import TRY_ONCE, LockRole
 from defender.tests.support.learning.core import _state1135
-from defender.tests.support.shared.contracts._repo import head_files, head_message, seed_repo
 
 
-CORPUS_REL = "defender/lessons/"
-
-
-def _repo(tmp_path: Path) -> Path:
-    """A fresh git repo with a seed commit and an empty corpus dir."""
-    repo = tmp_path / "repo"
-    (repo / CORPUS_REL).mkdir(parents=True)
-    seed_repo(repo, add="README")
-    return repo
-
-
-def _corpus(repo: Path) -> Path:
-    return repo / CORPUS_REL
-
-
-def _status(repo: Path, path: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "status", "--porcelain", "--", path],
-        capture_output=True, text=True, check=True,
-    ).stdout
-
-
-def test_commit_corpus_commits_only_corpus(tmp_path):
-    """The author path (no trailers): an uncommitted corpus edit is committed, the new sha returned, the working..."""
-    repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    sha = shared.commit_corpus(repo, _corpus(repo), "lesson batch")
-    assert sha == shared.git_head_sha(repo)
-    assert head_files(repo) == ["defender/lessons/x.md"]
-    assert shared.changes_outside(repo, CORPUS_REL) == []
-    assert "Generation:" not in head_message(repo)
-
-
-def test_commit_corpus_stages_only_corpus(tmp_path):
-    """#321: a file already **staged** outside the corpus (a sibling author's ``_draft/`` deposit left in the..."""
-    repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    (repo / "stray.txt").write_text("stray\n")
-    subprocess.run(["git", "-C", str(repo), "add", "stray.txt"], check=True)
-
-    shared.commit_corpus(repo, _corpus(repo), "lesson batch")
-    files = head_files(repo)
-    assert files == ["defender/lessons/x.md"]
-    assert "stray.txt" not in files
-    assert _status(repo, "stray.txt").startswith("A  ")
-
-
-def test_commit_corpus_no_op_when_nothing_authored(tmp_path):
-    """Empty index ⇒ no commit, returns None (the all-skip batch); HEAD unchanged."""
-    repo = _repo(tmp_path)
-    head_before = shared.git_head_sha(repo)
-    assert shared.commit_corpus(repo, _corpus(repo), "msg") is None
-    assert shared.git_head_sha(repo) == head_before
-
-
-def test_commit_corpus_appends_trailers(tmp_path):
-    """When ``trailers`` is given (the actor/env provenance path) each lands on the commit at creation time, and..."""
-    repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    shared.commit_corpus(
-        repo, _corpus(repo), "lesson batch",
-        trailers=[("Generation", "3"), ("Actor-Model", "claude-x")],
-    )
-    msg = head_message(repo)
-    assert "Generation: 3" in msg
-    assert "Actor-Model: claude-x" in msg
-    assert head_files(repo) == ["defender/lessons/x.md"]
-
-
-def test_commit_corpus_rejects_message_carrying_trailers(tmp_path):
-    """If the agent put its own trailers in the message, ``git --trailer`` would *append* a second set that..."""
-    repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    head_before = shared.git_head_sha(repo)
-    with pytest.raises(shared.AuthorError, match="already carries"):
-        shared.commit_corpus(
-            repo, _corpus(repo),
-            "batch\n\nGeneration: 99\nActor-Model: wrong",
-            trailers=[("Generation", "3"), ("Actor-Model", "claude-x")],
-        )
-    assert shared.git_head_sha(repo) == head_before
-
-
-def test_commit_corpus_no_trailers_skips_the_dup_guard(tmp_path):
-    """No trailers ⇒ no dup-guard: the author path (which stamps none) commits its message verbatim even if the..."""
-    repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    sha = shared.commit_corpus(
-        repo, _corpus(repo), "batch\n\nGeneration: not-a-trailer",
-    )
-    assert sha == shared.git_head_sha(repo)
-
-
-def test_commit_corpus_commit_failure_is_atomic(tmp_path):
-    """#321: a failing commit (here a rejecting pre-commit hook, the issue's exact trigger) raises ``GitError``..."""
-    repo = _repo(tmp_path)
-    hooks = repo / ".git" / "hooks"
-    hooks.mkdir(parents=True, exist_ok=True)
-    hook = hooks / "pre-commit"
-    hook.write_text("#!/bin/sh\nexit 1\n")
-    hook.chmod(0o755)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    head_before = shared.git_head_sha(repo)
-    with pytest.raises(_git.GitError):
-        shared.commit_corpus(repo, _corpus(repo), "lesson batch")
-    assert shared.git_head_sha(repo) == head_before
-
-
-def test_changes_outside_flags_only_non_corpus_paths(tmp_path):
-    """A corpus ``*.md`` edit is in-scope; anything else (incl. a non-``.md`` file inside the corpus dir) is..."""
-    repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    (repo / "scratch.txt").write_text("nope\n")
-    (_corpus(repo) / "notes.txt").write_text("nope\n")
-    assert shared.changes_outside(repo, CORPUS_REL) == [
-        "defender/lessons/notes.txt",
-        "scratch.txt",
-    ]
-
-
-def test_corpus_dir_clean(tmp_path):
-    repo = _repo(tmp_path)
-    assert shared.corpus_dir_clean(repo, _corpus(repo)) is True
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    assert shared.corpus_dir_clean(repo, _corpus(repo)) is False
-
-
-def test_verify_rejects_change_outside_corpus(tmp_path):
-    """Scope gate: a working-tree change outside the corpus (a stray the path-scoped commit would ignore) fails..."""
-    repo = _repo(tmp_path)
-    (repo / "scratch.txt").write_text("stray\n")
-    result = {"committed": [], "commit_message": None}
-    with pytest.raises(shared.AuthorError, match="outside"):
-        shared.verify_agent_state(repo, result, _corpus(repo), CORPUS_REL, "findings", [])
-
-
-def test_verify_tolerates_baseline_stray(tmp_path):
-    """A stray already present in the pre-agent ``baseline_stray`` is not blamed on the agent — only *new*..."""
-    repo = _repo(tmp_path)
-    (repo / "scratch.txt").write_text("stray\n")
-    baseline = shared.changes_outside(repo, CORPUS_REL)
-    result = {"committed": [], "commit_message": None}
-    shared.verify_agent_state(
-        repo, result, _corpus(repo), CORPUS_REL, "findings", baseline
-    )
-
-
-def test_verify_rejects_no_commit_with_corpus_edits(tmp_path):
-    """``committed`` empty but the corpus is dirty ⇒ inconsistent; refuse to rotate."""
-    repo = _repo(tmp_path)
-    (_corpus(repo) / "x.md").write_text("hello\n")
-    result = {"committed": [], "commit_message": None}
-    with pytest.raises(shared.AuthorError, match="left edits"):
-        shared.verify_agent_state(repo, result, _corpus(repo), CORPUS_REL, "findings", [])
-
-
-def test_verify_rejects_committed_with_clean_corpus_using_noun(tmp_path):
-    """``committed`` non-empty but the corpus is clean ⇒ inconsistent; refuse to rotate. The error embeds the..."""
-    repo = _repo(tmp_path)
-    result = {"committed": ["a/0"], "commit_message": "m"}
-    with pytest.raises(shared.AuthorError, match="committed observations but left"):
-        shared.verify_agent_state(
-            repo, result, _corpus(repo), CORPUS_REL, "observations", []
-        )
+# #1108 P4 OD12(i): the worktree commit layer this file pinned is gone (O7: the commit-maker is the
+# one maker of tenant commits; S-D's tenant_1108_p4/test_writers.py::test_o7_no_production_writer_commits_or_delivers_outside_the_tenant_commit_maker
+# bans `commit_corpus`). Deleted, each with what covers it now:
+#  - test_commit_corpus_commits_only_corpus / _stages_only_corpus / _no_op_when_nothing_authored /
+#    _commit_failure_is_atomic: P3 tenant_1108_delivery/test_changes.py
+#    ::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files,
+#    ::test_the_commit_maker_takes_no_lock_and_leaves_main_the_index_and_the_checkout_alone and
+#    ::test_the_first_commit_makes_the_branch_and_never_takes_one_over; the author-level outcome
+#    in test_author_postflight.py::test_committed_finding_consumed.
+#  - test_commit_corpus_appends_trailers / _rejects_message_carrying_trailers /
+#    _no_trailers_skips_the_dup_guard: the trailer path had no production caller left (its users
+#    were the retired actor/environment corpora, U5); the commit-maker composes no trailers.
+#  - test_changes_outside_flags_only_non_corpus_paths / test_verify_rejects_change_outside_corpus /
+#    test_verify_tolerates_baseline_stray / test_corpus_dir_clean: `git status` scope over the
+#    worktree. Out-of-lane box output now refuses the claim whole: P3 test_changes.py
+#    ::test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole and
+#    ::test_no_change_set_commits_outside_the_lanes_or_touches_a_forbidden_name; author-level in
+#    test_author_postflight.py::test_agent_writes_outside_lessons_aborts.
+#  - test_verify_rejects_no_commit_with_corpus_edits / _committed_with_clean_corpus_using_noun:
+#    the report-against-tree cross-check is kept at the author's entry point,
+#    test_author_postflight.py::test_no_commit_but_left_corpus_edits_aborts and
+#    ::test_committed_but_corpus_clean_aborts (over a draft).
 
 
 @pytest.mark.parametrize("noun", ["findings", "observations"])

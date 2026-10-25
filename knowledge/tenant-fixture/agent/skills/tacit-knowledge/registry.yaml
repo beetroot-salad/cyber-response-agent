@@ -1,0 +1,8 @@
+# Fixture tenant's tacit-knowledge registry (#1108 P4 fixture content; made up).
+#
+# The shape and rules are those of the shipped registry's header: one entry per sanctioned
+# pattern, eight required fields, `review_by` at most 180 days past `added_at`. Empty on
+# purpose: a dated entry would stop answering once `review_by` passes, so a test that needs
+# one writes it with dates relative to its own clock.
+
+entries: []

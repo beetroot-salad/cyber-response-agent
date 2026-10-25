@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import dataclasses
 import datetime as _dt
+import io
 import json
 import logging
-import os
 import shutil
-import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
-from _harness_util import find_venv_py, init_git, run as _run
+from _harness_util import LocalTenant
 
 from defender import _git
 from defender.knowledge._knowledge import KnowledgePaths
@@ -26,9 +28,23 @@ REAL_DEFENDER = HERE.parent / "defender"
 REAL_LEARNING = REAL_DEFENDER / "learning"
 REAL_REPO_ROOT = REAL_DEFENDER.parent
 RESULTS_DIR = HERE / "results_lead"
+#: The agent root an eval tenant starts from unless `--agent` names another (a lab tenant's
+#: `agent/`): the tenant template's (#1108 P4 O1: the catalog is a tenant's, never the
+#: product's).
+TEMPLATE_AGENT = REAL_REPO_ROOT / "knowledge" / "tenant-template" / "agent"
+#: The branch prefix the lead lane's batches take (the lead-author drain's).
+LEAD_BRANCH_PREFIX = "lead-author/"
 
 
-def materialize(scenario: Path, tmp: Path) -> Path:
+def _agent_source(tmp: Path) -> Path:
+    return tmp / "agent-source" / "agent"
+
+
+def materialize(scenario: Path, tmp: Path, *, agent: Path = TEMPLATE_AGENT) -> Path:
+    """The scenario's tree: the learning code relocated under `tmp/defender` (with the shared
+    frame module it imports), the eval tenant's agent root `agent-source/agent/` (`agent`, its
+    catalog overlaid with the scenario's `catalog_overlay/`), and the scenario's one run under
+    `runs/`, whose folder is returned."""
     learning_dst = tmp / "defender" / "learning"
     learning_dst.mkdir(parents=True)
     _SKIP = {"__pycache__", "_pending", "_pending_leads", "runs", "frontend"}
@@ -45,29 +61,12 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     # The copied learning tree imports this shared frame primitive directly.
     shutil.copy(REAL_DEFENDER / "_untrusted.py", tmp / "defender" / "_untrusted.py")
 
-    real = KnowledgePaths.of_defender_dir(REAL_DEFENDER)
-    scratch = KnowledgePaths.of_defender_dir(tmp / "defender")
-    shutil.copytree(
-        real.catalog_dir, scratch.catalog_dir,
-    )
-    adapters_dst = tmp / "defender" / "integrations"
-    adapters_dst.mkdir(parents=True)
-    for skill in sorted(real.skills_dir.glob("*/SKILL.md")):
-        dst = scratch.system_skill_dir(skill.parent.name) / "SKILL.md"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(skill, dst)
-        # The materialized tree has no adapters dir, so the declared-systems resolver would
-        # refuse the lane. Stub one (never imported) per copied SKILL.md.
-        (adapters_dst / f"{skill.parent.name.replace('-', '_')}_adapter.py").write_text(
-            "VERBS = {}\n", encoding="utf-8",
-        )
-
+    source = _agent_source(tmp)
+    shutil.copytree(agent, source, ignore=shutil.ignore_patterns(".tenant-id", ".git"))
     overlay = scenario / "catalog_overlay"
     if overlay.is_dir():
-        shutil.copytree(
-            overlay, scratch.catalog_dir,
-            dirs_exist_ok=True,
-        )
+        shutil.copytree(overlay, KnowledgePaths(agent_root=source).catalog_dir,
+                        dirs_exist_ok=True)
 
     src_runs = scenario / "run"
     if not src_runs.is_dir():
@@ -80,33 +79,71 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     return run_dst
 
 
-def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
-    venv_py = find_venv_py(REAL_REPO_ROOT)
-    env = os.environ.copy()
+@dataclasses.dataclass(frozen=True)
+class LeadRun:
+    returncode: int
+    stdout: str
+    stderr: str
+    #: The batch branch's commits past its base, oldest first (`[]`: nothing committed).
+    commits: tuple[str, ...] = ()
+
+
+def run_lead_author(tmp: Path, run_dir: Path) -> LeadRun:
+    """One lead-author claim over a tenant draft (#1108 P4 O7): the materialized agent root as a
+    local tenant's one commit, a batch started on it, the REAL lead author serving `run_dir`
+    into the batch's draft, and the batch delivered to the fake forge. The draft's tree after
+    the claim is kept as `tmp/after/` (the root `expect.json`'s `agent/...` paths name)."""
+    from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
+    from defender.learning.leads.lead_author import run
+    from defender.run_repository import Run
+
+    tenant = LocalTenant(tmp, _agent_source(tmp))
+    paths = LoopPaths(repo_root=REAL_REPO_ROOT, state_dir=tmp / "_state")
     (tmp / "_state").mkdir(exist_ok=True)  # lint-unguarded-tree-write: ok — eval scratch dir; the handle never creates its root
-    return _run(
-        [str(venv_py), "-c", """
-import sys
-from pathlib import Path
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
-from defender.learning.leads.lead_author import run
-from defender.run_repository import Run
-from defender._log import configure_from_env
-configure_from_env()
-root, run_dir = map(Path, sys.argv[1:])
-sys.exit(run(Run.at(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL,
-             paths=LoopPaths(repo_root=root, state_dir=root / "_state")))
-""", str(tmp), str(run_dir)],
-        cwd=tmp, env=env, check=False,
-    )
+    out, err = io.StringIO(), io.StringIO()
+    commits: tuple[str, ...] = ()
+    try:
+        delivery = tenant.delivery(LEAD_BRANCH_PREFIX)
+        batch = delivery.start_batch(f"evals-{uuid.uuid4().hex[:12]}",
+                                     lanes=LEAD_AUTHOR_DRAIN_LABEL.lanes)
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = run(Run.at(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths,
+                         batch=batch)
+            shutil.copytree(Path(batch.draft_root) / "agent", tmp / "after" / "agent")
+            tip = _git.git(["rev-parse", "--verify", "-q", f"refs/heads/{batch.branch}"],
+                           cwd=tenant.clone, check=False)
+            if tip:
+                listed = _git.git(["rev-list", "--reverse", f"{batch.export.commit}..{tip}"],
+                                  cwd=tenant.clone, check=False)
+                commits = tuple(listed.split())
+            out.write(f"\ndelivery: {delivery.finish(batch).status}\n")
+        finally:
+            batch.discard()
+    except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
+        rc = 1
+        err.write(f"\n{type(e).__name__}: {e}\n")
+    return LeadRun(rc, out.getvalue(), err.getvalue(), commits)
 
 
 def _catalog_path(tmp: Path, rel: str) -> Path:
-    return tmp / rel
+    """`rel` (repo-relative, `agent/...`) in the draft's tree after the claim."""
+    return tmp / "after" / rel
 
 
-def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
+def _touched(tmp: Path, commits: tuple[str, ...]) -> set[str]:
+    clones = [p.parent for p in (tmp / "data").glob("*/knowledge/.git")]
+    if not clones or not commits:
+        return set()
+    shown = _git.git(["show", "--no-renames", "--name-only", "--format=", *commits],
+                     cwd=clones[0], check=False)
+    return {line for line in shown.splitlines() if line}
+
+
+def _verdict(tmp: Path, expect: dict, proc: LeadRun) -> tuple[str, list[str]]:
     notes: list[str] = []
+    if not (tmp / "after").is_dir():
+        return "ERROR", [f"the claim left no draft tree to judge (rc={proc.returncode}; see stderr)"]
     for rel in expect.get("forbid_promoted", []):
         if _catalog_path(tmp, rel).exists():
             notes.append(f"UNDERFOLD: promoted narrow sibling exists: {rel}")
@@ -124,11 +161,8 @@ def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
 
     widened = expect.get("prefer_widened")
     if widened:
-        count = _git.git(["rev-list", "--count", "HEAD"], cwd=tmp, check=False)
-        ncommits = int(count) if count.isdigit() else 0
-        if ncommits >= 2:
-            diff = _git.git(["diff", "--name-only", "HEAD~1", "HEAD"], cwd=tmp, check=False)
-            touched = widened in diff.split()
+        if proc.commits:
+            touched = widened in _touched(tmp, proc.commits)
             notes.append(f"prefer_widened {'TOUCHED' if touched else 'untouched'}: {widened}")
         else:
             notes.append(f"prefer_widened untouched (no loop commit): {widened}")
@@ -136,7 +170,7 @@ def _verdict(tmp: Path, expect: dict) -> tuple[str, list[str]]:
     return ("PASS" if draft_gone else "WEAK-PASS"), notes
 
 
-def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
+def capture(tmp: Path, scenario_name: str, proc: LeadRun,
             verdict: str, notes: list[str]) -> Path:
     ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = RESULTS_DIR / f"{ts}-{scenario_name}"
@@ -144,21 +178,28 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
     (out / "lead_author.stdout").write_text(proc.stdout, encoding="utf-8")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     (out / "lead_author.stderr").write_text(proc.stderr, encoding="utf-8")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     (out / "rc.txt").write_text(str(proc.returncode), encoding="utf-8")
-    log = _git.git(["log", "--format=%H %s%n%b%n----", "-n", "5"], cwd=tmp, check=False)
+    clones = [p.parent for p in (tmp / "data").glob("*/knowledge/.git")]
+    if clones and proc.commits:
+        log = _git.git(["log", "--format=%H %s%n%b%n----", "-n", "5", proc.commits[-1]],
+                       cwd=clones[0], check=False)
+        show = _git.git(["show", "--stat", proc.commits[-1]], cwd=clones[0], check=False)
+    else:
+        log = show = "(no commit)\n"
     (out / "git_log.txt").write_text(log, encoding="utf-8")
-    show = _git.git(["show", "--stat", "HEAD"], cwd=tmp, check=False)
     (out / "head_show.txt").write_text(show, encoding="utf-8")
     (out / "verdict.txt").write_text(verdict + "\n" + "\n".join(notes) + "\n", encoding="utf-8")
-    shutil.copytree(
-        KnowledgePaths.of_defender_dir(tmp / "defender").catalog_dir,
-        out / "catalog_after", dirs_exist_ok=True,
-    )
+    after = KnowledgePaths(agent_root=tmp / "after" / "agent").catalog_dir
+    if after.is_dir():
+        shutil.copytree(after, out / "catalog_after", dirs_exist_ok=True)
     return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("scenario", help="path to a scenario dir under scenarios_lead/")
+    ap.add_argument("--agent", type=Path, default=TEMPLATE_AGENT,
+                    help="the agent root the eval tenant starts from (default: the tenant "
+                         "template's); its catalog is what the lead author curates")
     ap.add_argument("--keep-tmp", action="store_true")
     args = ap.parse_args()
 
@@ -177,11 +218,10 @@ def main() -> int:
                  f"{REAL_REPO_ROOT} — the agent would edit real files")
 
     try:
-        run_dir = materialize(scenario, tmp)
-        init_git(tmp)
+        run_dir = materialize(scenario, tmp, agent=args.agent.resolve())
         _logger.info(f"running lead-author against {scenario.name}")
         proc = run_lead_author(tmp, run_dir)
-        verdict, notes = _verdict(tmp, expect)
+        verdict, notes = _verdict(tmp, expect, proc)
         out = capture(tmp, scenario.name, proc, verdict, notes)
         _logger.info(f"rc={proc.returncode}  verdict={verdict}", extra={"notes": notes})
         _logger.info(f"results: {out}")

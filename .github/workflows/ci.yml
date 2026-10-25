@@ -567,7 +567,7 @@ jobs:
       # walk, never a second implementation), so a green gate here means the runtime reads
       # every entry the author wrote.
       - name: Tacit-knowledge registry (hard gate — the commit is the sign-off)
-        run: defender/.venv/bin/python -m defender.cli.tacit_cli check
+        run: defender/.venv/bin/python -m defender.cli.tacit_cli check --defender-dir knowledge/tenant-fixture/agent
 
       # The other half of the `gate` marker (defender/pyproject.toml): the nine tests that
       # re-run a repo-wide lint gate over the real tree, which the `test` job deselects with
@@ -815,7 +815,7 @@ jobs:
         run: defender/.venv/bin/python tooling/lint/lint_unbounded_whole_read.py
 
       # Hand-rolled git subprocess calls under defender/ that bypass the
-      # defender._git facade (git / git_status / git_commit / git_worktree_* /
+      # defender._git facade (git / git_status / git_head_sha / git_show_file /
       # GitError) — a ~8× dedup smell plus the spaced-path porcelain bug the
       # shared -z reader fixes (#460). New sites must route through defender._git;
       # the facade itself is excluded and test fixtures are exempt.

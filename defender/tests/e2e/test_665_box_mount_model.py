@@ -25,7 +25,7 @@ def test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus(tmp_path)
     scope = RunScope(corpus_name="lessons",
                      read_confine=tuple((dtree / n).resolve() for n in SHIPPED_LESSON_CORPORA))
     policy = compile_policy_for(CORPUS_AUTHOR_DEF, tmp_path / "lrd", scope=scope, defender_dir=dtree)
-    decision = decide_bash(f"rm {dtree / 'lessons'}/../lessons-environment/x.md",
+    decision = decide_bash(f"rm {dtree / 'lessons'}/../lessons-questioner/x.md",
                            policy=policy, run_dir=tmp_path / "lrd", defender_dir=dtree,
                            cwd_anchor=repo)
     assert not decision.allow, "the gate allowed a `..` traversal out of the curator's corpus scope"

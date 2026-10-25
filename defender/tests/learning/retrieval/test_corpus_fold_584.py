@@ -11,7 +11,10 @@ from pathlib import Path
 from defender.tests.support.shared.contracts._by_path import load_trace_lesson
 
 
+import pytest
+
 from defender.learning.frontend import serialize  # noqa: E402
+from defender.tests.tenancy.tenant_1108_p4._support import published_tenant  # noqa: E402
 from defender.hooks import record_lesson_load  # noqa: E402
 
 from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV  # noqa: E402
@@ -20,7 +23,6 @@ from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa:
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
-DEFENDER = WORKSPACE_ROOT / "defender"
 
 #: The tenant whose runs the tracer walks — #1105 PR 2 (J8, declared change 10).
 TID = H1105.T_ID
@@ -87,12 +89,22 @@ def _crlf_lesson(corpus: Path, stem: str = "crlf") -> Path:
     return p
 
 
-def _fixture_defender(tmp_path: Path) -> Path:
-    """A fake ``defender/`` root with the three corpus dirs — the tree ``build_view(defender_dir=)`` is pointed..."""
-    root = tmp_path / "defender"
-    for d in ("lessons", "lessons-actor", "lessons-environment"):
+def _fixture_agent(tmp_path: Path) -> Path:
+    """A made-up agent root with the live corpus dirs — the tree ``build_view(agent_root=)`` is
+    pointed at. #1108 P4: the reader takes an agent root (an export's `agent/`, assumed seam
+    replacing `defender_dir=`), and U5 deleted the retired `lessons-actor`/`lessons-environment`."""
+    root = tmp_path / "agent"
+    for d in ("lessons", "lessons-questioner"):
         (root / d).mkdir(parents=True)
     return root
+
+
+@pytest.fixture
+def export_agent(tmp_path: Path, data_root: Path) -> Path:
+    """The fixture tenant's `agent/` inside a real export (#1108 P4 O11's one helper) — what the
+    posture page reads instead of the product tree (O1, P-1)."""
+    with published_tenant(tmp_path / "forge", root=data_root) as tenant:
+        yield tenant.export.path / "agent"
 
 
 def _titles(view: dict) -> set[str]:
@@ -205,37 +217,50 @@ def test_d9_oserror_members_are_warn_skipped(tmp_path, capsys):
         assert name in err, f"{name} ({exc}) was not named on stderr"
 
 
-def test_d12_build_view_takes_a_defaulted_corpus_root(tmp_path):
-    """demand: d12 (seam) — ``build_view`` gains a DEFAULTED corpus-root parameter, ``build_view(defender_dir:..."""
-    root = _fixture_defender(tmp_path)
+def test_d12_build_view_reads_only_the_agent_root_it_is_given(tmp_path, export_agent):
+    """demand: d12 (seam), #1108 P4 O1/O-U5 — ``build_view`` reads the agent root it is handed
+    (``agent_root=``) and nothing else: a made-up root shows only its own lesson, and the
+    fixture tenant's export shows its own lessons under exactly the two live groups."""
+    root = _fixture_agent(tmp_path)
     _findings_lesson(root / "lessons", "fixture-only-lesson")
 
-    view = serialize.build_view(defender_dir=root)
+    view = serialize.build_view(agent_root=root)
     assert _titles(view) == {"fixture-only-lesson"}
 
-    real = serialize.build_view()
-    assert set(real["groups"]) == {"defender", "actor", "environment", "questioner"}  # 1007 M7: a fourth group
-    assert _titles(real) != _titles(view)
-    assert all(g["lessons"] for g in real["groups"].values())
+    exported = serialize.build_view(agent_root=export_agent)
+    assert set(exported["groups"]) == {"defender", "questioner"}  # O-U5: no retired group
+    assert _titles(exported) != _titles(view)
+    assert all(g["lessons"] for g in exported["groups"].values())
 
 
-def test_d13_source_path_keys_off_the_injected_root(tmp_path):
-    """demand: d13 — ``_normalize`` computes ``source_path`` relative to ``defender_dir.parent``, not the module..."""
-    root = _fixture_defender(tmp_path)
+def _resolves_under(agent_root: Path, source_path: str) -> bool:
+    """`source_path` names a file of `agent_root`, spelled relative to the agent root or to the
+    repo holding it (r3 does not fix which; both are tenant-repo spellings, never `defender/`)."""
+    return any((base / source_path).is_file() for base in (agent_root, agent_root.parent))
+
+
+def test_d13_source_path_keys_off_the_injected_root(tmp_path, export_agent):
+    """demand: d13, #1108 P4 O1 — ``source_path`` is relative and keyed off the injected agent
+    root, never the module's location or the product tree's ``defender/`` spelling."""
+    root = _fixture_agent(tmp_path)
     _findings_lesson(root / "lessons", "fixture-lesson")
 
-    rec = _records(serialize.build_view(defender_dir=root))[0]
-    assert rec["source_path"] == "defender/lessons/fixture-lesson.md"
+    rec = _records(serialize.build_view(agent_root=root))[0]
+    assert rec["source_path"].endswith("lessons/fixture-lesson.md")
     assert not Path(rec["source_path"]).is_absolute()
+    assert not rec["source_path"].startswith("defender/")
+    assert _resolves_under(root, rec["source_path"])
 
-    for real in _records(serialize.build_view()):
-        assert real["source_path"].startswith("defender/lessons")
-        assert (WORKSPACE_ROOT / real["source_path"]).is_file()
+    exported = _records(serialize.build_view(agent_root=export_agent))
+    assert exported, "the fixture export holds lessons, so the loop below is not vacuous"
+    for real in exported:
+        assert not real["source_path"].startswith("defender/")
+        assert _resolves_under(export_agent, real["source_path"]), real["source_path"]
 
 
 def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
     """demand: d14 — the FULL classification truth table over one fixture corpus, not a membership check."""
-    root = _fixture_defender(tmp_path)
+    root = _fixture_agent(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "good")
     (corpus / "empty-fm.md").write_text("---\n{}\n---\nbody\n")
@@ -243,7 +268,7 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
     _undecodable(corpus)
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\n---\nbody\n")
 
-    view = serialize.build_view(defender_dir=root)
+    view = serialize.build_view(agent_root=root)
     assert _titles(view) == {"good", "empty-fm", "unfenced", "no-close", "bad-yaml", "null-doc",
                              "bom", "undecodable"}
     assert {rec["group"] for rec in _records(view)} == {"defender"}
@@ -261,10 +286,10 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
 
 def test_d15_empty_mapping_record_shape(tmp_path):
     """demand: d15 (shape) — the ``{}``-lesson's rendered RECORD, field by field: ``title == path.stem`` (no..."""
-    root = _fixture_defender(tmp_path)
+    root = _fixture_agent(tmp_path)
     (root / "lessons" / "empty-fm.md").write_text("---\n{}\n---\nthe body\n")
 
-    rec = _records(serialize.build_view(defender_dir=root))[0]
+    rec = _records(serialize.build_view(agent_root=root))[0]
     assert rec["title"] == "empty-fm"
     assert rec["description"] == ""
     assert rec["status"] == "live"
@@ -275,13 +300,13 @@ def test_d15_empty_mapping_record_shape(tmp_path):
 
 def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
     """demand: d16 — with an UNDECODABLE lesson AND an OSError lesson (a directory named ``foo.md``) in the..."""
-    root = _fixture_defender(tmp_path)
+    root = _fixture_agent(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "survivor")
     _undecodable(corpus)
     _oserror_members(corpus)
 
-    view = serialize.build_view(defender_dir=root)
+    view = serialize.build_view(agent_root=root)
     assert _titles(view) == {"survivor", "undecodable", "foo", "dead"}
     assert {r["title"] for r in _records(view) if r["status"] != "malformed"} == {"survivor"}
 
@@ -292,13 +317,13 @@ def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
 
 def test_d17_stdout_stays_a_json_protocol(tmp_path, capsys):
     """demand: d17 (negative) — ``serialize.py --stdout`` is an api preview, i.e. a PROTOCOL: over a corpus..."""
-    root = _fixture_defender(tmp_path)
+    root = _fixture_agent(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "good")
     _frontmatter_error_members(corpus)
     _undecodable(corpus)
 
-    serialize.build_view(defender_dir=root)
+    serialize.build_view(agent_root=root)
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "undecodable.md" in captured.err
@@ -335,17 +360,20 @@ def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
     # #1105 PR 2 (J8, declared change 10): `--tenant` is required
     assert tl.main(["--all", "--lessons-dir", str(missing), "--tenant", TID]) == 1
     err = capsys.readouterr().err
-    assert f"no lessons dir: {missing}" in err
-    assert str(tl.LESSONS_DIR) not in err
+    # #1108 P4 O4: the CLI's import-time `LESSONS_DIR` constant is gone; the guard names the
+    # resolved (injected) dir and no other.
+    named = [ln for ln in err.splitlines() if "no lessons dir:" in ln]
+    assert named == [f"no lessons dir: {missing}"], err
 
 
 def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     tl = load_trace_lesson("trace_lesson_584")
     _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
-    corpus = _corpus_of(tmp_path / "defender", "foo-bar")
+    # #1108 P4 O5: lessons sit under an agent root and the recogniser is told which one.
+    corpus = _corpus_of(tmp_path / "agent", "foo-bar")
     lesson_path = corpus / "foo-bar.md"
 
-    oracle = record_lesson_load.lesson_name(str(lesson_path))
+    oracle = record_lesson_load.lesson_name(str(lesson_path), agent_root=tmp_path / "agent")
     assert oracle == "foo-bar"
 
     # #1105 PR 2 (J8, declared change 10)

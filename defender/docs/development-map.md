@@ -14,9 +14,9 @@ Current source establishes existing behavior; the approved design establishes in
 | **the branch** / **the episode** | `learning/branch/` — forks a finished run at a chosen message and runs a family of sibling worlds from it; `cli.py` is the composition root, `estate/` is what a sibling's queries are answered from |
 | **the questioner** | `learning/branch/questioner/` — a deny-all role that authors the family manifest: sibling worlds differing by one deliberate fact. Runs no tools; its whole input is inlined by the host |
 | **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Holds its own deny-all role since #1008 — one such role per package, so the branch package's comparator stays under the questioner's |
-| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons. TWO of them since #1007, one per queue channel and one per corpus: `author/lessons/` folds DEFENDER findings (`direction: family` rows only) into `defender/lessons/`; `author/questioner/` folds WORLD findings — observations about the instrument, not the investigation — into `defender/lessons-questioner/` behind an idempotency-only gate. No check re-runs a lesson before it commits (the same-case forward check was deleted in #1166; #397). Both run in one drain tick, one commit, one PR |
+| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons. TWO of them since #1007, one per queue channel and one per corpus: `author/lessons/` folds DEFENDER findings (`direction: family` rows only) into the tenant's `agent/lessons/`; `author/questioner/` folds WORLD findings — observations about the instrument, not the investigation — into the tenant's `agent/lessons-questioner/` behind an idempotency-only gate. No check re-runs a lesson before it commits (the same-case forward check was deleted in #1166; #397). Both run in one drain tick, one draft, one commit, one PR on the tenant's forge (#1108 P4: through `TenantDelivery`) |
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
-| **lessons** | `defender/lessons/` — authored by the loop, retrieved by three pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, the `append_block`/`fix_row` block keyed on the invlang frontier (`runtime/lessons_engine/lessons_frontier.py`, #919), and the same frontier block on the compaction fold's row (`runtime/lessons_push.py`, #936). Grep, no index |
+| **lessons** | the tenant repo's `agent/lessons/` (a run reads its own copy at `/agent/lessons/`, `$DEFENDER_AGENT_DIR`; the product tree holds none since #1108 P4) — authored by the loop, retrieved by three pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, the `append_block`/`fix_row` block keyed on the invlang frontier (`runtime/lessons_engine/lessons_frontier.py`, #919), and the same frontier block on the compaction fold's row (`runtime/lessons_push.py`, #936). Grep, no index |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
 | **the frontend** / **the visualizations** | rendered HTML, not a web app: `presentation/` emits `runtime.html` (the run's one page — alert, report card, phases, metrics, review gate, leads and transcript) per run and `learning.html` (the branch episode's one page — verdict, worlds, findings, stages and leads, rendered from the episode dir alone after `judge.yaml`); `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
 | **evals** | `evaluations/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric (the frozen-actor replay and the judge A/B are retired); see root `evaluations/README.md` |
@@ -73,8 +73,6 @@ defender/
   api/              # the platform HTTP API (#1131) — a STUB: routes + wire models + ports. The data rules are the
                     #   store's (#1082), stated on the ports; `fakes.py` enforces none of them. Never imports
                     #   runtime/ or learning/. `api/serve.py` runs it locally over the fakes (`--extra api`)
-  lessons/          # checked-in lesson corpus (the defender's; read at PLAN time)
-  lessons-questioner/ # the questioner's own corpus — lessons about authoring worlds, never read by the runtime agent
   run-transcripts/  # curated transcripts of past real-alert runs
   tests/            # single collected test tree, grouped by subsystem
                     #   runtime/, sandbox/, storage/, tenancy/, invlang/, integrations/
@@ -93,12 +91,13 @@ Runtime verification includes unit tests, hermetic e2e replay, and real-alert ev
 | To change... | Edit... |
 |---|---|
 | Runtime loop shape, phase discipline, gather dispatch ergonomics | `defender/SKILL.md` |
-| Per-system reference (what data a system holds, sample queries) | `defender/skills/{system}/SKILL.md` |
-| Gather subagent behavior, query templates, raw payload contract | `defender/skills/gather/` |
+| Per-system reference (what data a system holds, sample queries) | the tenant repo's `agent/skills/{system}/SKILL.md`, through `tenant.py propose` (#1108 P4) |
+| Gather subagent behavior, raw payload contract, query-template format | `defender/skills/gather/` (`query-schema.md` is the format; the templates are the tenant's `agent/skills/gather/queries/`) |
 | How the two tables are read/joined | `defender/learning/lead_repository.py` |
 | Questioner prompts + driver | `defender/learning/branch/questioner/` (`role.md`, `family.md`, `world.md` + `__init__.py`) |
 | Judge prompt + driver | `defender/learning/judge/` (`role.md` + `run.py`) |
 | Curator prompts + drivers | `defender/learning/author/<curator>/` |
-| Lessons corpus | `defender/lessons/*.md` (hand-edits fine if they match the schema) |
+| Lessons corpus | the tenant repo's `agent/lessons/*.md`, by PR on the tenant's forge (hand-edits fine if they match the schema) |
+| How a run's knowledge source (fresh/stale/pinned) reads on the run page, ticket and API | `defender/records/_knowledge_status.py` (one rule for every reader, OD22') |
 | Eval metrics / scenarios | `evaluations/` |
 | Permission gate / grants | `runtime/permission/` + each agent's `bash_shapes` in `defender/agents.py`; secrets denylist in `runtime/bash_policy.json` |

@@ -225,6 +225,15 @@ def _resolved_tree(defender_dir: Path | None) -> Path:
     return defender_dir if defender_dir is not None else PATHS.defender_dir
 
 
+def _cwd_anchor(defn: AgentDefinition, roots: ResolvedRoots) -> Path:
+    """Where a relative operand resolves: the run dir, or for a role anchored on its tree that
+    tree — the tenant agent root when the scope names one (a batch draft's `agent/`, the drain
+    box's workdir, #1108 P4), else the checkout holding `defender_dir`."""
+    if not defn.anchors_on_tree:
+        return roots.run_dir
+    return roots.tenant_agent if roots.tenant_agent is not None else roots.defender_dir.parent
+
+
 def _build_roots(
     defn: AgentDefinition, run_dir: Path, scope: RunScope, defender_dir: Path | None,
 ) -> ResolvedRoots:
@@ -235,7 +244,9 @@ def _build_roots(
         _require_absolute_root("tenant_agent", scope.tenant_agent)
     for member in (*scope.add_dirs, *scope.read_confine, *scope.scripts):
         _require_absolute_root("scope read root", member)
-    if defn.requires_explicit_tree and (
+    # A tenant agent root is the explicit tree a role anchored on its tree authors (a batch
+    # draft's `agent/`, #1108 P4): the product checkout is then only read.
+    if defn.requires_explicit_tree and scope.tenant_agent is None and (
         defender_dir is None or Path(defender_dir).resolve() == PATHS.defender_dir.resolve()
     ):
         raise ValueError(
@@ -258,8 +269,7 @@ def _build_roots(
         run_dir, defn.corpus_dirs, scope, defender_dir=_resolved_tree(defender_dir),
     )
     view = ModelView.for_scope(
-        run_dir, roots.defender_dir,
-        roots.defender_dir.parent if defn.anchors_on_tree else run_dir,
+        run_dir, roots.defender_dir, _cwd_anchor(defn, roots),
         roots.tenant_agent, extra_roots=roots.model_roots,
     )
     for root in scope.add_dirs:
@@ -310,7 +320,7 @@ def bind(
         )
     return defn.deps_cls._for_run(
         run_dir, policy, defender_dir=roots.defender_dir, box=box,
-        cwd_anchor=(roots.defender_dir.parent if defn.anchors_on_tree else run_dir),
+        cwd_anchor=_cwd_anchor(defn, roots),
         roots=roots,
     )
 

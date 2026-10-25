@@ -150,9 +150,10 @@ def lookup_miss_row(
     )
 
 
-#: The system directory the registry lives under, inside whatever tree is being read
-#: (`defender/skills/tacit-knowledge/registry.yaml` in the shipped one, a `tmp_path` in a
-#: scenario's). Spelled once because the unit suite writes fixtures with it and the e2e reads
+#: The system directory the registry lives under, inside whatever AGENT ROOT is being read
+#: (a tenant's `agent/skills/tacit-knowledge/registry.yaml` — the run copy's in a run, the
+#: committed fixture tenant's `knowledge/tenant-fixture/agent/...` in the replays, #1108 P4;
+#: a `tmp_path` in a scenario's). The product tree holds no registry after P4 (O1). Spelled once because the unit suite writes fixtures with it and the e2e reads
 #: the adapter's answer back out of one.
 REGISTRY_SYSTEM = "tacit-knowledge"
 REGISTRY_RELPATH = ("skills", REGISTRY_SYSTEM, "registry.yaml")

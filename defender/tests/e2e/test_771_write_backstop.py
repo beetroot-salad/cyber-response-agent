@@ -5,7 +5,6 @@ from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
-import contextlib
 import errno
 import json
 import os
@@ -25,7 +24,6 @@ from defender.tests.e2e._spec771 import (  # noqa: E402
     CENSUS,
     POSTURES,
     Writer,
-    drive_drain_restore,
     drive_fault_exit_trace,
     drive_normal_exit_trace,
     drive_writer,
@@ -91,7 +89,7 @@ def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, t
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     target = elsewhere / "secret.txt"
-    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")
+    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     before = snapshot_outside(elsewhere)
 
     plant_symlink(run / writer.artifact, target)
@@ -182,19 +180,12 @@ def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
         "the primitive created through the planted component and landed outside the tree"
     )
 
-    # the fifth site: the drain lane's restore, driven at a planted COMPONENT of its own
-    worktree = tmp_path / "wt"
-    corpus = worktree / "defender" / "lessons"
-    corpus.mkdir(parents=True)
-    plant_dir_symlink(corpus / "sub", outside_dir)
-    with contextlib.suppress(OSError):
-        drive_drain_restore(worktree, corpus, {"sub/lesson-a.md": b"# restored\n"})
-
-    assert snapshot_outside(elsewhere) == before, (
-        "the drain lane's restore mkdir'd through a planted component and landed its blob "
-        "outside the second shared root — B10's silent success, on the site the design's own "
-        "'two mkdir sites' count never had"
-    )
+    # #1108 P4 (OD12 class i): the fifth site here was the drain lane's fault-path corpus
+    # restore into a checkout worktree (`drain._restore_corpus`), a mechanism P4 removes — a
+    # curator now writes a git-free batch draft and a failed claim is reset by `Batch.reset`.
+    # Its planted-COMPONENT case moved with it:
+    # `tests/tenancy/tenant_1108_delivery/test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`
+    # (a lane folder replaced by a directory symlink, nothing written through it).
 
 
 def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
@@ -454,18 +445,13 @@ def test_the_drain_worktree_writers_meet_a_planted_alias_the_same_way(tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     target = elsewhere / "secret.txt"
-    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")
+    target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     before = snapshot_outside(elsewhere)
 
-    # 1. the lane's OWN production writer — the fault-path corpus restore
-    plant_symlink(corpus / "lesson-a.md", target)
-    with contextlib.suppress(OSError):   # the restore's posture is its own (F1 preserves it)
-        drive_drain_restore(worktree, corpus, {"lesson-a.md": b"# restored\n"})
-    assert snapshot_outside(elsewhere) == before, (
-        "the drain lane's corpus restore wrote through a planted alias and landed outside the "
-        "second shared root — the lane a fix written at the run dir never reaches"
-    )
-    (corpus / "lesson-a.md").unlink()
+    # 1. #1108 P4 (OD12 class i): the lane's own fault-path corpus restore
+    # (`drain._restore_corpus`) is a mechanism P4 removes; its successor, the claim reset, is
+    # pinned never to write through a planted leaf alias by
+    # `tests/tenancy/tenant_1108_delivery/test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`.
 
     # 2. the primitive itself, on this root's paths
     plant_symlink(corpus / "lesson-b.md", target)

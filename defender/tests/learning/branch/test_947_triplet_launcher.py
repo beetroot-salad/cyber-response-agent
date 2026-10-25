@@ -108,7 +108,7 @@ def test_world_identities_are_independent_of_episode_and_label(tmp_path):
 
 def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_path):
     """Preflight checks every precondition in ONE block before anything is spent, and EACH of them refuses before the questioner is called"""
-    base, src = location_path(T.runs_base)(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
 
     def refuses(argv_extra, *, prepare=lambda: None):
         agent = T.FakeAgent()
@@ -128,7 +128,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
 
 def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_it(tmp_path):
     """The launcher screens the source run's `alert.json` before it reaches the questioner's prompt"""
-    base, src = location_path(T.runs_base)(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     secret = tmp_path / "root-private-key"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
     RunPaths(src).alert.unlink()

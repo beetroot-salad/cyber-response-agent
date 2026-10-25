@@ -46,8 +46,9 @@ FOREIGN_HOST_PATH = "/srv/acme-prod/defender-data/acme/runs/20250101t000000z-old
 def _unboxed(layout: V.Layout, run_dir: Path, monkeypatch) -> object:
     """Start production's explicitly permitted fallback without a Docker daemon."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    agent, token = layout.staged()
     return box_mod.start_box(run_dir, layout.checkout, spec=SPEC, docker=V.FakeDocker(),
-                             tenant_agent=layout.agent, tenant_id=layout.tenant.id)
+                             tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
 
 
 def _drive(layout: V.Layout, run_dir: Path, main, monkeypatch, **kw) -> dict:
@@ -102,6 +103,11 @@ def test_b6_o3_message_zero_lessons_section_shows_no_host_layout(tmp_path, monke
     from defender.runtime import orient
 
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
+    # #1108 P4 (O1, O4): the corpus the signature lookup reads is the run TENANT's
+    # (`agent/lessons/`), never the checkout's; the fixture tenant carries no lesson for this
+    # alert's signature, so the scene plants one there (made up; the default signature of
+    # `_write_lesson` is this alert's rule id).
+    _write_lesson(layout.agent / "lessons", "view-b6-signature-lesson")
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-lessons0")
     main = V.Recorder([Turn(text="done")])
     _drive(layout, run_dir, main, monkeypatch, orient_shim=orient._shim)
@@ -406,12 +412,16 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
 
 
 def test_b3_the_lessons_block_names_lessons_by_model_path(tmp_path, monkeypatch):
-    tree = V.mirror_checkout(tmp_path / "co" / "src", own_lessons=True)
+    # #1108 P4 (O1, O4): the lessons a run's writes are matched against are its TENANT's
+    # (`agent/lessons/`, at the model root `MODEL_AGENT`), never the checkout's — so the
+    # lesson is planted in the tenant's agent half and named back by its `/agent` path. The
+    # checkout is a mirror elsewhere, so a block that leaked either host tree is caught.
+    tree = V.mirror_checkout(tmp_path / "co" / "src")
     layout = V.make_layout(tmp_path / "a", V.TENANT_A, checkout=tree)
-    _write_lesson(tree / "lessons", CLASS_LESSON, nodes=CLASS_SELECTOR)
+    _write_lesson(layout.agent / "lessons", CLASS_LESSON, nodes=CLASS_SELECTOR)
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-lesson")
     (run_dir / RUN_LAYOUT.investigation).write_text(CLOSED_LOOP, encoding="utf-8")
-    model_lesson = f"{V.MODEL_DEFENDER}/lessons/{CLASS_LESSON}.md"
+    model_lesson = f"{V.MODEL_AGENT}/lessons/{CLASS_LESSON}.md"
     main = V.Recorder([
         Turn(tool_calls=[("append_block", {"text": OPEN_CLASS_BLOCK})]),
         Turn(tool_calls=[("read_file", {"path": model_lesson})]),

@@ -5,6 +5,8 @@
     python3 defender/cli/tenant.py scaffold <tenant-id> <empty dir>
     python3 defender/cli/tenant.py setup <tenant-id>
     python3 defender/cli/tenant.py check <tenant-id> | --folder <path>
+    python3 defender/cli/tenant.py update <tenant-id>
+    python3 defender/cli/tenant.py propose <tenant-id> <staged dir>
     python3 defender/cli/tenant.py migrate <tenant-id> <new knowledge folder>   # one-off
 
 A tenant's knowledge (its `settings/` and `agent/` halves) lives in the tenant's OWN repo, never
@@ -31,6 +33,16 @@ lead-zero agreement, and — for a git clone — that `agent/.tenant-id` is what
 commits (failing closed when git cannot answer). `check <id>` judges the tenant under
 `$DEFENDER_DATA_ROOT` through acceptance; `check --folder <path>` judges a tenant repo's working
 folder with no data root at all (tenant CI).
+
+`update` publishes (#1108 P4 flow 1): it logs in to the issuer from the issuer client config
+file the tenant row's forge binding names (`forge.issuer_config`), fetches the tenant row's bound origin, fast-forwards the clone, writes the export and points
+`current` at it.
+`setup` does the same once the row carries a forge binding. `check <id>` also reports how far
+`current` trails the clone's `origin/main` and the last publish refusal any trigger met (a run
+launch, a drain start, `update`), so a sealed issuer or a refused merge is visible (O-SEE).
+`propose` hands a staged directory shaped like the tenant's `agent/` root (connect's tenant
+half: a system skill, seed queries, tacit entries) to the commit-maker as one PR on the tenant
+forge; files are added or replaced, nothing is deleted, and only `agent/` is touched.
 
 `migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
 its settings committed in the product repo until #1120 deleted them): it builds the knowledge
@@ -102,7 +114,8 @@ def _say(message: object) -> None:
 # setup
 # ==========================================================================================
 
-def setup(tenant_id: str, learning_state_from: Path | None = None) -> int:
+def setup(tenant_id: str, learning_state_from: Path | None = None, *,
+          issuer_config: Path | None = None) -> int:
     """Validate the placed knowledge and learning adoption plan before writing the row, then
     provision or adopt tenant learning state. Refuse at the first rule it fails: the id grammar (before anything
     under the data root is looked at), the data root, the one-tenant guard (which admits the
@@ -124,10 +137,21 @@ def setup(tenant_id: str, learning_state_from: Path | None = None) -> int:
                                    create_row=not has_row)
         if learning_state_from is not None:
             print(f"learning state adopted from {learning_state_from}")
+        tenant = _tenant.accept_tenant(root, tid, defender_dir=_DEFENDER_DIR)
     except (OSError, _tenant.TenantRefused) as refused:
         _say(refused)
         return 1
+    if _has_forge_binding(tenant):
+        return _publish(tenant, by="tenant.py setup", issuer_config=issuer_config)
     return 0
+
+
+def _has_forge_binding(tenant: _tenant.Tenant) -> bool:
+    try:
+        _tenant.read_forge_binding(tenant)
+    except _tenant.TenantRefused:
+        return False
+    return True
 
 
 def _settings_files_parse(settings: Path) -> None:
@@ -153,7 +177,148 @@ def check_tenant(tenant_id: str) -> int:
     except _tenant.TenantRefused as refused:
         _say(refused)
         return 1
-    return _report(_findings(tenant.knowledge))
+    return _report([*_findings(tenant.knowledge), *_publish_findings(tenant)])
+
+
+def _publish_findings(tenant: _tenant.Tenant) -> list[str]:
+    """O-SEE: how far `current` trails the clone's `origin/main` (as the last fetch left it; no
+    network), and the last publish refusal any trigger recorded, while no later publish has
+    succeeded. Read locally only."""
+    from defender.learning.author import version_control as vc
+    from defender.learning.author.version_control.status import read_status
+
+    findings: list[str] = []
+    try:
+        current: str | None = vc.current_export(tenant).commit
+    except vc.DeliveryRefused:
+        current = None  # never published: nothing trails yet (a refusal is reported below)
+    trail = _trail(tenant, current)
+    if trail is not None:
+        findings.append(trail)
+    status = read_status(tenant)
+    if status is not None and status.get("refused"):
+        findings.append(
+            f"the last publish ({status.get('by', 'unknown trigger')}, {status.get('at', '?')}) "
+            f"was refused ({status.get('kind', 'operator')}): {status['refused']}")
+    return findings
+
+
+def _trail(tenant: _tenant.Tenant, current: str | None) -> str | None:
+    """The finding that `current` trails `origin/main`, or None when it does not (or there is
+    no clone with an `origin/main` to compare with)."""
+    from defender.learning.author.version_control import DeliveryRefused
+    from defender.learning.author.version_control.repository import LocalRepository
+
+    if current is None or not os.path.lexists(tenant.knowledge / ".git"):
+        return None
+    try:
+        repository = LocalRepository.open_local(tenant.knowledge)
+        if not repository.holds_ref("refs/remotes/origin/main"):
+            return None
+        upstream = repository.revision("refs/remotes/origin/main")
+        if current == upstream:
+            return None
+        behind = len(repository.commits_since(current, upstream))
+    except (OSError, _git.GitError, ValueError, DeliveryRefused) as unreadable:
+        return f"could not compare `current` with origin/main in {tenant.knowledge}: {unreadable}"
+    if not behind:
+        return None
+    return (f"`current` ({current[:12]}) trails origin/main ({upstream[:12]}) by {behind} "
+            f"{'commit' if behind == 1 else 'commits'}: the merged knowledge is not published "
+            "yet (see the last publish refusal, or run tenant.py update)")
+
+
+# ==========================================================================================
+# update / propose (#1108 P4)
+# ==========================================================================================
+
+def _delivery(tenant: _tenant.Tenant, *, client=None, identity=None,
+              issuer_config: Path | None = None):
+    """The tenant's opened `TenantDelivery` (a context manager): its row's bound origin, an
+    identity from the issuer client config the binding names (or the given stand-ins)."""
+    from defender.learning.author import version_control as vc
+
+    return vc.opened_delivery(tenant, defender_dir=_DEFENDER_DIR, client=client,
+                              identity=identity, issuer_config=issuer_config)
+
+
+def _publish(tenant: _tenant.Tenant, *, by: str, client=None, identity=None,
+             issuer_config: Path | None = None) -> int:
+    from defender.learning.author import version_control as vc
+    from defender.learning.author.version_control.status import recording
+
+    try:
+        with recording(tenant, by=by), _delivery(
+                tenant, client=client, identity=identity, issuer_config=issuer_config) as delivery:
+            export = delivery.publish()
+    except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
+        _say(f"publish refused: {refused}")
+        return 1
+    print(f"published {export.commit} as tenant {tenant.id}'s current knowledge")
+    return 0
+
+
+def update(tenant_id: str, *, client=None, identity=None,
+           issuer_config: Path | None = None) -> int:
+    """`update <id>`: publish the tenant's merged `main` (flow 1). The keywords are in-process
+    stand-ins for the forge client and the issuer login. Refusals print `[tenant.py] ...`,
+    exit 1, and are what `check` reports afterwards."""
+    try:
+        tenant = _tenant.accept_tenant(
+            _tenant.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
+    except _tenant.TenantRefused as refused:
+        _say(refused)
+        return 1
+    return _publish(tenant, by="tenant.py update", client=client, identity=identity,
+                    issuer_config=issuer_config)
+
+
+def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
+            issuer_config: Path | None = None) -> int:
+    """`propose <id> <dir>`: the staged directory (shaped like `agent/`) as one commit-maker
+    commit on a branch off the origin's `main`, pushed to the tenant origin with one PR. Files
+    are added or replaced; nothing absent from the directory is deleted. A link, a special
+    file, `.tenant-id` or a git control name anywhere in it refuses the whole proposal before
+    anything is committed. Refusals print `[tenant.py] ...` and exit 1."""
+    import secrets
+    from dataclasses import replace
+
+    from defender.learning.author import version_control as vc
+    from defender.tenancy._exports import regular_files as _regular_files
+
+    batch = None
+    try:
+        tenant = _tenant.accept_tenant(
+            _tenant.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
+        try:
+            files = _regular_files(Path(staged))
+        except OSError as unreadable:
+            raise vc.DeliveryRefused(f"{staged} could not be read: {unreadable}") from None
+        if not files:
+            raise vc.DeliveryRefused(f"{staged} stages no file: there is nothing to propose")
+        change_set = vc.ChangeSet(tuple(
+            vc.AgentChange(f"agent/{rel}", data) for rel, data in sorted(files.items())))
+        lanes = sorted({change.path.split("/")[1] for change in change_set
+                        if change.path.count("/") >= 2})
+        flat = [change.path for change in change_set if change.path.count("/") < 2]
+        if flat:
+            raise vc.DeliveryRefused(
+                f"{', '.join(flat)}: propose stages files below a folder of agent/ only")
+        with _delivery(tenant, client=client, identity=identity,
+                       issuer_config=issuer_config) as opened:
+            delivery = replace(opened, branch_prefix="propose/")
+            batch = delivery.start_batch(f"propose-{secrets.token_hex(4)}", lanes=lanes)
+            batch.commit(change_set, f"propose: {', '.join(sorted(files))[:200]}")
+            delivered = delivery.finish(batch)
+    except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
+        _say(f"propose refused: {refused}")
+        return 1
+    finally:
+        if batch is not None:
+            batch.discard()
+    print(f"proposed {len(files)} file(s): {delivered.status}"
+          + (f" {delivered.url}" if delivered.url else ""))
+    return 0
 
 
 def check_folder(folder: Path) -> int:
@@ -187,7 +352,7 @@ def _findings(knowledge: Path) -> list[str]:
     table = dispositions_path(settings)
     census: _tenant_census.Census | None = None
     try:
-        census = _tenant_census.take_census(_DEFENDER_DIR, _REPO_ROOT)
+        census = _tenant_census.take_census(_DEFENDER_DIR)
     except _tenant_census.CensusUnavailable as blind:
         findings.append(
             f"{table} was not checked against the running checkout's adapters (for verbs nobody "
@@ -195,7 +360,7 @@ def _findings(knowledge: Path) -> list[str]:
     try:
         findings += (_tenant_census.table_findings(settings, census).lines(table)
                      if census is not None
-                     else _tenant_census.folder_findings(settings, _DEFENDER_DIR).lines())
+                     else _tenant_census.folder_findings(settings).lines())
     except DispositionError as unloadable:
         findings.append(str(unloadable))
     committed = _tenant_id_committed(knowledge)
@@ -523,6 +688,12 @@ def main(argv: list[str]) -> int:
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
+    update_p = sub.add_parser("update", help="publish the tenant's merged main as `current`")
+    update_p.add_argument("tenant_id")
+    propose_p = sub.add_parser(
+        "propose", help="propose a staged agent/-shaped directory as one PR on the tenant forge")
+    propose_p.add_argument("tenant_id")
+    propose_p.add_argument("staged", type=Path)
     migrate_p = sub.add_parser(
         "migrate", help="one-off (#1120): build a pre-#1120 tenant's knowledge folder from its "
                         "last copy in the checkout's history")
@@ -538,6 +709,10 @@ def main(argv: list[str]) -> int:
         return setup(ns.tenant_id, ns.learning_state_from)
     if ns.command == "migrate":
         return migrate(ns.tenant_id, ns.target)
+    if ns.command == "update":
+        return update(ns.tenant_id)
+    if ns.command == "propose":
+        return propose(ns.tenant_id, ns.staged)
     if (ns.tenant_id is None) == (ns.folder is None):
         check_p.error("give exactly one of <tenant-id> and --folder")
     if ns.folder is not None:

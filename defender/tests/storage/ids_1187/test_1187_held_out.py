@@ -5,7 +5,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 import json
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -62,13 +62,17 @@ def _index(path: Path, *rows: tuple[str, str]) -> Path:
 
 
 def _rows(text: str | None) -> list[tuple[str, str]]:
-    """F's rows as `(slug, run_id)`, read by the TEST (plain JSON Lines)."""
+    """F's rows as `(slug, run_id)`, read by the TEST (plain JSON Lines). #1108 P4 OD10: F
+    also records the knowledge commit resolved at its creation, in a shape not designed; a
+    line that carries no `slug` is that record, not a launch row, and is skipped."""
     if not text:
         return []
     out = []
     for line in text.splitlines():
         if line.strip():
             row = json.loads(line)
+            if "slug" not in row:
+                continue
             out.append((row["slug"], row["run_id"]))
     return out
 # The CLI, driven through `held_out.main`
@@ -183,14 +187,21 @@ def _after_run_py(argv: Sequence[str]) -> list[str]:
     return list(argv[names.index("run.py") + 1:])
 
 
-def _launched_run_id(call: SpawnCall, alert: Path) -> str:
-    """Assert `call` ran `run.py <alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn` (flags in any order, nothing else), and return the uuid."""
+def _launched_run_id(call: SpawnCall, alert: Path, pin: str) -> str:
+    """Assert `call` ran `run.py <alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn
+    --knowledge-commit <pin>` (flags in any order, nothing else), and return the uuid. #1108 P4
+    (O-PIN, OD10): every held-out run is pinned to the commit its index recorded at creation —
+    `pin`, the commit `current` named then."""
     rest = _after_run_py(call.argv)
     assert rest, f"run.py was handed no arguments: {call.argv}"
     assert Path(rest[0]).resolve() == alert.resolve(), (
         f"run.py's alert is {rest[0]!r}, not the fixture's {alert}")
     flags = rest[1:]
-    assert len(flags) == 5, f"run.py's flags are not exactly --tenant/--run-id/--no-learn: {flags}"
+    assert len(flags) == 7, (
+        f"run.py's flags are not exactly --tenant/--run-id/--no-learn/--knowledge-commit: {flags}")
+    assert flags.count("--knowledge-commit") == 1, flags
+    assert flags[flags.index("--knowledge-commit") + 1] == pin, (
+        f"run.py was not pinned to the index's knowledge commit {pin}: {flags}")
     assert flags.count("--no-learn") == 1, flags
     assert "--tenant" in flags, flags
     assert flags[flags.index("--tenant") + 1] == LAUNCH_TENANT, flags
@@ -207,6 +218,9 @@ class Scene:
     state: Path
     fixtures: Path
     ops: Path
+    #: #1108 P4 (OD10): the launch tenant is published for real; this is the commit its
+    #: `exports/current` names, which every index created in the scene records and pins to.
+    pin: str
 
     def alert(self, slug: str = SLUG) -> Path:
         return self.fixtures / slug / "alert.json"
@@ -217,14 +231,37 @@ class Scene:
 
 
 @pytest.fixture
-def scene(tmp_path: Path, data_root: Path) -> Scene:
-    """`DEFENDER_DATA_ROOT` is conftest's per-test root (outside `tmp_path`)."""
-    state = Path(data_root) / LAUNCH_TENANT / "learning"
-    state.mkdir(parents=True)
-    ops = tmp_path / "ops"
-    ops.mkdir()
-    fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious", OTHER: "benign"})
-    return Scene(tmp_path, Path(data_root), state, fixtures, ops)
+def scene(tmp_path: Path, data_root: Path) -> Iterator[Scene]:
+    """`DEFENDER_DATA_ROOT` is conftest's per-test root (outside `tmp_path`). #1108 P4 (OD10,
+    O11): the launch tenant is the P4 fixture tenant published for real (S0's one helper), so a
+    launch has a `current` to resolve and pin; its served origin lives in a scratch folder
+    outside `tmp_path` (several tests compare `tmp_path`'s tree before and after)."""
+    import tempfile
+
+    from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+
+    with tempfile.TemporaryDirectory(prefix="held-out-forge-") as forge, published_tenant(
+            Path(forge), root=Path(data_root), tenant_id=LAUNCH_TENANT) as tenant:
+        state = Path(data_root) / LAUNCH_TENANT / "learning"
+        state.mkdir(parents=True, exist_ok=True)
+        ops = tmp_path / "ops"
+        ops.mkdir()
+        fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious", OTHER: "benign"})
+        yield Scene(tmp_path, Path(data_root), state, fixtures, ops, tenant.commit)
+
+
+def _seeded_index(scene: Scene, path: Path) -> Path:
+    """An index F that already holds one row (for `OTHER`), made by a REAL launch into a fresh F
+    (its spawn runs nothing) — so F carries whatever record OD10's index creation writes,
+    rather than a hand-written row in a shape that predates it."""
+    from evaluations import held_out
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rc = held_out.main(["launch", OTHER, "--tenant", LAUNCH_TENANT, "--index", str(path),
+                        "--fixtures-dir", str(scene.fixtures)], spawn=lambda argv, **_: 0)
+    assert rc in (0, None), f"fixture bug: seeding {path} failed ({rc})"
+    assert [slug for slug, _ in _rows(path.read_text(encoding="utf-8"))] == [OTHER]
+    return path
 
 
 def _assert_refused(res: Outcome, index: Path, what: str) -> None:
@@ -245,7 +282,7 @@ def _assert_launch_accepted(scene: Scene, index: Path, *, spawn: FakeSpawn) -> s
         assert res.crashed is spawn.raises
     assert len(spawn.calls) == 1, spawn.calls
     call = spawn.calls[0]
-    run_id = _launched_run_id(call, scene.alert())
+    run_id = _launched_run_id(call, scene.alert(), scene.pin)
     assert _rows(call.index_then) == [*before, (SLUG, run_id)], "spawn preceded its index row"
     assert _rows(index.read_text(encoding="utf-8")) == [*before, (SLUG, run_id)]
     return run_id
@@ -255,7 +292,7 @@ def _assert_launch_accepted(scene: Scene, index: Path, *, spawn: FakeSpawn) -> s
 def test_launch_records_each_fresh_id_before_start_even_when_the_child_fails(scene, scenario):
     index = scene.ops / INDEX_NAME
     if scenario == "append-twice":
-        _index(index, (OTHER, S.new_id()))
+        _seeded_index(scene, index)
     prefix = index.read_bytes() if index.exists() else b""
     failures = {"exit-1": {"exit_code": 1}, "crash": {"raises": RuntimeError("run.py crashed")},
                 "interrupt": {"raises": KeyboardInterrupt()}}
@@ -283,6 +320,10 @@ def test_launch_requires_an_explicit_canonical_tenant_before_appending(scene, te
 
 
 def test_launch_as_the_operator_runs_it_really_starts_run_py(scene):
+    """#1108 P4 (OD10): the tenant is published (launch resolves and pins its `current`), then
+    its row is removed — so the REAL run.py, pinned, still refuses on its own before making
+    anything (as it did when the scene had no row), rather than starting an investigation."""
+    (Path(location_path(scene.data_root)) / LAUNCH_TENANT / "tenant.json").unlink()
     index = scene.ops / INDEX_NAME
     before = S.tree(location_path(scene.data_root))
     child = process.run_script(
@@ -441,7 +482,7 @@ def _index_swap_child(scene: Scene, index: Path, elsewhere: Path, mode: str,
 
 def _index_swap_scene(scene: Scene, name: str) -> tuple[Path, Path, Path, bytes]:
     """An operator index and a same-named canary in a simulated box-writable run folder."""
-    index = _index(scene.tmp / name / INDEX_NAME, (OTHER, S.new_id()))
+    index = _seeded_index(scene, scene.tmp / name / INDEX_NAME)
     elsewhere = location_path(scene.data_root) / LAUNCH_TENANT / "runs" / S.new_id()
     canary = _index(elsewhere / INDEX_NAME, (OTHER, S.new_id()))
     return index, elsewhere, canary, canary.read_bytes()
@@ -455,7 +496,7 @@ def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene
     assert outcome["rc"] in (0, None), outcome
     assert len(outcome["calls"]) == 1, outcome
     assert not outcome["swapped"], outcome
-    run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert())
+    run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert(), scene.pin)
     assert _rows(control.read_text(encoding="utf-8"))[-1] == (SLUG, run_id)
     assert canary.read_bytes() == before
 
@@ -469,7 +510,7 @@ def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene
                 index.parent.with_name(index.parent.name + "-held-original") / index.name)
     if outcome["rc"] in (0, None):
         assert len(outcome["calls"]) == 1, outcome
-        run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert())
+        run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert(), scene.pin)
         assert original.read_bytes().startswith(prefix)
         assert _rows(original.read_text(encoding="utf-8"))[-1] == (SLUG, run_id)
     else:

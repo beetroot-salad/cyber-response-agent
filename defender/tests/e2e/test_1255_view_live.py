@@ -33,8 +33,9 @@ def _real_box(tmp_path: Path, run_id: str):
     golden = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
     RunPaths(run_dir).investigation.write_text(
         (golden / "investigation.md").read_text(encoding="utf-8"), encoding="utf-8")
+    agent, token = layout.staged()
     box = box_mod.start_box(run_dir, layout.checkout, docker=box_mod._docker,
-                            tenant_agent=layout.agent, tenant_id=layout.tenant.id)
+                            tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
     return layout, run_dir, box
 
 

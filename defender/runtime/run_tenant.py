@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from defender.knowledge._corpus import QueryTemplate, iter_query_templates
 from defender.knowledge._knowledge import KnowledgePaths
-from defender.tenancy._tenant import Tenant, TenantId, TenantRefused, accept_tenant
+from defender.tenancy._tenant import Tenant, TenantId, TenantRefused, accept_tenant, clone_halves
+from defender.tenancy._tenants import AGENT_HALF
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime import tenant_settings
@@ -76,6 +77,14 @@ class RunTenant:
     systems: Mapping[str, SystemConfig | ConfigFault]
     #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
     ticket_mapping: CaseMapping | CaseTicketError
+    #: The run's knowledge, one export commit (#1108 P4, O-B): the agent root the run reads (its
+    #: run copy's `stage/agent/`) and the settings it was resolved from (the copy's `settings/`).
+    #: `None` only for a record resolved over the tenant's own folder (`clone_halves`).
+    agent_root: Path | None = None
+    settings_root: Path | None = None
+    #: The startup token run start staged beside `agent_root` (U9: the copy's `stage/<token>`),
+    #: which the run's box reads back to prove its bind; `None` when nothing was staged.
+    stage_token: Path | None = None
 
     @property
     def tenant_id(self) -> TenantId:
@@ -83,11 +92,11 @@ class RunTenant:
 
     @property
     def settings(self) -> Path:
-        return self.tenant.settings
+        return self.settings_root if self.settings_root is not None else clone_halves(self.tenant)[1]
 
     @property
     def agent(self) -> Path:
-        return self.tenant.agent
+        return self.agent_root if self.agent_root is not None else clone_halves(self.tenant)[0]
 
     @property
     def table_pointer(self) -> str:
@@ -95,9 +104,15 @@ class RunTenant:
         return table_pointer(self.tenant_id)
 
 
-def catalog_templates(defender_dir: Path) -> list[QueryTemplate]:
-    """The query catalog of the tree a run reads, walked once."""
-    return list(iter_query_templates(KnowledgePaths.of_defender_dir(defender_dir).catalog_dir))
+def catalog_templates(agent_root: Path) -> list[QueryTemplate]:
+    """The query catalog of the agent root a run reads (#1108 P4: its run copy's), walked once."""
+    return list(iter_query_templates(KnowledgePaths(agent_root).catalog_dir))
+
+
+def _agent_beside(settings: Path) -> Path:
+    """The agent half beside a `settings/` half (a clone's or an export's `<root>/agent/`): the
+    agent root of a resolve that names none."""
+    return Path(settings).parent / AGENT_HALF
 
 
 def correlation_dispatch(
@@ -132,70 +147,91 @@ def resolve_tenant(
     data_root: DataRoot, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
     box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...] = (),
 ) -> RunTenant:
-    """`tenant_id` under `data_root`, accepted and ready to run, or `TenantRefused`.
+    """`tenant_id` under `data_root`, accepted and ready, or `TenantRefused` — resolved over the
+    tenant's own folder (`clone_halves`), for a caller that names no export.
 
     The acceptance is `_tenant.accept_tenant` (the one frame every entry point shares; the
     settings half outside `defender_dir` and every `box_mounted` tree, e.g. the runs base),
     then run start's readiness function over the accepted tenant's settings."""
     tenant = accept_tenant(
         data_root, tenant_id, defender_dir=defender_dir, box_mounted=box_mounted)
-    return run_tenant_for(
-        tenant, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
+    return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero)
 
 
-def run_tenant_for(
-    tenant: Tenant, *, defender_dir: Path, dispatches_lead_zero: bool,
+def run_tenant_for(  # noqa: PLR0913 — the tenant, its two roots, the staged token, the flag
+    tenant: Tenant, *, dispatches_lead_zero: bool, agent_root: Path | None = None,
+    settings_root: Path | None = None, stage_token: Path | None = None,
+    defender_dir: Path | None = None,
 ) -> RunTenant:
-    """An accepted tenant, ready to run — or `TenantRefused` carrying run start's refusal."""
+    """An accepted tenant, ready to run — or `TenantRefused` carrying run start's refusal.
+
+    `agent_root`/`settings_root` are the two halves of the one export the run reads (#1108 P4,
+    O-B: run start hands its run copy's); each defaults to the tenant's own folder
+    (`clone_halves`). `defender_dir` is accepted for callers that still pass it and is not read:
+    the code tree holds no catalog (O1)."""
+    del defender_dir
+    clone_agent, clone_settings = clone_halves(tenant)
+    settings = Path(settings_root) if settings_root is not None else clone_settings
+    agent = Path(agent_root) if agent_root is not None else clone_agent
     ready = resolve_run_tenant_or_refuse(
-        tenant.settings, tenant_id=tenant.id, defender_dir=defender_dir,
+        settings, tenant_id=tenant.id, agent_root=agent,
         dispatches_lead_zero=dispatches_lead_zero)
     return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
-                     **resolved_settings(tenant))
+                     agent_root=agent, settings_root=settings, stage_token=stage_token,
+                     **resolved_settings(tenant, settings_root=settings))
 
 
 def resolve_run_tenant_or_refuse(
-    settings: Path, *, tenant_id: TenantId, defender_dir: Path, dispatches_lead_zero: bool,
+    settings: Path, *, tenant_id: TenantId, dispatches_lead_zero: bool,
+    agent_root: Path | None = None, defender_dir: Path | None = None,
 ) -> RunReadiness:
     """`resolve_run_tenant`, its refusal re-raised as the one tenant refusal: `TenantRefused`
     naming the tenant and carrying the readiness function's own message verbatim."""
+    del defender_dir
     try:
         return resolve_run_tenant(
-            settings, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
+            settings, agent_root=agent_root, dispatches_lead_zero=dispatches_lead_zero)
     except refusals() as refusal:
         raise TenantRefused(f"tenant {tenant_id!r}: {refusal}") from refusal
 
 
 def resolve_run_tenant(
-    settings: Path, *, defender_dir: Path, dispatches_lead_zero: bool,
+    settings: Path, *, dispatches_lead_zero: bool, agent_root: Path | None = None,
+    defender_dir: Path | None = None,
 ) -> RunReadiness:
     """Run start's readiness function: load a tenant's grants from its `settings` folder and
     check them, before the run dir, the box and any model call. `tenant.py setup` calls it too.
+
+    The lead-zero template is resolved against `agent_root`'s catalog (#1108 P4, O2: the run
+    copy's, never the product tree's), by default the agent half beside `settings`.
+    `defender_dir` is accepted for callers that still pass it and is not read.
 
     Refused (one of `refusals()`): a table that does not load; one under which gather can
     query nothing (`require_gather_query` — a `health-check` grant alone reaches no data); and,
     when `dispatches_lead_zero`, a lead-zero config the catalog or the table disagrees with.
     `dispatches_lead_zero` is False for a resumed sibling: it dispatches no turn-0 lead, so a
     template demoted since the source run must not refuse it."""
+    del defender_dir
+    agent = Path(agent_root) if agent_root is not None else _agent_beside(settings)
     grants = run_grants(settings)
     require_gather_query(grants)
     correlation = (
-        correlation_dispatch(settings, catalog_templates(defender_dir), grants.correlation)
+        correlation_dispatch(settings, catalog_templates(agent), grants.correlation)
         if dispatches_lead_zero else None
     )
     return RunReadiness(grants=grants, correlation=correlation)
 
 
-def resolved_settings(tenant: Tenant) -> dict[str, Any]:
-    """The three parts of the record built from the accepted tenant's settings folder — each
-    system's `config.env` (`systems`), the corpus-engine view and the case-history mapping
-    (`ticket_mapping`) — as the keyword arguments `RunTenant` takes. Read ONCE, here, when a run
-    (or a launch) begins; nothing ever raises for a part's content (O5): a part that cannot
-    stand is carried as the fault that says why."""
-    systems = tenant_settings.read_systems(tenant.settings)
+def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> dict[str, Any]:
+    """The parts of the record built from a settings folder — `settings_root` (the run copy's,
+    #1108 P4), by default the accepted tenant's own (`clone_halves`): each system's `config.env`
+    (`systems`) and the case-history mapping (`ticket_mapping`) — as the keyword arguments
+    `RunTenant` takes. Read ONCE, here, when a run (or a launch) begins; nothing ever raises for a
+    part's content (O5): a part that cannot stand is carried as the fault that says why."""
+    settings = Path(settings_root) if settings_root is not None else clone_halves(tenant)[1]
+    systems = tenant_settings.read_systems(settings)
     try:
-        ticket_mapping: CaseMapping | CaseTicketError = load_case_mapping(
-            tenant.settings)
+        ticket_mapping: CaseMapping | CaseTicketError = load_case_mapping(settings)
     except CaseTicketError as error:
         # The text only: the caught error's traceback and cause (the OSError, with its host
         # path) must not ride the record.

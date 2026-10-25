@@ -9,15 +9,16 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _git
+from collections.abc import Mapping
+
 from defender._paths import DefenderPaths
 from defender.learning.leads._errors import LeadAuthorError
+from defender.learning.leads.path_validation import SKILLS_PREFIX
 from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, read_roster
 
 #: From `DefenderPaths` rather than re-spelled, so the resolver and the gates agree on where
 #: adapters live.
 ADAPTERS_REL = DefenderPaths.adapters_rel
-SKILLS_REL = DefenderPaths.skills_rel
 
 _logger = logging.getLogger(__name__)
 
@@ -57,63 +58,50 @@ def _adapter_names(adapters_dir: Path) -> frozenset[str]:
     return frozenset(read_adapters(adapters_dir).accepted)
 
 
-def _skills_tree_exists_at_head(repo_root: Path) -> bool:
-    return _git.git_ok(
-        ["cat-file", "-e", f"HEAD:{SKILLS_REL.rstrip('/')}"], cwd=repo_root,
-    )
-
-
-def _marker_names(repo_root: Path) -> frozenset[str]:
-    """The marker half: a committed-tree read, exactly one directory segment deep — a nested
-    `execution.md` under a model-chosen directory must declare nothing."""
-    skills_dir = repo_root / SKILLS_REL
-    if not _skills_tree_exists_at_head(repo_root):
-        raise LeadAuthorError(
-            f"declared_systems: {skills_dir} is not resolvable at HEAD "
-            "(no commits, detached from a real repo, or the path is absent there)"
-        )
-    # `-z` and `--full-name` are required: without `-z`, non-ASCII paths come back C-quoted
-    # and whitespace splitting tears names with spaces; without `--full-name` output is
-    # CWD-relative, but `count("/") == 3` assumes root-relative. Either would silently
-    # un-declare a real system.
-    try:
-        listing = _git.git(
-            ["ls-tree", "-r", "-z", "--full-name", "--name-only", "HEAD", "--", SKILLS_REL],
-            cwd=repo_root,
-        )
-    except _git.GitError as e:
-        raise LeadAuthorError(
-            f"declared_systems: cannot list the committed tree at {skills_dir}: {e}"
-        ) from e
+def _marker_names(agent: Mapping[str, object]) -> frozenset[str]:
+    """The marker half: the tenant's committed `agent/skills/<name>/execution.md` files, read
+    off a committed tree (`agent`: its repo-relative paths, as `Batch.base` gives a batch's
+    base), exactly one directory segment deep — a nested `execution.md` under a model-chosen
+    directory declares nothing, and the draft the model writes is never consulted (#1108 P4:
+    the markers are the tenant's, never the product tree's)."""
     names: set[str] = set()
-    for rel in listing.split("\0"):
-        if not rel or not rel.endswith("/execution.md") or rel.count("/") != 3:
+    for rel in agent:
+        if not rel.startswith(SKILLS_PREFIX):
             continue
-        name = Path(rel).parent.name
+        parts = rel[len(SKILLS_PREFIX):].split("/")
+        if len(parts) != 2 or parts[1] != "execution.md":
+            continue
+        name = parts[0]
         if is_system_name(name):
             names.add(name)
         else:
             _logger.warning(
                 f"declared_systems: refused shape-anomalous marker name {name!r} "
-                f"from {skills_dir}"
+                f"from {SKILLS_PREFIX}"
             )
     return frozenset(names)
 
 
-def declared_systems(repo_root: Path) -> frozenset[str]:
-    """The union of the adapter glob (working tree) and the committed `execution.md` marker,
-    both rooted at `repo_root`. Either source unresolvable raises `LeadAuthorError`."""
-    return declared_systems_over(read_adapters(repo_root / ADAPTERS_REL), repo_root)
+def declared_systems(
+    repo_root: Path, *, agent: Mapping[str, object] | None = None,
+) -> frozenset[str]:
+    """The union of the adapter glob (the product checkout at `repo_root`, working tree) and
+    the tenant's committed `execution.md` markers (`agent`, a committed tree's repo-relative
+    paths; none given, the adapter half alone: a product checkout carries no tenant marker
+    after #1108 P4 O1). An unreadable adapter source raises `LeadAuthorError`."""
+    return declared_systems_over(read_adapters(repo_root / ADAPTERS_REL), agent=agent)
 
 
-def declared_systems_over(roster: RosterRead, repo_root: Path) -> frozenset[str]:
+def declared_systems_over(
+    roster: RosterRead, *, agent: Mapping[str, object] | None = None,
+) -> frozenset[str]:
     """`declared_systems` for a caller that already read the adapter half (the disposition
     census lint), so it needn't read twice."""
-    union = frozenset(roster.accepted) | _marker_names(repo_root)
+    union = frozenset(roster.accepted) | (_marker_names(agent) if agent is not None else frozenset())
     if not union:
         _logger.warning(
             f"declared_systems: no systems declared by either source "
-            f"({roster.root} or {repo_root / SKILLS_REL})"
+            f"({roster.root} or the tenant's {SKILLS_PREFIX}<system>/execution.md)"
         )
     return union
 

@@ -122,11 +122,15 @@ _CALL_JOIN_SUFFIX = ".call-join.jsonl"
 #: to the world, which a world branched from it serves as never having happened. Host-only; the
 #: receipt's shape is the page's and stays `{key, status, url, ok, reason}`.
 _TICKET_COMMENTS_SUFFIX = ".ticket-comments.jsonl"
+#: Which knowledge the run read and why (#1108 P4, U12): `{kind, commit, stale_kind, reason}`,
+#: written by run start. Host-held like the ticket receipt: the raw publish reason it may carry
+#: never enters a file the box can read, and the run page, the ticket and the API read it here.
+KNOWLEDGE_SOURCE_SUFFIX = ".knowledge-source.json"
 #: The host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs base
 #: (the accounting-failures name reserved, see above).
 _SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
                      TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX, _CALL_JOIN_SUFFIX,
-                     _TICKET_COMMENTS_SUFFIX)
+                     _TICKET_COMMENTS_SUFFIX, KNOWLEDGE_SOURCE_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -456,6 +460,12 @@ class RunPaths:
     def ticket_comments(self, runs_base: RunsBase | None = None) -> Path:
         """Every comment the run posted on its case ticket (#1255 P5), beside the run folder."""
         return self._container(runs_base) / f"{self.run_dir.name}{_TICKET_COMMENTS_SUFFIX}"
+
+    def knowledge_source(self, runs_base: RunsBase | None = None) -> Path:
+        """The run's knowledge source record (#1108 P4, U12): which export it copied, whether
+        that was fresh, stale or pinned, and the publish's reason. Beside the run folder, so the
+        box can neither read the reason nor forge the record."""
+        return self._container(runs_base) / f"{self.run_dir.name}{KNOWLEDGE_SOURCE_SUFFIX}"
 
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

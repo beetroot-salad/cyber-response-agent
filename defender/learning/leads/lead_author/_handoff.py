@@ -23,12 +23,10 @@ from defender.learning.leads import lead_render
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
-    CATALOG_DIR,
-    CATALOG_REL,
+    CATALOG_PREFIX,
     LEARNING_DIR,
     REPO_ROOT,
-    SKILLS_DIR,
-    SKILLS_REL,
+    SKILLS_PREFIX,
     _draft_twin,
     _is_catalog_path,
     _is_catalog_template,
@@ -57,7 +55,7 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
     extract,
     extract_from_joined,
 )
-from defender.learning.leads._lead_spine import _spawn_author_agent
+from defender.learning.leads._lead_spine import _spawn_author_agent, draft_view
 
 _logger = logging.getLogger(__name__)
 
@@ -89,6 +87,12 @@ def _templates_by_identity(catalog: list) -> dict:
     return by_id
 
 
+def _agent_spelled(path: Path, where: Path) -> str:
+    """`path` below the `skills/` mount spelled `where`, as the tenant repo names it
+    (`agent/skills/...`, OD6)."""
+    return SKILLS_PREFIX + path.relative_to(where).as_posix()
+
+
 def build_handoff(
     run_dir: Path, executed: list[ExecutedLead], joined_leads: list | None = None,
     *, repo_root: Path = REPO_ROOT, skills: Bound, where: Path,
@@ -96,7 +100,10 @@ def build_handoff(
 ) -> list[dict]:
     """One handoff per executed catalog template. `skills` is the held `skills/` mount's view and
     `where` the Path it is spelled as: the catalog (when not given) and each template's rendering
-    are read through it, never through a link (#1134)."""
+    are read through it, never through a link (#1134). Each template is named by its
+    repo-relative `agent/skills/...` spelling (OD6), whatever host path the mount lies at."""
+
+    del repo_root  # the callers' keyword; no handoff path is spelled from the host root
     if catalog is None:
         catalog = lead_neighbors.load_lane_catalog(skills, where=where)
     by_id = _templates_by_identity(catalog)
@@ -158,12 +165,12 @@ def build_handoff(
             )
         handoffs.append(
             {
-                "executed_template_path": str(tpl.path.relative_to(repo_root)),
+                "executed_template_path": _agent_spelled(tpl.path, where),
                 "query_id": tpl.id,
                 "status": tpl.status,
                 "neighbors": [
                     {
-                        "template_path": str(n.template_path.relative_to(repo_root)),
+                        "template_path": _agent_spelled(n.template_path, where),
                         "score": n.score,
                     }
                     for n in neighbors
@@ -264,15 +271,17 @@ def invoke_agent(
     salt: str | None = None,
     box: Any = None,
 ) -> int:
+    """Spawn the lead author over the lane's tree at `repo_root` (a batch draft's root, holding
+    the `agent/` its paths name, #1108 P4 OD6). The context names each folder as the model sees
+    it (`draft_view`); handoff paths stay relative to the draft root (`agent/...`)."""
     pending_drafts = pending_drafts or []
-    from defender.runtime.model_view import ModelView
-
-    view = ModelView.for_learning(run_dir, repo_root)
+    view = draft_view(run_dir, repo_root)
     stage_salt = salt if salt is not None else uuid4().hex
     context = (
         f"run_dir: {view.to_model(run_dir)}\n"
-        f"catalog_dir: {CATALOG_REL}\n"
-        f"skills_dir: {SKILLS_REL}"
+        f"draft_root: {view.to_model(repo_root)}\n"
+        f"catalog_dir: {view.to_model(repo_root / CATALOG_PREFIX)}\n"
+        f"skills_dir: {view.to_model(repo_root / SKILLS_PREFIX)}"
     )
     user_prompt = stage_user_message(
         stage_salt,

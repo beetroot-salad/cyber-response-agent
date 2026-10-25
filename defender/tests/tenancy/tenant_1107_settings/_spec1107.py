@@ -134,13 +134,23 @@ def plant(root: Path, tenant_id: str = PLAYGROUND_ID, *, marker: str = "t1107",
     folder `root/<tenant_id>/knowledge/` (#1120: the settings half is `<folder>/settings`).
 
     A knowledge folder already there (`_spec1078.tenant_source` places the committed fixture's)
-    is replaced whole, so every value the tenant carries is this call's. `configs` replaces the
+    has its content replaced whole, so every value the tenant carries is this call's; its
+    `.git` is kept (#1108 P4), so the folder stays the one repository an earlier publish pushed
+    and the next publish is a fast-forward on the same remote. `configs` replaces the
     per-system `config.env` set (default `config_texts(marker)`); `secrets` writes
     `settings/secrets.env` (a mapping is rendered `KEY="value"` per line). The rest (`table`,
     `omit`, `lead_zero`, …) is `_tenants1106.plant_tenant`'s."""
     import shutil
 
-    shutil.rmtree(Path(root) / tenant_id / "knowledge", ignore_errors=True)
+    knowledge = Path(root) / tenant_id / "knowledge"
+    if knowledge.is_dir() and not knowledge.is_symlink():
+        for entry in knowledge.iterdir():
+            if entry.name == ".git":
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
     folder = T1106.place_tenant(
         root, tenant_id, table=table,
         configs=configs if configs is not None else config_texts(marker), **kw)
@@ -570,9 +580,15 @@ def seed_session_store(run_dir: Path) -> None:
 
 def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | None, Any]:
     """Drive the REAL `run.main` over `argv` with `rec`'s seams (plus `seams`). Returns
-    `(exit status, None)` or `(None, the SystemExit it refused with)`."""
+    `(exit status, None)` or `(None, the SystemExit it refused with)`.
+
+    #1108 P4 (OD14, O11): an in-process `run.main` is handed its launch-time publish; unless the
+    caller passes its own, it is the in-process stand-in that publishes the tenant's folder for
+    real when `run.main` launches it (`_launch_publish_p4`), so the run reads an export."""
+    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+
     try:
-        return run_py().main(argv, **{**rec.seams(), **seams}), None
+        return run_py().main(argv, **with_publish({**rec.seams(), **seams})), None
     except SystemExit as refused:
         return None, refused
 

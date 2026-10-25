@@ -6,7 +6,6 @@ import errno
 import json
 import os
 import shutil
-import tarfile
 from pathlib import Path
 
 import pytest
@@ -26,7 +25,6 @@ from defender.tests.e2e._spec771 import (
     outside,
     plant_hardlink,
     plant_symlink,
-    quarantine_a_tainted_tree,
     read_verdict,
     run_tree,
     tree_verified,
@@ -143,36 +141,12 @@ def test_a_verdict_planted_inside_the_tree_is_never_read_as_one(tmp_path):
     assert forged.is_file(), "the consumer removed the planted entry — reading must not sanitize"
 
 
-def test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive(tmp_path):
-    qdir = tmp_path / "quarantine"
-
-    judged = run_tree(tmp_path / "judged")
-    archive, doc = quarantine_a_tainted_tree(
-        judged, qdir, batch_id="b-judged", verdict={"ran": True, "reason": "walk completed"})
-
-    assert archive is not None, "nothing was preserved at all, so the rest of this is vacuous"
-    assert archive.is_file(), f"the quarantine reported {archive} and wrote nothing there"
-    with tarfile.open(archive) as tar:
-        members = {Path(m.name).name for m in tar.getmembers()}
-    assert FORGED_IN_TREE_VERDICT_NAME not in members, (
-        "the verdict is inside the archive, so it was inside the tree — D8's siting is undone"
-    )
-    assert doc.get("verdict") == read_verdict(judged), (
-        f"the quarantine manifest does not carry the tree's verdict: {doc.get('verdict')!r} — "
-        f"the archive is a tar of the tree and the marker is not in the tree, so this manifest "
-        f"is the only thing that can tell a human whether the tree was ever judged"
-    )
-
-    unjudged = run_tree(tmp_path / "unjudged")
-    _archive, doc2 = quarantine_a_tainted_tree(unjudged, qdir, batch_id="b-unjudged")
-    assert "verdict" in doc2, (
-        "a tree with no verdict produced a manifest with no verdict FIELD — indistinguishable "
-        "from a manifest written before the field existed, so an unjudged tree reads as one "
-        "nobody thought to record"
-    )
-    assert not doc2["verdict"], (
-        f"the manifest invented a verdict for a tree that has none: {doc2['verdict']!r}"
-    )
+# #1108 P4 OD12(i): `test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive`
+# drove `learning.core.quarantine.preserve_tainted_tree`, deleted with its only caller (the legacy
+# `AuthorBranch` worktree delivery): a tainted tree is no longer archived for forensics. No
+# successor pins a preserving writer — an OPEN OWNER ITEM in
+# `tests/tenancy/tenant_1108_p4/README.md` §6. The verdict's siting outside the tree stays pinned
+# above (the forged in-tree verdict is never read).
 
 
 def test_a_partial_reap_scan_failure_fails_closed_over_the_whole_tree(tmp_path):

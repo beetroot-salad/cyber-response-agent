@@ -47,7 +47,7 @@ def _layout(tmp_path: Path, data_root: Path, monkeypatch, *,
         monkeypatch.delenv(name, raising=False)
     episodes = data_root / TID / "episodes"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
-    _base, src = H.tenant_source(data_root, TID)
+    _base, src = H.tenant_source(data_root, TID, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     folder = S.plant(data_root, TID, marker=marker)
     return src, data_root, folder, episodes
 
@@ -138,6 +138,11 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     # ... and is edited bad before the sibling starts.
     S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
 
+    # #1108 P4 (flow 3, O11): a run reads its own copy of an EXPORT, never the clone's working
+    # tree, so "the sibling resolves its own record at its own start" means: the edit is
+    # PUBLISHED by the sibling's own (unpinned) launch — `S.drive_run`'s in-process publish
+    # commits and exports the folder as it now is — and the sibling's record is resolved from
+    # that export. An edit nobody publishes is never seen (`test_branch_replay`).
     rec = S.RunRecorder(tmp_path / "sibling-run")
     rc, refused = S.drive_run(
         H.sibling_argv(manifest, "b", "--tenant", TID), rec,

@@ -71,7 +71,7 @@ as the driver hands them: the dispatch's breaker screen reads it."""
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     return run_dir, replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)),
-                            run_state=RunState(run_dir, "r-875"))
+                            run_state=RunState(run_dir, "r-875"), tenant=T1106.fixture_run_tenant())
 
 
 

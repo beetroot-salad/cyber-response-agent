@@ -6,9 +6,10 @@ Vault identity; boxes receive only host-made copies. Production drain/run wiring
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,8 +17,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import httpx
 from defender import _io
-from defender.tenancy._tenant import Tenant
-from defender.learning.author.branch import LESSONS_BRANCH_PREFIX
+from defender.tenancy._tenant import Tenant, read_forge_binding
 from defender import box
 from defender.box._docker import DockerFn, _docker
 
@@ -25,6 +25,7 @@ from .auth import ForgejoIdentity
 from .batch import Batch
 from .commits import CommitMaker, _Line
 from .exports import (
+    DRAFT_STAGE,
     draft_path,
     TenantExport,
     build_draft,
@@ -32,6 +33,7 @@ from .exports import (
     tenant_lock,
 )
 from .forgejo import PullRequest
+from .issuer import issuer_login
 from .model import (
     _PRECEDENCE,
     AgentChange,
@@ -47,6 +49,39 @@ from .model import (
 )
 from .record import _BatchKey, _NetChange, _Record
 from .repository import NETWORK_TIMEOUT, GitRepository
+from .status import record_published, recording
+
+#: The lessons lane's branch prefix on the tenant repository (a lane passes its own).
+LESSONS_BRANCH_PREFIX = "lessons/"
+
+
+@contextlib.contextmanager
+def opened_delivery(
+    tenant: Tenant,
+    *,
+    defender_dir: Path,
+    client: httpx.Client | None = None,
+    identity: ForgejoIdentity | None = None,
+    issuer_config: Path | None = None,
+    issuer_transport: httpx.BaseTransport | None = None,
+) -> Iterator[TenantDelivery]:
+    """The tenant's delivery, opened against its row's forge binding: the binding's origin;
+    `identity`, else an AppRole login with the issuer client config the binding names
+    (`issuer_config` and `issuer_transport` are in-process stand-ins); `client`, else a new
+    forge client. A client made here is closed on exit; a given one stays its caller's. An
+    unbound row is `TenantRefused`; a refused open, `DeliveryRefused` or `ForgejoAuthError`."""
+    binding = read_forge_binding(tenant)
+    with contextlib.ExitStack() as owned:
+        if identity is None:
+            identity = issuer_login(tenant, issuer_config=issuer_config,
+                                    transport=issuer_transport, binding=binding)
+            owned.callback(identity.client.close)
+        if client is None:
+            import httpx
+
+            client = owned.enter_context(httpx.Client())
+        yield TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
+                                  identity=identity, origin=binding.origin)
 
 
 @dataclass(frozen=True, eq=False)
@@ -73,7 +108,7 @@ class TenantDelivery:
         origin: str,
         network_timeout: float = NETWORK_TIMEOUT,
     ) -> TenantDelivery:
-        with _refusals():
+        with recording(accepted_tenant, by="delivery"), _refusals():
             repository = GitRepository.open(
                 accepted_tenant.knowledge,
                 tenant_id=str(accepted_tenant.id),
@@ -91,10 +126,12 @@ class TenantDelivery:
         and publish its export. Refuses, publishing nothing, a dirty, untracked or diverged
         clone, a tree entry under `agent/` or `settings/` that is not a regular blob, and an
         `agent/.tenant-id` not naming this tenant."""
-        with _refusals():
+        with recording(self.tenant, by="delivery"), _refusals():
             self.repository.fetch()
             with tenant_lock(self.tenant):
-                return publish_locked(self.tenant, self.repository)
+                export = publish_locked(self.tenant, self.repository)
+        record_published(self.tenant, export.commit, by="delivery")
+        return export
 
     def start_batch(self, batch_id: str, *, lanes: Sequence[str]) -> Batch:
         """Flow 3: refuse at once an id whose draft or branch exists (ids are never retried, so
@@ -107,9 +144,14 @@ class TenantDelivery:
             declared = _lanes(lanes)
             branch = f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
-            self.repository.fetch()
+            with recording(self.tenant, by="delivery"), _refusals():
+                self.repository.fetch()
             with tenant_lock(self.tenant):
-                export = publish_locked(self.tenant, self.repository)
+                with recording(self.tenant, by="delivery"), _refusals():
+                    export = publish_locked(
+                        self.tenant, self.repository, temporaries_only=True
+                    )
+                record_published(self.tenant, export.commit, by="delivery")
                 self._refuse_taken(batch_id, branch)
                 build_draft(
                     self.tenant, self.repository, batch_id, export.commit, declared
@@ -124,7 +166,7 @@ class TenantDelivery:
                 id=batch_id,
                 branch=branch,
                 export=export,
-                draft_root=draft_path(self.tenant, batch_id),
+                draft_root=draft_path(self.tenant, batch_id) / DRAFT_STAGE,
                 lanes=declared,
                 tenant=self.tenant,
                 defender_dir=self.defender_dir,
@@ -132,6 +174,13 @@ class TenantDelivery:
                 committer=CommitMaker(self.tenant, self.repository),
                 _line=line,
             )
+
+    def open_pr_exists(self) -> bool:
+        """The lane's writer lease (amendment 3 C1, OD8): whether the tenant repository has an
+        open PR of its own whose branch starts with `branch_prefix`. A fork's PR, or a row
+        with no head repository (D-fork), holds nothing."""
+        with _refusals():
+            return bool(self.repository.forge.list_open_prs(self.branch_prefix))
 
     def _refuse_taken(self, batch_id: str, branch: str) -> None:
         if os.path.lexists(draft_path(self.tenant, batch_id)):

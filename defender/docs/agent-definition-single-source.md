@@ -160,7 +160,7 @@ but load-bearing for the consolidation. Four points shape the `AgentDefinition`:
    tight anchored grammars (a regex can't `resolve()`). Do not specify read-roots and
    bash-anchoring independently.
 3. **Roots are derived, not literal.** From `RunPaths` + a short corpus-dirs list
-   (`lessons/`, `skills/<sys>/`, `examples/`, `gather_summaries/`) so they can't drift
+   (`agent/lessons/`, `agent/skills/<sys>/`, `agent/examples/`, `gather_summaries/`) so they can't drift
    from the layout (`[[defender-paths-primitive]]`). Hence `corpus_dirs` (relative) in
    the definition; `bind` resolves absolutes.
 4. **`viewer_patterns()` / operand-extraction retire for gather/main.** `cat` is the sole

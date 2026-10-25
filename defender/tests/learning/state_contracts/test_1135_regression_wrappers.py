@@ -12,8 +12,12 @@ import pytest
 from defender.learning.core.state import FINDINGS
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.e2e.test_922_spine import TriggerRecorder, drive_author_drain
 from defender.tests.learning.state_contracts import _spec1135 as S
+from defender.tests.tenancy.tenant_1108_delivery._support import merge_on_remote
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    LESSONS_PREFIX, BoxSpy, CuratorTrigger, author_drain, drain_paths, product_repo,
+    remote_branches, touched)
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, git, published_tenant
 
 ENV = "DEFENDER_LEARNING_STATE_DIR"
 
@@ -23,8 +27,19 @@ def _finding_ids(rows: list[dict]) -> list[str]:
 
 
 @pytest.mark.e2e
-def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, monkeypatch):
-    paths = S.built_paths(tmp_path, repo_root=D.make_repo(tmp_path))
+def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, data_root: Path,
+                                                               monkeypatch):
+    """The spine over the tenant path (#1108 P4 flow 4): the graded rows reach the curator on
+    the handle the drain opens over the tenant's learning root, the lesson lands as one commit
+    on a `lessons/` branch of the tenant repo, and after its merge a second tick retires them."""
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        paths = drain_paths(t, product_repo(tmp_path))
+        location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
+        _spine(t, tmp_path, paths, monkeypatch)
+
+
+def _spine(t, tmp_path: Path, paths, monkeypatch) -> None:
     runs_base = tmp_path / "defender-runs"
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(runs_base))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
@@ -57,28 +72,36 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
         "the handle does not read the rows the grade enqueued"
 
     # hop 2: the batch the curator's model call receives is exactly those rows
-    head_before = D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip()
+    main = t.origin_main()
+    product_head = D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip()
     agent = D.recording(D.committing("family-lesson"))
-    rc, _rec = drive_author_drain(paths, TriggerRecorder(agent))
+    rc = author_drain(t, paths, trigger=CuratorTrigger(author=agent), box=BoxSpy())
     assert rc == 0, f"author_drain did not complete its batch (rc={rc})"
     assert len(agent.calls) == 1, f"the findings curator ran {len(agent.calls)} times, not once"
     authored = _finding_ids(agent.calls[0]["rows"])
     assert authored == queued, \
         f"the curator was handed {authored}, not the graded episode's rows {queued}"
 
-    # hop 3: git log gains one commit, the corpus one document naming both finding ids
-    head_after = D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip()
-    assert head_after != head_before, "the corpus author opened no commit"
-    lessons = list(paths.lessons_dir.glob("*.md"))
-    assert len(lessons) == 1, f"the corpus gained {len(lessons)} documents, not one"
-    body = lessons[0].read_text(encoding="utf-8")
+    # hop 3: the tenant repo gains one lessons/ branch whose commits add one document naming
+    # both finding ids; the product checkout is untouched
+    (branch, tip), = remote_branches(t.remote, LESSONS_PREFIX).items()
+    landed = touched(t.remote, main, tip)
+    assert len(landed) == 1, f"the batch landed {landed}, not one lesson"
+    assert landed[0].startswith("agent/lessons/family-lesson-"), landed
+    body = git(t.remote, "show", f"{tip}:{landed[0]}")
     assert all(fid in body for fid in queued), f"the committed lesson does not attribute {queued}"
+    assert D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip() == product_head, \
+        "the drain committed to the product checkout"
     assert set(_finding_ids(D.pending(paths, channel))) == set(queued), \
         "the committed rows left the queue before the batch's PR (hold_committed=True keeps them)"
 
-    # hop 4: a second tick reads the corpus back and rotates the rows off as consumed_idempotent
+    # hop 4: once merged, a second tick reads the corpus back and rotates the rows off as
+    # consumed_idempotent
+    merge_on_remote(t.p3, t.scratch, branch)
+    branches = remote_branches(t.remote, LESSONS_PREFIX)
     second = D.recording(D.committing("must-not-run-twice"))
-    assert drive_author_drain(paths, TriggerRecorder(second))[0] == 0, "the second tick failed"
+    assert author_drain(t, paths, trigger=CuratorTrigger(author=second), box=BoxSpy()) == 0, \
+        "the second tick failed"
     assert second.calls == [], "the second tick authored the same findings again"
     consumed = {r["finding_id"]: r for r in D.consumed(paths, channel)}
     assert set(consumed) == set(queued), \
@@ -86,8 +109,8 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
     assert all(r.get("consumed_category") == "consumed_idempotent" for r in consumed.values()), \
         f"the rotation's categories are {[r.get('consumed_category') for r in consumed.values()]}"
     assert D.pending(paths, channel) == [], "the authored rows are still queued"
-    assert D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip() == head_after, \
-        "the second tick opened a second commit for findings already in the corpus"
+    assert remote_branches(t.remote, LESSONS_PREFIX) == branches, \
+        "the second tick opened a second batch for findings already in the corpus"
 
 
 def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_path: Path, caplog):

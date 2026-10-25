@@ -416,7 +416,7 @@ async def _close_a_run_cut_short(
 
 
 def _dispatch_catalogs(
-    defender_dir: Path, roster: RosterRead, grants: RunGrants,
+    agent_root: Path, roster: RosterRead, grants: RunGrants,
     down: Mapping[str, system_status.StartCause],
 ) -> tuple[SystemIndex, SystemIndex]:
     """The descriptor index each dispatch prompt opens with: MAIN's (narrowed to the gather
@@ -426,7 +426,7 @@ def _dispatch_catalogs(
     is listed without being loaded. Each is rendered when a dispatch prompt is built, its down
     marks from the run's status then (#1256 O-3). Uses the run's grants, not the injected
     `verbs=` registry, so a narrower registry does not narrow the catalog."""
-    skills = KnowledgePaths.of_defender_dir(defender_dir).skills_dir
+    skills = KnowledgePaths(agent_root).skills_dir
     return (
         descriptor_index(skills, roster, grants.gather, unloaded=down),
         descriptor_index(skills, roster, grants.correlation, unloaded=down),
@@ -702,7 +702,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )
     catalog, correlation_catalog = _dispatch_catalogs(
-        defender_dir, roster, tenant.grants, judged.down)
+        tenant.agent, roster, tenant.grants, judged.down)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     # A usable deadline or no run: checked before the run folder is touched, never replaced by a
     # fallback. A lead the table withholds is never run, so it owes no deadline.

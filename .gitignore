@@ -155,5 +155,10 @@ experiments/*/sessions/
 # Local discussion notes and evidence
 /.discussion/
 
+# The dev Forgejo's data (#1108 P4, U2): bind-mounted at Forgejo's /data, never committed.
+/playground-knowledge/
+# The dev issuer's state (#1108 P4, U4): OpenBao storage, seal key, CA, recovery keys and the
+# AppRole client config (its secret_id). Dev posture only; never committed.
+/playground-issuer/
 # contract-first plugin working state (scratch maps, findings, hand-off drafts)
 /.contract-first/

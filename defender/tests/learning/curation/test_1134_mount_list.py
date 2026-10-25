@@ -12,17 +12,13 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.learning.core import drains
-from defender.tests.support.learning.core._state1135 import curation_run_dir, enqueue_case, state_for_paths
 from defender.learning.core.config import (
     DrainLabel, LoopPaths,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests.support.learning.curation._drain_trees_1134 import PAYLOAD
-from defender.tests.e2e import _box665 as B
 from defender.tests.shared.filesystem.test_1111_rooted_io import HOST_BYTES, census
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under, put_plain
-from defender.learning.core.state import FINDINGS
 
 
 #: The two labels are the members of `DrainLabel` (#1179): values no string equals.
@@ -93,7 +89,7 @@ class Leaf:
 
     @property
     def wt_paths(self) -> LoopPaths:
-        return self.paths.with_repo_root(self.wt)
+        return dataclasses.replace(self.paths, repo_root=self.wt)
 
     def build(self, *rels: str) -> None:
         """Make each tree in `rels` under `wt`; by default every tree a checkout carries, the
@@ -106,16 +102,6 @@ def _leaf(tmp_path: Path) -> Leaf:
     paths = LoopPaths(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
     location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
     return Leaf(paths=paths, wt=tmp_path / "wt-leaf")
-
-
-def rw_mounts(request: Any) -> list[tuple[Path, Path]]:
-    """The request's read-write mounts as `(source, target)`, in request order."""
-    return [(Path(m.source), Path(m.target)) for m in request.mounts if m.writable]
-
-
-def ro_mounts(request: Any) -> list[tuple[Path, Path]]:
-    """The request's read-only mounts as `(source, target)`, in request order."""
-    return [(Path(m.source), Path(m.target)) for m in request.mounts if not m.writable]
 
 
 def held_roots(top: Path) -> list[str]:
@@ -165,14 +151,11 @@ def relocated_paths(asked: list[tuple[Path, str]]) -> type[LoopPaths]:
     """A `LoopPaths` subclass, injected through the `paths` argument, whose three drain trees
     are NOT where the shipped paths put them: each is `relocated_rel(repo_root, name)`, a
     sibling of the real trees. Every read of a tree attribute records `(repo_root, attribute)`
-    in `asked`. `with_repo_root` keeps the subclass (the shipped one returns a plain
-    `LoopPaths`), so `paths.with_repo_root(wt)` still relocates. A class per call, so each test
+    in `asked`. A rebase (`dataclasses.replace`) keeps the subclass, so a rebased double still
+    relocates. A class per call, so each test
     reads its own `asked` (the instances are frozen)."""
 
     class RelocatedPaths(LoopPaths):
-        def with_repo_root(self, repo_root: Path) -> LoopPaths:
-            return type(self)(repo_root=repo_root, state_dir=location_path(self.state_root))
-
         def _moved(self, attr: str, name: str) -> Path:
             asked.append((self.repo_root, attr))
             return self.repo_root / relocated_rel(self.repo_root, name)
@@ -246,115 +229,184 @@ def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
     assert w.catalog_dir.is_relative_to(w.skills_dir)
 
 
-@pytest.mark.parametrize("label", KNOWN)
-def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: DrainLabel):
-    lf = _leaf(tmp_path)
-
-    request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
-
-    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
-    assert label.writable_trees(lf.wt_paths) == tuple(expected)
-    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(lf.wt)) for m in expected]
-    assert ro_mounts(request) == [(lf.wt, Path("/workspace"))]
-    assert len(request.mounts) == 1 + len(expected)
-    assert Path(request.workdir) == lf.wt
-    assert request.model_workdir == Path("/workspace")
-    assert request.name == "defender-drain-batch-1"
-    assert not lf.wt.exists(), "_drain_box_request touched the disk"
+#: Each known label's writable lanes as the P4 drain box mounts them, relative to the batch's
+#: draft root (the `staged` mount): the same lanes `EXPECTED_MOUNTS` names in a checkout, under
+#: the tenant's `agent/` (#1108 P4, OD6).
+DRAFT_LANES: dict[DrainLabel, tuple[str, ...]] = {
+    AUTHOR: ("agent/lessons", "agent/lessons-questioner"),
+    LEAD: ("agent/skills",),
+}
+ALL_DRAFT_LANES = ("agent/lessons", "agent/lessons-questioner", "agent/skills")
 
 
-@pytest.mark.parametrize("dot_git", ["file", "folder"])
-@pytest.mark.parametrize("label", KNOWN)
-def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
-        tmp_path: Path, label: DrainLabel, dot_git: str):
-    lf = _leaf(tmp_path)
-    lf.build()
-    git = lf.wt / ".git"
-    if dot_git == "file":
-        put_plain(git, b"gitdir: /nonexistent/.git/worktrees/wt-leaf\n")
-    else:
-        (git / "objects").mkdir(parents=True)
+def _drain_tick_over_draft(tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch,
+                           label: DrainLabel, step: Callable[[Any, Any, Any], None]) -> tuple[int, Any]:
+    """One real P4 drain tick of `label`'s lane over the fixture tenant (#1108 P4 flow 4), its
+    work step replaced by `step(step_paths, batch, box_spy)`, run once, inside the batch, after
+    the box started: through `trigger_author` (author lane, a queued finding wakes it) or
+    `run_pitfalls` (lead lane, a queued pitfall wakes it). OD16: the drain hands each lane entry
+    its tick's batch as `batch=`; `step_paths` stays the product-rooted `LoopPaths`. Returns
+    `(exit status, the BoxSpy)`."""
+    from defender.learning.core.state import FINDINGS, PITFALLS
+    from defender.tests.support.learning.core._declared870 import shim_row
+    from defender.tests.support.learning.curation._drain719 import finding_row, seed
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        BoxSpy, author_drain, drain_paths, lead_author_drain, product_repo)
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
-    request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
+    box = BoxSpy()
+    ran: list[str] = []
 
-    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
-    assert ro_mounts(request) == [(lf.wt, Path("/workspace"))], "the git leaf is not mounted read-only"
-    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(lf.wt)) for m in expected]
-    assert len(request.mounts) == 1 + len(expected)
-    assert git.is_file() if dot_git == "file" else git.is_dir()
+    def once(step_paths: Any, batch: Any) -> None:
+        if not ran:
+            ran.append("ran")
+            step(step_paths, batch, box)
+
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        paths = drain_paths(t, product_repo(tmp_path))
+        if label is AUTHOR:
+            monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+            seed(paths, FINDINGS, [finding_row("f1", run_id="f1")])
+            rc = author_drain(t, paths, trigger=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch),
+                              box=box)
+        else:
+            monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+            seed(paths, PITFALLS, [shim_row("p1:1")])
+            rc = lead_author_drain(
+                t, paths, box=box, run_lead_author=lambda *_a, **_kw: None,
+                run_pitfalls=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch) or 0)
+    assert ran, "the lane's work step never ran inside a batch"
+    return rc, box
+
+
+def _refused_others(trees: Any, others: list[Path]) -> list[bool]:
+    """For each tree outside the label's lanes: refused by `mount` and unknown to `tree_for`."""
+    refused = []
+    for other in others:
+        try:
+            trees.mount(other)
+        except ValueError:
+            refused.append(trees.tree_for(other / PROBE) is None)
+        else:
+            refused.append(False)
+    return refused
+
+
+def _swap(rw: list[Path], swap: str, outside: Path) -> dict[Path, Path]:
+    """Move each mount path aside and put a fresh folder or a link out in its place."""
+    moved: dict[Path, Path] = {}
+    for m in rw:
+        moved[m] = m.with_name(f"{m.name}.moved")
+        os.rename(m, moved[m])
+        if swap == "fresh_folder":
+            m.mkdir()
+        else:
+            decoy = outside / m.name
+            put_plain(decoy / AFTER, HOST_BYTES)
+            m.symlink_to(decoy, target_is_directory=True)
+    return moved
+
+
+def _restore(moved: dict[Path, Path]) -> None:
+    """Put the draft back as the box found it, so the rest of the tick is ordinary."""
+    for m, aside in moved.items():
+        if m.is_symlink():
+            m.unlink()
+        else:
+            os.rmdir(m)
+        for name in (BEFORE, AFTER):
+            (aside / name).unlink()
+        os.rename(aside, m)
+
+
+def _o4_step(label: DrainLabel, swap: str, outside: Path, seen: dict[str, Any]):
+    """The lane's work step for the O4 case: records what the box mounted and how the roots
+    `open_drain_trees` holds behave across a swap. Observations only: a raise here is contained
+    by the drain as a curator fault.
+
+    ASSUMED SEAM (OD16): `open_drain_trees(paths, label, *, batch)` holds `label`'s lanes under
+    `batch.draft_root` (the box's rw mounts) while `paths` stays product-rooted."""
+
+    def swapped_in(rw: list[Path]) -> Any:
+        return census(outside) if swap == "link_to_outside" else {m: census(m) for m in rw}
+
+    def step(step_paths: Any, batch: Any, box: Any) -> None:
+        [request] = box.requests
+        [staged] = [Path(m.source) for m in request.mounts if m.kind == "staged"]
+        rw = [Path(m.source) for m in request.mounts if m.writable]
+        drafts = staged.parent.parent  # amendment A / U9: <T>/drafts/<id>/stage
+        seen.update(staged=staged, rw=rw, held_before=held_roots(drafts),
+                    draft_root=Path(batch.draft_root), repo_root=Path(step_paths.repo_root))
+        others = [staged / rel for rel in ALL_DRAFT_LANES if rel not in DRAFT_LANES[label]]
+        with open_drain_trees(step_paths, label, batch=batch) as trees:
+            seen.update(type=type(trees), mounts=trees.mounts, held=held_roots(drafts))
+            helds = {m: trees.mount(m) for m in rw}
+            seen["held_types"] = {type(h) for h in helds.values()}
+            for held in helds.values():
+                held.write(BEFORE, PAYLOAD, mode="create")
+            seen["before_landed"] = [(m / BEFORE).read_bytes() == PAYLOAD for m in rw]
+            seen["others_refused"] = _refused_others(trees, others)
+            moved = _swap(rw, swap, outside)
+            before = swapped_in(rw)
+            seen["same_handle"] = [trees.mount(m) is helds[m] for m in rw]
+            for m in rw:
+                helds[m].write(AFTER, PAYLOAD, mode="replace")
+            seen["after_landed"] = [(moved[m] / AFTER).read_bytes() == PAYLOAD for m in rw]
+            seen["swapped_in_untouched"] = swapped_in(rw) == before
+            seen["held_moved"] = held_roots(drafts) == real(*moved.values())
+        seen["held_after"] = held_roots(drafts)
+        _restore(moved)
+
+    return step
 
 
 @pytest.mark.parametrize("swap", ["fresh_folder", "link_to_outside"])
 @pytest.mark.parametrize("label", KNOWN)
 def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves_none(
-        tmp_path: Path, label: str, swap: str):
-    """For a known label, the box's rw mounts equal `open_drain_trees(wt_paths, label).mounts`,
-    and each of them is held, by behaviour."""
-    lf = _leaf(tmp_path)
-    lf.build()
+        tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch, label: DrainLabel,
+        swap: str):
+    """#1134 O4 over P4's draft (#1108 P4 flow 4): for a known label, the drain box's rw mounts
+    are the draft's lanes for that label, they equal the roots `open_drain_trees` holds over the
+    paths the drain hands the lane's work step, and each is held by behaviour — a write through
+    a held root stays in it when the mount path is swapped (a fresh folder, a link out)."""
     outside = tmp_path / "outside"
     outside.mkdir()
-    expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
-    others = [lf.wt / rel for rel in (*ALL_TREES, *DECOY_TREES)
-              if rel not in EXPECTED_MOUNTS[label]]
+    seen: dict[str, Any] = {}
+    step = _o4_step(label, swap, outside, seen)
 
-    request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
-    rw = [source for source, _target in rw_mounts(request)]
-    assert rw == expected
-    assert held_roots(tmp_path) == []
+    _rc, _box = _drain_tick_over_draft(tmp_path, data_root, monkeypatch, label, step)
 
-    with open_drain_trees(lf.wt_paths, label) as trees:
-        assert type(trees) is DrainTrees
-        assert trees.mounts == tuple(rw)
-        assert held_roots(tmp_path) == real(*rw), "the held roots are not the box's rw mounts"
-
-        helds = {m: trees.mount(m) for m in rw}
-        for m, held in helds.items():
-            assert type(held) is _io.Held, type(held)
-            held.write(BEFORE, PAYLOAD, mode="create")
-            assert (m / BEFORE).read_bytes() == PAYLOAD, str(m)
-        for other in others:
-            refused_value_error(lambda other=other: trees.mount(other), str(other))
-            assert trees.tree_for(other / PROBE) is None, str(other)
-
-        moved: dict[Path, Path] = {}
-        for m in rw:
-            moved[m] = m.with_name(f"{m.name}.moved")
-            os.rename(m, moved[m])
-            if swap == "fresh_folder":
-                m.mkdir()
-            else:
-                decoy = outside / m.name
-                put_plain(decoy / AFTER, HOST_BYTES)
-                m.symlink_to(decoy, target_is_directory=True)
-        swapped_in = census(outside) if swap == "link_to_outside" else {
-            m: census(m) for m in rw}
-
-        for m in rw:
-            assert trees.mount(m) is helds[m], f"{m} answered another handle after the swap"
-            helds[m].write(AFTER, PAYLOAD, mode="replace")
-            assert (moved[m] / AFTER).read_bytes() == PAYLOAD, f"{m}: the write left its root"
-            assert (moved[m] / BEFORE).read_bytes() == PAYLOAD
-        assert swapped_in == (census(outside) if swap == "link_to_outside" else {
-            m: census(m) for m in rw}), "a write reached what was swapped in at a mount path"
-        assert held_roots(tmp_path) == real(*moved.values())
-    assert held_roots(tmp_path) == [], "a root is still held after the trees closed"
+    staged, rw = seen["staged"], seen["rw"]
+    assert [m.relative_to(staged).as_posix() for m in rw] == list(DRAFT_LANES[label])
+    assert seen["draft_root"] == staged, "the step's batch is not the draft the box mounted"
+    assert not staged.is_relative_to(seen["repo_root"]), "the step's paths are draft-rooted"
+    assert seen["held_before"] == []
+    assert seen["type"] is DrainTrees
+    assert seen["mounts"] == tuple(rw), "the held roots are not the box's rw mounts"
+    assert seen["held"] == real(*rw)
+    assert seen["held_types"] == {_io.Held}
+    assert all(seen["before_landed"])
+    assert all(seen["others_refused"]), "a tree outside the label's lanes was held"
+    assert all(seen["same_handle"]), "a mount answered another handle after the swap"
+    assert all(seen["after_landed"]), "a write left its held root after the swap"
+    assert seen["swapped_in_untouched"], "a write reached what was swapped in at a mount path"
+    assert seen["held_moved"]
+    assert seen["held_after"] == [], "a root is still held after the trees closed"
 
 
 @pytest.mark.parametrize("label", UNKNOWN_LABELS)
 def test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held(
         tmp_path: Path, label: object):
+    """The holder half: P4's box is built from the batch's lanes, never from a label (its
+    one-list promise is `test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds...`)."""
     lf = _leaf(tmp_path)
 
-    assert_raises_non_member(
-        lambda: drains._drain_box_request(lf.wt, "batch-1", label, lf.paths), "the box")
     assert_raises_non_member(lambda: open_drain_trees(lf.wt_paths, label), "the holder")
     assert held_roots(tmp_path) == []
     assert not lf.wt.exists()
 
     for owner in KNOWN:
-        request = drains._drain_box_request(lf.wt, "batch-1", owner, lf.paths)
-        assert rw_mounts(request) == [(lf.wt / rel, Path("/workspace") / rel) for rel in EXPECTED_MOUNTS[owner]]
         with pytest.raises(FileNotFoundError):
             open_drain_trees(lf.wt_paths, owner)
         assert held_roots(tmp_path) == []
@@ -396,15 +448,10 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
     lf.build(*ALL_TREES, *DECOY_TREES, *all_relocated(wt), *all_relocated(paths.repo_root))
     expected = [wt / rel for rel in relocated_rels(label, wt)]
 
-    request = drains._drain_box_request(wt, "batch-1", label, paths)
-
-    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(wt)) for m in expected]
-    assert ro_mounts(request) == [(wt, Path("/workspace"))]
-    assert len(request.mounts) == 1 + len(expected)
-    assert_asked_of(asked, wt, label, "the box")
-    asked.clear()
-
-    wt_paths = paths.with_repo_root(wt)
+    # The box half (`_drain_box_request` following the paths) is gone with the worktree batch:
+    # P4's box mounts the draft's lanes (`test_the_box_rw_mounts_are_the_roots_open_drain_trees_
+    # holds...`); the holder still follows whatever trees the paths name.
+    wt_paths = dataclasses.replace(paths, repo_root=wt)
     assert type(wt_paths) is type(paths)  # the double keeps itself across the rebase
     with open_drain_trees(wt_paths, label) as trees:
         assert trees.mounts == tuple(expected)
@@ -418,11 +465,11 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
 
 def relative_paths(how: str, root: Path, tmp_path: Path) -> LoopPaths:
     """A `LoopPaths` whose `repo_root` is the relative `root`: `constructed` directly, or
-    `rebased` from the main checkout's paths through `with_repo_root`, the drain's own route."""
+    `rebased` from the main checkout's paths (`dataclasses.replace`)."""
     state = tmp_path / "learning-state"
     if how == "constructed":
         return LoopPaths(repo_root=root, state_dir=state)
-    return LoopPaths(repo_root=tmp_path / MAIN, state_dir=state).with_repo_root(root)
+    return dataclasses.replace(LoopPaths(repo_root=tmp_path / MAIN, state_dir=state), repo_root=root)
 
 
 @pytest.mark.parametrize("how", ["constructed", "rebased"])
@@ -443,10 +490,8 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
 
     assert relative.repo_root == rel_root
     assert label.writable_trees(relative) == listed
-    with pytest.raises(ValueError, match="host root"):
-        drains._drain_box_request(
-            rel_root, "batch-1", label,
-            LoopPaths(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state"))
+    # The box half (`_drain_box_request` over a relative worktree) is gone: P4's box mounts a
+    # draft under the tenant's own (absolute) folder (tenant_1108_delivery/test_box.py).
     with pytest.raises(ValueError):  # noqa: PT011 — DrainTrees' mount refusal; the type is the contract
         open_drain_trees(relative, label)
     assert held_roots(tmp_path) == [], "a relative mount was held"
@@ -461,155 +506,3 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
         with pytest.raises(NotADirectoryError):
             open_drain_trees(absolute, label)
     assert held_roots(tmp_path) == []
-
-
-#: Each lane's own branch prefix (`AuthorBranch`'s default, and the lead lane's).
-LANE_PREFIX = {AUTHOR: "lessons/", LEAD: "lead-author/"}
-
-
-class CheckoutBranch(B.RecordingBranch):
-    """`_box665.RecordingBranch` (the recorded worktree lifecycle), whose leaf carries the three
-    drain trees as the real worktree, a checkout of the repo, does, plus the decoys,
-    `relocated_paths`' trees for this leaf, and the ones it names for the main checkout. The
-    leaf sits under its own base, never at `paths.repo_root`, and is kept after the drive
-    (`destroy_on_cleanup` off)."""
-
-    def __init__(self, worktree_base: Path, **kw: Any) -> None:
-        super().__init__(worktree_base, **kw)
-        self.leaves: list[Path] = []
-
-    def start_batch(self, batch_id: str) -> Path:
-        wt = super().start_batch(batch_id)
-        for rel in (*ALL_TREES, *DECOY_TREES, *all_relocated(wt), *all_relocated(Path(MAIN))):
-            (wt / rel).mkdir(parents=True, exist_ok=True)
-        self.leaves.append(wt)
-        return wt
-
-
-class WorkStep:
-    """The lane's work-step seam (`trigger_author=` for the author lane, `run_lead_author=` for
-    the lead lane). It records the `LoopPaths` the lane hands its work step, and on the first
-    call opens `open_drain_trees(that paths, label)` while the box is up, the place A3 puts the
-    drain's trees. It records the mounts, the descriptors held under the leaf, and what a write
-    through each `mount(m)` left at `m / PROBE`. It answers nothing and asserts nothing: both
-    lanes contain a work-step fault, so a fault is recorded for the test to report."""
-
-    def __init__(self, label: str) -> None:
-        self.label = label
-        self.received: list[LoopPaths] = []
-        self.mounts: tuple[Path, ...] | None = None
-        self.held: list[str] | None = None
-        self.landed: dict[Path, bytes] = {}
-        self.fault: str | None = None
-
-    def __call__(self, paths: LoopPaths, *_args: Any, **_kw: Any) -> None:
-        self.received.append(paths)
-        if self.mounts is not None:
-            return
-        try:
-            with open_drain_trees(paths, self.label) as trees:
-                self.mounts = trees.mounts
-                self.held = held_roots(paths.repo_root)
-                for m in trees.mounts:
-                    trees.mount(m).write(PROBE, PAYLOAD, mode="create")
-                    self.landed[m] = (m / PROBE).read_bytes()
-        except Exception as e:  # noqa: BLE001 — reported by the test; the lane would swallow it
-            self.fault = f"{type(e).__name__}: {e}"
-
-
-@dataclasses.dataclass
-class Drive:
-    """One lane drive's inputs and recorders: the lane's label, the `paths` kind it was handed
-    (`shipped`, or `relocated` with its `asked` log), the box recorder, the branch and the work
-    step."""
-
-    label: str
-    kind: str
-    paths: LoopPaths
-    asked: list[tuple[Path, str]]
-    rec: B.BoxLifecycleRecorder
-    branch: CheckoutBranch
-    step: WorkStep
-
-
-def start_drive(tmp_path: Path, label: str, kind: str, prefix: str) -> Drive:
-    """The drive's `paths` (`kind`), and a branch whose prefix is the lane's own or the other
-    lane's (`prefix`)."""
-    asked: list[tuple[Path, str]] = []
-    cls = LoopPaths if kind == "shipped" else relocated_paths(asked)
-    paths = cls(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
-    other = LEAD if label == AUTHOR else AUTHOR
-    rec = B.BoxLifecycleRecorder()
-    branch = CheckoutBranch(tmp_path / "worktrees", events=rec.events,
-                            branch_prefix=LANE_PREFIX[label if prefix == "own" else other])
-    return Drive(label, kind, paths, asked, rec, branch, WorkStep(label))
-
-
-def assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d: Drive) -> None:
-    """The drive's verdict, from the `BoxRequest` the box seam was handed and what the work
-    step recorded: the rw mounts are the lane's list for `d.kind` under the leaf, in order."""
-    [leaf] = d.branch.leaves
-    assert leaf != d.paths.repo_root
-    request = d.rec.only_request()
-    shipped = list(EXPECTED_MOUNTS[d.label])
-    rels = shipped if d.kind == "shipped" else relocated_rels(d.label, leaf)
-    expected = [leaf / rel for rel in rels]
-
-    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(leaf)) for m in expected], (
-        f"the box's rw mounts are {rw_mounts(request)}, not {rels} under the leaf")
-    assert ro_mounts(request) == [(leaf, Path("/workspace"))]
-    assert len(request.mounts) == 1 + len(expected)
-    for m in request.mounts:
-        assert Path(m.source).is_absolute(), m
-        assert Path(m.target).is_absolute(), m
-    [(wt, _)] = ro_mounts(request)
-    rw = tuple(source for source, _target in rw_mounts(request))
-
-    step = d.step
-    assert step.fault is None, f"the work step's open failed: {step.fault}"
-    assert step.received, "the lane never reached its work step"
-    for got in step.received:
-        assert type(got) is type(d.paths), type(got)
-        assert got == d.paths.with_repo_root(wt), got
-    assert step.mounts == rw, "the trees the work step holds are not the box's rw mounts"
-    assert step.held == real(*rw), "the held roots are not the box's rw mounts"
-    assert step.landed == dict.fromkeys(rw, PAYLOAD)
-    if d.kind == "relocated":
-        assert {attr for root, attr in d.asked if root == wt} >= {
-            attr for attr, _name in TREE_ATTRS[d.label]}, d.asked
-
-
-@pytest.mark.parametrize("prefix", ["own", "other_lanes"])
-@pytest.mark.parametrize("kind", ["shipped", "relocated"])
-def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_them(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, prefix: str):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    d = start_drive(tmp_path, AUTHOR, kind, prefix)
-    put_plain(location_path(d.paths.state_root) / FINDINGS.queue, b'{"finding_id": "f-1"}\n')
-
-    rc = drains.author_drain(d.paths, trigger_author=d.step, branch=d.branch,
-                             start_box=d.rec.start_box, stop_box=d.rec.stop_box,
-                             scrub=d.rec.scrub)
-
-    assert rc == 0
-    assert len(d.step.received) == 2, "both curators' turns are the work step"
-    assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d)
-
-
-@pytest.mark.parametrize("prefix", ["own", "other_lanes"])
-@pytest.mark.parametrize("kind", ["shipped", "relocated"])
-def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
-        tmp_path: Path, kind: str, prefix: str):
-    d = start_drive(tmp_path, LEAD, kind, prefix)
-    run_dir = curation_run_dir("run-1")
-    with state_for_paths(d.paths) as state:
-        enqueue_case(state, "case-1", run_dir)
-
-    rc = drains.lead_author_drain(
-        d.paths, run_lead_author=d.step, run_pitfalls=lambda *_a, **_kw: 0, branch=d.branch,
-        start_box=d.rec.start_box, stop_box=d.rec.stop_box, scrub=d.rec.scrub)
-
-    assert rc == 0
-    assert len(d.step.received) == 1, "the one queued case is the work step"
-    assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d)

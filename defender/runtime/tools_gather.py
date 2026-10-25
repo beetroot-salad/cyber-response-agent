@@ -101,17 +101,19 @@ def _payload_note(deps: GatherDeps, record: dict) -> str:
     return f"\n[record_query] raw payload: {view.to_model(host) if view is not None else host}"
 
 
-def _repo_rel(defender_dir: Path, path: Path) -> str:
+def _repo_rel(knowledge: KnowledgePaths, path: Path) -> str:
+    """`path`'s spelling relative to the tenant repo (`agent/...`), or as given outside it."""
     try:
-        return str(path.relative_to(defender_dir.parent))
+        return f"{knowledge.rel(path.relative_to(knowledge.agent_root).as_posix()).rstrip('/')}"
     except ValueError:
         return str(path)
 
 
-def _locator(defender_dir: Path, t: QueryTemplate, view: ModelView | None = None) -> str:
+def _locator(knowledge: KnowledgePaths, t: QueryTemplate, view: ModelView | None = None) -> str:
     """The `id — path` line shared by the dispatch index and `template_search` hits. The path
-    is the template's model path for a role in the model view (#1255 P1), else repo-relative."""
-    shown = view.to_model(t.path) if view is not None else _repo_rel(defender_dir, t.path)
+    is the template's model path for a role in the model view (#1255 P1), else tenant-repo
+    relative."""
+    shown = view.to_model(t.path) if view is not None else _repo_rel(knowledge, t.path)
     return f"- `{t.id}` — `{shown}`"
 
 
@@ -127,7 +129,7 @@ class TemplateIndex:
 
 
 def _template_index(
-    defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
+    knowledge: KnowledgePaths, dispatched: str, verb_grant: VerbGrant | None = None,
     *, view: ModelView | None = None,
 ) -> TemplateIndex:
     """Two tiers: the dispatched system's templates with their `## Goal`; every other system's
@@ -140,13 +142,13 @@ def _template_index(
     on_target: list[str] = []
     elsewhere: list[str] = []
     established_seen = 0
-    for t in iter_query_templates(KnowledgePaths.of_defender_dir(defender_dir).catalog_dir):
+    for t in iter_query_templates(knowledge.catalog_dir):
         if not is_established(t):
             continue
         established_seen += 1
         if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
             continue
-        locator = _locator(defender_dir, t, view)
+        locator = _locator(knowledge, t, view)
         if t.system == dispatched:
             on_target.append(f"{locator}\n  {' '.join(t.goal.split())}")
         else:
@@ -247,23 +249,27 @@ def _gather_prompt(
     view = deps.view
     # Section order is the cache prefix: the indexes vary only per system, the Dispatch block
     # per lead, so indexes go first to let same-system leads share a cached prefix.
+    # Every dispatched lead reads its run's knowledge (#1108 P4: the run copy's agent root,
+    # carried on the run tenant the driver requires).
+    knowledge = deps.knowledge
     block = "Begin gathering this lead.\n\n"
     if catalog:
+        skill_dir = view.to_model(knowledge.system_skill_dir(request.system))
+        surface = f" {_execution_surface(knowledge, request.system, view)}"
         block += (
             "## Systems of record (descriptor index — frontmatter only, "
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
-            f"`{view.to_model(deps.knowledge.system_skill_dir(request.system))}/SKILL.md` ONLY on "
+            f"`{skill_dir}/SKILL.md` ONLY on "
             "demand, when you "
             "need field vocab the descriptor lacks; not on every dispatch. Which verbs you may "
             "run and what params each one binds come from `list_verbs`, not from either file — "
             "but the VALUES a param accepts (an enum, a clamp, a timestamp format) are still "
-            "the execution surface's to state. "
-            f"{_execution_surface(deps.knowledge, request.system, view)}\n\n"
+            f"the execution surface's to state.{surface}\n\n"
             f"{catalog}\n"
         )
-    index = _template_index(deps.defender_dir, request.system, verb_grant, view=view)
+    index = _template_index(knowledge, request.system, verb_grant, view=view)
     if index.text:
         block += _INDEX_HEADER + index.text + "\n"
     else:
@@ -272,9 +278,15 @@ def _gather_prompt(
     wts = "\n".join(
         f"  - {_yaml_scalar(d, '      ', parent_indent=2)}" for d in request.what_to_summarize
     ) or "  - (unspecified)"
+    # The tenant's pitfalls add-on to the product's `defender-sql` page, the file the pitfalls
+    # curator writes (one name, `knowledge.REDUCER_PITFALLS`); named only when the run's copy
+    # carries it, so gather never spends a turn on a failing read.
+    reducer = knowledge.reducer_pitfalls
+    pitfalls = (f"reducer_pitfalls: {view.to_model(reducer)}\n" if reducer.is_file() else "")
     block += (
         "\n## Dispatch\n```yaml\n"
         f"defender_dir: {view.to_model(deps.defender_dir)}\n"
+        f"{pitfalls}"
         f"run_dir: {view.to_model(deps.run_dir)}\n"
         f"lead_id: {request.lead_id}\n"
         f"system: {request.system}\n"
@@ -343,7 +355,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
         shown = matched[:_SEARCH_LINES_PER_TEMPLATE]
         dropped += len(matched) - len(shown)
         hit = "\n".join(
-            [_locator(deps.defender_dir, t, deps.view), *(f"    {ln}" for ln in shown)]
+            [_locator(deps.knowledge, t, deps.view), *(f"    {ln}" for ln in shown)]
         )
         (untrusted if permission.is_untrusted_read(t.path) else trusted).append(hit)
 

@@ -113,10 +113,11 @@ def make_repo(tmp_path: Path) -> Path:
 
 
 def _make_repo(tmp_path: Path) -> Path:
-    """A committed-clean git repo carrying all three corpora the four author channels
-    write, with the mutable learning state gitignored."""
+    """A committed-clean git repo carrying the live lesson corpora the author channels write
+    (#1108 P4 U5: `lessons-actor`/`lessons-environment` are deleted), with the mutable
+    learning state gitignored."""
     repo = tmp_path / "repo"
-    for corpus in ("lessons", "lessons-actor", "lessons-environment"):
+    for corpus in ("lessons", "lessons-questioner"):  # #1108 P4 U5: the retired corpora are deleted
         d = repo / "defender" / corpus
         d.mkdir(parents=True)
         (d / ".gitkeep").write_text("")
@@ -445,9 +446,11 @@ def run_in_subprocess(script: str, *, repo: Path, env_extra: dict[str, str] | No
 
     C14/P44 is a phase-E constraint, not a fork: `DEFAULT_PATHS` is frozen at import, so a
     test that needs a second actor gets a second process, never an in-process env poke."""
-    import defender  # type: ignore[import-not-found]
-
-    root = Path(defender.__path__[0]).resolve().parent  # namespace pkg: __file__ is None
+    # This checkout's root, from this file's own place in it (`defender/tests/support/learning/
+    # curation/`): never `defender.__path__[0]`, which for the namespace package can name another
+    # `defender/` folder a test put on the path first (a scratch repo's), so the fresh process
+    # would import from the wrong tree.
+    root = Path(__file__).resolve().parents[5]
     env = dict(os.environ)
     env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
     env.update(env_extra or {})

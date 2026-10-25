@@ -18,6 +18,7 @@ from defender.configuration._env import env_int, env_str
 from defender.configuration._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
 from defender.run_repository import WIRE_LOG_NAMES
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
+from defender.knowledge._knowledge import LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths
 
 
 from defender.tenancy._tenant import Tenant
@@ -35,8 +36,8 @@ def provenance_field(id_key: str) -> str:
 
 
 class DrainLabel(enum.Enum):
-    """The drain lanes (#1134, owner decision 2026-09-29; members since #1179). Each lane passes
-    its own to `_run_worktree_batch`, and the member answers its own writable trees."""
+    """The drain lanes (#1134, owner decision 2026-09-29; members since #1179). Each lane names
+    its own lanes, and the member answers its own writable trees."""
 
     AUTHOR = "author_drain"
     LEAD_AUTHOR = "lead_author_drain"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
@@ -45,12 +46,30 @@ class DrainLabel(enum.Enum):
         """@owns DrainLabel display and written form — the value, never `DrainLabel.AUTHOR`."""
         return self.value
 
+    @property
+    def lanes(self) -> tuple[str, ...]:
+        """The lane's corpora under an agent root, in order: what its batch declares (P3's
+        `start_batch(lanes=)`) and its box mounts writable (#1108 P4)."""
+        return _LANES[self]
+
     def writable_trees(self, paths: DefenderPaths) -> tuple[Path, ...]:
-        """@owns drain_writable_trees"""
+        """@owns drain_writable_trees — the lane's trees in a checkout-shaped tree `paths`
+        names (a scene's; a drain batch's are `draft_trees`)."""
         return tuple(getattr(paths, attr) for attr in _WRITABLE_TREE_ATTRS[self])
 
+    def draft_trees(self, batch: Any) -> tuple[Path, ...]:
+        """The lane's trees in `batch`'s draft (`<draft_root>/agent/<lane>`), in order: the
+        box's writable mounts and the roots `lane_trees.open_drain_trees` holds (#1108 P4)."""
+        agent = KnowledgePaths(agent_root=Path(batch.draft_root) / "agent")
+        return tuple(agent.agent_root / lane for lane in self.lanes)
 
-#: Each lane's writable trees, by the `DefenderPaths` attribute that spells each, in order.
+
+#: Each lane's corpora under an agent root, in order.
+_LANES: dict[DrainLabel, tuple[str, ...]] = {
+    DrainLabel.AUTHOR: (LESSONS, LESSONS_QUESTIONER),
+    DrainLabel.LEAD_AUTHOR: (SKILLS,),
+}
+#: Each lane's writable trees, by the `LoopPaths` attribute that spells each, in order.
 _WRITABLE_TREE_ATTRS: dict[DrainLabel, tuple[str, ...]] = {
     DrainLabel.AUTHOR: ("lessons_dir", "lessons_questioner_dir"),
     DrainLabel.LEAD_AUTHOR: ("skills_dir",),
@@ -62,8 +81,7 @@ AUTHOR_DRAIN_LABEL = DrainLabel.AUTHOR
 LEAD_AUTHOR_DRAIN_LABEL = DrainLabel.LEAD_AUTHOR
 
 
-#: The quarantine directory's name under `worktree_base`, spelled once for both sides
-#: (`LoopPaths.quarantine_dir` reads it, `AuthorBranch.quarantine_dir` writes under it).
+#: The quarantine directory's name under `worktree_base` (`LoopPaths.quarantine_dir`).
 QUARANTINE_DIRNAME = "quarantine"
 
 
@@ -77,6 +95,29 @@ class LoopPaths(DefenderPaths):
 
     state_dir: Path | LearningRoot | None = None
     tenant: Tenant | None = field(default=None, kw_only=True)
+
+    # A checkout-shaped tree's corpora (`<repo_root>/defender/<corpus>`): what a learning scene
+    # over a scratch checkout holds. No drain batch reads them: a batch's lanes are its draft's
+    # (`DrainLabel.draft_trees`, #1108 P4).
+    @property
+    def knowledge(self) -> KnowledgePaths:
+        return KnowledgePaths(agent_root=self.defender_dir)
+
+    @property
+    def catalog_dir(self) -> Path:
+        return self.knowledge.catalog_dir
+
+    @property
+    def skills_dir(self) -> Path:
+        return self.knowledge.skills_dir
+
+    @property
+    def lessons_dir(self) -> Path:
+        return self.knowledge.lessons_dir
+
+    @property
+    def lessons_questioner_dir(self) -> Path:
+        return self.knowledge.lessons_questioner_dir
 
     def __post_init__(self) -> None:
         if self.tenant is not None and not isinstance(self.state_dir, LearningRoot):
@@ -98,14 +139,11 @@ class LoopPaths(DefenderPaths):
             raise FatalConfigError("learning state requires an explicit tenant or scratch state_dir")
         return self.state_dir
 
-    def with_repo_root(self, repo_root: Path) -> LoopPaths:
-        return LoopPaths(repo_root=repo_root, state_dir=self.state_root, tenant=self.tenant)
-
     @property
     def quarantine_dir(self) -> Path:
-        """Where `quarantine.preserve_tainted_tree` archives a tainted worktree. Follows
-        `worktree_base`, not `state_root`: a copied state dir carries none of this host's
-        tainted trees. `AuthorBranch.quarantine_dir` is the same path on the writer's side."""
+        """Where the legacy worktree drain archived a tainted worktree, which the queue page
+        still counts (#1108 P4 retired the writer). Follows `worktree_base`, not `state_root`:
+        a copied state dir carries none of this host's tainted trees."""
         return self.worktree_base / QUARANTINE_DIRNAME
 
 

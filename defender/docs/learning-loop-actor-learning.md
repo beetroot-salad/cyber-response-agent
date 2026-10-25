@@ -16,7 +16,7 @@ PRs against this branch.
 ## Motivation
 
 The deployed loop has a structural asymmetry that *plausibly* drives
-a plateau: the defender accumulates `lessons/` monotonically; the
+a plateau: the defender accumulates `agent/lessons/` monotonically; the
 actor is memoryless across cases and reads a hand-curated
 `mitre_corpus.py` that does not grow. Over enough generations the
 defender may exhaust the actor's static strategy space or its
@@ -58,7 +58,7 @@ ground-truth labels (`benign | malicious | inconclusive`). Correctness
 is the fraction of runs whose `report.md` frontmatter `disposition`
 matches the label. **Judge-independent at eval time.** No held-out
 case's judge findings or `actor_observations` ever feed back into
-`lessons/`, `lessons-actor/`, or either `_pending/` queue.
+`agent/lessons/`, `lessons-actor/`, or either `_pending/` queue.
 
 **Failure accounting.** Every held-out alert is in the denominator.
 Runs that fail to produce a clean `report.md` with parseable
@@ -227,7 +227,7 @@ suspect.
 ### Stays the same
 
 - Runtime defender loop (ORIENT/PLAN/GATHER/ANALYZE/REPORT).
-- Defender's `lessons/` pipeline and `defender/learning/author.py`.
+- Defender's `agent/lessons/` pipeline and `defender/learning/author.py`.
 - Actor prompt at `defender/learning/actor.md` — four-section output
   (Section 0 technique table + Sections 1–3: Attack story / Goal /
   Bypass).

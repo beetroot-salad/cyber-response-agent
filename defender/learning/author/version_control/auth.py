@@ -15,9 +15,12 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpx
+
+from defender.tenancy._tenant import ISSUER_ROLE
 
 TOKEN_TTL = 600
 CLOCK_SKEW = 30
@@ -65,6 +68,17 @@ def _timestamp(value: object) -> float:
     return float(value)
 
 
+class ForgeCredential(Protocol):
+    """What the forge client and the git transport read off a tenant's credential: the tenant
+    it is for, and a bearer token valid for at least `min_validity` more seconds.
+    `ForgejoIdentity` is the production one; a local harness with no issuer supplies its own."""
+
+    @property
+    def tenant_id(self) -> str: ...
+
+    def token(self, *, min_validity: float = ...) -> str: ...
+
+
 @dataclass
 class ForgejoIdentity:
     """One tenant's authorized Vault role and Forgejo-generated audience.
@@ -97,7 +111,7 @@ class ForgejoIdentity:
             raise ForgejoAuthError(
                 "Vault issuer must be an HTTPS URL without credentials"
             )
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", self.role):
+        if not ISSUER_ROLE.fullmatch(self.role):
             raise ForgejoAuthError("Vault identity role must be a plain name")
         if not self.tenant_id or not self.audience:
             raise ForgejoAuthError(

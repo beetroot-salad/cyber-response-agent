@@ -12,6 +12,7 @@ import pytest
 from defender.records import _provenance
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 
 LEARNING_LOOP_PAGE = "skills/handbook/content/learning-loop.md"
 PAGE_SPELLINGS = (LEARNING_LOOP_PAGE,
@@ -64,7 +65,8 @@ def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     T.plant_roster(ep)
     lifecycle = _Lifecycle()
-    rc = T.mod("run").main(
+    # #1108 P4 (OD14, O11): run.main handed the in-process launch-time publish.
+    rc = RunWithPublish(T.mod("run")).main(
         ["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", world],
         lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
         preflight=lambda *_a, **_k: 0)

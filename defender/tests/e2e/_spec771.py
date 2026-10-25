@@ -388,7 +388,7 @@ def worktree_tree(at: Path) -> Path:
     return at
 
 
-def outside(tmp_path: Path, name: str = "secret.txt", text: str = "ORIGINAL OUTSIDE\n") -> Path:
+def outside(tmp_path: Path, name: str = "secret.txt", text: str = "ORIGINAL OUTSIDE\n") -> Path:  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     """A file OUTSIDE every shared tree — the redirect target an alias aims a write at.
 
     Sited as a sibling of the run dir rather than under it, because `run_dir.parent` is where
@@ -738,8 +738,16 @@ def _invoke_lesson_load(run_dir: Path) -> None:
 
     from dataclasses import replace
 
-    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=fixture_run(run_dir))
-    runtime_tools._record_lesson_load(deps, DEFENDER / "lessons" / "spec-771.md", kind="read")
+    from defender.tests.support.tenancy import _tenants1106
+
+    # #1108 P4 (O1, O4): a lesson is the run TENANT's (`<agent root>/lessons/`), never the
+    # checkout's — the role is bound with the fixture tenant's run record, and the lesson it
+    # loads lies in that tenant's agent half.
+    run_tenant = _tenants1106.fixture_run_tenant()
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=fixture_run(run_dir),
+                   tenant=run_tenant)
+    runtime_tools._record_lesson_load(deps, Path(run_tenant.agent) / "lessons" / "spec-771.md",
+                                      kind="read")
 
 
 def _invoke_queries_table(run_dir: Path) -> Any:
@@ -962,7 +970,6 @@ CENSUS_MODULES: frozenset[str] = frozenset(w.module for w in CENSUS)
 DRAIN_MODULES: frozenset[str] = frozenset({"learning/author/drain.py"})
 LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
     "_filesystem/", "runtime/query_catalog.py", "runtime/session_store/_pointers.py",
-    "learning/author/version_control/restore.py",
 }
 
 
@@ -1052,47 +1059,3 @@ def is_eexist(exc: BaseException) -> bool:
     return isinstance(exc, OSError) and exc.errno == errno.EEXIST
 
 
-# The second shared root's own production writers (F6)
-def quarantine_a_tainted_tree(
-    tree: Path, quarantine_dir: Path, *, batch_id: str = "b-771", verdict: dict | None = None,
-):
-    """Drive #747's REAL quarantine path over a real tainted tree, and return
-    `(archive, manifest_doc)` — the manifest of THIS batch, never whatever sorted first."""
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-    from defender.learning.core.quarantine import preserve_tainted_tree
-    from defender.box import _scrub as scrub_mod
-
-    os.symlink("/root/.ssh/id_rsa", tree / "stolen.json")
-    try:
-        scrub_mod.scrub(tree)
-    except scrub_mod.RunTainted as taint:
-        if verdict is None:
-            verdict_sidecar(tree).unlink(missing_ok=True)
-        else:
-            write_verdict(tree, verdict)
-        archive = preserve_tainted_tree(
-            tree, quarantine_dir, batch_id=batch_id, branch=f"lessons-{batch_id}",
-            label=AUTHOR_DRAIN_LABEL, taint=taint)
-    else:
-        raise AssertionError("the planted symlink did not taint the tree — the drive is vacuous")
-    manifest = quarantine_dir / f"{batch_id}.json"
-    doc = json.loads(manifest.read_text(encoding="utf-8")) if manifest.is_file() else {}
-    return archive, doc
-
-
-def drive_drain_restore(worktree: Path, corpus: Path, snapshot: dict[str, bytes]) -> None:
-    """Drive the drain lane's fault-path corpus restore — a REAL second-root production writer.
-
-    X9's shape, executed here rather than described: `mkdir(parents=True, exist_ok=True)` then
-    `write_bytes`, over paths composed from snapshot keys, from an `except` around the agent
-    call. Both halves redirect at HEAD — a symlink at a snapshot leaf truncates the outside
-    file, and a symlink-to-directory at a snapshot key's parent component lands the restored
-    blob inside the outside directory."""
-    from defender._io import hold
-    from defender.learning.author import drain
-
-    # The second positional is the corpus's spelling (git pathspec); `corpus=` is its held mount;
-    # `head_before` names the commit the snapshot was taken at (the worktree here is no
-    # repository, so git answers nothing and every snapshot file is written back).
-    with hold(corpus) as held:
-        drain._restore_corpus(worktree, corpus, snapshot, corpus=held, head_before="HEAD")

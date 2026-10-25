@@ -1,4 +1,7 @@
-"""#870 M7 — one literal allowance in the path rule, and everything it must not relax."""
+"""#870 M7 — one literal allowance in the path rule, and everything it must not relax.
+
+#1108 P4 (O7, OD6): paths are the batch draft's `agent/skills/...`; the literal is the tenant's
+pitfalls add-on. ASSUMED (S-H): the rules keep their `(xy, path)` shape, `xy` derived from the claim."""
 from __future__ import annotations
 
 import unicodedata
@@ -9,26 +12,38 @@ import pytest
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime.permission.files import build_write_allow
+from defender.learning.core.lane_trees import DrainTrees
 from defender.tests.support.learning.core._declared870 import (
     DELETING_SHAPES,
-    REDUCER_REL,
     STATUS_SHAPES,
-    seed_tree,
     write,
-    write_reducer_surface,
 )
-from defender.tests.support.learning.curation._lead_author_1134 import lane_tree_for
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 DECLARED = frozenset({"elastic", "cmdb"})
-ELASTIC_MD = "defender/skills/elastic/execution.md"
+#: #1108 P4 (OD6): repo-relative spellings are `agent/...`. The one reducer literal the pitfalls
+#: lane may write is the tenant's add-on (carried decision, A1 path), not the product page
+#: `_declared870.REDUCER_REL` still names.
+REDUCER_REL = "agent/skills/gather/defender-sql.pitfalls.md"
+ELASTIC_MD = "agent/skills/elastic/execution.md"
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    tree = seed_tree(tmp_path, adapters=("elastic", "cmdb"), markers=("elastic",),
-                     skills=("elastic",), catalog=(), non_systems=("gather",))
-    write_reducer_surface(tree)
-    return tree
+    """A batch draft's shape (`<root>/agent/skills/...`, no git): the declared system's skill and
+    marker, and the tenant's pitfalls add-on (the fixture's committed copy)."""
+    root = tmp_path / "draft"
+    skills = root / "agent" / "skills"
+    write(skills / "elastic" / "SKILL.md", "---\nname: defender-elastic\n---\n# elastic\n")
+    write(skills / "elastic" / "execution.md", "# execution\n")
+    write(root / REDUCER_REL, (FIXTURE_AGENT / "skills" / "gather" / "defender-sql.pitfalls.md")
+          .read_text(encoding="utf-8"))
+    return root
+
+
+def lane_tree_for(root: Path):
+    """The lead lane's held `skills/` mount over the draft (open while referenced)."""
+    return DrainTrees.open((root / "agent" / "skills",)).tree_for
 
 
 def test_the_reducer_surface_cannot_be_deleted():
@@ -51,15 +66,16 @@ def test_the_reducer_surface_cannot_be_deleted():
 
 def test_the_allowance_is_exactly_one_literal():
     refused = (
-        "defender/skills/gather/SKILL.md",
-        "defender/skills/gather/synthetic-reference.md",
-        "defender/skills/gather/failure-modes.md",
-        "defender/skills/gather/queries/elastic/x.md",
-        "defender/skills/gather/defender-sql.md/x.md",
-        "defender/skills/gather/sub/defender-sql.md",
-        "defender/skills/gather/../gather/defender-sql.md",
-        "defender/skills/gather/Defender-SQL.md",
-        "defender/skills/gather/defender-sql.markdown",
+        "agent/skills/gather/SKILL.md",
+        "agent/skills/gather/synthetic-reference.md",
+        "agent/skills/gather/failure-modes.md",
+        "agent/skills/gather/queries/elastic/x.md",
+        "agent/skills/gather/defender-sql.md",
+        "agent/skills/gather/defender-sql.pitfalls.md/x.md",
+        "agent/skills/gather/sub/defender-sql.pitfalls.md",
+        "agent/skills/gather/../gather/defender-sql.pitfalls.md",
+        "agent/skills/gather/Defender-SQL.pitfalls.md",
+        "agent/skills/gather/defender-sql.pitfalls.markdown",
     )
     for path in refused:
         with pytest.raises(LeadAuthorError):
@@ -68,21 +84,21 @@ def test_the_allowance_is_exactly_one_literal():
 
 
 def test_the_path_rule_and_the_live_write_grant_agree_on_one_literal(repo):
-    grant = build_write_allow(repo / "defender" / "skills", suffix=".md")
-    combining = "defender/skills/gather/defender-sq́l.md"
+    grant = build_write_allow(repo / "agent" / "skills", suffix=".md")
+    combining = "agent/skills/gather/defender-sq́l.pitfalls.md"
     assert unicodedata.normalize("NFC", REDUCER_REL) == REDUCER_REL
 
     textual_variants = (
-        "defender/skills/gather/DEFENDER-SQL.MD",
-        "defender/skills/gather/defender-sql.MD",
+        "agent/skills/gather/DEFENDER-SQL.PITFALLS.MD",
+        "agent/skills/gather/defender-sql.pitfalls.MD",
         combining,
         unicodedata.normalize("NFC", combining),
         unicodedata.normalize("NFD", combining),
         REDUCER_REL + "\x00.md",
-        "defender/skills/defender/skills/gather/defender-sql.md",
+        "agent/skills/agent/skills/gather/defender-sql.pitfalls.md",
         REDUCER_REL + "/",
-        "defender/skills/gather/./defender-sql.md",
-        "defender/skills/gather/../gather/defender-sql.md",
+        "agent/skills/gather/./defender-sql.pitfalls.md",
+        "agent/skills/gather/../gather/defender-sql.pitfalls.md",
     )
     for variant in textual_variants:
         assert variant != REDUCER_REL
@@ -103,26 +119,26 @@ def test_the_path_rule_and_the_live_write_grant_agree_on_one_literal(repo):
     link.symlink_to(outside)
     assert pitfalls_curator._pitfalls_path_rule(" M", REDUCER_REL, systems=DECLARED) is None
     assert not grant.fullmatch(str(link.resolve())), (
-        "a symlinked literal resolves outside defender/skills and both layers admitted it"
+        "a symlinked literal resolves outside agent/skills and both layers admitted it"
     )
 
 
 def test_the_merged_membership_gate_is_not_weakened(repo):
     assert pitfalls_curator._pitfalls_path_rule(
-        "??", "defender/skills/cmdb/execution.md", systems=DECLARED,
+        "??", "agent/skills/cmdb/execution.md", systems=DECLARED,
     ) is None, "minting a declared system's first execution.md was refused"
     assert pitfalls_curator._pitfalls_path_rule(" M", ELASTIC_MD, systems=DECLARED) is None
 
     with pytest.raises(LeadAuthorError) as exc:
         pitfalls_curator._pitfalls_path_rule(
-            " M", "defender/skills/newsys/execution.md", systems=DECLARED,
+            " M", "agent/skills/newsys/execution.md", systems=DECLARED,
         )
     assert "undeclared system" in str(exc.value)
     assert "newsys" in str(exc.value)
 
 
 def test_the_curator_still_cannot_touch_a_skill_md():
-    for path in ("defender/skills/elastic/SKILL.md", "defender/skills/gather/SKILL.md"):
+    for path in ("agent/skills/elastic/SKILL.md", "agent/skills/gather/SKILL.md"):
         for xy in (" M", "??", "A "):
             with pytest.raises(LeadAuthorError):
                 pitfalls_curator._pitfalls_path_rule(xy, path, systems=DECLARED)
@@ -135,12 +151,12 @@ def test_only_the_pitfalls_lane_may_write_the_reducer_surface(repo):
     assert "out-of-scope" in str(exc.value)
     assert pitfalls_curator._pitfalls_path_rule(" M", REDUCER_REL, systems=DECLARED) is None
 
-    write(repo / "defender/skills/elastic/SKILL.md", "---\nname: defender-elastic\n---\n# e\n")
+    write(repo / "agent/skills/elastic/SKILL.md", "---\nname: defender-elastic\n---\n# e\n")
     assert lead_author._skills_path_rule(
-        repo, " M", "defender/skills/elastic/SKILL.md", systems=DECLARED,
+        repo, " M", "agent/skills/elastic/SKILL.md", systems=DECLARED,
         tree_for=lane_tree_for(repo),
     ) is None, "the sibling lane stopped admitting its own target"
     with pytest.raises(LeadAuthorError):
         pitfalls_curator._pitfalls_path_rule(
-            " M", "defender/skills/elastic/SKILL.md", systems=DECLARED,
+            " M", "agent/skills/elastic/SKILL.md", systems=DECLARED,
         )

@@ -19,7 +19,7 @@ re-coining.
 ## What "good" looks like
 
 - **PASS (good):** the draft is discarded (`git rm`); ideally
-  `sshd-auth-history.md`'s `## Goal` gains the recall keywords.
+  `sshd-auth-history`'s `## Goal` gains the recall keywords.
 - **WEAK-PASS (tolerable):** the draft is skipped (left in place) — no new
   sibling, but the fold didn't happen.
 - **FAIL (the underfold we are fixing):** `elastic/sshd-failed-by-srcip.md` is

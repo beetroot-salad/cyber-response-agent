@@ -68,6 +68,9 @@ SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 INV = Investigation(
     investigation_id="inv-1", alert_id="al-1", status="completed", disposition="benign",
     cost_usd=1.5, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
+    # #1108 P4 O-WARN: the knowledge revision the run used (`current` = the run record's `fresh`).
+    knowledge={"status": "current", "commit": "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5",
+               "stale_kind": None},
 )
 JOB = LearningJob(
     learning_job_id="lj-1", investigation_id="inv-1", alert_id="al-1", status="queued",

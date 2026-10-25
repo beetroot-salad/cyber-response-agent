@@ -185,7 +185,7 @@ def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
         root = tmp_path / driver / "data"
         H.tenant_dir(root, TID).mkdir(parents=True)
         target = tmp_path / driver / "outside.json"
-        target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")
+        target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
         plant = location_path(H.row_path)(root, TID)
         if alias == "symlink":
             plant.symlink_to(target)
@@ -202,7 +202,7 @@ def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
         assert O10_TEXT not in text, (
             f"O10 short-circuited the plant ({driver}); the guarded write was never reached:\n"
             f"{text}")
-        assert target.read_text(encoding="utf-8") == "ORIGINAL OUTSIDE\n", (
+        assert target.read_text(encoding="utf-8") == "ORIGINAL OUTSIDE\n", (  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
             f"the {alias} plant was written through ({driver})")
         assert os.lstat(target).st_mtime_ns == before.st_mtime_ns
         assert os.path.lexists(plant), "the refusal removed the plant (sanitizing, D1)"

@@ -118,7 +118,8 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         from defender.runtime.run_state import RunState
 
         return replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(run_dir)),
-                       run_state=RunState(run_dir, "d826-terminators"))
+                       run_state=RunState(run_dir, "d826-terminators"),
+                       tenant=T1106.fixture_run_tenant())
 
     def _factory_raising(exc: BaseException):
         class _Agent:

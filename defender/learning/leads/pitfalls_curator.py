@@ -5,16 +5,17 @@ import difflib
 import logging
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
+from typing import Any
 from pathlib import Path
 
 from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _git
 from defender.knowledge._corpus import _FENCE_RE
+from defender.knowledge._knowledge import AGENT_REL, REDUCER_PITFALLS
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
@@ -25,12 +26,14 @@ from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, kind_at, read_at
 from defender.learning.core.state import PITFALLS, LearningState
-from defender._claim_git import ClaimGit
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
+from defender.learning.author.version_control import ChangeSet
 from defender.learning.leads._lead_spine import (
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
+    committed_text,
+    draft_view,
     lane_skills,
 )
 from defender.learning.leads.declared_systems import (
@@ -43,7 +46,7 @@ from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads.path_validation import (
     LEARNING_DIR,
-    SKILLS_REL,
+    SKILLS_PREFIX,
     _is_system_execution_md,
 )
 
@@ -52,9 +55,11 @@ _logger = logging.getLogger(__name__)
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
 #: The reducer surface: the one literal `_pitfalls_path_rule` admits beyond a declared system's
-#: `execution.md`. `skills/gather/SKILL.md` has the gather subagent read it before writing SQL —
-#: the same before-the-attempt criterion that put system pitfalls in `execution.md`.
-REDUCER_REL = "defender/skills/gather/defender-sql.md"
+#: `execution.md` — the tenant's pitfalls add-on to the product's `defender-sql` page
+#: (`knowledge.REDUCER_PITFALLS`, the same name the gather dispatch hands the subagent, which
+#: reads it beside the product page before writing SQL). The product page itself is never
+#: written (#1108 P4 O1, O7).
+REDUCER_REL = f"{AGENT_REL}/{REDUCER_PITFALLS}"  # lint-stage-frame: ok — a path
 
 #: The one section a curator addition may land in, on either surface. `_pitfalls_content_rule`
 #: enforces it on the reducer surface; the prompt asks for it on both.
@@ -109,7 +114,7 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
         {
             "surface": "system",
             "system": system,
-            "path": f"{SKILLS_REL}{system}/execution.md",
+            "path": f"{SKILLS_PREFIX}{system}/execution.md",
             "failures": _failures_of(by_system[system]),
         }
         for system in sorted(by_system)
@@ -130,9 +135,13 @@ def _invoke_pitfalls_agent(
     box=None,
 ) -> int:
     stage_salt = salt if salt is not None else uuid4().hex
+    learning_run_dir = state.stage_dir(_loop_config.LEAD_AUTHOR_DRAIN_LABEL)
+    view = draft_view(learning_run_dir, repo_root)
+    context = (f"draft_root: {view.to_model(repo_root)}\n"
+               f"skills_dir: {view.to_model(repo_root / SKILLS_PREFIX)}")
     user_prompt = stage_user_message(
         stage_salt,
-        wrap(f"skills_dir: {SKILLS_REL}", "pitfalls_context", stage_salt),
+        wrap(context, "pitfalls_context", stage_salt),
         wrap(structured_json_body(handoffs), "pitfalls_handoffs", stage_salt),
     )
     return spawn(
@@ -140,7 +149,7 @@ def _invoke_pitfalls_agent(
         batch_id="pitfalls",
         user_prompt=user_prompt,
         repo_root=repo_root,
-        learning_run_dir=state.stage_dir(_loop_config.LEAD_AUTHOR_DRAIN_LABEL),
+        learning_run_dir=learning_run_dir,
         log_label="pitfalls curator",
         salt=stage_salt, box=box,
     )
@@ -235,14 +244,16 @@ def _line_ops(
     return added, removed, kept
 
 
-def _readable_pair(repo_root: Path, path: str, *, tree_for: TreeFor) -> tuple[str, str]:
-    """The document as committed and as the curator left it, or this rule's refusal. Also
-    compares frontmatter, the one check that reads raw text rather than lines.
+def _readable_pair(
+    repo_root: Path, path: str, *, tree_for: TreeFor, base: Mapping[str, bytes] | None = None,
+) -> tuple[str, str]:
+    """The document as the batch's `base` commits it and as the curator left it, or this rule's
+    refusal. Also compares frontmatter, the one check that reads raw text rather than lines.
 
-    The working-copy side is read through the lane's held `skills/` mount (`tree_for`), so a link
+    The draft's side is read through the lane's held `skills/` mount (`tree_for`), so a link
     at the name or at a holding folder is refused, never followed (#1134).
     """
-    committed = _git.git_show_file(repo_root, "HEAD", path)
+    committed = committed_text(repo_root, path, base=base)
     if committed is None:
         raise LeadAuthorError(
             f"pitfalls curator created {path}; refusing to commit (the reducer surface is a "
@@ -267,12 +278,15 @@ def _readable_pair(repo_root: Path, path: str, *, tree_for: TreeFor) -> tuple[st
     return committed, current
 
 
-def _pitfalls_content_rule(repo_root: Path, xy: str, path: str, *, tree_for: TreeFor) -> None:
+def _pitfalls_content_rule(
+    repo_root: Path, xy: str, path: str, *, tree_for: TreeFor,
+    base: Mapping[str, bytes] | None = None,
+) -> None:
     """The content half of the gate (mirror of `lead_author._skills_content_rule`): is what the
     curator wrote still the document?"""
     if path != REDUCER_REL or "D" in xy:
         return
-    committed, current = _readable_pair(repo_root, path, tree_for=tree_for)
+    committed, current = _readable_pair(repo_root, path, tree_for=tree_for, base=base)
     lines, committed_lines = current.splitlines(), committed.splitlines()
     survived, sections = _outline(lines)
     committed_headings, committed_sections = _outline(committed_lines)
@@ -346,9 +360,10 @@ def _pitfalls_offer_rule(path: str, *, reducer_offered: bool) -> None:
         )
 
 
-def _pitfalls_rule(
+def _pitfalls_rule(  # noqa: PLR0913 — the path, the tick's offer, and the two trees it reads
     repo_root: Path, xy: str, path: str, *,
     systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor,
+    base: Mapping[str, bytes] | None = None,
 ) -> None:
     """The whole per-path gate: may the lane write this path at all, was this tick offered it,
     and is what the curator wrote still the document.
@@ -359,23 +374,26 @@ def _pitfalls_rule(
     reading)."""
     _pitfalls_path_rule(xy, path, systems=systems)
     _pitfalls_offer_rule(path, reducer_offered=reducer_offered)
-    _pitfalls_content_rule(repo_root, xy, path, tree_for=tree_for)
+    _pitfalls_content_rule(repo_root, xy, path, tree_for=tree_for, base=base)
 
 
-def _verify_pitfalls_state(
-    repo_root: Path, baseline_stray: list[str], *,
-    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor, git: ClaimGit,
+def _verify_pitfalls_state(  # noqa: PLR0913 — the claim, its base, and the tick's three facts
+    repo_root: Path, *, change_set: ChangeSet,
+    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor,
+    base: Mapping[str, bytes] | None = None,
 ) -> list[str]:
-    """`reducer_offered` is required: either default ("every tick may write the reducer
-    surface" or "no tick may") is wrong for a caller that forgot it."""
+    """The lane's gate over one claim (`change_set`, the batch's draft against its `base`; no
+    base given, `committed_text`'s fallback), its paths `agent/skills/...` under the draft's `repo_root`
+    (#1108 P4 O7, OD6). `reducer_offered` is required: either default ("every tick may write
+    the reducer surface" or "no tick may") is wrong for a caller that forgot it."""
     return _verify_corpus_scope(
-        repo_root, baseline_stray, actor="pitfalls curator",
+        repo_root, change_set, actor="pitfalls curator",
         rule=partial(
             _pitfalls_rule, repo_root,
-            systems=systems, reducer_offered=reducer_offered, tree_for=tree_for,
+            systems=systems, reducer_offered=reducer_offered, tree_for=tree_for, base=base,
         ),
         tree_for=tree_for,
-        git=git,
+        base=base,
     )
 
 
@@ -486,21 +504,26 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     paths: _loop_config.LoopPaths,
     state: LearningState | None = None,
     trees: DrainTrees,
+    batch: Any = None,
     invoke: Callable[..., int] | None = None,
     box=None,
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
-    """One curation tick over the pitfalls queue."""
+    """One curation tick over the pitfalls queue, into `batch`'s draft (#1108 P4 O7): the claim
+    is the draft against the batch's base, judged by the lane's gate and committed by the
+    batch's commit-maker. `paths` names the product checkout (adapters) and the learning state;
+    `git_timeout` is kept for the drain's call shape (the lane runs no git)."""
     # An entry point on its own (by hand) opens the handle; the drain hands its own in.
     if state is None:
         with LearningState.open(paths) as own:
             return run_pitfalls(
-                paths=paths, state=own, trees=trees, invoke=invoke, box=box,
+                paths=paths, state=own, trees=trees, batch=batch, invoke=invoke, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
                 git_timeout=git_timeout)
-    lane_skills(trees, paths)
+    root = Path(batch.draft_root) if batch is not None else paths.repo_root
+    lane_skills(trees, paths, skills_dir=root / SKILLS_PREFIX if batch is not None else None)
     rows = _loop_persist.read_pitfalls(state)
     # The gate counts distinct mistakes, not rows: the queue keeps one row per failure, so a
     # looping lead would otherwise clear the threshold on a single lesson.
@@ -557,8 +580,11 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
             timeout_seconds=lock_wait_seconds,
         )
         return 0
-    git = ClaimGit(repo_root, SKILLS_REL, timeout=git_timeout)
-    baseline_stray = git.changed_outside_corpus()
+    if batch is None:
+        raise LeadAuthorError(
+            "pitfalls curation refused: no batch was handed, and the lane commits only into a "
+            "tenant batch's draft (#1108 P4) — nothing is curated"
+        )
     # A queue row is one occurrence, so `len(rows)` is the failure count. Surfaces are named
     # rather than systems, since a reducer-only tick has no system names.
     _logger.info(
@@ -571,7 +597,7 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     # (#1195).
     with _box.box_for_run(box) as run_box:
         rc = (invoke or _invoke_pitfalls_agent)(
-            handoffs, state=state, repo_root=repo_root, box=run_box)
+            handoffs, state=state, repo_root=root, box=run_box)
     if rc != 0:
         # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
         # retire set, so a repeatedly failing batch reaches the bounded retirement.
@@ -579,13 +605,16 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
             f"pitfalls curator exited rc={rc}; leaving queue intact"
         )
 
+    # The claim, derived before anything reads what the box wrote (a link, FIFO or out-of-lane
+    # entry refuses it whole, `DeliveryRefused`); the gate judges it, the commit-maker commits.
+    change_set = batch.change_set()
     changed = _verify_pitfalls_state(
-        repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
-        tree_for=trees.tree_for, git=git,
+        root, change_set=change_set, systems=systems, reducer_offered=reducer_offered,
+        tree_for=trees.tree_for, base=batch.base(),
     )
     sha = None
     if changed:
-        sha = git.commit(changed, _pitfalls_commit_message(changed))
+        sha = batch.commit(change_set, _pitfalls_commit_message(changed))
     else:
         _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
     # After the commit: a reducer row's criterion needs the confirmed edit, which only

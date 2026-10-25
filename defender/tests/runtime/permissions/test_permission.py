@@ -11,7 +11,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
 from defender.runtime.permission.grant import PathShapes, under  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
@@ -215,30 +215,81 @@ def test_the_real_pipe_the_gather_deny_reason_teaches_is_still_allowed():
     ]
 
 
-# read: deny-by-default allowlist over {run_dir, defender_dir}
+# read: deny-by-default allowlist over {run_dir, defender_dir, the run's tenant agent root}
 
 def _read_roots(tmp_path):
-    """A run dir + a defender corpus dir for the read allowlist (both real dirs so
-    `resolve()` has something to anchor)."""
+    """A run dir, a product tree (general skills only, #1108 P4 O1) and the run's tenant agent
+    root — a test-local stand-in for the run copy `<T>/run-knowledge/<run_id>/agent/`, holding
+    made-up corpus dirs (the gate only needs the root and the shapes, never lab content). All
+    real dirs so `resolve()` has something to anchor."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     dfn = tmp_path / "defender"
-    (dfn / "skills" / "elastic").mkdir(parents=True)
-    (dfn / "lessons").mkdir(parents=True)
-    return run, dfn
+    (dfn / "skills" / "invlang").mkdir(parents=True)
+    agent = tmp_path / "data" / "tenant-a" / "run-knowledge" / "run-1" / "agent"
+    (agent / "skills" / "cmdb").mkdir(parents=True)
+    (agent / "lessons").mkdir(parents=True)
+    return run, dfn, agent
+
+
+def _main_on(run: Path, dfn: Path, agent: Path):
+    """MAIN's policy for a run whose tenant agent root is `agent` (`RunScope.tenant_agent`, the
+    seam the driver binds the run's agent half through)."""
+    return compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn,
+                              scope=RunScope(tenant_agent=agent))
 
 
 def test_read_allows_in_root_corpus_and_run(tmp_path):
-    run, dfn = _read_roots(tmp_path)
-    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
+    """O2: the run's own files, a product general skill, and the run's own tenant agent root's
+    system skill are readable."""
+    run, dfn, agent = _read_roots(tmp_path)
+    main = _main_on(run, dfn, agent)
     for p in (run / "alert.json", run / "investigation.md", run / "executed_queries.jsonl",
-              dfn / "skills" / "elastic" / "SKILL.md"):
+              dfn / "skills" / "invlang" / "SKILL.md",
+              agent / "skills" / "cmdb" / "SKILL.md", agent / "lessons" / "fixture-a.md"):
         assert permission.decide_read(
             p, run_dir=run, defender_dir=dfn, policy=main).allow, p
     # a bare SKILL.md directly under defender_dir (outside lessons/skills/examples) is NOT a tight
     # corpus `.md`, so the read_allow shapes deny it — parity with the bash cat lane.
     assert not permission.decide_read(
         dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
+
+
+def test_o2_read_gate_admits_the_own_run_copy_and_refuses_another_tenants_agent_half(tmp_path):
+    """O2 (read-gate arm): a lesson in this run's own copy is admitted; the same lesson name in
+    ANOTHER tenant's run copy under the same data root is refused, on the same gate call with
+    the same policy (the positive control is the first assertion)."""
+    run, dfn, agent = _read_roots(tmp_path)
+    other = tmp_path / "data" / "tenant-b" / "run-knowledge" / "run-2" / "agent"
+    (other / "lessons").mkdir(parents=True)
+    main = _main_on(run, dfn, agent)
+    assert permission.decide_read(
+        agent / "lessons" / "x.md", run_dir=run, defender_dir=dfn, policy=main).allow
+    assert not permission.decide_read(
+        other / "lessons" / "x.md", run_dir=run, defender_dir=dfn, policy=main).allow
+    assert permission.decide_bash(f"cat {agent}/lessons/x.md", policy=main, run_dir=run,
+                                  defender_dir=dfn).allow
+    assert not permission.decide_bash(f"cat {other}/lessons/x.md", policy=main, run_dir=run,
+                                      defender_dir=dfn).allow
+
+
+def test_p1_the_product_tree_is_no_lesson_corpus_for_a_run(tmp_path):
+    """#1108 P4 P-1/O1 (old design D4: "`defender_dir`'s corpus shapes go once P4 lands"): a
+    run reads lessons from its own copy only, so a `lessons/` folder planted under the product
+    tree is NOT a readable corpus — by the typed read and by bash `cat` alike — while the same
+    name under the run's agent root is (the positive control on the same channel)."""
+    run, dfn, agent = _read_roots(tmp_path)
+    (dfn / "lessons").mkdir()
+    (dfn / "lessons" / "x.md").write_text("stale product lesson\n", encoding="utf-8")
+    main = _main_on(run, dfn, agent)
+    assert permission.decide_read(
+        agent / "lessons" / "x.md", run_dir=run, defender_dir=dfn, policy=main).allow
+    assert permission.decide_bash(f"cat {agent}/lessons/x.md", policy=main, run_dir=run,
+                                  defender_dir=dfn).allow
+    assert not permission.decide_read(
+        dfn / "lessons" / "x.md", run_dir=run, defender_dir=dfn, policy=main).allow
+    assert not permission.decide_bash(f"cat {dfn}/lessons/x.md", policy=main, run_dir=run,
+                                      defender_dir=dfn).allow
 
 
 @pytest.mark.parametrize("path", [
@@ -251,7 +302,7 @@ def test_read_allows_in_root_corpus_and_run(tmp_path):
 def test_read_denies_outside_roots(tmp_path, path):
     # Deny-by-default: a read outside {run_dir, defender_dir} fails closed regardless
     # of filename — the structural close for the cat-.env / basename / case gaps.
-    run, dfn = _read_roots(tmp_path)
+    run, dfn, _agent = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert not permission.decide_read(
         Path(path), run_dir=run, defender_dir=dfn, policy=main).allow, path
@@ -260,7 +311,7 @@ def test_read_denies_outside_roots(tmp_path, path):
 def test_read_traversal_escape_denied(tmp_path):
     # resolve() collapses `..`, so a path whose prefix is in-root but which escapes
     # the root fails the allowlist.
-    run, dfn = _read_roots(tmp_path)
+    run, dfn, _agent = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert not permission.decide_read(
         run / ".." / "outside.txt", run_dir=run, defender_dir=dfn, policy=main).allow
@@ -268,7 +319,7 @@ def test_read_traversal_escape_denied(tmp_path):
 
 @pytest.mark.parametrize("name", [".env", "credentials.txt", "ground_truth.yaml", "cases.json"])
 def test_read_denylist_is_belt_and_suspenders_inside_a_root(tmp_path, name):
-    run, dfn = _read_roots(tmp_path)
+    run, dfn, _agent = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert not permission.decide_read(
         run / name, run_dir=run, defender_dir=dfn, policy=main).allow, name
@@ -277,16 +328,16 @@ def test_read_denylist_is_belt_and_suspenders_inside_a_root(tmp_path, name):
 
 
 def test_read_ssh_dir_component_denied_inside_a_shape(tmp_path):
-    run, dfn = _read_roots(tmp_path)
-    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
+    run, dfn, agent = _read_roots(tmp_path)
+    main = _main_on(run, dfn, agent)
     assert not permission.decide_read(
-        dfn / "lessons" / ".ssh" / "id_rsa.md", run_dir=run, defender_dir=dfn, policy=main).allow
+        agent / "lessons" / ".ssh" / "id_rsa.md", run_dir=run, defender_dir=dfn, policy=main).allow
     assert permission.decide_read(          # positive control: same shape, no denied component
-        dfn / "lessons" / "auth" / "scope.md", run_dir=run, defender_dir=dfn, policy=main).allow
+        agent / "lessons" / "auth" / "scope.md", run_dir=run, defender_dir=dfn, policy=main).allow
 
 
 def test_read_main_loop_gather_raw_not_enumerated_gather_allowed(tmp_path):
-    run, dfn = _read_roots(tmp_path)
+    run, dfn, _agent = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     gather = compile_policy_for(T1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)
     raw = run / "gather_raw" / "l-001" / "0.json"
@@ -487,7 +538,7 @@ from defender.runtime.permission import AgentPolicy, Grant  # noqa: E402
 
 
 def test_policy_read_roots_extend_the_allowlist(tmp_path):
-    run, dfn = _read_roots(tmp_path)
+    run, dfn, _agent = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     extra = tmp_path / "learning_run" / "comparison"
     extra.mkdir(parents=True)
@@ -498,7 +549,7 @@ def test_policy_read_roots_extend_the_allowlist(tmp_path):
 
 
 def test_policy_read_roots_still_subject_to_denylist(tmp_path):
-    run, dfn = _read_roots(tmp_path)
+    run, dfn, _agent = _read_roots(tmp_path)
     extra = tmp_path / "learning_run"
     extra.mkdir(parents=True)
     pol = AgentPolicy(read_roots=(extra,))

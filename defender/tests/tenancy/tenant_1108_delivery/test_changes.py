@@ -91,6 +91,40 @@ def test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_fil
             assert git_bytes(clone, "cat-file", "blob", f"{sha}:{path}") == content
 
 
+def test_an_existing_lesson_rewritten_lf_to_crlf_with_the_same_text_is_a_change_of_those_bytes(repo):
+    """O-C/O-D (review R-4): the ChangeSet compares raw bytes, so a lane file the box rewrites
+    from LF to CRLF endings, its text otherwise unchanged, is a change carrying the CRLF bytes,
+    and the commit stores exactly those bytes."""
+    batch = delivery(repo, ForgeHTTP()).start_batch("crlfonly", lanes=LANES)
+    lane = batch.draft_root / "agent/lessons"
+    lesson = sorted(p for p in lane.rglob("*") if p.is_file())[0]
+    data = lesson.read_bytes()
+    assert b"\n" in data, f"precondition: {lesson} has a line ending to rewrite"
+    assert b"\r\n" not in data, f"precondition: {lesson} is not already CRLF"
+    crlf = data.replace(b"\n", b"\r\n")
+    lesson.write_bytes(crlf)
+    rel = lesson.relative_to(batch.draft_root).as_posix()
+    change_set = batch.change_set()
+    assert _changes(change_set) == {rel: crlf}, "an LF-to-CRLF rewrite is not a change of its bytes"
+    sha = batch.commit(change_set, "crlf only")
+    clone = repo[0].knowledge
+    assert _name_status(clone, sha) == {rel: "M"}
+    assert git_bytes(clone, "cat-file", "blob", f"{sha}:{rel}") == crlf
+
+
+def test_a_mode_only_edit_of_an_existing_lesson_is_no_change(repo):
+    """O-C/O-D (review R-4): the commit-maker stores plain files (mode 100644 whatever the box
+    set), so a chmod of an unchanged lane file, its bytes untouched, is no change at all."""
+    batch = delivery(repo, ForgeHTTP()).start_batch("modeonly", lanes=LANES)
+    lane = batch.draft_root / "agent/lessons"
+    lesson = sorted(p for p in lane.rglob("*") if p.is_file())[0]
+    data = lesson.read_bytes()
+    lesson.chmod(0o755)
+    assert lesson.stat().st_mode & 0o111, "precondition: the chmod took"
+    assert lesson.read_bytes() == data
+    assert _changes(batch.change_set()) == {}, "a mode-only edit became a change"
+
+
 @pytest.mark.parametrize("changer", sorted(_BYTE_CHANGERS))
 def test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say(repo, tmp_path, changer):
     """O-C: the commit-maker stores each changed file's bytes exactly as the box wrote them."""
@@ -188,6 +222,7 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
     blobs = agent_blobs(clone, base)
     for rel, data in blobs.items():
         assert plain_file(agent / rel, data), f"the reset left agent/{rel} other than git's blob"
+        assert os.lstat(agent / rel).st_nlink == 1, f"the reset left agent/{rel} hard-linked"
     assert odd_entries(agent) == []
     assert files_under(agent) == blobs
     assert _changes(batch.change_set()) == {}

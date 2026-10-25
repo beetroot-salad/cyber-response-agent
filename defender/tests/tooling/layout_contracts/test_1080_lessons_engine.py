@@ -168,10 +168,21 @@ def write_corpus(corpus: Path, lessons: Mapping[str, str]) -> Path:
     return corpus
 
 
+def agent_root(root: Path) -> Path:
+    """The agent root beside a code copy at `root` (`root/agent`, a run copy's `agent/` in shape):
+    what `DEFENDER_AGENT_DIR` names for that copy's shim. #1108 P4 (O1, O2): the code tree holds
+    no corpus; the engine reads `$DEFENDER_AGENT_DIR/lessons` (ASSUMED SEAM, S-G2)."""
+    return root / "agent"
+
+
+def corpus_of(root: Path) -> Path:
+    return agent_root(root) / "lessons"
+
+
 def tree_with(tmp: Path, name: str, *corpora: Mapping[str, str]) -> Path:
-    """A code copy at `tmp/name` whose `defender/lessons` holds the union of `corpora`."""
+    """A code copy at `tmp/name` whose agent root's `lessons/` holds the union of `corpora`."""
     root = code_tree(tmp / name)
-    write_corpus(root / "defender" / "lessons", {k: v for c in corpora for k, v in c.items()})
+    write_corpus(corpus_of(root), {k: v for c in corpora for k, v in c.items()})
     return root
 
 
@@ -216,7 +227,7 @@ def box_lane_env(root: Path, tmp: Path) -> dict[str, str]:
     the shims first on PATH, the root on PYTHONPATH, the in-box mark set."""
     from defender import box as box_mod
 
-    env = dict(box_mod._render_env({}, root))
+    env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(agent_root(root))}, root))
     env["PATH"] = _after_bin(env["PATH"], tmp)
     env["COLUMNS"] = "80"
     return env
@@ -226,7 +237,7 @@ def host_lane_env(root: Path, run_dir: Path, tmp: Path) -> dict[str, str]:
     """The host bash lane's environment (`run_common.run_env`, the real one)."""
     from defender import run_common
 
-    env = dict(run_common.run_env(root / "defender", run_dir))
+    env = dict(run_common.run_env(root / "defender", run_dir, tenant_agent=agent_root(root)))
     env["PATH"] = _after_bin(env["PATH"], tmp)
     env["COLUMNS"] = "80"
     env["LANG"] = "C.UTF-8"
@@ -243,8 +254,9 @@ def shim(root: Path, argv: Sequence[str], *, tmp: Path, cwd: Path | None = None,
     """`defender-lessons argv` — the copy's shim by path, or `program` (a name the lane's PATH
     resolves, or another path)."""
     prog = program or str(root / SHIM_REL)
-    return S.run([prog, *subst(argv, root, tmp)], cwd=cwd or tmp,
-                 env=env if env is not None else bare_env(tmp), timeout=60)
+    if env is None:
+        env = bare_env(tmp, DEFENDER_AGENT_DIR=str(agent_root(root)))
+    return S.run([prog, *subst(argv, root, tmp)], cwd=cwd or tmp, env=env, timeout=60)
 
 
 def run_all(jobs: Mapping[str, Callable[[], Any]]) -> dict[str, Any]:
@@ -314,8 +326,8 @@ SURVIVAL_ARGV: tuple[tuple[str, ...], ...] = (
     ("lateral",),
     ("--tags",),
     ("--tags", "attack_phase"),
-    ("--show", "defender/lessons/sshd-one.md"),
-    ("--show", "defender/lessons/sshd-one.md", "defender/lessons/falco-one.md"),
+    ("--show", "agent/lessons/sshd-one.md"),
+    ("--show", "agent/lessons/sshd-one.md", "agent/lessons/falco-one.md"),
     ("--help",),
 )
 
@@ -373,31 +385,34 @@ def observe_box_closure(tmp: Path) -> dict[str, Any]:
 S021_REAL_ARGV: tuple[tuple[str, ...], ...] = (
     ("--show", "<REPO>/knowledge/tenant-fixture/settings/systems/cmdb/config.env"),
     ("--show", "<REPO>/defender/pyproject.toml"),
-    ("--show", "defender/lessons/../pyproject.toml"),
-    ("--show", "defender/lessons/../../README.md"),
-    ("--show", "defender/lessons/../skills/invlang/SKILL.md"),
+    ("--show", "agent/lessons/../../defender/pyproject.toml"),
+    ("--show", "agent/lessons/../../README.md"),
+    ("--show", "agent/lessons/../../defender/skills/invlang/SKILL.md"),
 )
 #: s021 over a copy with links planted inside the corpus.
 S021_PLANTED_ARGV: tuple[tuple[str, ...], ...] = (
-    ("--show", "defender/lessons/link_out_rel.md"),
-    ("--show", "defender/lessons/link_out_abs.md"),
-    ("--show", "defender/lessons/linkdir/invlang/SKILL.md"),
-    ("--show", "defender/lessons/sshd-one.md"),
+    ("--show", "agent/lessons/link_out_rel.md"),
+    ("--show", "agent/lessons/link_out_abs.md"),
+    ("--show", "agent/lessons/linkdir/invlang/SKILL.md"),
+    ("--show", "agent/lessons/sshd-one.md"),
 )
 
 
 def plant_links(root: Path, tmp: Path) -> None:
     """RG6's planted entries inside a copy's corpus: links in and out, linked parents."""
-    corpus = root / "defender" / "lessons"
+    corpus = corpus_of(root)
     outside = tmp / "outside"
     write_corpus(outside, {"o.md": _lesson("o", desc="outside", sig="[o]", tel="[o]",
                                             phase="[o]")})
     (corpus / "link_in.md").symlink_to("sshd-one.md")
-    (corpus / "link_out_rel.md").symlink_to("../pyproject.toml")
+    (corpus / "link_out_rel.md").symlink_to("../../defender/pyproject.toml")
     (corpus / "link_out_abs.md").symlink_to(outside / "o.md")
-    (corpus / "linkdir").symlink_to("../skills", target_is_directory=True)
+    (corpus / "linkdir").symlink_to("../../defender/skills", target_is_directory=True)
     (corpus / "linkdir2").symlink_to(outside, target_is_directory=True)
     (root / "README.md").write_text("readme\n", encoding="utf-8")
+    # A sibling corpus beside the runtime one (U5 deleted `lessons-actor`, whose template this
+    # row once named): a file there exists and is still no lesson `--show` may print.
+    write_corpus(agent_root(root) / "lessons-questioner", {"_TEMPLATE.md": "---\nname: t\n---\n"})
 
 
 def real_subst(argv: Sequence[str]) -> list[str]:
@@ -410,8 +425,9 @@ def observe_s021(tmp: Path) -> dict[str, Any]:
     away = tmp / "elsewhere"
     away.mkdir()
     real = S.REPO_ROOT / SHIM_REL
+    agent_env = bare_env(tmp, DEFENDER_AGENT_DIR=str(agent_root(root)))
     jobs = {f"real {key(a)}": (lambda a=a: outcome(S.run([real, *real_subst(a)], cwd=away,
-                                                          env=bare_env(tmp)), tmp))
+                                                          env=agent_env), tmp))
             for a in S021_REAL_ARGV}
     jobs |= {f"copy {key(a)}": (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=away), tmp))
              for a in S021_PLANTED_ARGV}
@@ -435,7 +451,8 @@ def observe_s060(tmp: Path) -> dict[str, Any]:
         "copy-outside, tree variable unset": dict(program=str(copied_bin / "defender-lessons")),
         "link-outside, tree variable set": dict(
             program=str(linked_bin / "defender-lessons"),
-            env=bare_env(tmp, DEFENDER_DIR=str(root / "defender"))),
+            env=bare_env(tmp, DEFENDER_DIR=str(root / "defender"),
+                         DEFENDER_AGENT_DIR=str(agent_root(root)))),
         "host lane, search path": dict(program="defender-lessons", cwd=run_dir,
                                        env=host_lane_env(root, run_dir, tmp)),
         "box lane, search path": dict(program="defender-lessons", cwd=run_dir,
@@ -453,7 +470,8 @@ CORPUS_VARIANTS = ("fixed", "missing", "empty", "linked", "malformed")
 
 def variant_tree(tmp: Path, variant: str) -> Path:
     root = code_tree(tmp / f"tree-{variant}")
-    corpus = root / "defender" / "lessons"
+    agent_root(root).mkdir()
+    corpus = corpus_of(root)
     if variant == "missing":
         return root
     if variant == "empty":
@@ -527,7 +545,8 @@ def orient_once(root: Path, tmp: Path, label: str, sig: str | None,
     plant_alert(run_dir, {"rule": {"id": sig}} if sig else {})
     alert = RunPaths(run_dir).alert
     recorder = RecordingShim({"vocab": None, **spec})
-    text = orient.orientation(run_dir, root / "defender", alert, systems=[], shim=recorder)
+    text = orient.orientation(run_dir, root / "defender", alert, systems=[], shim=recorder,
+                              tenant_agent=agent_root(root))
     section = lessons_section(text)
     return {"section": None if section is None else norm(section, tmp),
             "calls": recorder.calls,
@@ -544,7 +563,7 @@ def observe_s062(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, Any
     tags = run_all({v: (lambda r=r: outcome(shim(r, ("--tags",), tmp=tmp, cwd=away), tmp))
                     for v, r in trees.items()})
     stripped = code_tree(tmp / "tree-no-shim")
-    write_corpus(stripped / "defender" / "lessons", FIXED_CORPUS)
+    write_corpus(corpus_of(stripped), FIXED_CORPUS)
     (stripped / SHIM_REL).unlink()
     rows = run_all({
         label: (lambda label=label, v=v, sig=sig, spec=spec, gone=gone: orient_once(
@@ -554,25 +573,25 @@ def observe_s062(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, Any
 
 
 S145_ARGV: tuple[tuple[str, ...], ...] = (
-    ("--show", "defender/lessons/out.md"),
-    ("--show", "defender/lessons/loop1.md"),
-    ("--show", "defender/lessons/self.md"),
-    ("--show", "defender/lessons/dangling.md"),
-    ("--show", "defender/lessons/subdir"),
-    ("--show", "defender/lessons/dir.md"),
-    ("--show", "defender/lessons"),
-    ("--show", "defender/lessons/nope.md"),
-    ("--show", "defender/lessons/nofm.md"),
-    ("--show", "defender/lessons/sshd-one.md", "defender/lessons/nope.md"),
-    ("--show", "defender/lessons/nope.md", "defender/lessons/sshd-one.md"),
-    ("--show", "defender/lessons/sshd-one.md", "defender/lessons/out.md"),
-    ("--show", "defender/lessons/sshd-one.md", "defender/lessons/loop1.md"),
+    ("--show", "agent/lessons/out.md"),
+    ("--show", "agent/lessons/loop1.md"),
+    ("--show", "agent/lessons/self.md"),
+    ("--show", "agent/lessons/dangling.md"),
+    ("--show", "agent/lessons/subdir"),
+    ("--show", "agent/lessons/dir.md"),
+    ("--show", "agent/lessons"),
+    ("--show", "agent/lessons/nope.md"),
+    ("--show", "agent/lessons/nofm.md"),
+    ("--show", "agent/lessons/sshd-one.md", "agent/lessons/nope.md"),
+    ("--show", "agent/lessons/nope.md", "agent/lessons/sshd-one.md"),
+    ("--show", "agent/lessons/sshd-one.md", "agent/lessons/out.md"),
+    ("--show", "agent/lessons/sshd-one.md", "agent/lessons/loop1.md"),
 )
 
 
 def observe_s145(tmp: Path) -> dict[str, Any]:
     root = tree_with(tmp, "tree", FIXED_CORPUS, {"nofm.md": MALFORMED_EXTRA["nofm.md"]})
-    corpus = root / "defender" / "lessons"
+    corpus = corpus_of(root)
     write_corpus(tmp / "outside", {"o.md": "---\nname: o\n---\n"})
     (corpus / "out.md").symlink_to(tmp / "outside" / "o.md")
     (corpus / "loop1.md").symlink_to("loop2.md")
@@ -591,8 +610,8 @@ def observe_s147(tmp: Path) -> dict[str, Any]:
     jobs = {f"shapes {key(a)}": (lambda a=a: outcome(shim(shapes, a, tmp=tmp, cwd=shapes), tmp))
             for a in (("--tags",), ("--tags", "source_signature"), ())}
     jobs |= {f"breaks {key(a)}": (lambda a=a: outcome(shim(breaks, a, tmp=tmp, cwd=breaks), tmp))
-             for a in ((), ("--show", "defender/lessons/break-tab.md",
-                            "defender/lessons/break-newline.md"),
+             for a in ((), ("--show", "agent/lessons/break-tab.md",
+                            "agent/lessons/break-newline.md"),
                        ("source_signature:.*tab",))}
     return run_all(jobs)
 
@@ -608,10 +627,10 @@ def frontier_block(corpus: Path, doc: str, *, top_k: int, fold: bool = False) ->
 
 def observe_s185(tmp: Path) -> dict[str, Any]:
     root = tree_with(tmp, "tree", META_CORPUS)
-    corpus = root / "defender" / "lessons"
+    corpus = corpus_of(root)
     argvs: list[tuple[str, ...]] = [("--tags",), (), (".*(?i)[a-z]+(",),
-                                    ("--show", "defender/lessons/meta-quotes.md",
-                                     "defender/lessons/meta-lead.md")]
+                                    ("--show", "agent/lessons/meta-quotes.md",
+                                     "agent/lessons/meta-lead.md")]
     sigs = [".*(?i)[a-z]+(", 'it\'s "quoted"', "a: b", "-rf", "\U0001f6a8-alert",
             _FOLD_LEAD_PREFIX]
     argvs += [(f"source_signature:.*{re.escape(s)}",) for s in sigs]
@@ -625,20 +644,20 @@ def observe_s185(tmp: Path) -> dict[str, Any]:
 
 #: The lanes' argv table: RG6's refusal table, the in-corpus spellings, and the flag allowlist.
 LANE_ARGV: tuple[tuple[str, ...], ...] = (
-    ("--show", "defender/lessons/sshd-one.md"),
-    ("--show", "<TREE>/defender/lessons/sshd-one.md"),
-    ("--show", "defender/lessons/link_in.md"),
-    ("--show", "defender/lessons/link_out_rel.md"),
-    ("--show", "defender/lessons/link_out_abs.md"),
-    ("--show", "defender/lessons/../pyproject.toml"),
-    ("--show", "defender/lessons/../../README.md"),
+    ("--show", "agent/lessons/sshd-one.md"),
+    ("--show", "<TREE>/agent/lessons/sshd-one.md"),
+    ("--show", "agent/lessons/link_in.md"),
+    ("--show", "agent/lessons/link_out_rel.md"),
+    ("--show", "agent/lessons/link_out_abs.md"),
+    ("--show", "agent/lessons/../../defender/pyproject.toml"),
+    ("--show", "agent/lessons/../../README.md"),
     ("--show", "<TREE>/defender/pyproject.toml"),
     ("--show", "/etc/passwd"),
-    ("--show", "defender/lessons/linkdir/invlang/SKILL.md"),
-    ("--show", "defender/lessons/linkdir2/o.md"),
-    ("--show", "defender/lessons-actor/_TEMPLATE.md"),
-    ("--show", "defender/lessons/no-such-lesson.md"),
-    ("--show", "defender/lessons/sshd-one.md", "/etc/passwd"),
+    ("--show", "agent/lessons/linkdir/invlang/SKILL.md"),
+    ("--show", "agent/lessons/linkdir2/o.md"),
+    ("--show", "agent/lessons-questioner/_TEMPLATE.md"),
+    ("--show", "agent/lessons/no-such-lesson.md"),
+    ("--show", "agent/lessons/sshd-one.md", "/etc/passwd"),
     ("--tags",),
     ("--tags", "telemetry_source"),
     ("--tags", "bogus"),
@@ -648,8 +667,8 @@ LANE_ARGV: tuple[tuple[str, ...], ...] = (
 )
 #: The corpus folder itself a link to a real folder elsewhere.
 LINKED_CORPUS_ARGV: tuple[tuple[str, ...], ...] = (
-    ("--show", "defender/lessons/sshd-one.md"),
-    ("--show", "defender/lessons/out.md"),
+    ("--show", "agent/lessons/sshd-one.md"),
+    ("--show", "agent/lessons/out.md"),
     ("--show", "<TMP>/corpus-sibling/x.md"),
 )
 
@@ -661,7 +680,8 @@ def lane_trees(tmp: Path) -> tuple[Path, Path]:
     real = write_corpus(tmp / "real-corpus", FIXED_CORPUS)
     write_corpus(tmp / "corpus-sibling", {"x.md": "---\nname: x\n---\n"})
     (real / "out.md").symlink_to(tmp / "corpus-sibling" / "x.md")
-    (linked / "defender" / "lessons").symlink_to(real, target_is_directory=True)
+    agent_root(linked).mkdir()
+    corpus_of(linked).symlink_to(real, target_is_directory=True)
     return root, linked
 
 
@@ -739,33 +759,48 @@ def plant_import(path: Path, stmt: str) -> None:
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def _first_real_lesson() -> Path:
-    names = sorted(p for p in S.LESSONS_CONTENT.glob("*.md") if not p.name.startswith("_"))
-    assert names, "the real corpus holds no lesson"
-    return names[0]
+def _run_copy_agent(tmp: Path) -> Path:
+    """A run copy's `agent/` (`<T>/run-knowledge/<run_id>/agent/`, r3 data model) holding the
+    committed fixture tenant's made-up agent content (decision 4) — never the product tree."""
+    from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
+
+    agent = tmp / "data" / "tenant" / "run-knowledge" / "run" / "agent"
+    shutil.copytree(FIXTURE_AGENT, agent, symlinks=True)
+    return agent
 
 
 def test_lessons_show_names_a_file_outside_the_corpus_after_the_engine_moved(tmp_path):
+    """#1108 P4 O2/O4 (was: the shim over the product tree's real corpus). The checkout's
+    `defender-lessons` reads the corpus of the agent root `DEFENDER_AGENT_DIR` names — the run
+    copy's `agent/` — not a corpus inside the code tree: `--show` names the run copy's file,
+    the listing names exactly the fixture's lessons (a lab lesson from the product tree in the
+    listing is the violation), and a code copy holding no corpus answers `--tags` the same.
+    ASSUMED SEAM (S-G2): the engine resolves `$DEFENDER_AGENT_DIR/lessons` on every lane."""
     engine_home()
     assert observe_s021(tmp_path) == golden("s021")
 
+    agent = _run_copy_agent(tmp_path)
+    corpus = agent / "lessons"
+    expected = sorted(p.name for p in corpus.glob("*.md") if not p.name.startswith("_"))
+    assert expected, "the committed fixture tenant holds no lesson"
     real_shim = S.REPO_ROOT / SHIM_REL
-    env = bare_env(tmp_path)
-    lesson = _first_real_lesson()
-    shown = S.run([real_shim, "--show", f"defender/lessons/{lesson.name}"], cwd=tmp_path,
-                  env=env)
+    env = bare_env(tmp_path, DEFENDER_AGENT_DIR=str(agent))
+
+    lesson = corpus / expected[0]
+    shown = S.run([real_shim, "--show", str(lesson)], cwd=tmp_path, env=env)
     assert shown.returncode == 0, shown.stderr.decode()
     assert shown.stdout.decode().splitlines()[0] == f"--- {lesson.resolve()}"
 
     listing = S.run([real_shim], cwd=tmp_path, env=env)
     paths = [ln.split("\t", 1)[0] for ln in listing.stdout.decode().splitlines()]
     assert paths, listing.stderr.decode()
-    assert all(Path(p).parent == S.LESSONS_CONTENT.resolve() for p in paths), paths
+    assert all(Path(p).parent == corpus.resolve() for p in paths), paths
+    assert sorted(Path(p).name for p in paths) == expected, paths
 
-    copy = code_tree(tmp_path / "real-content")
-    shutil.copytree(S.LESSONS_CONTENT, copy / "defender" / "lessons", symlinks=True)
+    copy = code_tree(tmp_path / "no-corpus")
+    assert not (copy / "defender" / "lessons").exists()
     real_tags = S.run([real_shim, "--tags"], cwd=tmp_path, env=env)
-    copy_tags = shim(copy, ("--tags",), tmp=tmp_path)
+    copy_tags = shim(copy, ("--tags",), tmp=tmp_path, env=env)
     assert real_tags.returncode == 0, real_tags.stderr.decode()
     assert real_tags.stdout.strip()
     assert real_tags.stdout == copy_tags.stdout
@@ -940,7 +975,7 @@ def observe_hostile(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, 
     setenv("PATH", f"{interp_bin(tmp)}{os.pathsep}/usr/bin{os.pathsep}/bin")
     root = tree_with(tmp, "tree", FIXED_CORPUS, HOSTILE_CORPUS)
     argvs = [("--tags",), ("--tags", "source_signature"), ("--tags", "telemetry_source"),
-             ("--tags", "attack_phase"), (), ("--show", "defender/lessons/hostile-block.md"),
+             ("--tags", "attack_phase"), (), ("--show", "agent/lessons/hostile-block.md"),
              *((pattern,) for pattern, _ in HOSTILE_SEARCHES)]
     out = run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
                    for a in argvs})
@@ -961,10 +996,10 @@ def test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_ta
                                                                    + len(HOSTILE_CORPUS) - 1), listing
     assert "name lesson" not in listing, listing
     assert "hostile-name-sig" not in tags, tags
-    shown = seen[key(("--show", "defender/lessons/hostile-block.md"))]
+    shown = seen[key(("--show", "agent/lessons/hostile-block.md"))]
     assert shown["rc"] == 0, shown
     assert shown["out"] == (
-        "--- <TMP>/tree/defender/lessons/hostile-block.md\n<run-<SALT>-untrusted>\n"
+        "--- <TMP>/tree/agent/lessons/hostile-block.md\n<run-<SALT>-untrusted>\n"
         + HOSTILE_CORPUS["hostile-block.md"].split("---\n")[1].rstrip("\n")
         + "\n</run-<SALT>-untrusted>\n"), shown["out"]
     for pattern, want in HOSTILE_SEARCHES:

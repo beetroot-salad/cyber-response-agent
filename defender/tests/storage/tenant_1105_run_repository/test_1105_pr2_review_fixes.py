@@ -292,32 +292,6 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
         assert not P.still_queued(paths, case_id)
 
 
-class _Branch:
-    """`AuthorBranch`'s seam for one tick, its worktree the given real git tree."""
-
-    branch_prefix = "lead-author/"
-
-    def __init__(self, worktree: Path) -> None:
-        self.worktree = worktree
-        self.events: list[str] = []
-
-    def branch_name(self, batch_id: str) -> str:
-        return f"{self.branch_prefix}{batch_id}"
-
-    def open_pr_exists(self) -> bool:
-        return False
-
-    def start_batch(self, _batch_id: str) -> Path:
-        self.events.append("start")
-        return self.worktree
-
-    def finish_batch(self, _batch_id: str, _wt: Path) -> None:
-        self.events.append("finish")
-
-    def cleanup(self, _wt: Path) -> None:
-        self.events.append("cleanup")
-
-
 class _Box:
     def __init__(self) -> None:
         self.started: list[str] = []
@@ -327,7 +301,28 @@ class _Box:
         return SimpleNamespace(name=request.name, sandboxed=False)
 
 
-def _tick(paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> int:
+@pytest.fixture
+def published(tmp_path, data_root):
+    """The fixture tenant published for real, its forge bound: #1108 P4's lead-author drain
+    batches into the tenant repo (flow 4), so its ticks run tenant-selected over it."""
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
+
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        yield t
+
+
+def _tenant_paths(t: Any, tmp_path: Path) -> Any:
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
+
+    paths = drain_paths(t, product_repo(tmp_path))
+    Path(location_path(paths.state_root)).mkdir(parents=True, exist_ok=True)
+    return paths
+
+
+def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> int:
+    """One REAL `lead_author_drain` tick over the tenant path (assumed seams, #1108 P4: the
+    tenant forge fake's client and an issuer-fake identity; `branch=`/`scrub=` are gone)."""
     from defender.learning.core import drains
 
     def run_pitfalls(_wt_paths: Any, _state: Any, **_kw: Any) -> int:
@@ -336,15 +331,17 @@ def _tick(paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> int:
 
     return drains.lead_author_drain(
         paths, run_lead_author=lane, run_pitfalls=run_pitfalls,
-        branch=_Branch(Path(paths.repo_root)), start_box=box.start,
-        stop_box=lambda *_a, **_k: None, scrub=lambda *_a, **_k: None)
+        client=t.forge.client, identity=t.vault.identity(), start_box=box.start,
+        stop_box=lambda *_a, **_k: None)
 
 
-def test_c_a_pitfalls_only_tick_needs_no_data_root(tmp_path, monkeypatch):
+def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypatch):
+    """#1105 PR 2 C-a (tenant path, #1108 P4): a tick with only pitfalls work reads no ambient
+    data root: with `DEFENDER_DATA_ROOT` unset it still starts its box and reaches pitfalls."""
     from defender.learning.core import persist
     from defender.tests.support.learning.core._state1135 import state_for_paths
 
-    paths = P.loop_paths(tmp_path)
+    paths = _tenant_paths(published, tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls([{"pitfall_id": "r:0", "system": "elastic"}],
                             state=state_for_paths(paths))
@@ -352,34 +349,31 @@ def test_c_a_pitfalls_only_tick_needs_no_data_root(tmp_path, monkeypatch):
     pitfalls: list[str] = []
     box = _Box()
     lane = P.Lane()
-    rc = _tick(paths, lane=lane, pitfalls=pitfalls, box=box)
+    rc = _tick(published, paths, lane=lane, pitfalls=pitfalls, box=box)
     assert rc == 0
     assert box.started, "the tick never started its box"
     assert pitfalls == ["pitfalls"], "the pitfalls step was not reached"
     assert lane.handed == []
 
 
-def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, monkeypatch):
-    from defender.learning.core.config import FatalConfigError
-
-    t = _good(tmp_path, RID_R1)
-    root = os.environ[P.DATA_ROOT_ENV]
-    paths = P.loop_paths(tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+def test_c_a_tenant_tick_serves_its_rows_from_its_own_root_without_the_env(
+        published, tmp_path, monkeypatch):
+    """#1105 PR 2 C-a (tenant path, #1108 P4): every drain is tenant-selected (`--tenant T`), so
+    a queued row's run is rehydrated under the SELECTED tenant's own data root, never the
+    ambient `DEFENDER_DATA_ROOT`: with it unset, the row is served. (The scratch-path refusal
+    this case pinned before P4 — rows and no configured data root — cannot arise: a P4 drain
+    has no scratch paths.)"""
+    t = published
+    H.make_run(H.runs_folder(t.tenant), RID_R1)
+    paths = _tenant_paths(t, tmp_path)
+    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": t.tenant_id, "run_id": RID_R1})
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     box = _Box()
     lane = P.Lane()
-    err = H.raised(_tick, paths, lane=lane, pitfalls=[], box=box)
-    assert isinstance(err, FatalConfigError), f"the tick did not refuse: {err!r}"
-    assert isinstance(err.__cause__, _tenant.TenantRefused), err.__cause__
-    assert box.started == [], "a box was started for a tick that could not serve its rows"
-    assert _queued(paths, "case-t") is not None, "the row left the queue"
-    assert lane.handed == []
-
-    monkeypatch.setenv(P.DATA_ROOT_ENV, root)
-    assert _tick(paths, lane=lane, pitfalls=[], box=box) == 0
-    assert box.started, "the control never started its box"
-    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1]
+    assert _tick(t, paths, lane=lane, pitfalls=[], box=box) == 0
+    assert box.started, "the tick never started its box"
+    assert lane.run_dirs == [Path(location_path(t.tenant.runs)) / RID_R1]
+    assert _queued(paths, "case-t") is None, "the served row was left on the queue"
 
 
 @contextmanager

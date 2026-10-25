@@ -2,12 +2,9 @@
   "//": "lint_unguarded_tree_write baseline — a shared-tree write reachable while a box is alive that bypasses #771's alias-refusing primitives (write_guarded/guarded_mkdir/open_guarded). Fingerprint is file:function, file relative to the scan scope. Modules named in the writer census (LINT_HARD_GATED_MODULES, derived from _spec771.py's CENSUS) are HARD-gated — a finding there fails regardless of the baseline. Regenerate: python tooling/lint/lint_unguarded_tree_write.py --update-baseline.",
   "entries": {
     "_flock.py:open_lock": "intentional: mkdir of a LOCK file's parent, not a shared-tree artifact. Replaces the three baselined copies in learning/author/shared.py.",
-    "learning/author/branch.py:revert_lesson_pr": "",
-    "learning/author/branch.py:start_batch": "",
     "learning/author/lessons/run.py:invoke_agent": "intentional (#1134 N-e): mkdir of the host-side `_pending` queue dir, outside every box mount; the corpus itself is written only through its held mount",
     "learning/author/shared.py:assert_clean_corpus_dir": "false positive (#1134): `corpus.mkdir(\".\")` is `Held.mkdir` on the corpus's held mount (descriptor-rooted, follows nothing); the lint matches `.mkdir` by name. The D6 census proves the receiver a `Held`",
     "learning/core/persist.py:append_pitfalls": "",
-    "learning/core/quarantine.py:preserve_tainted_tree": "",
     "learning/frontend/build.py:main": "",
     "learning/frontend/serialize.py:main": "",
     "learning/lead_repository.py:stage_tables": "",

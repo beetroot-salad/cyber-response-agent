@@ -282,7 +282,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
 def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call(
     tmp_path: Path,
 ) -> None:
-    """The offline reader's rendered page shows the ORIGINAL JSON of a substituted call, beside
+    """The offline reader's rendered page shows the original JSON of a substituted call, beside
     the view — it does not merely survive the new field."""
     import defender.presentation.visualize_data  # noqa: F401 — enter the cycle at the
     # other end first: importing `visualize_messages` (and therefore `visualize_run`, which

@@ -27,9 +27,8 @@ fed them. The `judge` role went with them and then came back under a different
 owner (#1008): it now belongs to the **family judge** described below, which is
 a live stage, not to the pipeline judge described above, which is gone.
 
-One exception: `defender/lessons-actor/` and `defender/lessons-environment/`
-are **left in place as frozen archives** — nothing produces or reads them, and
-the posture view marks them retired rather than hiding them.
+The two corpora those curators fed, the actor-side and environment-side ones, were left as
+frozen archives for a while and then deleted outright (#1108); nothing produces or reads them.
 
 What runs now branches a **real** investigation instead of inventing one.
 
@@ -79,11 +78,12 @@ episode's analog of a single run's `runtime.html`.
 ## How lessons feed back
 
 Unchanged by the cutover, and it is the joint the whole thing swings on. The
-runtime-facing output is the `defender/lessons/` corpus. Once the findings
+runtime-facing output is the tenant's `agent/lessons/` corpus, in its knowledge tree (the tenant
+repo's `agent/`; a run reads its own copy at `/agent/lessons/`). Once the findings
 queue holds `LEARNING_AUTHOR_THRESHOLD` (default **5**) rows it could
 AUTHOR — a row already stamped `held_reason` stays queued and counts for
 nothing (#881) — the lessons curator folds the queued rows into
-`defender/lessons/*.md`:
+`agent/lessons/*.md`, as a pull request on the tenant's repo:
 
 ```
 python3 defender/learning/loop.py --author-drain
@@ -96,12 +96,12 @@ is open in #397.) Only `direction: family` rows are authored; any other row is
 held naming its direction.
 
 The same drain tick runs a second curator. The **questioner curator**
-(`author/questioner/`) folds the world findings into
-`defender/lessons-questioner/`, which the questioner reads back when it authors
+(`author/questioner/`) folds the world findings into the tenant's
+`lessons-questioner/`, which the questioner reads back when it authors
 the next family. That corpus has only an idempotency gate.
-Both curators share one worktree, one commit and one PR per batch.
+Both curators share one draft, one commit and one pull request per batch.
 
-At **PLAN** time the runtime agent enumerates `defender/lessons/*.md`, reads
+At **PLAN** time the runtime agent enumerates `/agent/lessons/*.md`, reads
 each file's frontmatter `description:`, and reads the body of any lesson that
 looks relevant to the current alert shape — before writing its `:H`/`:L`
 blocks. Bodies teach what to *check next time*, not what conclusion to reach.
@@ -113,11 +113,11 @@ gather query catalog and the per-system skills, and opens its own PR.
 ## Two corpora, two queues
 
 The old loop ran two directions and fed three corpora — defender findings
-into `lessons/`, plus actor and environment observations into their own.
-Those two lost their producers at the cutover and are frozen (see above).
+into `agent/lessons/`, plus actor and environment observations into their own.
+Those two lost their producers at the cutover and are gone (see above).
 What is live since #1007 is partitioned by *subject*, not by direction:
-`defender/lessons/`, fed by `_pending/findings.jsonl` and read by the runtime
-agent, and `defender/lessons-questioner/`, fed by
+`agent/lessons/`, fed by `_pending/findings.jsonl` and read by the runtime
+agent, and `lessons-questioner/`, fed by
 `_pending/questioner_findings.jsonl` and read by the questioner. One drain
 tick serves both.
 

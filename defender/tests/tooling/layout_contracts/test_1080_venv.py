@@ -58,8 +58,10 @@ def helper_home() -> str:
 
 
 def code_tree(root: Path) -> Path:
-    """`root/defender`: a copy of this checkout's `defender/` code, no venv, no lesson corpus
-    (`ONE_LESSON` planted). Returns the copy's checkout root."""
+    """`root/defender`: a copy of this checkout's `defender/` code, no venv, no lesson corpus;
+    `ONE_LESSON` is planted in the agent root beside it (`agent_root(root)`, #1108 P4 O1/O2: the
+    lessons shim reads `$DEFENDER_AGENT_DIR/lessons`, never the code tree). Returns the copy's
+    checkout root."""
     src = S.DEFENDER.resolve()
 
     def _ignore(d: str, names: list[str]) -> set[str]:
@@ -69,10 +71,16 @@ def code_tree(root: Path) -> Path:
         return skip
 
     shutil.copytree(src, root / "defender", ignore=_ignore, symlinks=True)
-    corpus = root / "defender" / "lessons"
-    corpus.mkdir()
+    corpus = agent_root(root) / "lessons"
+    corpus.mkdir(parents=True)
     (corpus / "one.md").write_text(ONE_LESSON, encoding="utf-8")
     return root
+
+
+def agent_root(root: Path) -> Path:
+    """The agent root beside a code copy at `root` (`root/agent`): what `DEFENDER_AGENT_DIR`
+    names for that copy's lessons shim (as `test_1080_lessons_engine.agent_root`)."""
+    return root / "agent"
 
 
 def recorder(path: Path, label: str, *, mode: int = 0o755) -> Path:
@@ -266,7 +274,7 @@ def observe_s058(tmp: Path) -> dict[str, Any]:
     (image_bin / "python3").write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
                                        encoding="utf-8")
     (image_bin / "python3").chmod(0o755)
-    box_env = dict(box_mod._render_env({}, root))
+    box_env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(agent_root(root))}, root))
     head, _, tail = box_env["PATH"].partition(os.pathsep)
     box_env["PATH"] = os.pathsep.join((head, str(image_bin), tail))
     host_env = {k: v for k, v in box_env.items() if k != "DEFENDER_BOX"}
@@ -313,9 +321,12 @@ def start_log(tmp: Path, name: str) -> tuple[Path, dict[str, str]]:
 
 
 def started(interp: Path | str | None, script: Path, args: Sequence[str], tmp: Path, name: str,
-            ) -> dict[str, Any]:
-    """`script` started by `interp` (`None`: run directly, as a shim is) with the start hook."""
+            *, agent: Path | None = None) -> dict[str, Any]:
+    """`script` started by `interp` (`None`: run directly, as a shim is) with the start hook;
+    `agent` is the agent root a lessons shim is handed (`DEFENDER_AGENT_DIR`)."""
     log, env = start_log(tmp, name)
+    if agent is not None:
+        env["DEFENDER_AGENT_DIR"] = str(agent)
     proc = S.run([*([interp] if interp is not None else []), script, *args], cwd=tmp, env=env,
                  timeout=90)
     starts = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
@@ -345,7 +356,8 @@ def observe_s124(tmp: Path) -> dict[str, Any]:
         make(root / "defender")
         jobs[f"lessons shim, {shape}"] = (
             lambda root=root, label=f"lessons shim {s}": started(
-                None, root / LESSONS_SHIM, SETTLE_ARGS["lessons shim"], tmp, label))
+                None, root / LESSONS_SHIM, SETTLE_ARGS["lessons shim"], tmp, label,
+                agent=agent_root(root)))
     root = tree(tmp, "tree-spellings")
     venv_py = link_venv(root / "defender")
     (tmp / "tree-spellings-link").symlink_to(root, target_is_directory=True)
@@ -428,7 +440,7 @@ def observe_s206(tmp: Path) -> dict[str, Any]:
     u = users()
     return run_all({
         "lessons shim": lambda: started(None, root / LESSONS_SHIM, ("--tags",), tmp,
-                                        "lessons shim"),
+                                        "lessons shim", agent=agent_root(root)),
         "frontend serializer": lambda: started(base_interpreter(),
                                                root / u["frontend serializer"], ("--stdout",),
                                                tmp, "frontend serializer"),

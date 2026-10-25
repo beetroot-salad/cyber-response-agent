@@ -19,6 +19,7 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
 
 TOKEN_B = T.fixture_world_id("b")
@@ -34,7 +35,8 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def _run():
-    return T.mod("run")
+    # #1108 P4 (OD14, O11): run.main handed the in-process launch-time publish.
+    return RunWithPublish(T.mod("run"))
 
 
 def _no_preflight(*_args, **_kw) -> int:

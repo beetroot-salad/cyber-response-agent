@@ -366,7 +366,6 @@ def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
     [
         "docs/archive/spec-graphs/archive/575-pre-graph/brief.md",
         "defender/tests/fixtures/e2e/golden-x/investigation.md",
-        "defender/lessons-environment/l-01.md",
         "docs/design.md",
     ],
 )

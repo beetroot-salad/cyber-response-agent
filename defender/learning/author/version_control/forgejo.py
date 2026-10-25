@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 if TYPE_CHECKING:
     import httpx
 
-from .auth import ForgejoIdentity
+from .auth import ForgeCredential
 
 
 class ForgeError(Exception):
@@ -176,7 +176,7 @@ class ForgejoForge:
     """Host-only Forgejo client; importing the legacy forge needs no HTTP stack."""
 
     def __init__(
-        self, *, origin: str, identity: ForgejoIdentity, client: httpx.Client
+        self, *, origin: str, identity: ForgeCredential, client: httpx.Client
     ) -> None:
         self.address = ForgeAddress.parse(origin)
         self._identity = identity
@@ -282,9 +282,6 @@ class ForgejoForge:
         return [
             row for row in self._open() if row["headRefName"].startswith(head_prefix)
         ]
-
-    def list_prs_for_head(self, head: str) -> list[dict]:
-        return [row for row in self._open() if row["headRefName"] == head]
 
     def pull_requests(self) -> list[PullRequest]:
         """Every PR of this repository's own, open, merged or closed (a `state=all` listing),

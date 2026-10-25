@@ -51,14 +51,16 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
 
 def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     """A gather registry whose `tacit-knowledge.lookup` IS the shipped adapter's, repointed at
-    the fixture tree under `root` and at `AS_OF`."""
+    the fixture tree under `root` and at `AS_OF`. #1108 P4 (O1, O4): the registry is the run's
+    agent knowledge, so `root` is handed as the run tenant's agent root (`RunTenant.agent`),
+    not as `defender_dir`."""
     from defender.runtime.verbs import VerbContext, declared_params
     from defender.integrations import tacit_knowledge_adapter
 
     def lookup(ctx: VerbContext, *, actor: str, host: str, pattern: str) -> dict:
         rec.record(LOOKUP, ctx, {"actor": actor, "host": host, "pattern": pattern})
         return tacit_knowledge_adapter.lookup(
-            replace(ctx, defender_dir=root, as_of=AS_OF),
+            replace(ctx, tenant=replace(ctx.tenant, agent_root=root), as_of=AS_OF),
             actor=actor, host=host, pattern=pattern,
         )
 

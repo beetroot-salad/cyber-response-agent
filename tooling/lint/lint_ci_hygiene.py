@@ -55,9 +55,8 @@ EXCLUDED_PREFIXES = (
     "defender/__pycache__/",
     "playground-v2/examples/alerts/",
     "defender/tests/",
-    "defender/lessons/",
-    "defender/lessons-actor/",
-    "defender/lessons-questioner/",
+    # No tenant-knowledge carve-out (#1108 P4): lessons, system skills and query templates live
+    # in each tenant's own repo, outside this tree.
     "defender/docs/",                                  # POC design notes
     "defender/integrations/",                         # per-vendor adapters
 )

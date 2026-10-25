@@ -235,7 +235,8 @@ Example B shows a single-fact lead (CMDB lookup); when adding an IAM
 check, that's a second `:L` row dispatched in parallel.
 
 **Lessons.** The learning loop builds up a corpus of pitfall lessons
-under `defender/lessons/` — each is a markdown file with a freeform
+under `/agent/lessons/` (your tenant's knowledge tree, `$DEFENDER_AGENT_DIR`) — each is a
+markdown file with a freeform
 pitfall body and frontmatter carrying a one-line `description` plus three
 retrieval dimensions (inline lists):
 
@@ -412,7 +413,7 @@ not assigning one; the `:L` set is append-only, so a retry of a lead is a
 
 The tool writes the leads-table row
 `{run_dir}/gather_raw/{lead_id}.lead.json`, looks up
-`defender/skills/{system}/SKILL.md`'s frontmatter `description:` and hands
+`/agent/skills/{system}/SKILL.md`'s frontmatter `description:` and hands
 it to the subagent (to confirm relevance, then Read the full SKILL body),
 and runs the nested gather agent. Its returned summary is the only thing
 that enters your context — the raw payloads stay in the queries table.
@@ -424,7 +425,7 @@ bodies missing a time-range filter), so the lighter model carries the
 load without losing rigor.
 
 Gather picks a query template from
-`defender/skills/gather/queries/{system}/`, or coins a measurement id and
+`/agent/skills/gather/queries/{system}/`, or coins a measurement id and
 writes the query itself. Gather returns: summary of observations + the
 `queries[]` it ran (id + bound params). Those `queries[]` — addressed
 by `(lead_id, seq)` in the queries table — are the authoritative record
@@ -615,7 +616,7 @@ Loaded on demand:
   load when authoring `investigation.md`.
 - `defender/skills/gather/SKILL.md` — the gather subagent reads this
   itself when dispatched; you do not need to load it.
-- `defender/skills/{system}/SKILL.md` — per-system **visibility**
+- `/agent/skills/{system}/SKILL.md` — per-system **visibility**
   reference: what data the system holds and what it can/can't answer.
   The reachable systems are already listed in the **Orientation → Workspace
   block** of your first message — don't re-enumerate them; just Read the

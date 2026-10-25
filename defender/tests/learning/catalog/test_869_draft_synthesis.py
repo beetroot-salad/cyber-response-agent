@@ -10,19 +10,16 @@ from defender.learning.leads.draft_synthesis import (
     synthesize_drafts,
 )
 from defender.learning.leads.lead_extraction import ExecutedLead
-from defender.learning.core.config import LoopPaths
 from defender.tests.support.runtime.engine._declared869 import (
-    SKILLS_REL,
     LeadAuthorSpawn,
-    declared_systems,
-    git,
     log_lines_naming,
     loop_log,
-    seed_tree,
     write,
+    write_adapter,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.tests.support.learning.curation._lead_author_1134 import drafts_under, lead_deps, skills_view
+from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.learning.curation._lead_author_1134 import drafts_under, skills_view
 from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of
 
 DECLARED = frozenset({"elastic"})
@@ -83,23 +80,38 @@ def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
 def test_discover_system_drafts_hands_out_no_undeclared_directory(
     tmp_path, monkeypatch, capsys,
 ):
+    """#869 M4 site 4: discovery over the batch draft hands out no undeclared directory, says so
+    in the log, and the lane hands the agent only the declared draft (#1108 P4: draft lane)."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
-                     catalog=("elastic",), non_systems=("gather",))
-    write(repo / SKILLS_REL / "elastic" / "_draft" / "lift-me.md",
-          "---\nid: elastic.lift-me\nstatus: draft\n---\n\n## Goal\n\nx\n")
-    write(repo / SKILLS_REL / "gather" / "_draft" / "phantom.md",
-          "---\nid: gather.phantom\nstatus: draft\n---\n\n## Goal\n\nx\n")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "a declared draft and an undeclared one")
-
-    systems = declared_systems(repo)
+    product = tmp_path / "product"
+    write_adapter(product, "elastic")
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files={
+        "skills/elastic/execution.md": "# execution\n",
+        "skills/gather/SKILL.md": "---\nname: defender-gather\n---\n# gather\n",
+        "skills/gather/queries/elastic/auth-events.md":
+            "---\nid: elastic.auth-events\nstatus: established\n---\n\n## Goal\n\nprobe\n",
+        "skills/elastic/_draft/lift-me.md":
+            "---\nid: elastic.lift-me\nstatus: draft\n---\n\n## Goal\n\nx\n",
+        "skills/gather/_draft/phantom.md":
+            "---\nid: gather.phantom\nstatus: draft\n---\n\n## Goal\n\nx\n",
+    })
+    skills = lane.skills_dir
+    paths = lane.paths
+    spawn = LeadAuthorSpawn()
+    # ASSUMED SEAM (S-H): `batch=`; the deps' declared set is the product's adapters joined with
+    # the draft's committed markers (gap: r3 does not spell the marker half over a draft).
+    deps = dataclasses.replace(
+        lead_author.build_lead_author_deps(
+            paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch),
+        invoke_agent=spawn, extract=lambda _rd: ([], []),
+    )
+    systems = deps.systems
     assert "gather" not in systems
     assert "elastic" in systems
 
     capsys.readouterr()
     found = lead_author.discover_system_drafts(
-        skills=skills_view(repo / SKILLS_REL), where=repo / SKILLS_REL, systems=systems)
+        skills=skills_view(skills), where=skills, systems=systems)
     assert [p.name for p in found] == ["lift-me.md"]
 
     assert log_lines_naming(loop_log(capsys), repr("gather")), (
@@ -109,20 +121,13 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     # The control on the same address: declare it, and the same walk says nothing.
     capsys.readouterr()
     lead_author.discover_system_drafts(
-        skills=skills_view(repo / SKILLS_REL), where=repo / SKILLS_REL,
-        systems=systems | {"gather"})
+        skills=skills_view(skills), where=skills, systems=systems | {"gather"})
     assert log_lines_naming(loop_log(capsys), repr("gather")) == [], (
         "a line that fires on a walk with nothing to skip reports nothing"
     )
 
     # And through the lane, so the drive edge is exercised rather than inspected: the pending
     # drafts the agent is handed never name the undeclared directory.
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    spawn = LeadAuthorSpawn()
-    deps = dataclasses.replace(
-        lead_deps(paths),
-        invoke_agent=spawn, extract=lambda _rd: ([], []),
-    )
     run_dir = curation_run_dir("run-x")
     (run_dir / "gather_raw").mkdir()
     lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths, deps=deps)

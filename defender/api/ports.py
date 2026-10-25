@@ -86,6 +86,14 @@ class AlertsRepository(Protocol):
 
 
 class InvestigationsRepository(Protocol):
+    """An investigation's `knowledge` is its run's HOST-held knowledge record (beside the run
+    dir, never the box-writable provenance stamp), mapped `fresh` -> `current`, `stale` ->
+    `stale` with its kind, `pinned` -> `pinned`, the commit carried and the publish's raw reason
+    dropped. Null when no record should exist: no run yet, or a run from before the record (its
+    stamp names no knowledge source). A record that is missing while the stamp names a source,
+    or that does not parse, is `{status: stale, stale_kind: operator, commit: null}` — never
+    claimed current (#1108 P4, OD22')."""
+
     def list_investigations(
         self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:

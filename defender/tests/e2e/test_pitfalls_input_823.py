@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.shared._pre_p4_shipped import CATALOG, SHIPPED_AGENT
 from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender._io import read_jsonl_rows
@@ -39,7 +40,11 @@ from defender.tests.e2e.test_query_tool_611 import (
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
 from defender.runtime.record_query import SHIM_COMMAND_MAX_CHARS
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
-from defender.tests.support.learning.curation._lead_author_1134 import repo_skills  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view  # noqa: E402
+
+# The handoff's skills root is the one the catalog was read from (the shipped fixture's), so an
+# executed template's path is under it.
+SHIPPED_SKILLS = SHIPPED_AGENT / "skills"
 
 pytestmark = pytest.mark.e2e
 
@@ -128,7 +133,7 @@ class _Res:
         if query_id is not None:
             leads = [lead for lead in leads if lead.query_id == query_id]
             assert leads, f"no lead carries {query_id!r}, so the routing claim is vacuous"
-        catalog = lead_neighbors.load_catalog(None)
+        catalog = lead_neighbors.load_catalog(CATALOG)
         by_id = {t.id for t in catalog}
         pitfalls = collect_general_failures(leads, self.run_dir, catalog=catalog)
         drafts = [
@@ -137,7 +142,8 @@ class _Res:
                 lead.query_id, lead.verb, by_id, row_system=lead.system)
             is not None
         ]
-        handoff = build_handoff(self.run_dir, leads, **repo_skills(), catalog=catalog)
+        handoff = build_handoff(self.run_dir, leads, skills=skills_view(SHIPPED_SKILLS), where=SHIPPED_SKILLS,
+                                catalog=catalog)
         return len(pitfalls), len(drafts), len(handoff)
 
 
@@ -302,7 +308,7 @@ def test_shim_row_reaches_the_curator_and_nothing_else(failing_reducer_run):
     assert SQL in rec["executed_query"]
     assert "unnest" in rec["stderr_digest"]
 
-    by_id = {t.id for t in lead_neighbors.load_catalog(None)}
+    by_id = {t.id for t in lead_neighbors.load_catalog(CATALOG)}
     shim_leads = [lead for lead in r.leads() if lead.query_id == BASH_SHIM_QUERY_ID]
     assert len(shim_leads) == 1, "the shim row was dropped before extraction (missing payload?)"
     assert draft_synthesis._draft_candidate_segments(
@@ -408,7 +414,7 @@ def test_shim_row_payload_is_not_the_untrusted_stdout(tmp_path):
 
 
 def test_catalog_template_failures_still_route_to_the_lead_author(tmp_path):
-    catalog = lead_neighbors.load_catalog(None)
+    catalog = lead_neighbors.load_catalog(CATALOG)
     established = sorted(t.id for t in catalog if t.id.startswith("elastic."))[0]
     rec = VerbRecorder()
     r = _run(

@@ -13,7 +13,13 @@ from defender.learning.leads import lead_neighbors as ln
 
 _DEFENDER = Path(__file__).resolve().parents[3]
 _ROOT = _DEFENDER.parent
-_QUERIES = _DEFENDER / "skills" / "gather" / "queries"
+#: The query catalog the placeholder<->param invariant sweeps. #1108 P4 (O1) moved the catalog out of
+#: the product tree into each tenant's `agent/skills/gather/queries/`; the shipped pre-P4 catalog is the
+#: committed fixture below (the fullest one, 30 templates over adapters that stay in the product tree),
+#: so the sweep checks real templates instead of iterating a deleted folder — and every committed tenant
+#: catalog (`knowledge/<tenant>/agent/...`) beside it.
+_QUERIES = _DEFENDER / "tests" / "fixtures" / "pre-p4-shipped" / "agent" / "skills" / "gather" / "queries"
+_CATALOGS = (_QUERIES, *sorted(_ROOT.glob("knowledge/*/agent/skills/gather/queries")))
 _EXAMPLES = _DEFENDER / "skills" / "connect" / "examples"
 
 
@@ -51,9 +57,14 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution(tmp_path):
     assert not passes(bad_undeclared), "an undeclared ${placeholder} must FAIL the invariant"
     assert not passes(bad_no_verb), "a template that declares no verb is undecidable -> FAIL"
 
+    shipped = list(_corpus.iter_query_templates(_QUERIES))
+    assert len(shipped) >= 20, (
+        f"the swept catalog {_QUERIES} yields {len(shipped)} template(s): the invariant checks nothing")
+    templates = [t for catalog in _CATALOGS for t in _corpus.iter_query_templates(catalog)]
+    assert len(templates) > len(shipped), f"no committed tenant catalog was swept: {_CATALOGS}"
     failing = [
         f"{t.path}: {f.message}"
-        for t in _corpus.iter_query_templates(_QUERIES)
+        for t in templates
         for f in check_template(t, resolver.verbs(t.system))
     ]
     assert failing == [], (

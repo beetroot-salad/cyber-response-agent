@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,6 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.core._state1135 import state_over  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S  # noqa: E402
 
@@ -174,9 +172,8 @@ def test_1224_a_tenant_with_no_lab_systems_branches_and_serves_a_world_change(tm
 def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
     est = S.estate(tmp_path)
     if elastic == "fails-to-resolve":
-        T6.place_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), S.FIXTURE_TENANT,
-                        table=est.table(),
-                        configs={"elastic": "ELASTIC_TRANSPORT=carrier-pigeon\n"})
+        # #1108 P4 (OD5): the estate's tenant is published for real, with this config.
+        est.place(configs={"elastic": "ELASTIC_TRANSPORT=carrier-pigeon\n"})
         assert "elastic" in est.run_tenant().systems
     else:
         assert "elastic" not in est.run_tenant().systems

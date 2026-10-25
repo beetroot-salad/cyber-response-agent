@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import datetime as _dt
 import functools
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
-from defender import _git
-from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, LESSONS
 from defender.records._report import ReportRead
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
-from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.run_repository import RUN_LAYOUT
 from defender.learning import lead_repository
 from defender.presentation.visualize_data import (
     normalize_phase_names,
@@ -21,7 +17,6 @@ from defender.presentation.visualize_data import (
     split_investigation_phases,
 )
 from defender.presentation.visualize_primitives import (
-    REPO_ROOT,
     block,
     esc,
     esc_untrusted,
@@ -29,10 +24,6 @@ from defender.presentation.visualize_primitives import (
     pre_text_untrusted,
     section,
 )
-
-
-#: The lessons corpus as a pathspec of the checkout (`defender.knowledge._knowledge`).
-_LESSONS_PATHSPEC = CHECKOUT_KNOWLEDGE.rel(LESSONS)
 
 
 def _wire_log_rel() -> str:
@@ -710,99 +701,6 @@ def render_runtime_toc(  # noqa: PLR0913 — one argument per section the nav li
     {review_item}
     {leads_item}
     {transcript_item}
-    <li class="item"><a href="#sec-footer">lesson commits</a></li>
   </ul>
 </nav>
-"""
-
-
-
-
-def _lesson_changes(run_dir: Path, run_id: str) -> dict:
-    trace = RunPaths(run_dir).tool_trace
-    if not trace.is_file():
-        return {"available": False, "reason": f"no {trace.name}"}
-    since_iso = (
-        _dt.datetime.fromtimestamp(trace.stat().st_mtime, tz=_dt.UTC).isoformat()
-    )
-    try:
-        log_out = _git.git(
-            [
-                "log",
-                f"--since={since_iso}",
-                "--pretty=format:%H%x09%cI%x09%s",
-                "--name-status",
-                "--", _LESSONS_PATHSPEC,
-            ],
-            cwd=REPO_ROOT, timeout=10,
-        )
-    except _git.GitError as e:
-        return {"available": False, "reason": e.stderr or "git log failed"}
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        return {"available": False, "reason": f"git unavailable: {e}"}
-    commits = _parse_git_log_records(log_out)
-    for c in commits:
-        c["diff"] = _git_show_lessons_diff(c["sha"])
-    return {"available": True, "since": since_iso, "commits": commits, "run_id": run_id}
-
-
-def _parse_git_log_records(stdout: str) -> list[dict]:
-    commits: list[dict] = []
-    cur: dict | None = None
-    for line in stdout.splitlines():
-        if not line.strip():
-            if cur:
-                commits.append(cur)
-                cur = None
-            continue
-        if "\t" in line and len(line.split("\t")) >= 3 and len(line.split("\t")[0]) == 40:
-            sha, when, subject = line.split("\t", 2)
-            if cur:
-                commits.append(cur)
-            cur = {"sha": sha, "when": when, "subject": subject, "files": []}
-        elif cur is not None:
-            cur["files"].append(line)
-    if cur:
-        commits.append(cur)
-    return commits
-
-
-def _git_show_lessons_diff(sha: str) -> str:
-    try:
-        return _git.git(
-            ["show", sha, "--pretty=format:", "--", _LESSONS_PATHSPEC], cwd=REPO_ROOT
-        )
-    except _git.GitError:
-        return ""
-
-
-def render_footer(run_dir: Path, run_id: str) -> str:
-    lc = _lesson_changes(run_dir, run_id)
-    if not lc.get("available"):
-        body = f'<div class="empty">lesson change tracking unavailable ({esc(lc.get("reason", "?"))})</div>'
-    elif not lc.get("commits"):
-        body = f'<div class="empty">no lesson commits since this run started ({esc(lc["since"])})</div>'
-    else:
-        rows: list[str] = []
-        for c in lc["commits"]:
-            files = "\n".join(c.get("files", []))
-            diff = c.get("diff", "")
-            inner = (
-                f'<div class="commit-meta">{esc(c["when"])} · {esc(c["sha"][:10])}</div>'
-                f'<pre class="text files">{esc(files)}</pre>'
-            )
-            if diff.strip():
-                inner += f'<pre class="json diff">{esc(diff)}</pre>'
-            rows.append(block("lesson-commit", c["subject"], inner))
-        body = "\n".join(rows)
-    return f"""
-<footer id="sec-footer" class="footer">
-  <h2>concurrent lesson commits</h2>
-  <div class="footer-caveat">
-    The author flushes the pending-findings queue when it crosses the threshold,
-    so commits below were authored during this run's wall-clock window but may
-    fold in findings from earlier runs.
-  </div>
-  {body}
-</footer>
 """

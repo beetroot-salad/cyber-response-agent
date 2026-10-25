@@ -68,6 +68,20 @@ class Layout:
     def agent(self) -> Path:
         return Path(self.tenant.agent)
 
+    def staged(self) -> tuple[Path, Path]:
+        """The tenant's agent half staged as a run copy (`stage/agent`, its token), under this
+        layout's data root: what a run box is started over. One per layout, so every box a test
+        starts for it binds the same copy."""
+        from defender.tests.support.tenancy._run_copy_stage import staged_agent
+
+        if self.data_root not in _STAGED:
+            _STAGED[self.data_root] = staged_agent(self.agent, self.data_root / "run-copies")
+        return _STAGED[self.data_root]
+
+
+#: Each layout's one staged run copy, by its (per-test, unique) data root.
+_STAGED: dict[Path, tuple[Path, Path]] = {}
+
 
 def mirror_checkout(root: Path, *, own_lessons: bool = False) -> Path:
     """Create a symlink mirror with an optional private lessons folder."""

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from defender import _git
 
-from .auth import CLOCK_SKEW, ForgejoIdentity
+from .auth import CLOCK_SKEW, ForgeCredential
 
 #: Linux UAPI (include/uapi/linux/{memfd,fcntl}.h). Standalone Python builds can omit
 #: os.memfd_create, its flags, or fcntl's seal names, depending on their build headers.
@@ -48,7 +48,7 @@ def network_git(
     *,
     repo: Path,
     origin: str,
-    identity: ForgejoIdentity,
+    identity: ForgeCredential,
     env: dict[str, str],
     timeout: float,
 ) -> str:

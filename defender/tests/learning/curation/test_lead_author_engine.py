@@ -33,7 +33,7 @@ from defender.learning.leads.lead_author_engine import (  # noqa: E402
 )
 from defender.learning._pydantic_stage import run_stage  # noqa: E402
 from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission import AgentPolicy  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
@@ -42,22 +42,30 @@ from defender.tests.support.runtime.engine._engine_helpers import replay_once as
 from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
 
 
+#: #1108 P4 (O7, option (a) of the S-H report): the lane writes a batch draft's `agent/skills`;
+#: the adapters and the authored product prompts stay in the product checkout. The deps bind the
+#: product tree as `defender_dir` and the draft's `agent/` as `RunScope(tenant_agent=...)`
+#: (ASSUMED SEAM: the lead author's write lanes compile under that scope); relative paths resolve
+#: from the draft's `agent/` (P3 `Batch.box_request`'s workdir).
+
+
 def _lead_deps(run_dir: Path, wt: Path) -> LeadAuthorDeps:
-    """The lead-author deps via the SINGLE bind seam (#551 — replaces the retired
-    ``LeadAuthorDeps.for_run(run_dir, repo_root)``): bind threads the worktree tree
-    ``wt/defender`` into BOTH the policy anchor and the deps ``defender_dir`` field."""
-    deps = bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt / "defender")
+    """The lead-author deps via the SINGLE bind seam (#551): `wt/defender` (product: adapters)
+    as the policy anchor and the deps' `defender_dir`, `wt/draft/agent` as the tenant agent."""
+    deps = bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt / "defender",
+                scope=RunScope(tenant_agent=_agent(wt)))
     assert isinstance(deps, LeadAuthorDeps)
     return deps
 
 
-def _lead_policy(skills_dir: Path) -> AgentPolicy:
-    """The lead-author policy anchored on ``skills_dir`` via bind (#551 — replaces the retired
-    ``_lead_author_policy(skills_dir)``). ``skills_dir.parent`` is a NON-PATHS worktree defender_dir
-    (LEAD_AUTHOR_DEF is ``requires_explicit_tree``, so a main-checkout tree is unbuildable — these
-    shape tests use a synthetic worktree; the rm matcher recognizes the repo-relative
-    ``defender/skills`` spelling regardless of the worktree location)."""
-    return bind(LEAD_AUTHOR_DEF, Path("/tmp/lead-run"), defender_dir=skills_dir.parent).policy
+def _lead_policy(wt: Path) -> AgentPolicy:
+    """The lead-author policy for the lane tree `wt` (product + draft), via bind."""
+    return _lead_deps(Path("/tmp/lead-run"), wt).policy
+
+
+def _agent(wt: Path) -> Path:
+    """The batch draft's `agent/` beside the product tree in the lane tree `wt`."""
+    return wt / "draft" / "agent"
 
 
 def _tool_then_text(tool_calls, final_text):
@@ -76,24 +84,19 @@ def _tool_then_text(tool_calls, final_text):
 
 def _prompt(tmp_path):
     p = tmp_path / "lead_author.md"
-    p.write_text("Curate the catalog. Edit skill files under defender/skills. Finish when done.\n")
+    p.write_text("Curate the catalog. Edit skill files under skills/. Finish when done.\n")
     return p
 
 
 def _worktree(tmp_path):
-    """A tmp 'batch worktree': <root>/defender/skills/... exists so real writes land somewhere.
-
-    It declares `elastic` and `cmdb` as systems because since #772 the write allow compiles one
-    lane PER declared system — a worktree with a skills dir and no adapters is a tree in which
-    nothing under `skills/` is a system, so the policy has no lane at all and `bind` refuses it.
-    That is the tree's fault, not the policy's, which is why the probe paths below moved off the
-    old `queries/foo/` (a name no tree ever declared) onto `queries/elastic/`.
-    """
+    """A tmp lane tree: `<root>/defender` (product: the `elastic` and `cmdb` adapters, since #772
+    one lane per declared system) and `<root>/draft/agent/skills/...` (the batch draft the lane
+    writes), with the draft folders real writes land in."""
     root = tmp_path / "wt"
-    (root / "defender" / "skills" / "gather" / "queries" / "elastic" / "_draft").mkdir(
-        parents=True
-    )
-    (root / "defender" / "skills" / "elastic" / "_draft").mkdir(parents=True)
+    skills = _agent(root) / "skills"
+    (skills / "gather" / "queries" / "elastic" / "_draft").mkdir(parents=True)
+    (skills / "elastic" / "_draft").mkdir(parents=True)
+    (root / "defender" / "skills").mkdir(parents=True)
     seed_adapter_stubs(root / "defender", ("elastic", "cmdb"))
     return root
 
@@ -141,22 +144,28 @@ def _spawn(**over):
 # bind(LEAD_AUTHOR_DEF, defender_dir=) — worktree binding + safe-by-construction
 
 def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
+    """One bind anchors the product tree and the draft: the lane writes and reads its own draft,
+    and a policy bound to another draft refuses both (#551, O7)."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     deps = _lead_deps(rd, wt)
     assert deps.defender_dir == wt / "defender"
-    assert len(deps.policy.write_allow) == 5  # the five named lanes, anchored to the worktree
+    assert len(deps.policy.write_allow) == 5  # the five named lanes, anchored to the draft
     assert deps.role is AgentRole.LEAD_AUTHOR
-    skill = wt / "defender" / "skills" / "gather" / "queries" / "elastic" / "x.md"
-    # positive: the worktree binding lets the agent write + read its own corpus
+    skill = _agent(wt) / "skills" / "gather" / "queries" / "elastic" / "x.md"
+    # positive: the binding lets the agent write + read its own draft
     assert permission.decide_write(
         skill, "body\n", run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
     assert permission.decide_read(skill, run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
-    # guarded negatives: a policy bound to a DIFFERENT worktree tree denies the write …
+    # guarded negatives: a policy bound to a DIFFERENT lane tree denies the write and the read
     other_pol = _lead_deps(rd, _worktree(tmp_path / "other")).policy
     assert not permission.decide_write(
         skill, "body\n", run_dir=rd, defender_dir=deps.defender_dir, policy=other_pol).allow
-    # … and calling the gate with a mismatched defender_dir (the split) denies the read.
-    assert not permission.decide_read(skill, run_dir=rd, defender_dir=config.REPO_ROOT / "defender", policy=deps.policy).allow
+    assert not permission.decide_read(
+        skill, run_dir=rd, defender_dir=deps.defender_dir, policy=other_pol).allow
+    # … and the product tree's own skills are no lane (O1/O7: tenant writes touch agent/ only)
+    product = wt / "defender" / "skills" / "elastic" / "_draft" / "x.md"
+    assert not permission.decide_write(
+        product, "body\n", run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
 
 
 def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
@@ -170,77 +179,82 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
 
 
 # the bound lead-author policy — shape + the rm-of-drafts matcher (F3) + asymmetry
+# (#1108 P4: rm runs from the draft's `agent/`, the box's workdir; `skills/...` is relative to it)
+
+
+def _rm(cmd: str, wt: Path, pol: AgentPolicy) -> bool:
+    agent = _agent(wt)
+    return permission.decide_bash(cmd, policy=pol, run_dir=agent, cwd_anchor=agent).allow
 
 
 def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path):
     wt = _worktree(tmp_path)
     pol = _lead_deps(_run_dir(tmp_path), wt).policy
-    assert permission.decide_bash("rm defender/skills/elastic/_draft/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
-    assert permission.decide_bash(f"rm {wt}/defender/skills/elastic/_draft/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
+    assert _rm("rm skills/elastic/_draft/x.md", wt, pol)
+    assert _rm(f"rm {_agent(wt)}/skills/elastic/_draft/x.md", wt, pol)
 
 
 def test_rm_outside_skills_denied(tmp_path):
-    """rm of a path OUTSIDE defender/skills (lessons, an absolute system file) → denied: the
-    skills prefix and the resolved operand's scope are both checked."""
+    """rm of a path OUTSIDE the draft's skills (lessons, the product tree, an absolute system
+    file) → denied, with the in-skills draft as the positive control (#551, O7)."""
     wt = _worktree(tmp_path)
-    pol = _lead_policy(wt / "defender" / "skills")
-    assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
-    assert not permission.decide_bash("rm /etc/passwd", policy=pol, run_dir=wt, cwd_anchor=wt).allow
+    pol = _lead_policy(wt)
+    assert _rm("rm skills/elastic/_draft/z.md", wt, pol)
+    assert not _rm("rm lessons/z.md", wt, pol)
+    assert not _rm(f"rm {wt}/defender/skills/elastic/_draft/z.md", wt, pol)
+    assert not _rm("rm /etc/passwd", wt, pol)
 
 
 def test_rm_flags_and_multipath_denied(tmp_path):
     """F3: single-path rm only. ``rm -rf <skills>`` (a flag) and ``rm a b`` (multi-path) are
-    DENIED — matching the old ``rm defender/skills/:*`` intent (one draft removed at a time)."""
+    DENIED — one draft removed at a time."""
     wt = _worktree(tmp_path)
-    pol = _lead_policy(wt / "defender" / "skills")
-    assert not permission.decide_bash("rm -rf defender/skills/elastic/_draft/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
-    assert not permission.decide_bash(
-        "rm defender/skills/elastic/_draft/a.md defender/skills/elastic/_draft/b.md",
-        policy=pol, run_dir=wt, cwd_anchor=wt,
-    ).allow
-    # rejected: allow -f / multi-path because "it's all under skills" — the agent issues one rm
-    #           per draft; the git scope gate is containment, the regex is shape (mirrors the actor)
+    pol = _lead_policy(wt)
+    assert _rm("rm skills/elastic/_draft/x.md", wt, pol)
+    assert not _rm("rm -rf skills/elastic/_draft/x.md", wt, pol)
+    assert not _rm("rm skills/elastic/_draft/a.md skills/elastic/_draft/b.md", wt, pol)
 
 
 def test_rm_command_substitution_denied(tmp_path):
     """``rm $(...)`` is denied by _stage_unsafe (structural), independent of the operand — the
     gate never expands the substitution."""
     wt = _worktree(tmp_path)
-    pol = _lead_policy(wt / "defender" / "skills")
-    assert not permission.decide_bash(
-        "rm $(echo defender/skills/elastic/_draft/x.md)", policy=pol, run_dir=wt, cwd_anchor=wt).allow
+    pol = _lead_policy(wt)
+    assert _rm("rm skills/elastic/_draft/x.md", wt, pol)
+    assert not _rm("rm $(echo skills/elastic/_draft/x.md)", wt, pol)
 
 
 def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     pol = _lead_deps(rd, wt).policy
-    (wt / "defender" / "lessons").mkdir(parents=True)
-    skills_ok = wt / "defender" / "skills" / "gather" / "queries" / "elastic" / "y.md"
-    lessons = wt / "defender" / "lessons" / "z.md"
+    agent = _agent(wt)
+    (agent / "lessons").mkdir(parents=True)
+    skills_ok = agent / "skills" / "gather" / "queries" / "elastic" / "y.md"
+    lessons = agent / "lessons" / "z.md"
     # write surface
     assert permission.decide_write(                                               # positive control
         skills_ok, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
     assert not permission.decide_write(                                           # negative
         lessons, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
-    # rm (bash) surface — repo-relative spellings the matcher recognizes
-    assert permission.decide_bash(
-        "rm defender/skills/gather/queries/elastic/_draft/y.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow  # positive
-    assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow             # negative
+    # rm (bash) surface
+    assert _rm("rm skills/gather/queries/elastic/_draft/y.md", wt, pol)          # positive
+    assert not _rm("rm lessons/z.md", wt, pol)                                    # negative
 
 
 def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     pol = _lead_deps(rd, wt).policy
-    escape = wt / "defender" / "skills" / ".." / "lessons" / "x.md"
+    agent = _agent(wt)
+    escape = agent / "skills" / ".." / "lessons" / "x.md"
     assert not permission.decide_write(
         escape, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
-    assert not permission.decide_bash("rm defender/skills/../lessons/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
+    assert not _rm("rm skills/../lessons/x.md", wt, pol)
     # a ..-escape via the absolute spelling is denied too
-    assert not permission.decide_bash(f"rm {wt}/defender/skills/../../etc/passwd", policy=pol, run_dir=wt, cwd_anchor=wt).allow
-    ok = wt / "defender" / "skills" / "gather" / "queries" / "elastic" / "z.md"
+    assert not _rm(f"rm {agent}/skills/../../../etc/passwd", wt, pol)
+    ok = agent / "skills" / "gather" / "queries" / "elastic" / "z.md"
     assert permission.decide_write(
         ok, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
-    assert permission.decide_bash("rm defender/skills/gather/queries/elastic/_draft/z.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
+    assert _rm("rm skills/gather/queries/elastic/_draft/z.md", wt, pol)
 
 
 # run_stage — require_output (the new flag) + the writers toolset
@@ -284,9 +298,9 @@ def test_run_stage_require_output_matrix(tmp_path):
 def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     decoy = tmp_path / "decoy"
-    (decoy / "defender" / "skills" / "gather" / "queries" / "elastic").mkdir(parents=True)
+    (decoy / "skills" / "gather" / "queries" / "elastic").mkdir(parents=True)
     monkeypatch.chdir(decoy)
-    rel = "defender/skills/gather/queries/elastic/new.md"
+    rel = "skills/gather/queries/elastic/new.md"
     fn = _tool_then_text([("write_file", {"path": rel, "content": "BODY-42"})], "done")
     with override_allow_model_requests(False):
         out = _run_lead_author_pydantic(
@@ -300,12 +314,12 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
                 user="u",
                 request_limit=6,
                 wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=wt,
+                repo_root=_agent(wt),
             ),
             make_model=_fake_model(fn),
         )
     assert out == "done"
-    landed = wt / "defender" / "skills" / "gather" / "queries" / "elastic" / "new.md"
+    landed = _agent(wt) / "skills" / "gather" / "queries" / "elastic" / "new.md"
     assert landed.is_file()                                       # positive: real write, in the worktree
     assert landed.read_text() == "BODY-42"
     assert not (decoy / rel).exists()                             # negative: never the ambient cwd
@@ -313,8 +327,8 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
 
 def test_write_into_new_subtree_creates_parents(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
-    rel = "defender/skills/cmdb/_draft/auth.md"              # cmdb/ absent in the worktree
-    assert not (wt / "defender" / "skills" / "cmdb").exists()
+    rel = "skills/cmdb/_draft/auth.md"              # cmdb/ absent in the draft
+    assert not (_agent(wt) / "skills" / "cmdb").exists()
     fn = _tool_then_text([("write_file", {"path": rel, "content": "PROMOTED"})], "done")
     with override_allow_model_requests(False):
         out = _run_lead_author_pydantic(
@@ -328,12 +342,12 @@ def test_write_into_new_subtree_creates_parents(tmp_path):
                 user="u",
                 request_limit=6,
                 wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=wt,
+                repo_root=_agent(wt),
             ),
             make_model=_fake_model(fn),
         )
     assert out == "done"
-    landed = wt / "defender" / "skills" / "cmdb" / "_draft" / "auth.md"
+    landed = _agent(wt) / "skills" / "cmdb" / "_draft" / "auth.md"
     assert landed.read_text() == "PROMOTED"
 
 
@@ -355,7 +369,7 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
                 user="u",
                 request_limit=4,
                 wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=wt,
+                repo_root=_agent(wt),
             ),
             make_model=_fake_model(_replay("done")),
         )
@@ -364,7 +378,7 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
 
 def test_writer_contentless_final_after_write_is_success(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
-    rel = "defender/skills/gather/queries/elastic/e.md"
+    rel = "skills/gather/queries/elastic/e.md"
     fn = _tool_then_text([("write_file", {"path": rel, "content": "X"})], "  ")
     with override_allow_model_requests(False):
         out = _run_lead_author_pydantic(
@@ -378,12 +392,12 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
                 user="u",
                 request_limit=6,
                 wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=wt,
+                repo_root=_agent(wt),
             ),
             make_model=_fake_model(fn),
         )
     assert out == "  "
-    assert (wt / "defender" / "skills" / "gather" / "queries" / "elastic" / "e.md").read_text() == "X"
+    assert (_agent(wt) / "skills" / "gather" / "queries" / "elastic" / "e.md").read_text() == "X"
 
 
 # run_author_stage — rc mapping (F1) + key ordering + trace key

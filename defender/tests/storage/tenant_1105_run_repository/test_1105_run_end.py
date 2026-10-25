@@ -1,6 +1,8 @@
 """Run end keeps its order: cross-check, ticket, curation, page."""
 from __future__ import annotations
 
+import dataclasses
+
 from defender.tests.support.shared._locations_1210 import location_path
 
 import errno
@@ -10,6 +12,7 @@ from typing import Any
 from defender import run as run_py
 from defender import run_common
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     author_markers,
@@ -81,7 +84,7 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     location_path(tenant.learning).mkdir(exist_ok=True)
     repo = arm / "repo"
     (repo / "defender").mkdir(parents=True)
-    paths = LoopPaths.for_tenant(tenant).with_repo_root(repo)
+    paths = dataclasses.replace(LoopPaths.for_tenant(tenant), repo_root=repo)
     order: list[str] = []
     tail = _Tail(paths, order, fail=fail)
     handler = _Order(order)
@@ -92,8 +95,10 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
         alert = plant_alert(arm / f"alert-{arm.name}")
         argv = [str(alert), "--tenant", str(tenant.id), "--update-ticket"]
         try:
+            # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
             outcome: Any = run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize,
-                                       ticket_writer=tail, enqueue=tail.enqueue)
+                                       ticket_writer=tail, enqueue=tail.enqueue,
+                                       publish=in_process_publish())
         except Exception as exc:  # noqa: BLE001 — a raising step's propagation is observed
             outcome = exc
     finally:

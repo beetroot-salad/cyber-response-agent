@@ -144,27 +144,11 @@ def test_marker_empty_commit_message_rejected(tmp_path):
     assert _shared.commit_message(ok, "observations") == "Fold obs-1"
 
 
-def test_marker_commit_message_with_trailer_rejected(tmp_path):
-    result = _stage(
-        tmp_path,
-        run_author=lambda *a, **kw: (
-            'AUTHOR_RESULT: {"committed": ["obs-1"], "consumed_skip": [], '
-            '"commit_message": "Fold obs-1\\n\\nGeneration: 5"}'
-        ),
-    )
-    trailers = [("Generation", "5"), ("Actor-Model", "glm-5.3")]
-    with pytest.raises(AuthorError):
-        _shared.commit_corpus(
-            _repo_root(tmp_path), _corpus(tmp_path), result["commit_message"], trailers=trailers
-        )
-    try:
-        _shared.commit_corpus(
-            _repo_root(tmp_path), _corpus(tmp_path), "Fold obs-1", trailers=trailers
-        )
-    except AuthorError:
-        pytest.fail("a clean commit_message must pass the trailer guard")
-    except Exception:
-        pass
+# #1108 P4 OD12(i): `test_marker_commit_message_with_trailer_rejected` deleted. It pinned only
+# `_shared.commit_corpus`'s trailer guard, the legacy checkout commit P4 removes (O7: every
+# corpus write goes through P3's commit-maker, which composes no trailers; see the matching
+# deletion note in test_author_shared.py). The commit message the drain reads from the result is
+# still pinned by `test_marker_empty_commit_message_rejected` above.
 
 
 def test_marker_malformed_result_types_rejected(tmp_path):

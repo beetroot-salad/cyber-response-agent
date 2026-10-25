@@ -434,12 +434,16 @@ def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
              clock: SteppingClock, registry_cls: type | None = None) -> None:
     """Run the production CLI composition and record its return code or refusal."""
     import defender.run as run_mod
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
     try:
+        # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the tenant for
+        # real when run.main launches it).
         recording.exit_code = run_mod.main(
             argv, lifecycle=lifecycle(recording, main_turns=main_turns, clock=clock,
                                       registry_cls=registry_cls),
-            preflight=_no_preflight, visualize=_no_page, enqueue=_no_queue)
+            preflight=_no_preflight, visualize=_no_page, enqueue=_no_queue,
+            publish=in_process_publish())
     except SystemExit as refused:
         recording.exit_code = "SystemExit"
         recording.refusal = str(refused.code)
