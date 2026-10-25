@@ -5,7 +5,6 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
-import ast
 import json
 
 import pytest
@@ -14,7 +13,6 @@ from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 from defender.skills.invlang.validate import validate_companion
 from defender.tests.support.tenancy._tenants1106 import fixture_run_tenant
 from defender.tests.support.runtime.engine._spec923 import (
-    DEFENDER,
     GAP_MEMBER,
     MEMBER,
     PAYING_ROW,
@@ -23,81 +21,10 @@ from defender.tests.support.runtime.engine._spec923 import (
     doc,
     main_deps,
     paid,
-    shipping_modules,
 )
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
-
-
-_AUTHORING_SURFACES = {
-    # A model supplies the value.
-    "runtime/close_tool.py",                    # the close tool's `disposition` argument
-    "skills/invlang/validate/_structure.py",    # `conclude.disposition` in investigation.md
-    "runtime/branch/_family.py",                # a world's declared disposition in family.yaml
-}
-_VOCABULARY_READERS = {
-    "_vocab.py",                                # the owner
-    "skills/invlang/vocab.py",                  # invlang's re-export of the owner
-    "records/_artifact_schema.py",                      # the report.md frontmatter write gate (host-written)
-    "records/_report.py",                               # the shared report accessor
-    "skills/invlang/cli.py",                    # read-only query filters
-    "skills/invlang/queries.py",                # corpus rendering
-    "skills/invlang/validate/_gating.py",       # the entry-price dispatch
-    "learning/judge/family.py",                 # the family judge's per-world row
-    "learning/judge/runs.py",                   # a failed world's row
-    "learning/branch/episode.py",               # the archived worlds' headlines
-    "presentation/visualize_runtime.py",   # the review-gate panel's pre-record fallback
-    "presentation/visualize_episode.py",   # the verdict tile's contrast/agree counts
-    "api/models.py",                            # the served investigation's disposition
-}
-_VOCABULARY_OWNER_NAMES = frozenset({
-    "DISPOSITION_ENUM", "DISPOSITION_VALUES", "DISPOSITION", "normalized_disposition",
-})
-
-_AUTHORING_ENTRY_POINTS = {
-    "runtime/close_tool.py::_close_investigation_async",
-    "skills/invlang/validate/_structure.py::_check_conclude_vocab",
-    "runtime/branch/_family.py::_check_disposition",
-}
-
-
-def _vocabulary_entry_points(modules: set[str]) -> set[str]:
-    """`module::function` for every function in `modules` that reaches the vocabulary owner."""
-    found: set[str] = set()
-    for rel in modules:
-        tree = ast.parse((DEFENDER / rel).read_text(encoding="utf-8"), filename=rel)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            used: set[str] = set()
-            for inner in ast.walk(node):
-                if isinstance(inner, ast.Name):
-                    used.add(inner.id)
-                elif isinstance(inner, ast.Attribute):
-                    used.add(inner.attr)
-            if used & _VOCABULARY_OWNER_NAMES:
-                found.add(f"{rel}::{node.name}")
-    return found
-
-
-def _vocabulary_consumers() -> set[str]:
-    """Every shipping module that reaches the vocabulary owner, by resolved reference rather
-    than by grepping for the four keyword strings: a module holding the keywords in a comment is
-    not a consumer, and one reaching them through the owner's names is one however it spells the
-    values."""
-    found: set[str] = set()
-    for path in shipping_modules():
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        used: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                used.add(node.id)
-            elif isinstance(node, ast.Attribute):
-                used.add(node.attr)
-        if used & _VOCABULARY_OWNER_NAMES:
-            found.add(str(path.relative_to(DEFENDER)))
-    return found
 
 
 @pytest.mark.parametrize("value", ["not-a-disposition", "Unresolved", "INCONCLUSIVE", ["benign"], 3])
