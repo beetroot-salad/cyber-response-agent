@@ -684,6 +684,29 @@ jobs:
       - name: Tenant-delivery fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_delivery_architecture.py
 
+      # Agent retries (#631): every production pydantic_ai Agent(...) passes retries=.
+      - name: Agent retries fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_agent_retries.py
+
+      # Scrub order (#540): the box lifecycle scrubs the run folder before any reader of it, no
+      # handler swallows the taint signal, and the bash tool has no in-process fallback.
+      - name: Scrub-order fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_scrub_order.py
+
+      # Episode paths (#1133, #1187): episode trees are reached only through the Episode handle and
+      # the runs repository's walk. The migrated modules make no episode I/O but the declared
+      # residue, the handle does I/O only through hold / hold_new, no function takes a path below
+      # the episode dir but the allowlist, and no production code opens an episode by path. The
+      # tables inside the script are the allowlists (a stale row fails); no baseline.
+      - name: Episode-path fence (allow-list tables in the script)
+        run: defender/.venv/bin/python tooling/lint/lint_episode_paths.py
+
+      # Episode identity (#1187): ids carry no composed meaning (no `{episode_id}-...` build, no
+      # banned deriver, no labelled mint), the walk owner makes no folder by its path, and the arm
+      # roster's file name is spelled only in the episode layout. No baseline.
+      - name: Episode-identity fence (no baseline)
+        run: defender/.venv/bin/python tooling/lint/lint_episode_identity.py
+
       # Lesson text is corpus text a model wrote (#1206): it leaves defender/knowledge/_corpus.py as
       # Lesson.line / .lines / .match_text, or a raw read says on its line where it goes.
       - name: Lesson-text gate (raw lesson text is read only where a line says why)

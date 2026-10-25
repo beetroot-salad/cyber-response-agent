@@ -5,7 +5,6 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-import ast
 import json
 from pathlib import Path
 
@@ -75,101 +74,6 @@ def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
     table.write_text(
         "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
     return table
-
-
-#: The shipped roots under `defender/` (files or packages) the census reads.
-_CODE_ROOTS = (
-    "box", "execution", "runtime", "learning", "integrations", "presentation", "cli", "tenancy",
-    "knowledge", "episodes", "records", "run_repository", "configuration", "run.py", "_io.py",
-    "_filesystem")
-_OWNER_MODULE = "episodes/_episode_paths.py"
-_LAYOUT_MODULE = "run_repository/_layout.py"
-_OWNER_MODULES = (_OWNER_MODULE, _LAYOUT_MODULE)
-_ARCHIVE_MODULE = "learning/branch/archive.py"
-#: The three names and the three files, one mapping.
-_RECORD_NAMES = {"REVIEW_NAME": "review.yaml", "SAMPLES_NAME": "samples.yaml",
-                 "JUDGE_NAME": "judge.yaml"}
-
-#: Every shipped module that reads one of the three records, and the attribute it reads the
-#: name through. Each must be `archive`'s OWN object — an import, never a re-spelling.
-_IMPORTERS: tuple[tuple[str, str], ...] = (
-    ("learning.branch.cli", "REVIEW_NAME"),
-    ("learning.branch.cli", "SAMPLES_NAME"),
-    ("learning.branch.episode", "REVIEW_NAME"),
-    ("learning.judge.enqueue", "SAMPLES_NAME"),
-    ("learning.judge.family", "REVIEW_NAME"),
-    ("learning.judge.family", "SAMPLES_NAME"),
-    ("learning.judge.run", "REVIEW_NAME"),
-    ("learning.judge.run", "SAMPLES_NAME"),
-    ("learning.judge.run", "JUDGE_NAME"),
-    ("learning.judge", "JUDGE_NAME"),
-    ("learning.judge", "REVIEW_NAME"),
-)
-
-
-def _shipped_modules() -> dict[str, str]:
-    """`{relative posix path: source text}` for every `.py` under the shipped roots. The
-    package dir is the one `archive.py` was imported from (`defender` is a namespace package
-    and has no `__file__` of its own), so the tree censused is the tree under test."""
-    package = Path(_archive().__file__).resolve().parents[2]
-    assert package.name == "defender", f"the census root is not the package: {package}"
-    out: dict[str, str] = {}
-    for root in (*_CODE_ROOTS, *_OWNER_MODULES):
-        base = package / root
-        files = [base] if base.is_file() else sorted(base.rglob("*.py"))
-        for path in files:
-            out[path.relative_to(package).as_posix()] = path.read_text(encoding="utf-8")
-    assert _ARCHIVE_MODULE in out, f"the census never saw {_ARCHIVE_MODULE}: {sorted(out)[:5]}"
-    assert _OWNER_MODULE in out, f"the census never saw {_OWNER_MODULE}"
-    assert _LAYOUT_MODULE in out, (
-        f"the census never saw the run-layout owner {_LAYOUT_MODULE} — a stale owner path drops "
-        "it from the census silently")
-    return out
-
-
-def _folded_string(node: ast.AST) -> str | None:
-    """The string a node denotes when it is a constant expression, else `None`."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = _folded_string(node.left), _folded_string(node.right)
-        return None if left is None or right is None else left + right
-    if isinstance(node, ast.JoinedStr):
-        parts = [_folded_string(v) for v in node.values]
-        return None if any(p is None for p in parts) else "".join(parts)
-    return None
-
-
-def _census(source: str, path: str) -> tuple[set[str], set[str]]:
-    """`(code strings, bound names)` for one module, off ONE parse."""
-    tree = ast.parse(source, filename=path)
-    docstrings = {
-        id(node.value) for node in ast.walk(tree)
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
-        and isinstance(node.value.value, str)
-    }
-    strings: set[str] = set()
-    bound: set[str] = set()
-    for node in ast.walk(tree):
-        if id(node) in docstrings:
-            continue
-        if (folded := _folded_string(node)) is not None:
-            strings.add(folded)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            bound.add(node.id)
-    return strings, bound
-
-
-def _string_constants(source: str, path: str) -> set[str]:
-    """Every code string a module's AST denotes as a constant expression — see `_census`."""
-    return _census(source, path)[0]
-
-
-_MOVED = (
-    ("_raw_manifest", "read_manifest"),  # lint-stale-ref: ok — assert the retired private spelling stays absent
-    ("_leads_by_id", "leads_by_id"),
-    ("_lead_chain", "lead_chain"),
-)
 
 
 def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_path):
