@@ -25,6 +25,7 @@ from defender.tests.e2e._box665 import RecordingDocker
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._drain_support import process_start, write_owner
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 from defender.tests.tenancy.tenant_1108_p4.test_run_copy import (
     _boxed_lifecycle,
     _dead_process,
@@ -193,11 +194,12 @@ def test_r6_a_run_that_cannot_write_its_host_knowledge_record_does_not_start(ten
 
 # --- surfaces-04: the production dev-issuer-config constant lies under no box mount source ----
 
-def test_r6_the_dev_issuer_config_constant_lies_under_no_box_mount_source(tenant, tmp_path,
+def test_r6_the_dev_issuer_config_location_lies_under_no_box_mount_source(tenant, tmp_path,
                                                                         boxed_only):  # noqa: F811 — fixture
-    from defender.learning.author.version_control.issuer import DEV_ISSUER_CONFIG
-
-    assert DEV_ISSUER_CONFIG == WORKTREE / "playground-issuer" / "client" / "issuer.json"
+    """The dev provisioning's per-tenant issuer client config (`playground-issuer/client/
+    <tenant>/issuer.json`), named by the tenant's binding, is under no box mount source."""
+    DEV_ISSUER_CONFIG = WORKTREE / "playground-issuer" / "client" / tenant.tenant_id / "issuer.json"
+    bind_forge(tenant, issuer_config=DEV_ISSUER_CONFIG)
     docker, investigation = RecordingDocker(), _Investigation()
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    lifecycle=_boxed_lifecycle(docker, investigation))

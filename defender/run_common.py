@@ -6,6 +6,7 @@ import contextlib
 import datetime as _dt
 import logging
 import os
+import re
 import sys
 import dataclasses as _dataclasses
 from pathlib import Path
@@ -311,16 +312,15 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
 
 
 #: Variables that may carry knowledge-delivery login material (an OpenBao/Vault token, an
-#: AppRole `role_id`/`secret_id`, a forge token): no run child is ever handed one (#1108 P4 O8,
-#: P-4: login material is file-only and reaches only host-side delivery processes).
-_ISSUER_WORDS = frozenset({"BAO", "OPENBAO", "VAULT", "ISSUER", "APPROLE"})
-_ISSUER_PAIRS = ("ROLE_ID", "SECRET_ID", "FORGEJO_TOKEN")
+#: AppRole `role_id`/`secret_id`, a forge token): no host child is ever handed one (#1108 P4 O8,
+#: P-4: login material is file-only and reaches a delivery process only by its config file). A
+#: name is matched anywhere in it, so `ISSUERS_URL` and `BAOTOKEN` are login names too.
+_ISSUER_NAME = re.compile(
+    r"BAO|VAULT|OPENBAO|ISSUER|APPROLE|ROLE_ID|SECRET_ID|FORGEJO_TOKEN", re.IGNORECASE)
 
 
 def _issuer_variable(name: str) -> bool:
-    upper = name.upper()
-    return (bool(_ISSUER_WORDS & set(upper.split("_")))
-            or any(pair in upper for pair in _ISSUER_PAIRS))
+    return _ISSUER_NAME.search(name) is not None
 
 
 def provider_scrubbed_environ() -> dict[str, str]:

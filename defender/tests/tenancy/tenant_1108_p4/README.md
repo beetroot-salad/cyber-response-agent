@@ -63,7 +63,7 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
   even with a snapshot).
 - **OD3** (superseded by U12) ticket got the value in-process; the keyword seam is withdrawn and the
   ticket reads the host record.
-- **OD4** One login symbol: `version_control.issuer_login(tenant, *, issuer_config, transport=None)
+- **OD4** One login symbol: `version_control.issuer_login(tenant, *, issuer_config=None, transport=None)
   -> ForgejoIdentity`; drains, the publish child and `tenant.py update` use it.
 - **OD5** `_spec1224.launch`/`Estate.place` build through the real publish helper and stamp the real commit.
 - **OD6** Corpus paths are `agent/<corpus>`; `KnowledgePaths(agent_root)` takes no `agent_rel`;
@@ -114,9 +114,9 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 **Run start and the publish child** (`_s_b_support.py`, `test_run_start.py`, `test_publish_child.py`)
 - `run.main(argv, *, publish=...)`: called once per unpinned launch with identifiers only (tenant id, data root); returns a report line.
 - `run.py --knowledge-commit <sha>`: starts on `<T>/exports/<sha>/`, skips publish; refuses `../current`, `current`, a short id, and a commit with no export, before the box (not by argparse).
-- `run.launch_publish(tenant_id, *, data_root, budget=60.0, command=None, spawn=None) -> str`: default budget 60.0; `spawn` has `subprocess.Popen`'s signature (`test_publish_child.py:683`); waits for the network phase only; never kills a child holding the tenant lock.
-- `version_control.publish_for_run(tenant_id, *, data_root, issuer_config, client=None, issuer_transport=None, identity=None, network_timeout=None) -> str`: reads the forge binding and config itself; misconfiguration decided before any network call.
-- `version_control.publish_child_main(argv, *, issuer_config=None, client=None, identity=None, network_timeout=None, locked_hook=None) -> int`: `locked_hook` called once under the tenant lock before the clone is touched; rc 0 for every reported outcome (OD20).
+- `publish_launch.launch_publish(tenant_id, *, data_root, budget=60.0, command=None, spawn=None) -> str`: default budget 60.0; `spawn` has `subprocess.Popen`'s signature (`test_publish_child.py:683`); waits for the network phase only; never kills a child holding the tenant lock.
+- `version_control.publish_for_run(tenant_id, *, data_root, issuer_config=None, client=None, issuer_transport=None, identity=None, network_timeout=None, locked_hook=None, budget=None) -> str`: reads the forge binding and the config it names itself (`issuer_config` is an in-process stand-in for that path); misconfiguration decided before any network call; `budget` is the one deadline over the network phase, past which it reports and records `stale:transient`.
+- `version_control.publish_child_main(argv, *, issuer_config=None, client=None, identity=None, network_timeout=None, locked_hook=None) -> int`: argv `<tenant id> --data-root <root> [--budget <seconds>]` (no config path); `locked_hook` called once under the tenant lock before the clone is touched; rc 0 for every reported outcome (OD20).
 - Report-line vocabulary: `fresh <commit>` / `stale:transient <reason>` / `stale:operator <reason>` / `misconfigured <reason>`; the reason is one line; U11 line `stale:operator publish child failed: <summary>`.
 - Run copy layout `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`, removed in `finally`; box mounts `stage/` read-only; startup reads the token back; `DEFENDER_AGENT_DIR=/agent`.
 - `RunPaths(run_dir).knowledge_source(runs_base=None) -> <runs base>/<run_id>.knowledge-source.json`, JSON `{kind, commit, stale_kind, reason}` (host-held; U12).
@@ -125,9 +125,9 @@ Spelled as the tests call them. One line each; the test file named holds the ful
   three keys (never `reason`); `as_json()` without it omits the key (repair r4, F1).
 
 **Delivery API** (`defender.learning.author.version_control`)
-- `issuer_login(tenant, *, issuer_config, transport=None) -> ForgejoIdentity` (`test_live_dev_issuer.py` omits `transport=`; it is a superset, not a conflict).
-- Issuer client config: JSON `{"issuer", "ca_cert" (PEM path), "role_id", "secret_id"}`, `issuer.json` under `<repo>/playground-issuer/client/` in dev; identity endpoint `<issuer>/v1/identity/oidc`.
-- Tenant row forge binding: `<T>/tenant.json` `forge: {origin, audience, issuer_role}`; origin required even with an injected identity.
+- `issuer_login(tenant, *, issuer_config=None, transport=None) -> ForgejoIdentity`: logs in with the config the tenant's forge binding names; `issuer_config` is an in-process stand-in for that path.
+- Issuer client config: JSON `{"issuer", "ca_cert" (PEM path), "role_id", "secret_id"}`, one file per tenant, `<repo>/playground-issuer/client/<tenant id>/issuer.json` in dev; identity endpoint `<issuer>/v1/identity/oidc`. No default path and no CLI flag (PR #1288 review).
+- Tenant row forge binding: `<T>/tenant.json` `forge: {origin, audience, issuer_role, issuer_config}` (`issuer_config` an absolute path); origin required even with an injected identity.
 - `materialise_export(tenant, commit) -> TenantExport`: no identity/client/origin; refusals `DeliveryRefused`, lock still busy after a bounded retry (assumed ≤60 s) `LockBusy`.
 - Draft layout `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`: `batch.draft_root` is `stage/`; `batch.box_request().workdir` is `stage/agent`.
 - Owner record: JSON `{"pid": int, "start": <`/proc/<pid>/stat` field 22, compared as text>}`; same pid with another start = dead; publish sweeps dead owners under the lock.

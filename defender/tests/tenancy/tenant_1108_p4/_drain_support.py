@@ -16,7 +16,8 @@ ASSUMED SEAMS (the implementer provides them; see each S-D test file's doc):
                     issuer_config=, issuer_transport=, start_box=, stop_box=, git_timeout=)
   version_control.issuer_login(tenant, *, issuer_config, transport=None)   # OD4 + transport
 ASSUMED SHAPE: the issuer client config is JSON `{"issuer", "ca_cert" (PEM path), "role_id",
-"secret_id"}` (`issuer.json`, under `<repo>/playground-issuer/client/` in dev).
+"secret_id"}` (`issuer.json`, one per tenant under `<repo>/playground-issuer/client/<tenant id>/` in
+dev, named by the tenant row's forge binding).
 """
 from __future__ import annotations
 

@@ -16,6 +16,7 @@ from ._support import (
     OTHER_LESSON,
     agent_blobs,
     bind_forge,
+    default_issuer_config,
     current_commit,
     export_dir,
     files_under,
@@ -83,7 +84,7 @@ def test_second_tenant_is_published_apart_under_the_same_data_root(p4_tenant):
 
 
 def test_forge_binding_round_trips_through_the_tenant_row(p4_tenant):
-    """`bind_forge` writes r3's `forge: {origin, audience, issuer_role}` into `<T>/tenant.json`,
+    """`bind_forge` writes `forge: {origin, audience, issuer_role, issuer_config}` into `<T>/tenant.json`,
     keeping the row's own fields, and the tenant is still accepted by the real reader (which
     today ignores the field); `unbind_forge` removes it again."""
     t = p4_tenant
@@ -92,7 +93,8 @@ def test_forge_binding_round_trips_through_the_tenant_row(p4_tenant):
     assert "forge" not in before
     binding = bind_forge(t)
     assert binding == {"origin": t.origin, "audience": ISSUER_AUDIENCE,
-                       "issuer_role": f"tenant-{t.tenant_id}"}
+                       "issuer_role": f"tenant-{t.tenant_id}",
+                       "issuer_config": str(default_issuer_config(t))}
     assert json.loads(row_path.read_text(encoding="utf-8")) == {**before, "forge": binding}
     assert str(tenants.accept(t.data_root, t.tenant_id).id) == t.tenant_id
     unbind_forge(t)

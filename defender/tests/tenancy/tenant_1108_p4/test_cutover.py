@@ -47,6 +47,7 @@ import pytest
 
 from defender import _git
 from defender._git import REPO_ROOT
+from defender.tests.tenancy.tenant_1108_p4._support import committed_blobs
 
 #: O1's product allowlist: these skills stay in the product; every other `defender/skills/<x>/`
 #: at the product commit is a system skill and moves to the lab.
@@ -382,7 +383,7 @@ def test_o14_lab_main_is_publishable_for_the_lab_tenant_before_merge():
     commits ahead — the UUID migration c6cdf9f and 1784b0f were never delivered. Red.)"""
     _root, tenant_id, tenant_dir = _lab_inputs()
     clone = tenant_dir / "knowledge"
-    marker = _git.git_tree_blobs(clone, "refs/remotes/origin/main", "agent/.tenant-id")
+    marker = committed_blobs(clone, "refs/remotes/origin/main", "agent/.tenant-id")
     assert marker == {"agent/.tenant-id": f"{tenant_id}\n".encode()}, marker
     ahead = _git.git(["rev-list", "refs/remotes/origin/main..refs/heads/main"], cwd=clone)
     assert ahead == "", f"the lab clone's main holds undelivered commits: {ahead.split()}"

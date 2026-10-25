@@ -8,24 +8,27 @@ folder `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, token}}` (U
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import re
 import secrets
-import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from defender import _io
-from defender.tenancy._exports import DeliveryRefused, current_export, regular_files
-from defender.tenancy._owner import owner_alive, write_owner
+from defender._text import one_line
+from defender.tenancy._exports import (
+    OID,
+    DeliveryRefused,
+    current_export,
+    regular_files,
+    remove_entry,
+)
+from defender.tenancy._owner import owned_temporary, owner_alive, write_owner
 from defender.tenancy._tenant import Tenant, TenantRefused
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
-
-#: A full commit id, as an export is named: SHA-1 (40) or SHA-256 (64) lowercase hex.
-_COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 #: The report line's classes (OD2). `stale:*` keeps a run with a snapshot going; `misconfigured`
 #: refuses it (O9); anything else is a failed child (U11).
@@ -54,23 +57,22 @@ class KnowledgeRefused(Exception):
 @dataclass(frozen=True)
 class PublishReport:
     """What the launch-time publish child reported: `fresh` with the commit it published,
-    `stale` with its kind and reason, or `misconfigured` with its reason."""
+    `stale` with its kind and reason, or `misconfigured` with its reason. `unreadable`: the
+    line was not one of those, so this is U11's `stale:operator` in its place."""
 
     kind: str
     commit: str | None = None
     stale_kind: str | None = None
     reason: str | None = None
-
-
-def _one_line(text: str) -> str:
-    return " ".join(text.split())
+    unreadable: bool = False
 
 
 def child_failed(summary: object) -> PublishReport:
     """U11: a child with no valid report line (a crash, garbage, nothing, a spawn failure) is
     `stale:operator`, never fresh."""
-    shown = _one_line(str(summary))[:_SUMMARY_LIMIT] or "no report line"
-    return PublishReport(STALE, stale_kind=OPERATOR, reason=f"publish child failed: {shown}")
+    shown = one_line(str(summary))[:_SUMMARY_LIMIT] or "no report line"
+    return PublishReport(STALE, stale_kind=OPERATOR, reason=f"publish child failed: {shown}",
+                         unreadable=True)
 
 
 def read_publish_report(line: object) -> PublishReport:
@@ -85,7 +87,7 @@ def read_publish_report(line: object) -> PublishReport:
     head, _sep, rest = text.partition(" ")
     rest = rest.strip()
     if head == FRESH:
-        if _COMMIT.fullmatch(rest):
+        if OID.fullmatch(rest):
             return PublishReport(FRESH, commit=rest)
         return child_failed(f"fresh without a full commit id: {text!r}")
     if head in (f"{_STALE_PREFIX}{TRANSIENT}", f"{_STALE_PREFIX}{OPERATOR}") and rest:
@@ -124,7 +126,7 @@ class KnowledgeSource:
 def pinned_commit(raw: str) -> str:
     """`--knowledge-commit`'s value, held to a full commit id before anything is read (O-PIN):
     `current`, a path and a short id are refused, never resolved."""
-    if not _COMMIT.fullmatch(raw):
+    if not OID.fullmatch(raw):
         raise KnowledgeRefused(
             f"--knowledge-commit {raw!r} is not a full commit id (40 or 64 lowercase hex): a "
             "pinned run names the export it reads by its whole commit")
@@ -211,24 +213,9 @@ class RunCopy:
 
 
 def _remove_copy(folder: Path, name: str) -> None:
-    """`folder/name` removed as the entry it is, nothing below it followed."""
-    try:
-        fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except OSError:
-        return
-    try:
-        try:
-            st = os.stat(name, dir_fd=fd, follow_symlinks=False)
-        except FileNotFoundError:
-            return
-        if stat.S_ISDIR(st.st_mode):
-            shutil.rmtree(name, dir_fd=fd)
-        else:
-            os.unlink(name, dir_fd=fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
+    """`folder/name` removed as the entry it is, nothing below it followed; never raises."""
+    with contextlib.suppress(OSError):
+        remove_entry(folder, name)
 
 
 def _files_of(root: Path) -> dict[str, bytes]:
@@ -240,8 +227,9 @@ def _files_of(root: Path) -> dict[str, bytes]:
 
 def copy_for_run(tenant: Tenant, source: KnowledgeSource, run_id: str) -> RunCopy:
     """Copy `source`'s export into `<T>/run-knowledge/<run_id>/`: built as a dot-named
-    temporary holding its owner record (this process: pid + start time, so a publish sweeps it
-    once this process is gone), then renamed into place. Every file is written anew (no inode
+    temporary whose name carries its owner (`owned_temporary`: this process's pid + start time,
+    so a publish's sweep, which takes no notice of this process, keeps it while this process
+    lives and removes it once it is gone), then renamed into place with its owner record. Every file is written anew (no inode
     is shared with the export) from a no-follow read that refuses anything but regular files.
 
     A copy already at `<run_id>` (a resumed run id whose earlier run was killed) is replaced
@@ -257,7 +245,7 @@ def copy_for_run(tenant: Tenant, source: KnowledgeSource, run_id: str) -> RunCop
                 f"run id {run_id} already has a live run copy at {final}: another process is "
                 "running it")
         _remove_copy(copies, run_id)
-    temporary = f"{_BUILDING_PREFIX}{run_id}-{secrets.token_hex(4)}"
+    temporary = owned_temporary(f"{_BUILDING_PREFIX}{run_id}")
     try:
         with _io.hold_new(copies, temporary, exclusive=True) as held:
             write_owner(copies / temporary)

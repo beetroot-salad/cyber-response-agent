@@ -14,7 +14,6 @@ from pydantic_ai.exceptions import ModelRetry
 from defender._clock import now_iso
 from defender._git import GitError
 from defender._frontmatter import FrontmatterError, split_frontmatter
-from defender._io import Bound
 from defender._text import one_line
 from defender.learning.author import shared as author_shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
@@ -339,60 +338,39 @@ def _settle_tree(cfg: CorpusAuthorConfig, change_set: ChangeSet) -> _Tree:
     )
 
 
-def _corpus_name(cfg: CorpusAuthorConfig, path: str) -> str:
-    """The repo-relative change path `path` as a name under the corpus mount."""
-    return path[len(cfg.corpus_rel):]
+def _change_text(change: AgentChange) -> str:
+    """The text `change` would land, decoded as the canonical text read decodes a file (UTF-8,
+    universal newlines); `""` when it is not UTF-8, so it cites nothing."""
+    assert change.content is not None  # a changed lesson, never a deletion
+    try:
+        text = change.content.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-#: How many times `_read_citations` will re-read the changed lessons when one moved under it
-#: before giving up. Two is the honest need (read, then confirm nothing moved); the rest is
-#: slack for a concurrent editor that is still writing when the first confirmation runs.
-_CITE_ROUNDS = 4
+def _change_cites(change: AgentChange, field: str) -> set[str]:
+    """The queue-row ids the changed lesson claims as its source, read from the bytes it would
+    land. A lesson whose frontmatter cannot be read cites nothing, so it is unattributable."""
+    return _cited_ids_in(_change_text(change), field)
 
 
 def _read_citations(
     cfg: CorpusAuthorConfig, changed: tuple[AgentChange, ...], batch: set[str],
 ) -> dict[str, frozenset[str]]:
-    """change path -> the this-batch ids each changed lesson cites. Each lesson is read through
-    the corpus mount (`cfg.corpus`, #1134), in rounds until nothing moved during one (#773 one
-    truth). A lesson whose settled bytes are not the ones the claim's change set took — the
-    bytes that would land — cites nothing: no citation was read from what it would commit, so
-    it is never approved (the claim's reset puts it back)."""
-    field_name = provenance_field(cfg.channel.id_key)
-    view = cfg.corpus.view()
-
-    def read(change: AgentChange) -> str:
-        return _read_or_empty(view, _corpus_name(cfg, change.path))
-
-    texts: dict[str, str] = {}
-    for _ in range(_CITE_ROUNDS):
-        texts = {change.path: read(change) for change in changed}
-        if all(read(change) == texts[change.path] for change in changed):
-            break
-    else:
-        raise AuthorError(
-            f"{cfg.corpus_rel} kept changing under the citation read for {_CITE_ROUNDS} "
-            "rounds — refusing to commit bytes no citation was read from"
-        )
-    cites: dict[str, frozenset[str]] = {}
-    for change in changed:
-        text = texts[change.path]
-        assert change.content is not None  # `changed` holds no deletion
-        if text.encode("utf-8", "surrogateescape") != change.content:
-            channel_logger(cfg).warning(
-                f"{change.path} changed after the claim's change set was taken — not approved")
-            cites[change.path] = frozenset()
-            continue
-        cites[change.path] = frozenset(_cited_ids_in(text, field_name) & batch)
-    return cites
+    """change path -> the this-batch ids each changed lesson cites, read from the bytes the
+    claim's change set took — the bytes that land (#773 one truth). Nothing is read back from
+    the corpus, so a citation is always read from exactly what it approves."""
+    field = provenance_field(cfg.channel.id_key)
+    return {change.path: frozenset(_change_cites(change, field) & batch) for change in changed}
 
 
 def _assert_corpus_attributable(
     cfg: CorpusAuthorConfig, changed: tuple[AgentChange, ...], ids: set[str],
 ) -> None:
     """Every corpus file in `changed` must cite, under the channel's provenance key, an id
-    this batch read — whatever bucket the curator reported it under. Read through the corpus
-    mount: a refused read cites nothing. (`changed` is every addition, and every edit of a base
+    this batch read — whatever bucket the curator reported it under, read from the bytes it
+    would land. (`changed` is every addition, and every edit of a base
     file that still claims a provenance — no other batch's citations vouch for this batch's
     edit, #773 C13. An edit of a base file citing nothing at all is repaired, never committed
     — `_author_batch`.)
@@ -401,7 +379,7 @@ def _assert_corpus_attributable(
     field = provenance_field(cfg.channel.id_key)
     unattributed = [
         c.path for c in changed
-        if not (_cited_ids(cfg.corpus.view(), _corpus_name(cfg, c.path), field) & ids)
+        if not (_change_cites(c, field) & ids)
     ]
     if unattributed:
         raise AuthorError(
@@ -473,7 +451,7 @@ def _author_batch(
     _assert_corpus_attributable(
         cfg,
         tuple(c for c in tree.changed if c.path not in base
-              or _cited_ids(cfg.corpus.view(), _corpus_name(cfg, c.path), field)),
+              or _change_cites(c, field)),
         batch_ids)
 
     cites = _read_citations(cfg, tree.changed, batch_ids)
@@ -695,13 +673,6 @@ def _project(
     return bucket_held, bucket_consumed
 
 
-def _cited_ids(corpus: Bound, name: str, field: str) -> set[str]:
-    """The queue-row ids the corpus file `name` claims as its source, read through the corpus
-    mount's view. A file whose frontmatter cannot be read (a link or hard link at the name
-    included) cites nothing, so it is unattributable."""
-    return _cited_ids_in(_read_or_empty(corpus, name), field)
-
-
 def _cited_ids_in(text: str, field: str) -> set[str]:
     try:
         fm, _raw, _body = split_frontmatter(text)
@@ -711,13 +682,6 @@ def _cited_ids_in(text: str, field: str) -> set[str]:
     if not isinstance(cited, list):
         return set()
     return {c for c in cited if isinstance(c, str)}
-
-
-def _read_or_empty(corpus: Bound, name: str) -> str:
-    """The text of the corpus file `name`, read through the corpus mount's view; `""` when it is
-    absent, undecodable or refused (a link, hard link or FIFO at the name, O5.1)."""
-    rec = corpus.read(name)
-    return rec.text if rec.text is not None else ""
 
 
 def _retire_unkeyable(

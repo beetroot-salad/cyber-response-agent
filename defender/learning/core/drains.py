@@ -9,7 +9,7 @@ import subprocess
 import uuid
 from defender._model import model
 from typing import TYPE_CHECKING, Any
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
@@ -645,47 +645,54 @@ LEAD_AUTHOR_BRANCH_PREFIX = "lead-author/"
 
 
 class _Refused(Exception):
-    """A delivery refusal met while the drain opens its tenant delivery: re-raised by the
-    entry as one `FatalConfigError` line, outside every `except`, so the stage runner logs the
-    cause alone (no displaced exception, no traceback)."""
+    """A delivery refusal met while the drain opens its tenant delivery or starts its batch:
+    re-raised by the entry as one `FatalConfigError` line, outside every `except`, so the stage
+    runner logs the cause alone (no displaced exception, no traceback) — unless `transient`
+    (an outage that may pass by itself, `status.classify`), which skips the tick instead."""
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
+def _classified_refusal(message: str, fault: BaseException) -> _Refused:
+    """`message` as a `_Refused`, transient when `fault` is an outage (`status.classify`)."""
+    from defender.learning.author.version_control.status import TRANSIENT, classify
+
+    return _Refused(message, transient=classify(fault)[0] == TRANSIENT)
+
+
+@contextlib.contextmanager
 def _open_delivery(
     paths: LoopPaths, *, prefix: str, client: httpx.Client | None,
     identity: ForgejoIdentity | None, issuer_config: Path | None,
     issuer_transport: httpx.BaseTransport | None,
-) -> TenantDelivery:
-    """Flow 4's front: the selected tenant's forge binding (its row), then its identity — the
-    given one, else an AppRole login with the issuer client config at `issuer_config` (A-ID,
-    OD4) — then `TenantDelivery.open` against the binding's origin. A missing binding or config
-    is decided locally, before any request (O9); every refusal is `_Refused`, naming why."""
+) -> Iterator[TenantDelivery]:
+    """Flow 4's front: the selected tenant's delivery, opened by `vc.opened_delivery` (its
+    forge binding, then its identity — the given one, else an AppRole login with the issuer
+    client config the binding names, A-ID, OD4 — then `TenantDelivery.open` against the
+    binding's origin), its own clients closed on exit. A missing binding or config is decided
+    locally, before any request (O9); every refusal is `_Refused`, naming why."""
     from defender.learning.author import version_control as vc
     from defender.tenancy import _tenant
 
     tenant = paths.tenant
     if tenant is None:
         raise _Refused("the drain delivers to a tenant's repository: no tenant is selected")
-    try:
+    with contextlib.ExitStack() as opened:
         try:
-            binding = _tenant.read_forge_binding(tenant)
+            # The batch box's code mount is this process's own code tree, never the checkout
+            # the learning paths name (whose adapters the lanes read).
+            delivery = opened.enter_context(vc.opened_delivery(
+                tenant, defender_dir=process_defender_dir(), client=client, identity=identity,
+                issuer_config=issuer_config, issuer_transport=issuer_transport))
         except _tenant.TenantRefused as unbound:
-            raise _Refused(f"the tenant {tenant.id} has no usable forge binding: {unbound}") from None
-        if identity is None:
-            identity = vc.issuer_login(
-                tenant, issuer_config=issuer_config or vc.DEV_ISSUER_CONFIG,
-                transport=issuer_transport)
-        if client is None:
-            import httpx
-
-            client = httpx.Client()
-        # The batch box's code mount is this process's own code tree, never the checkout the
-        # learning paths name (whose adapters the lanes read).
-        delivery = vc.TenantDelivery.open(
-            tenant, defender_dir=process_defender_dir(), client=client, identity=identity,
-            origin=binding.origin)
-    except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
-        raise _Refused(f"the tenant {tenant.id}'s delivery refused: {refused}") from None
-    return dataclasses.replace(delivery, branch_prefix=prefix)
+            raise _Refused(
+                f"the tenant {tenant.id} has no usable forge binding: {unbound}") from None
+        except (vc.DeliveryRefused, vc.ForgejoAuthError) as refused:
+            raise _classified_refusal(
+                f"the tenant {tenant.id}'s delivery refused: {refused}", refused) from None
+        yield dataclasses.replace(delivery, branch_prefix=prefix)
 
 
 def _record_pending_delivery(
@@ -778,7 +785,7 @@ def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
     label: DrainLabel,
     has_work: Callable[[LearningState], bool],
     do_work: Callable[..., BatchDisposition | None],
-    open_delivery: Callable[[], TenantDelivery],
+    open_delivery: Callable[[], contextlib.AbstractContextManager[TenantDelivery]],
     start_box: Callable[..., Any] | None,
     stop_box: Callable[..., None],
 ) -> int:
@@ -788,14 +795,32 @@ def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
     work, each claim committed by P3's commit-maker; the disposition; `finish`; `discard()`.
 
     A tick with nothing retained and nothing queued opens nothing. A refusal while opening is
-    the stage's refusal, before any claim, box or model call (O9)."""
-    from defender.learning.author.version_control import DeliveryRefused
-
+    the stage's refusal, before any claim, box or model call (O9); an outage there skips the
+    tick."""
     prefix = AUTHOR_BRANCH_PREFIX if label is AUTHOR_DRAIN_LABEL else LEAD_AUTHOR_BRANCH_PREFIX
     if not state.deliveries(prefix) and not has_work(state):
         _logger.info(f"{label}: nothing queued and no curator at threshold — skipping")
         return 0
-    delivery = open_delivery()
+    with open_delivery() as delivery:
+        return _run_opened_batch(paths, state, delivery, label=label, has_work=has_work,
+                                 do_work=do_work, start_box=start_box, stop_box=stop_box)
+
+
+def _run_opened_batch(  # noqa: PLR0913 — one batch, kept whole
+    paths: LoopPaths,
+    state: LearningState,
+    delivery: TenantDelivery,
+    *,
+    label: DrainLabel,
+    has_work: Callable[[LearningState], bool],
+    do_work: Callable[..., BatchDisposition | None],
+    start_box: Callable[..., Any] | None,
+    stop_box: Callable[..., None],
+) -> int:
+    """`_run_tenant_batch`'s tick past the open: everything after the delivery is open."""
+    from defender.learning.author.version_control import DeliveryRefused
+
+    prefix = delivery.branch_prefix
     if not _deliver_pending(state, delivery, label):
         return 0
     if not has_work(state):
@@ -807,7 +832,7 @@ def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
             return 0
         batch = delivery.start_batch(uuid.uuid4().hex[:12], lanes=label.lanes)
     except DeliveryRefused as e:
-        raise _Refused(f"{label}: the batch could not start: {e}") from None
+        raise _classified_refusal(f"{label}: the batch could not start: {e}", e) from None
 
     disposition: BatchDisposition | None = None
     consumed = False
@@ -852,10 +877,14 @@ def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
 
 def _refusing(entry: Callable[[], int]) -> int:
     """`entry()`, a `_Refused` turned into the stage's one-line `FatalConfigError` raised from
-    outside the `except`, so it carries no context for the stage runner to report."""
+    outside the `except`, so it carries no context for the stage runner to report. A transient
+    `_Refused` (an outage) is a warning and a skipped tick: the next tick tries again."""
     try:
         return entry()
     except _Refused as e:
+        if e.transient:
+            _logger.warning(f"{one_line(str(e))} — an outage; skipping this tick")
+            return 0
         refused = str(e)
     raise FatalConfigError(one_line(refused))
 
@@ -874,7 +903,8 @@ def author_drain(
 ) -> int:
     """The lessons lane's tick into the selected tenant's repository (flow 4). `client` is the
     forge's HTTP client (one is built when absent); `identity` the tenant's delivery identity,
-    else the drain logs in with the issuer client config at `issuer_config` (A-ID), its
+    else the drain logs in with the issuer client config the forge binding names (A-ID;
+    `issuer_config` stands in for it), its
     requests through `issuer_transport` when given; `start_box`/`stop_box` the batch's box
     (default `TenantDelivery.start_box`, sandbox required, and `box.stop_box`)."""
     _validate_merge_mode()
@@ -884,7 +914,7 @@ def author_drain(
         trigger_author = functools.partial(_maybe_trigger_author, label=AUTHOR_DRAIN_LABEL)
     seam = trigger_author
 
-    def open_delivery() -> TenantDelivery:
+    def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
         return _open_delivery(paths, prefix=AUTHOR_BRANCH_PREFIX, client=client,
                               identity=identity, issuer_config=issuer_config,
                               issuer_transport=issuer_transport)
@@ -938,7 +968,7 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
         )
     lead_step, pitfalls_step = run_lead_author, run_pitfalls
 
-    def open_delivery() -> TenantDelivery:
+    def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
         return _open_delivery(paths, prefix=LEAD_AUTHOR_BRANCH_PREFIX, client=client,
                               identity=identity, issuer_config=issuer_config,
                               issuer_transport=issuer_transport)

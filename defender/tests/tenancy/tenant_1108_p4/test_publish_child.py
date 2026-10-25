@@ -456,7 +456,7 @@ def test_o9_a_misconfigured_tenant_refuses_the_run_before_any_model_call(
 
 # --- O-BUDGET, parent half (OD11): a REAL child process under a REAL lock ---------------------
 #
-# The parent launcher (`run.launch_publish`, assumed seam) runs the REAL child's process entry
+# The parent launcher (`publish_launch.launch_publish`, assumed seam) runs the REAL child's process entry
 # (`publish_child_main`) in a subprocess whose fakes are rebuilt inside it (`_s_b_support.
 # CHILD_WRAPPER`). Budgets are small but must exceed the child's interpreter start-up and
 # imports, which the budget counts; the locked phase is slowed through the child's one

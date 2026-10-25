@@ -8,7 +8,6 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _io  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.presentation.workspace_map import DEFENDER_DIR, workspace_map  # noqa: E402
 
@@ -46,17 +45,14 @@ def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
     """The agent half of the export the run read (#1108 P4: its host-held knowledge record's
     commit, `<T>/exports/<commit>/agent`), or `None` when the run names none or the export is
     gone: the map then says it has no tenant knowledge to show."""
-    import json
-
+    from defender.records._knowledge_status import read_knowledge_status
     from defender.run_repository import RunPaths
     from defender.tenancy import _tenant
 
-    raw, _reason = _io.read_guarded(RunPaths(run_dir).knowledge_source())
-    try:
-        commit = json.loads(raw).get("commit") if raw is not None else None
-    except (ValueError, AttributeError):
-        commit = None
-    if not isinstance(commit, str) or not commit.isalnum():
+    paths = RunPaths(run_dir)
+    status = read_knowledge_status(paths.knowledge_source(), paths.provenance)
+    commit = status.commit if status is not None else None
+    if commit is None:
         return None
     try:
         tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)

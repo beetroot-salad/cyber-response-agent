@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 from defender.learning.author import drain
+from defender.learning.author.version_control import AgentChange
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.author.questioner import run as questioner_run
@@ -55,38 +56,23 @@ def _watch_for(kind: str, target: Path):
     return kernel_watch(reads=[target]) if kind == "hard link" else kernel_watch(opens=[target])
 
 
-@pytest.mark.parametrize("kind", ["symlink", "hard link"])
-def test_an_aliased_lesson_cites_nothing_and_reads_empty(tmp_path, kind):
-    """A lesson the box aliased outside the draft cites nothing and reads empty, its target never
-    followed; the same bytes as a plain draft file cite and read (#1134, P4 O7)."""
-    w = draft_world(tmp_path)
-    body = lesson_text("f1", mark=OUT_MARK)
-    target = w.target("secret.md", body)
-    at = w.corpus_dir / PLANTED
-    plant_alias(kind, at, target)
-
-    with _watch_for(kind, target) as events:
-        cited = drain._cited_ids(w.view, PLANTED, FIELD)
-        text = drain._read_or_empty(w.view, PLANTED)
-        seen = events()
-
-    assert cited == set()
-    assert text == ""
-    assert seen == []
-
-    put(at, body)
-    assert drain._cited_ids(w.view, PLANTED, FIELD) == {"f1"}
-    assert drain._read_or_empty(w.view, PLANTED) == body
+def _change(content: bytes) -> AgentChange:
+    return AgentChange(f"agent/lessons/{PLANTED}", content)
 
 
-def test_an_absent_or_undecodable_lesson_cites_nothing_and_reads_empty(tmp_path):
-    """An absent or undecodable draft lesson cites nothing and reads empty (#1134, P4 O7)."""
-    w = draft_world(tmp_path)
-    assert drain._cited_ids(w.view, "absent.md", FIELD) == set()
-    assert drain._read_or_empty(w.view, "absent.md") == ""
-    put(w.corpus_dir / "bad.md", b"---\nsource_finding_ids:\n- f1\n---\n\xff\xfe\n")
-    assert drain._cited_ids(w.view, "bad.md", FIELD) == set()
-    assert drain._read_or_empty(w.view, "bad.md") == ""
+def test_a_lesson_cites_what_its_landing_bytes_cite_whatever_its_line_endings():
+    """A changed lesson's citations are read from the bytes it would land, never read back from
+    the corpus (so an alias at its name is the change set's refusal, test_changes.py), decoded
+    as a text read decodes a file: CRLF and CR line endings cite as LF ones do."""
+    body = lesson_text("f1", mark=OUT_MARK).encode()
+    for content in (body, body.replace(b"\n", b"\r\n"), body.replace(b"\n", b"\r")):
+        assert drain._change_cites(_change(content), FIELD) == {"f1"}, content[:40]
+
+
+def test_an_undecodable_lesson_cites_nothing():
+    """A changed lesson that is not UTF-8 cites nothing, so it is unattributable."""
+    content = b"---\nsource_finding_ids:\n- f1\n---\n\xff\xfe\n"
+    assert drain._change_cites(_change(content), FIELD) == set()
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])

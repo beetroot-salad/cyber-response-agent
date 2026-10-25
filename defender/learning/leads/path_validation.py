@@ -16,9 +16,6 @@ CATALOG_PREFIX = f"{AGENT_REL}/{CATALOG}/"  # lint-stage-frame: ok — a path, n
 #: The catalog's folder below the `skills/` mount (`gather/queries`): drain code reaches the catalog
 #: through the held `skills/` mount, never through a handle rooted at the catalog (#1134).
 CATALOG_FOLDER = CATALOG[len(SKILLS):].strip("/")
-#: The same two spellings under their former names, for callers outside production code.
-SKILLS_REL = SKILLS_PREFIX
-CATALOG_REL = CATALOG_PREFIX
 
 
 def _under_draft(path: str) -> bool:

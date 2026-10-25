@@ -17,18 +17,6 @@ REPO_LOCATING_ENV = (
 )
 
 
-def committed_view_env(rev: str = "HEAD") -> dict[str, str]:
-    """This process's environment for a git call that must see the repository as `rev` commits
-    it: attributes from `rev`'s tree (`GIT_ATTR_SOURCE`, git 2.42+), never from a
-    `.gitattributes` in the worktree, and replace objects ignored (`GIT_NO_REPLACE_OBJECTS`).
-
-    A worktree `.gitattributes` is opened by every git call that hashes or writes a file there,
-    so one that is a FIFO blocks it for good, and its rules would convert what git hashes; a
-    `refs/replace` entry would stand another object in for the commit's own (#1134, aligned with
-    #1120's committed read)."""
-    return {**os.environ, "GIT_ATTR_SOURCE": rev, "GIT_NO_REPLACE_OBJECTS": "1"}
-
-
 def env_for_cwd() -> dict[str, str]:
     """This process's environment without the variables that would override `cwd=`, for a
     call that must act on the repository at its `cwd` and nowhere else (a tenant's own repo,
@@ -199,11 +187,6 @@ def git_blob_bytes(cwd: Path, sha: str, *, env: Mapping[str, str] | None = None,
     return _run_bytes(["cat-file", "blob", sha], cwd=cwd, env=env, timeout=timeout)
 
 
-#: `ls-tree` modes of a regular file blob: the only entries a before-state restores as a file
-#: (a symlink, 120000, and a submodule, 160000, never are).
-_REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
-
-
 def _run_bytes(
     args: Sequence[str], *, cwd: Path, input: bytes | None = None,
     env: Mapping[str, str] | None = None, timeout: float | None = None,
@@ -227,19 +210,6 @@ def git_bytes(
     listings, where a stripped or decoded answer would change what was stored. A non-zero
     exit raises `GitError`; `timeout` passing first, `subprocess.TimeoutExpired`."""
     return _run_bytes(args, cwd=cwd, input=input, env=env, timeout=timeout)
-
-
-def _regular_blobs(
-    cwd: Path, rev: str, pathspec: str, *, timeout: float | None,
-) -> list[tuple[str, str]]:
-    """`(oid, repo-relative path)` of every regular-file blob under `pathspec` at `rev`, nested
-    folders included (`ls-tree -r -z`, the pathspec taken literally); a symlink or submodule
-    entry is left out. An unknown `rev` raises `GitError`."""
-    listing = _run_bytes(["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-name", rev,
-                          "--", pathspec], cwd=cwd, env=committed_view_env(rev),
-                         timeout=timeout)
-    return [(oid, path) for mode, kind, oid, path in tree_records(listing)
-            if kind == "blob" and mode in _REGULAR_BLOB_MODES]
 
 
 def tree_records(listing: bytes, *, errors: str = "surrogateescape") -> list[tuple[str, str, str, str]]:
@@ -273,21 +243,3 @@ def blob_batch(args: Sequence[str], out: bytes, oids: Sequence[str]) -> list[byt
     return blobs
 
 
-def git_tree_blobs(
-    cwd: Path, rev: str, pathspec: str, *, timeout: float | None = None,
-) -> dict[str, bytes]:
-    """Every regular-file blob under `pathspec` at `rev`, nested folders included, by its
-    repo-relative path, with its exact stored bytes (`ls-tree -r` then one `cat-file --batch`):
-    git's own read of a commit (#1134 addendum 2 correction, C1), which no worktree entry can
-    redirect. A symlink (mode 120000) or submodule entry is left out, so nothing restores it as a
-    file. A `pathspec` `rev` does not carry answers `{}`; an unknown `rev` or a missing object
-    raises `GitError`. The bytes are the blob's, unfiltered, and the commit's own: replace objects
-    are ignored (`committed_view_env`). `timeout` bounds each git process; `TimeoutExpired`."""
-    wanted = _regular_blobs(cwd, rev, pathspec, timeout=timeout)
-    if not wanted:
-        return {}
-    batch_args = ["cat-file", "--batch"]
-    out = _run_bytes(batch_args, cwd=cwd, input="".join(f"{oid}\n" for oid, _ in wanted).encode(),
-                     env=committed_view_env(rev), timeout=timeout)
-    blobs = blob_batch(batch_args, out, [oid for oid, _ in wanted])
-    return {path: blob for (_oid, path), blob in zip(wanted, blobs, strict=True)}

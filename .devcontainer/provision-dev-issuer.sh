@@ -16,8 +16,9 @@
 #       binding the AppRole to the tenant; the bot's Generic JWT Authorized Integration in
 #       Forgejo (issuer https://openbao:8200/v1/identity/oidc, claim `tenant_id` = the tenant,
 #       restricted to the repo, write:repository + write:issue); the role's client_id set to the
-#       integration's audience; the AppRole client config at playground-issuer/client/issuer.json;
-#       the tenant row's forge binding. It checks the bot cannot push `main`, and revokes the root
+#       integration's audience; the tenant's AppRole client config at
+#       playground-issuer/client/<tenant-id>/issuer.json; the tenant row's forge binding, which
+#       names that file. It checks the bot cannot push `main`, and revokes the root
 #       token it used. A later run regenerates a root token from the recovery keys inside the
 #       issuer container.
 #
@@ -231,8 +232,15 @@ ensure_integration() {  # ensure_integration bot tenant repo -> sets AUDIENCE
 
 # --- the client config, the row's forge binding, and the protection check ---------------------
 
-write_client_config() {  # write_client_config token rotate
-  local t=$1 rotate=$2 config="$STATE/client/issuer.json" secret
+client_config() {  # client_config tenant -> the tenant's own AppRole client config path
+  printf '%s/client/%s/issuer.json' "$STATE" "$1"
+}
+
+write_client_config() {  # write_client_config token tenant rotate: one file per tenant
+  local t=$1 tenant=$2 rotate=$3 config secret
+  config=$(client_config "$tenant")
+  mkdir -p "$(dirname "$config")"
+  chmod 0700 "$(dirname "$config")"
   if [ "$rotate" = yes ] || [ ! -s "$config" ] || [ "$(jq -r .role_id "$config")" != "$ROLE_ID" ]; then
     secret=$(bao "$t" write -f -field=secret_id auth/approle/role/"$APPROLE"/secret-id)
     jq -n --arg issuer "$IDENTITY" --arg ca "$STATE/trust/dev-issuer-ca.pem" \
@@ -244,12 +252,14 @@ write_client_config() {  # write_client_config token rotate
   fi
 }
 
-bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, issuer_role}
+bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, issuer_role, issuer_config}
   local tenant=$1 repo=$2 row
   row="${DEFENDER_DATA_ROOT:?the dev container sets DEFENDER_DATA_ROOT}/$tenant/tenant.json"
   [ -s "$row" ] || die "no tenant row at $row: run \`python3 defender/cli/tenant.py setup $tenant\` first"
   jq --arg origin "http://forgejo:3000/$repo.git" --arg audience "$AUDIENCE" --arg role "$ROLE" \
-    '.forge = {origin: $origin, audience: $audience, issuer_role: $role}' "$row" > "$row.tmp"
+    --arg config "$(client_config "$tenant")" \
+    '.forge = {origin: $origin, audience: $audience, issuer_role: $role, issuer_config: $config}' \
+    "$row" > "$row.tmp"
   mv "$row.tmp" "$row"
 }
 
@@ -295,7 +305,7 @@ provision() {
   ensure_integration "$bot" "$tenant" "$repo"
   bao "$t" write identity/oidc/role/"$ROLE" key="$SIGNING_KEY" ttl=600 client_id="$AUDIENCE" \
     template='{"tenant_id": {{identity.entity.metadata.tenant_id}}}' >/dev/null
-  write_client_config "$t" "$rotate"
+  write_client_config "$t" "$tenant" "$rotate"
   bind_forge "$tenant" "$repo"
   check_main_protected "$t" "$repo"
   bao "$t" token revoke -self >/dev/null

@@ -144,26 +144,6 @@ def _sweep_temporaries(folder: Path, prefix: str) -> None:
         os.close(fd)
 
 
-def _remove_entry(folder: Path, name: str) -> None:
-    """Remove `folder/name` as the entry it is (a folder with no link below it followed,
-    anything else unlinked); nothing when it, or `folder`, is absent."""
-    try:
-        fd = os.open(folder, _FOLDER_FLAGS)
-    except FileNotFoundError:
-        return
-    try:
-        try:
-            st = os.stat(name, dir_fd=fd, follow_symlinks=False)
-        except FileNotFoundError:
-            return
-        if stat.S_ISDIR(st.st_mode):
-            shutil.rmtree(name, dir_fd=fd)
-        else:
-            os.unlink(name, dir_fd=fd)
-    finally:
-        os.close(fd)
-
-
 def _rename_new(folder: Path, source: str, name: str) -> None:
     """Rename `folder/source` to `folder/name`, refusing any entry already at `name` (a plain
     rename would replace an empty folder there). Both relative to one held, no-follow folder

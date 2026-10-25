@@ -139,9 +139,6 @@ class LoopPaths(DefenderPaths):
             raise FatalConfigError("learning state requires an explicit tenant or scratch state_dir")
         return self.state_dir
 
-    def with_repo_root(self, repo_root: Path) -> LoopPaths:
-        return LoopPaths(repo_root=repo_root, state_dir=self.state_root, tenant=self.tenant)
-
     @property
     def quarantine_dir(self) -> Path:
         """Where the legacy worktree drain archived a tainted worktree, which the queue page

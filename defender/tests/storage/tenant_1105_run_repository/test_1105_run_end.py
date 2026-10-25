@@ -1,6 +1,8 @@
 """Run end keeps its order: cross-check, ticket, curation, page."""
 from __future__ import annotations
 
+import dataclasses
+
 from defender.tests.support.shared._locations_1210 import location_path
 
 import errno
@@ -82,7 +84,7 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     location_path(tenant.learning).mkdir(exist_ok=True)
     repo = arm / "repo"
     (repo / "defender").mkdir(parents=True)
-    paths = LoopPaths.for_tenant(tenant).with_repo_root(repo)
+    paths = dataclasses.replace(LoopPaths.for_tenant(tenant), repo_root=repo)
     order: list[str] = []
     tail = _Tail(paths, order, fail=fail)
     handler = _Order(order)

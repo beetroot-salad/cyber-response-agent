@@ -1,6 +1,8 @@
 """Drain retire ceiling: new queue paths live under state_root, ceiling bound at config build, and the pitfalls channel retires at the ceiling."""
 from __future__ import annotations
 
+import dataclasses
+
 from defender.tests.support.shared._locations_1210 import location_path
 
 from pathlib import Path
@@ -308,7 +310,7 @@ def test_1186_tenant_state_requires_a_real_learning_directory(
     if selection != "at-open":
         selected = LoopPaths.for_tenant(tenant)
         if selection == "author-checkout":
-            selected = selected.with_repo_root(tmp_path / "other-author-checkout")
+            selected = dataclasses.replace(selected, repo_root=tmp_path / "other-author-checkout")
     if shape != "plain":
         location_path(tenant.learning).rmdir()
         location_path(tenant.learning).symlink_to(target, target_is_directory=True)
@@ -351,7 +353,7 @@ def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
     assert location_path(first.state_root) == location_path(a.learning)
     assert location_path(second.state_root) == location_path(b.learning)
     worktree = tmp_path / "different-author-checkout"
-    moved = first.with_repo_root(worktree)
+    moved = dataclasses.replace(first, repo_root=worktree)
     assert moved.repo_root == worktree
     assert location_path(moved.state_root) == location_path(a.learning)
 

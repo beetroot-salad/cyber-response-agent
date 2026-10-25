@@ -1,10 +1,11 @@
 """A-ID (#1108 P4): a host-side delivery process logs in to the issuer (OpenBao) itself, with
 AppRole, and gets the tenant's short-lived identity.
 
-The login material is one operator file, handed to delivery processes by path (P-4: file-only,
-never environment, never tenant content): JSON `{"issuer", "ca_cert", "role_id", "secret_id"}`,
-where `issuer` is OpenBao's address and `ca_cert` the PEM file it is trusted by. Which role
-signs the tenant's tokens and for which Forgejo audience is the tenant row's forge binding.
+The login material is one operator file per tenant, named by path in the tenant row's forge
+binding (`issuer_config`; P-4: file-only, never environment, never tenant content): JSON
+`{"issuer", "ca_cert", "role_id", "secret_id"}`, where `issuer` is OpenBao's address and
+`ca_cert` the PEM file it is trusted by. Which role signs the tenant's tokens and for which
+Forgejo audience is the same binding.
 Nothing read here is ever put in an environment, an argv, a box or a report line (O8).
 """
 
@@ -17,15 +18,11 @@ from pathlib import Path
 import httpx
 
 from defender import _io
-from defender._git import REPO_ROOT
-from defender.tenancy._tenant import Tenant, TenantRefused, read_forge_binding
+from defender.tenancy._tenant import ForgeBinding, Tenant, TenantRefused, read_forge_binding
 
 from .auth import ForgejoAuthError, ForgejoIdentity
 from .model import DeliveryRefused
 
-#: The dev issuer client config (U4): under the repository, outside `defender/` (so under no box
-#: mount source), gitignored. Production passes its own path.
-DEV_ISSUER_CONFIG = REPO_ROOT / "playground-issuer" / "client" / "issuer.json"  # lint-shippable: ok — the dev default path (U4); a deployment passes its own config path
 #: OpenBao's identity-token endpoint below its address, and its AppRole login.
 IDENTITY_PATH = "/v1/identity/oidc"
 LOGIN_PATH = "/v1/auth/approle/login"
@@ -42,6 +39,12 @@ class IssuerConfig:
     ca_cert: Path
     role_id: str = field(repr=False)
     secret_id: str = field(repr=False)
+
+
+def issuer_config_path(binding: ForgeBinding, override: Path | None = None) -> Path:
+    """The issuer client config file a delivery process logs in with: the binding's own
+    `issuer_config`, unless an in-process caller hands a stand-in `override`."""
+    return Path(override) if override is not None else binding.issuer_config
 
 
 def read_issuer_config(path: Path) -> IssuerConfig:
@@ -97,20 +100,20 @@ def _client(
 def issuer_login(
     tenant: Tenant,
     *,
-    issuer_config: Path,
+    issuer_config: Path | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> ForgejoIdentity:
-    """Log in to the issuer with the config file's AppRole pair and return the tenant's
-    identity: tokens for the forge binding's `issuer_role`, for its `audience`, checked by
+    """Log in to the issuer with the AppRole pair of the config file the forge binding names
+    (`issuer_config`, an in-process stand-in for it) and return the tenant's identity: tokens for the forge binding's `issuer_role`, for its `audience`, checked by
     `ForgejoIdentity` as bound to this tenant. A missing or malformed config file, or a tenant
     row with no forge binding, is refused before any request (O9). A refused login is a
     `ForgejoAuthError` naming the HTTP status only; an unreachable issuer keeps its transport
     fault as the cause (a caller tells an outage from a refusal by it)."""
-    config = read_issuer_config(issuer_config)
     try:
         binding = read_forge_binding(tenant)
     except TenantRefused as unbound:
         raise DeliveryRefused(str(unbound)) from unbound
+    config = read_issuer_config(issuer_config_path(binding, issuer_config))
     login = _client(config, transport)
     try:
         response = login.post(

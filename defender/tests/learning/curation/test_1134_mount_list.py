@@ -89,7 +89,7 @@ class Leaf:
 
     @property
     def wt_paths(self) -> LoopPaths:
-        return self.paths.with_repo_root(self.wt)
+        return dataclasses.replace(self.paths, repo_root=self.wt)
 
     def build(self, *rels: str) -> None:
         """Make each tree in `rels` under `wt`; by default every tree a checkout carries, the
@@ -151,14 +151,11 @@ def relocated_paths(asked: list[tuple[Path, str]]) -> type[LoopPaths]:
     """A `LoopPaths` subclass, injected through the `paths` argument, whose three drain trees
     are NOT where the shipped paths put them: each is `relocated_rel(repo_root, name)`, a
     sibling of the real trees. Every read of a tree attribute records `(repo_root, attribute)`
-    in `asked`. `with_repo_root` keeps the subclass (the shipped one returns a plain
-    `LoopPaths`), so `paths.with_repo_root(wt)` still relocates. A class per call, so each test
+    in `asked`. A rebase (`dataclasses.replace`) keeps the subclass, so a rebased double still
+    relocates. A class per call, so each test
     reads its own `asked` (the instances are frozen)."""
 
     class RelocatedPaths(LoopPaths):
-        def with_repo_root(self, repo_root: Path) -> LoopPaths:
-            return type(self)(repo_root=repo_root, state_dir=location_path(self.state_root))
-
         def _moved(self, attr: str, name: str) -> Path:
             asked.append((self.repo_root, attr))
             return self.repo_root / relocated_rel(self.repo_root, name)
@@ -454,7 +451,7 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
     # The box half (`_drain_box_request` following the paths) is gone with the worktree batch:
     # P4's box mounts the draft's lanes (`test_the_box_rw_mounts_are_the_roots_open_drain_trees_
     # holds...`); the holder still follows whatever trees the paths name.
-    wt_paths = paths.with_repo_root(wt)
+    wt_paths = dataclasses.replace(paths, repo_root=wt)
     assert type(wt_paths) is type(paths)  # the double keeps itself across the rebase
     with open_drain_trees(wt_paths, label) as trees:
         assert trees.mounts == tuple(expected)
@@ -468,11 +465,11 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
 
 def relative_paths(how: str, root: Path, tmp_path: Path) -> LoopPaths:
     """A `LoopPaths` whose `repo_root` is the relative `root`: `constructed` directly, or
-    `rebased` from the main checkout's paths through `with_repo_root`, the drain's own route."""
+    `rebased` from the main checkout's paths (`dataclasses.replace`)."""
     state = tmp_path / "learning-state"
     if how == "constructed":
         return LoopPaths(repo_root=root, state_dir=state)
-    return LoopPaths(repo_root=tmp_path / MAIN, state_dir=state).with_repo_root(root)
+    return dataclasses.replace(LoopPaths(repo_root=tmp_path / MAIN, state_dir=state), repo_root=root)
 
 
 @pytest.mark.parametrize("how", ["constructed", "rebased"])

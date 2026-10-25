@@ -801,24 +801,28 @@ def tenant_id_file_text(tenant_id: TenantId) -> str:
 
 #: The row field holding the binding.
 _FORGE_FIELD = "forge"
-_FORGE_KEYS = ("origin", "audience", "issuer_role")
+_FORGE_KEYS = ("origin", "audience", "issuer_role", "issuer_config")
 
 
 @dataclasses.dataclass(frozen=True)
 class ForgeBinding:
     """Where the tenant's repository is served and how its delivery identity is minted: the
-    repository's network `origin`, the Forgejo integration's `audience`, and the issuer role
-    that signs the tenant's tokens. Not secret; no login material."""
+    repository's network `origin`, the Forgejo integration's `audience`, the issuer role
+    that signs the tenant's tokens, and `issuer_config`, the absolute path of the operator's
+    issuer client config file holding this tenant's AppRole login (P-4: a path, handed by
+    the row, never the login material itself). Not secret."""
 
     origin: str
     audience: str
     issuer_role: str
+    issuer_config: Path
 
 
 def read_forge_binding(tenant: Tenant) -> ForgeBinding:
-    """The tenant row's `forge: {origin, audience, issuer_role}`, read from the row file NOW
-    (an operator may bind or re-bind after the tenant was accepted). Absent, or any of the
-    three missing or not a non-empty string, is `TenantRefused` naming the row."""
+    """The tenant row's `forge: {origin, audience, issuer_role, issuer_config}`, read from the
+    row file NOW (an operator may bind or re-bind after the tenant was accepted). Absent, any
+    of the four missing or not a non-empty string, or an `issuer_config` that is not an
+    absolute path, is `TenantRefused` naming the row."""
     path = _unwrap_tenant_root(tenant.tenant_root) / ROW_NAME
     try:
         with _real_io.bind(path.parent) as bound:
@@ -833,15 +837,20 @@ def read_forge_binding(tenant: Tenant) -> ForgeBinding:
     forge = obj.get(_FORGE_FIELD)
     if forge is None:
         raise TenantRefused(
-            f"{path} has no forge binding (`forge: {{origin, audience, issuer_role}}`): "
+            f"{path} has no forge binding "
+            "(`forge: {origin, audience, issuer_role, issuer_config}`): "
             "the tenant's repository is not bound to a forge")
     fields = forge if isinstance(forge, dict) else {}
     found = {key: fields.get(key) for key in _FORGE_KEYS}
     bad = [key for key, value in found.items() if not isinstance(value, str) or not value]
     if bad:
         raise TenantRefused(f"{path}'s forge binding lacks {', '.join(bad)}")
+    issuer_config = Path(str(found["issuer_config"]))
+    if not issuer_config.is_absolute():
+        raise TenantRefused(
+            f"{path}'s forge binding names a relative issuer_config: it must be an absolute path")
     return ForgeBinding(origin=str(found["origin"]), audience=str(found["audience"]),
-                        issuer_role=str(found["issuer_role"]))
+                        issuer_role=str(found["issuer_role"]), issuer_config=issuer_config)
 
 
 # ==========================================================================================

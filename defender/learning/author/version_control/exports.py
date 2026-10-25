@@ -17,9 +17,10 @@ from typing import IO
 from defender import _flock, _io
 from defender.tenancy._exports import POINTER as _POINTER
 from defender.tenancy._exports import TenantExport, current_export
+from defender.tenancy._exports import remove_entry as _remove_entry
 from defender.tenancy._tenant import Tenant, parse_tenant_id_bytes
 
-from .files import _remove_entry, _rename_new, _sweep_temporaries
+from .files import _rename_new, _sweep_temporaries
 from .model import (
     _OID,
     _REGULAR_MODES,
@@ -91,8 +92,9 @@ def sweep_dead_owners(tenant: Tenant, *, temporaries_only: bool = False) -> None
     unreadable, or a pid now running with another start time all count as dead), as the entry
     it is, no link below it followed. `temporaries_only`: the dot-named ones alone (a batch
     start's sweep; a finished draft or copy waits for a publish). The caller holds the tenant's
-    lock. A live owner's folder is kept however old it is: a builder writes its owner record
-    inside its dot-named temporary before anything else, so a folder mid-build is owned."""
+    lock. A live owner's folder is kept however old it is, and a folder mid-build is owned: a
+    draft is built under this lock, and a run copy (built without it) under a name that carries
+    its owner (`tenancy._owner.owned_temporary`) from the instant it exists."""
     for root in (_unwrap_drafts_root(tenant.drafts), tenant.run_knowledge):
         if not _io.entry_present(root):
             continue

@@ -52,19 +52,10 @@ def _revert_unlocked(
     from defender.tenancy import _tenant
 
     try:
-        binding = _tenant.read_forge_binding(tenant)
-        if identity is None:
-            identity = vc.issuer_login(
-                tenant, issuer_config=issuer_config or vc.DEV_ISSUER_CONFIG,
-                transport=issuer_transport)
-        if client is None:
-            import httpx
-
-            client = httpx.Client()
-        delivery = vc.TenantDelivery.open(
-            tenant, defender_dir=_DEFENDER_DIR, client=client, identity=identity,
-            origin=binding.origin)
-        delivered = delivery.revert(lesson_path(lesson_name), lesson_name)
+        with vc.opened_delivery(tenant, defender_dir=_DEFENDER_DIR, client=client,
+                                identity=identity, issuer_config=issuer_config,
+                                issuer_transport=issuer_transport) as delivery:
+            delivered = delivery.revert(lesson_path(lesson_name), lesson_name)
     except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
         _logger.critical(f"revert of {lesson_name} refused: {refused}")
         return 2
@@ -86,22 +77,22 @@ def main(
     issuer_transport=None,
 ) -> int:
     """The CLI. The keywords are in-process stand-ins for the forge client and the issuer
-    login (`identity` given: no login)."""
+    login (`identity` given: no login); the login reads the issuer client config the tenant
+    row's forge binding names."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Revert a lesson under its tenant's drain lock")
     parser.add_argument("--tenant", required=True)
-    parser.add_argument("--issuer-config", type=Path, default=None)
     parser.add_argument("lesson_name")
     args = parser.parse_args(argv)
     paths = command_line_paths(parser, args.tenant)
     if not _has_state_root(paths):
         return revert(args.lesson_name, state=None, tenant=paths.tenant, client=client,
-                      identity=identity, issuer_config=issuer_config or args.issuer_config,
+                      identity=identity, issuer_config=issuer_config,
                       issuer_transport=issuer_transport)
     with LearningState.open(paths) as state:
         return revert(args.lesson_name, state=state, tenant=paths.tenant, client=client,
-                      identity=identity, issuer_config=issuer_config or args.issuer_config,
+                      identity=identity, issuer_config=issuer_config,
                       issuer_transport=issuer_transport)
 
 

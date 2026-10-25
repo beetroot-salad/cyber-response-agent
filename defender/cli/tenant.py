@@ -5,8 +5,8 @@
     python3 defender/cli/tenant.py scaffold <tenant-id> <empty dir>
     python3 defender/cli/tenant.py setup <tenant-id>
     python3 defender/cli/tenant.py check <tenant-id> | --folder <path>
-    python3 defender/cli/tenant.py update <tenant-id> [--issuer-config <path>]
-    python3 defender/cli/tenant.py propose <tenant-id> <staged dir> [--issuer-config <path>]
+    python3 defender/cli/tenant.py update <tenant-id>
+    python3 defender/cli/tenant.py propose <tenant-id> <staged dir>
     python3 defender/cli/tenant.py migrate <tenant-id> <new knowledge folder>   # one-off
 
 A tenant's knowledge (its `settings/` and `agent/` halves) lives in the tenant's OWN repo, never
@@ -35,8 +35,7 @@ commits (failing closed when git cannot answer). `check <id>` judges the tenant 
 folder with no data root at all (tenant CI).
 
 `update` publishes (#1108 P4 flow 1): it logs in to the issuer from the issuer client config
-file (`--issuer-config`; by default the dev issuer's client config under the repository),
-fetches the tenant row's bound origin, fast-forwards the clone, writes the export and points
+file the tenant row's forge binding names (`forge.issuer_config`), fetches the tenant row's bound origin, fast-forwards the clone, writes the export and points
 `current` at it.
 `setup` does the same once the row carries a forge binding. `check <id>` also reports how far
 `current` trails the clone's `origin/main` and the last publish refusal any trigger met (a run
@@ -235,21 +234,12 @@ def _trail(tenant: _tenant.Tenant, current: str | None) -> str | None:
 
 def _delivery(tenant: _tenant.Tenant, *, client=None, identity=None,
               issuer_config: Path | None = None):
-    """The tenant's `TenantDelivery`, opened against its row's bound origin with an identity
-    from the issuer client config (or the given stand-ins)."""
+    """The tenant's opened `TenantDelivery` (a context manager): its row's bound origin, an
+    identity from the issuer client config the binding names (or the given stand-ins)."""
     from defender.learning.author import version_control as vc
 
-    binding = _tenant.read_forge_binding(tenant)
-    if identity is None:
-        identity = vc.issuer_login(
-            tenant, issuer_config=issuer_config or vc.DEV_ISSUER_CONFIG)
-    if client is None:
-        import httpx
-
-        client = httpx.Client()
-    return vc.TenantDelivery.open(
-        tenant, defender_dir=_DEFENDER_DIR, client=client, identity=identity,
-        origin=binding.origin)
+    return vc.opened_delivery(tenant, defender_dir=_DEFENDER_DIR, client=client,
+                              identity=identity, issuer_config=issuer_config)
 
 
 def _publish(tenant: _tenant.Tenant, *, by: str, client=None, identity=None,
@@ -258,9 +248,9 @@ def _publish(tenant: _tenant.Tenant, *, by: str, client=None, identity=None,
     from defender.learning.author.version_control.status import recording
 
     try:
-        with recording(tenant, by=by):
-            export = _delivery(tenant, client=client, identity=identity,
-                               issuer_config=issuer_config).publish()
+        with recording(tenant, by=by), _delivery(
+                tenant, client=client, identity=identity, issuer_config=issuer_config) as delivery:
+            export = delivery.publish()
     except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
         _say(f"publish refused: {refused}")
         return 1
@@ -314,11 +304,12 @@ def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
         if flat:
             raise vc.DeliveryRefused(
                 f"{', '.join(flat)}: propose stages files below a folder of agent/ only")
-        delivery = replace(_delivery(tenant, client=client, identity=identity,
-                                     issuer_config=issuer_config), branch_prefix="propose/")
-        batch = delivery.start_batch(f"propose-{secrets.token_hex(4)}", lanes=lanes)
-        batch.commit(change_set, f"propose: {', '.join(sorted(files))[:200]}")
-        delivered = delivery.finish(batch)
+        with _delivery(tenant, client=client, identity=identity,
+                       issuer_config=issuer_config) as opened:
+            delivery = replace(opened, branch_prefix="propose/")
+            batch = delivery.start_batch(f"propose-{secrets.token_hex(4)}", lanes=lanes)
+            batch.commit(change_set, f"propose: {', '.join(sorted(files))[:200]}")
+            delivered = delivery.finish(batch)
     except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
         _say(f"propose refused: {refused}")
         return 1
@@ -694,22 +685,15 @@ def main(argv: list[str]) -> int:
     setup_p.add_argument("tenant_id")
     setup_p.add_argument("--learning-state-from", type=Path, default=None,
                          help="explicit legacy learning directory to adopt offline")
-    setup_p.add_argument("--issuer-config", type=Path, default=None,
-                         help="the issuer client config file, for the publish of a tenant whose "
-                              "row is bound to a forge (default: the dev path)")
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
     update_p = sub.add_parser("update", help="publish the tenant's merged main as `current`")
     update_p.add_argument("tenant_id")
-    update_p.add_argument("--issuer-config", type=Path, default=None,
-                          help="the issuer client config file (default: the dev path)")
     propose_p = sub.add_parser(
         "propose", help="propose a staged agent/-shaped directory as one PR on the tenant forge")
     propose_p.add_argument("tenant_id")
     propose_p.add_argument("staged", type=Path)
-    propose_p.add_argument("--issuer-config", type=Path, default=None,
-                           help="the issuer client config file (default: the dev path)")
     migrate_p = sub.add_parser(
         "migrate", help="one-off (#1120): build a pre-#1120 tenant's knowledge folder from its "
                         "last copy in the checkout's history")
@@ -722,13 +706,13 @@ def main(argv: list[str]) -> int:
     if ns.command == "scaffold":
         return scaffold(ns.tenant_id, ns.target)
     if ns.command == "setup":
-        return setup(ns.tenant_id, ns.learning_state_from, issuer_config=ns.issuer_config)
+        return setup(ns.tenant_id, ns.learning_state_from)
     if ns.command == "migrate":
         return migrate(ns.tenant_id, ns.target)
     if ns.command == "update":
-        return update(ns.tenant_id, issuer_config=ns.issuer_config)
+        return update(ns.tenant_id)
     if ns.command == "propose":
-        return propose(ns.tenant_id, ns.staged, issuer_config=ns.issuer_config)
+        return propose(ns.tenant_id, ns.staged)
     if (ns.tenant_id is None) == (ns.folder is None):
         check_p.error("give exactly one of <tenant-id> and --folder")
     if ns.folder is not None:

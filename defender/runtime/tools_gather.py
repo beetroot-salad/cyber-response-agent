@@ -28,7 +28,7 @@ from . import run_end
 from . import session_store
 from . import tools
 from .agent_role import GATHER_AGENT_ID_PREFIX
-from .model_view import MODEL_AGENT, ModelView
+from .model_view import ModelView
 from .tools import (
     DeadEnd,
     GatherDeps,
@@ -37,7 +37,7 @@ from .tools import (
 )
 
 from defender.knowledge._corpus import QueryTemplate, is_established, iter_query_templates
-from defender.knowledge._knowledge import SKILLS, KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
@@ -249,15 +249,13 @@ def _gather_prompt(
     view = deps.view
     # Section order is the cache prefix: the indexes vary only per system, the Dispatch block
     # per lead, so indexes go first to let same-system leads share a cached prefix.
-    # A role handed no agent root (#1108 P4: no run copy) reads no tenant knowledge: its
-    # dispatch names the skill by its model path and gets the index's degradation block.
-    knowledge = deps.knowledge if deps.agent_root is not None else None
+    # Every dispatched lead reads its run's knowledge (#1108 P4: the run copy's agent root,
+    # carried on the run tenant the driver requires).
+    knowledge = deps.knowledge
     block = "Begin gathering this lead.\n\n"
     if catalog:
-        skill_dir = (view.to_model(knowledge.system_skill_dir(request.system))
-                     if knowledge is not None else f"{MODEL_AGENT}/{SKILLS}/{request.system}")
-        surface = (f" {_execution_surface(knowledge, request.system, view)}"
-                   if knowledge is not None else "")
+        skill_dir = view.to_model(knowledge.system_skill_dir(request.system))
+        surface = f" {_execution_surface(knowledge, request.system, view)}"
         block += (
             "## Systems of record (descriptor index — frontmatter only, "
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
@@ -271,8 +269,7 @@ def _gather_prompt(
             f"the execution surface's to state.{surface}\n\n"
             f"{catalog}\n"
         )
-    index = (_template_index(knowledge, request.system, verb_grant, view=view)
-             if knowledge is not None else TemplateIndex("", 0))
+    index = _template_index(knowledge, request.system, verb_grant, view=view)
     if index.text:
         block += _INDEX_HEADER + index.text + "\n"
     else:

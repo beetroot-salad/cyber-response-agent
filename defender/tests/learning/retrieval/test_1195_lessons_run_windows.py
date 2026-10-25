@@ -303,9 +303,10 @@ def test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box
     assert "gate" in _kinds(before), _kinds(before)
     # #1108 P4: the settle is the claim's change set (OD15) and the commit is P3's commit-maker
     # (O7), both journalled at the batch (`_journal_batch`); a non-`.md` stray is dropped from
-    # the claim and removed by its reset, never placed.
+    # the claim and removed by its reset, never placed. Citations are read from the change
+    # set's own bytes (PR #1288 review), so no corpus read follows the spawn.
     assert ("change_set",) in after_spawn, "the settle after the curator spawn was not seen"
-    assert {"report", "read"} <= set(_kinds(after_spawn)), _kinds(after_spawn)
+    assert "report" in set(_kinds(after_spawn)), _kinds(after_spawn)
     assert ("commit",) in after_spawn, "the commit was not seen"
     assert _rel(sc, "stray.txt") not in sc.head_files()
     assert not os.path.lexists(sc.corpus / "stray.txt"), "the stray outlived the claim"

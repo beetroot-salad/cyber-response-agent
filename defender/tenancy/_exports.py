@@ -5,7 +5,9 @@ Writing exports is the delivery package's (`learning/author/version_control/expo
 module only reads."""
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -138,3 +140,23 @@ def regular_files(root: Path) -> dict[str, bytes]:
                     )
                 files[rel] = read.data
     return files
+
+
+def remove_entry(folder: Path, name: str) -> None:
+    """Remove `folder/name` as the entry it is (a folder with no link below it followed,
+    anything else unlinked); nothing when it, or `folder`, is absent."""
+    try:
+        fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return
+    try:
+        try:
+            st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if stat.S_ISDIR(st.st_mode):
+            shutil.rmtree(name, dir_fd=fd)
+        else:
+            os.unlink(name, dir_fd=fd)
+    finally:
+        os.close(fd)

@@ -17,10 +17,8 @@ Inputs (test-only environment; P-4 forbids environment for the product, not for 
 
     DEFENDER_LIVE_DATA_ROOT        the host's real data root holding the lab tenant (the suite's
                                    conftest replaces DEFENDER_DATA_ROOT with a tmp root per test)
-    DEFENDER_LIVE_TENANT           the lab tenant id
-    DEFENDER_LIVE_ISSUER_CONFIG    the issuer client config FILE under
-                                   <repo>/playground-issuer/client/ (its name is the
-                                   implementer's; the design fixes only the folder)
+    DEFENDER_LIVE_TENANT           the lab tenant id (its row's forge binding names its issuer
+                                   client config, <repo>/playground-issuer/client/<id>/issuer.json)
     DEFENDER_LIVE_ALLOW_RESTART=1  allow `docker restart` of the openbao container
     DEFENDER_LIVE_ALLOW_LAB_PR=1   allow opening (then closing) one PR on the lab repo and an
                                    attempted push to its `main`
@@ -32,8 +30,8 @@ Inputs (test-only environment; P-4 forbids environment for the product, not for 
         -m live defender/tests/tenancy/tenant_1108_p4/test_live_dev_issuer.py
 
 Assumed seam (A-ID, shared with S-D): `defender.learning.author.version_control.issuer_login(
-tenant, *, issuer_config: Path) -> ForgejoIdentity` — reads the issuer client config file
-(issuer URL, CA, AppRole role_id/secret_id) and the tenant row's forge binding, logs in to
+tenant) -> ForgejoIdentity` — reads the tenant row's forge binding and the issuer client config
+file it names (issuer URL, CA, AppRole role_id/secret_id), logs in to
 OpenBao with AppRole, and returns the identity whose `client` is the authenticated, CA-trusting
 OpenBao client. Every live delivery process (drains, `tenant.py`, the publish child) goes through
 it, so this file logs in exactly as a drain does.
@@ -60,6 +58,7 @@ import pytest
 
 from defender import _git
 from defender._git import REPO_ROOT
+from defender.tests.tenancy.tenant_1108_p4._support import committed_blobs
 from defender.tests.support.sandbox._docker import daemon_reachable
 
 pytestmark = pytest.mark.live
@@ -94,23 +93,23 @@ def _main_checkout() -> Path:
 def _lab() -> Lab:
     data_root = os.environ.get("DEFENDER_LIVE_DATA_ROOT")
     tenant_id = os.environ.get("DEFENDER_LIVE_TENANT")
-    config = os.environ.get("DEFENDER_LIVE_ISSUER_CONFIG")
-    if not (data_root and tenant_id and config):
-        pytest.skip("set DEFENDER_LIVE_DATA_ROOT, DEFENDER_LIVE_TENANT and DEFENDER_LIVE_ISSUER_CONFIG")
-    if not Path(config).is_file():
-        pytest.skip(f"no issuer client config at {config}: the dev issuer is not provisioned")
+    if not (data_root and tenant_id):
+        pytest.skip("set DEFENDER_LIVE_DATA_ROOT and DEFENDER_LIVE_TENANT")
     from defender.tenancy._tenant import data_root_from_path, requested_tenant
 
-    tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
     row = json.loads((Path(data_root) / tenant_id / "tenant.json").read_text(encoding="utf-8"))
     assert "forge" in row, f"the lab tenant row has no forge binding: {sorted(row)}"
+    config = row["forge"].get("issuer_config")
+    if not (isinstance(config, str) and Path(config).is_file()):
+        pytest.skip(f"no issuer client config at {config!r}: the dev issuer is not provisioned")
+    tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
     return Lab(tenant=tenant, tenant_id=tenant_id, issuer_config=Path(config), forge=row["forge"])
 
 
 def _login(lab: Lab):
     """AppRole login exactly as a delivery process does it (assumed seam, see module doc)."""
     vc = importlib.import_module("defender.learning.author.version_control")
-    return vc.issuer_login(lab.tenant, issuer_config=lab.issuer_config)
+    return vc.issuer_login(lab.tenant)
 
 
 def _issuer_base(identity) -> str:
@@ -387,7 +386,8 @@ def test_one_lesson_pr_is_delivered_end_to_end_through_the_dev_issuer_O12():
 
 def test_deployment_facts_are_file_only_and_never_in_the_tenant_repo_P4_U4():
     """P-4: the issuer client config lies under `<repo>/playground-issuer/client/` (dev, U4);
-    the tenant row's forge binding is exactly `{origin, audience, issuer_role}` (no secret); no
+    the tenant row's forge binding is exactly `{origin, audience, issuer_role, issuer_config}`
+    (no secret: the config's path, never its content); no
     issuer/forge fact is in this process's environment (the dev container's); and no blob of the
     lab repo's `main` carries the issuer URL, the audience, a certificate or a private key.
     Positive control for the blob scan: it finds the tenant id in `agent/.tenant-id`."""
@@ -395,13 +395,13 @@ def test_deployment_facts_are_file_only_and_never_in_the_tenant_repo_P4_U4():
     client_dir = _main_checkout() / "playground-issuer" / "client"
     assert client_dir in lab.issuer_config.resolve().parents, (
         f"the issuer client config {lab.issuer_config} is not under {client_dir}")
-    assert set(lab.forge) == {"origin", "audience", "issuer_role"}, sorted(lab.forge)
+    assert set(lab.forge) == {"origin", "audience", "issuer_role", "issuer_config"}, sorted(lab.forge)
     leaked = sorted(k for k in os.environ
                     if _DEPLOYMENT_FACT.search(k) and not k.startswith(_TEST_ONLY_ENV))
     assert not leaked, f"deployment facts in the environment: {leaked}"
     identity = _login(lab)
     clone = lab.tenant.knowledge
-    blobs = _git.git_tree_blobs(clone, "refs/remotes/origin/main", ".")
+    blobs = committed_blobs(clone, "refs/remotes/origin/main", ".")
     assert lab.tenant_id.encode() in blobs.get("agent/.tenant-id", b""), "control: blobs are read"
     needles = [identity.issuer.encode(), _issuer_base(identity).encode(),
                lab.forge["audience"].encode(), b"BEGIN CERTIFICATE", b"PRIVATE KEY"]

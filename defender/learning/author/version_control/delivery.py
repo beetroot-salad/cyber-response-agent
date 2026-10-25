@@ -6,9 +6,10 @@ Vault identity; boxes receive only host-made copies. Production drain/run wiring
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import httpx
 from defender import _io
-from defender.tenancy._tenant import Tenant
+from defender.tenancy._tenant import Tenant, read_forge_binding
 from defender import box
 from defender.box._docker import DockerFn, _docker
 
@@ -32,6 +33,7 @@ from .exports import (
     tenant_lock,
 )
 from .forgejo import PullRequest
+from .issuer import issuer_login
 from .model import (
     _PRECEDENCE,
     AgentChange,
@@ -51,6 +53,35 @@ from .status import record_published, recording
 
 #: The lessons lane's branch prefix on the tenant repository (a lane passes its own).
 LESSONS_BRANCH_PREFIX = "lessons/"
+
+
+@contextlib.contextmanager
+def opened_delivery(
+    tenant: Tenant,
+    *,
+    defender_dir: Path,
+    client: httpx.Client | None = None,
+    identity: ForgejoIdentity | None = None,
+    issuer_config: Path | None = None,
+    issuer_transport: httpx.BaseTransport | None = None,
+) -> Iterator[TenantDelivery]:
+    """The tenant's delivery, opened against its row's forge binding: the binding's origin;
+    `identity`, else an AppRole login with the issuer client config the binding names
+    (`issuer_config` and `issuer_transport` are in-process stand-ins); `client`, else a new
+    forge client. A client made here is closed on exit; a given one stays its caller's. An
+    unbound row is `TenantRefused`; a refused open, `DeliveryRefused` or `ForgejoAuthError`."""
+    binding = read_forge_binding(tenant)
+    with contextlib.ExitStack() as owned:
+        if identity is None:
+            identity = issuer_login(tenant, issuer_config=issuer_config,
+                                    transport=issuer_transport)
+            owned.callback(identity.client.close)
+        if client is None:
+            import httpx
+
+            client = owned.enter_context(httpx.Client())
+        yield TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
+                                  identity=identity, origin=binding.origin)
 
 
 @dataclass(frozen=True, eq=False)

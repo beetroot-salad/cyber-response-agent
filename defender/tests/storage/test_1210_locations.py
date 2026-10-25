@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 from dataclasses import asdict
 from os import fspath
 import subprocess
@@ -138,7 +139,7 @@ def test_tenant_and_scratch_state_cannot_exchange_location_kinds(tmp_path):
     tenant = set_up_tenant(tmp_path / "data")
     selected = LoopPaths.for_tenant(tenant)
     assert isinstance(selected.state_root, L.LearningRoot)
-    copied = selected.with_repo_root(tmp_path / "checkout")
+    copied = dataclasses.replace(selected, repo_root=tmp_path / "checkout")
     assert copied.state_root is selected.state_root
     assert copied.tenant is tenant
     for value in (tmp_path / "raw", None):

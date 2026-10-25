@@ -64,3 +64,32 @@ def test_r6_a_failing_redelivery_serves_no_new_work_and_keeps_the_retained_recor
     assert _retained(paths) == held, "the retained delivery record was dropped by a failed redelivery"
     assert remote_branches(t.remote) == branches
     assert rc in (0, 2), (rc, critical_text(caplog))
+
+
+def test_an_outage_while_the_batch_starts_skips_the_tick_and_serves_nothing(
+        p4_tenant, tmp_path, thresholds, caplog):  # noqa: F811 — fixture
+    """A forge outage met while the batch starts (here, the writer-lease listing unreachable) is
+    a passing fault, not a configuration one: the tick logs a warning and exits 0 (the next tick
+    retries), and serves nothing — no box, no curator, the row still queued. A refusal that
+    needs a human stays the stage's one-line refusal (O9's matrix, test_drain_credentials.py)."""
+    from defender.learning.core.state import FINDINGS
+
+    t = p4_tenant
+    bind_forge(t)
+    paths = drain_paths(t, product_repo(tmp_path))
+    queue(paths, [S.finding_row("f1", run_id="f1")])
+    box = BoxSpy()
+    t.forge.fault = lambda request: (
+        httpx.ConnectError("the forge is down", request=request)
+        if request.method == "GET" and request.url.path.endswith("/pulls") else None)
+    trigger = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")}))
+    with caplog.at_level(logging.INFO):
+        rc = author_drain(t, paths, trigger=trigger, box=box)
+
+    assert rc == 0, critical_text(caplog)
+    assert [r for r in caplog.records if r.levelno >= logging.CRITICAL] == [], critical_text(caplog)
+    assert any("outage" in r.getMessage() for r in caplog.records
+               if r.levelno == logging.WARNING), "the skipped tick says why"
+    assert trigger.calls == []
+    assert box.requests == []
+    assert "f1" in S.pending_by_id(paths, FINDINGS), "the row left the queue"

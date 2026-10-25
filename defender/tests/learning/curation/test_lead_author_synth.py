@@ -241,7 +241,7 @@ def test_a_coined_id_naming_another_system_mints_nothing(tmp_path):
 
 def test_a_coined_id_cannot_mint_a_basename_the_commit_gate_discards_the_batch_for(tmp_path):
     from defender.learning.leads.path_validation import (
-        CATALOG_REL,
+        CATALOG_PREFIX as CATALOG_REL,
         _is_draft_readme,
         _is_schema_md,
     )

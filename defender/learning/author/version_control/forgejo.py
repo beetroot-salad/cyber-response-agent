@@ -283,9 +283,6 @@ class ForgejoForge:
             row for row in self._open() if row["headRefName"].startswith(head_prefix)
         ]
 
-    def list_prs_for_head(self, head: str) -> list[dict]:
-        return [row for row in self._open() if row["headRefName"] == head]
-
     def pull_requests(self) -> list[PullRequest]:
         """Every PR of this repository's own, open, merged or closed (a `state=all` listing),
         with its head commit: where a batch's PR is found by its head commit (amendment 3, C1)."""

@@ -18,7 +18,7 @@ from defender._tree_listing import list_tree
 from defender.learning.core.lane_trees import DrainTrees, read_at
 from defender.learning.leads import lead_author, lead_render, pitfalls_curator
 from defender.learning.leads.lead_extraction import collect_general_failures
-from defender.learning.leads.path_validation import SKILLS_REL
+from defender.learning.leads.path_validation import SKILLS_PREFIX as SKILLS_REL
 from defender.tests.support.learning.curation._tree_listing_1134 import SWAP_PLANTS, RealOs, SwapsOnStep, fd_path
 from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn
 from defender.tests.support.learning.curation._lead_author_1134 import (

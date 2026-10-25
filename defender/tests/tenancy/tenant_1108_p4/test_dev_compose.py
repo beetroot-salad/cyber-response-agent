@@ -259,7 +259,7 @@ _KNOWLEDGE_PROBES = [
 _ISSUER_PROBES = [
     "playground-issuer/storage/core/_keyring",
     "playground-issuer/seal/unseal",
-    "playground-issuer/client/issuer.json",
+    "playground-issuer/client/00000000-0000-4000-8000-000000000000/issuer.json",
     "playground-issuer/recovery/keys.json",
 ]
 

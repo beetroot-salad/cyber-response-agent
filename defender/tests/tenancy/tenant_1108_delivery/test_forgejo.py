@@ -62,12 +62,6 @@ def test_open_pr_listing_traverses_pages_and_filters_head_prefix():
     _all_ours(http)
 
 
-def test_exact_head_lookup_does_not_accept_prefix_match():
-    http = ForgeHTTP()
-    http.pages = {1: [row(1, "lessons/ab"), row(2, "lessons/a")]}
-    assert forge(http).list_prs_for_head("lessons/a") == [normalized(2, "lessons/a")]
-
-
 def test_create_sends_all_pr_fields_to_origin_repository():
     http = ForgeHTTP()
     url = forge(http).open_pr(base="main", head="lessons/a", title="tenant change", body="agent/lessons/a.md")
@@ -83,7 +77,6 @@ def test_create_sends_all_pr_fields_to_origin_repository():
 _FORGE_CALLS = {
     "verify_main_protection": lambda f: f.verify_main_protection(),
     "list_open_prs": lambda f: f.list_open_prs("lessons/"),
-    "list_prs_for_head": lambda f: f.list_prs_for_head("lessons/a"),
     "open_pr": lambda f: f.open_pr(base="main", head="lessons/a", title="t", body="b"),
 }
 
@@ -152,7 +145,6 @@ def test_owner_and_repository_compare_without_case():
                   2: [pr_row(3, "lessons/b", repo=SIBLING_FORK), pr_row(4, "lessons/b")]}
     assert forge(http, origin=cased).list_open_prs("lessons/") == [normalized(2, "lessons/a"),
                                                                    normalized(4, "lessons/b")]
-    assert forge(http, origin=cased).list_prs_for_head("lessons/a") == [normalized(2, "lessons/a")]
     _all_ours(http)
 
 
@@ -191,43 +183,34 @@ def _stored(http, heads):
 
 
 @pytest.mark.parametrize("link", sorted(_LINKS))
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_listings_ask_our_address_for_each_page_and_never_follow_link(link, method):
+def test_listings_ask_our_address_for_each_page_and_never_follow_link(link):
     http = ForgeHTTP()
     http.page_size = 2
     http.link = _LINKS[link]
     _stored(http, ["lessons/ab", "unrelated", "lessons/b", "lessons/a", "lessons/a"])
-    found = getattr(forge(http), method)("lessons/a")
-    expected = [normalized(4, "lessons/a"), normalized(5, "lessons/a")]
-    if method == "list_open_prs":
-        expected = [normalized(1, "lessons/ab"), *expected]
-    assert found == expected
+    found = forge(http).list_open_prs("lessons/a")
+    assert found == [normalized(1, "lessons/ab"), normalized(4, "lessons/a"),
+                     normalized(5, "lessons/a")]
     assert _pages_asked(http)[:3] == [1, 2, 3]
     _all_ours(http)
 
 
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_a_listing_goes_on_past_a_page_the_server_clamped(method):
+def test_a_listing_goes_on_past_a_page_the_server_clamped():
     http = ForgeHTTP()
     http.page_size = 1
     _stored(http, ["lessons/b", "unrelated", "lessons/a"])
-    if method == "list_open_prs":
-        assert forge(http).list_open_prs("lessons/") == [normalized(1, "lessons/b"), normalized(3, "lessons/a")]
-    else:
-        assert forge(http).list_prs_for_head("lessons/a") == [normalized(3, "lessons/a")]
+    assert forge(http).list_open_prs("lessons/") == [normalized(1, "lessons/b"), normalized(3, "lessons/a")]
     assert _pages_asked(http)[:3] == [1, 2, 3]
     _all_ours(http)
 
 
 @pytest.mark.parametrize("total", [True, False], ids=["with-total-count", "without-total-count"])
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_a_long_listing_is_read_to_its_end(method, total):
+def test_a_long_listing_is_read_to_its_end(total):
     http = ForgeHTTP()
     http.page_size = 5
     http.total_count = total
     _stored(http, [*(f"unrelated/{n}" for n in range(259)), "lessons/a"])
-    query = "lessons/a" if method == "list_prs_for_head" else "lessons/"
-    assert getattr(forge(http), method)(query) == [normalized(260, "lessons/a")]
+    assert forge(http).list_open_prs("lessons/") == [normalized(260, "lessons/a")]
     assert _pages_asked(http)[:52] == list(range(1, 53))
 
 
@@ -239,7 +222,7 @@ def test_a_total_count_that_is_not_a_number_is_a_forge_error(value):
     http.total_count = value
     http.pages = {1: [row(1, "lessons/a")]}
     with pytest.raises(_forge_module().ForgeError):
-        forge(http).list_prs_for_head("lessons/a")
+        forge(http).list_open_prs("lessons/")
 
 
 @pytest.mark.parametrize("total", [True, False], ids=["with-total-count", "without-total-count"])
@@ -256,12 +239,10 @@ def test_a_short_page_before_the_end_is_not_the_end(total):
         assert pages == [1, 2, 3, 4], "without X-Total-Count only an empty page ends the listing"
 
 
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_a_server_that_ignores_the_page_is_read_once_by_its_total_count(method):
+def test_a_server_that_ignores_the_page_is_read_once_by_its_total_count():
     http = ForgeHTTP()
     http.every_page = [pr_row(1, "lessons/a", repo=FORK), pr_row(2, "lessons/a")]
-    query = "lessons/" if method == "list_open_prs" else "lessons/a"
-    found, error, hung = bounded(lambda: getattr(forge(http), method)(query))
+    found, error, hung = bounded(lambda: forge(http).list_open_prs("lessons/"))
     assert not hung, "the listing never stopped"
     assert error is None, error
     assert found == [normalized(2, "lessons/a")]
@@ -275,15 +256,11 @@ def test_a_server_that_ignores_the_page_is_read_once_by_its_total_count(method):
     ("http://forge.invalid:80/tenants/blue.git", ("http", "forge.invalid", 80)),
     ("https://forge.invalid/tenants/blue.git", ("https", "forge.invalid", 443)),
 ])
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_every_page_is_asked_of_the_parsed_address(origin, address, method):
+def test_every_page_is_asked_of_the_parsed_address(origin, address):
     http = ForgeHTTP(origin=origin)
     http.pages = {1: [row(1, "lessons/ab")], 2: [row(2, "lessons/a")]}
-    result = getattr(forge(http, origin=origin), method)("lessons/a")
-    expected = [normalized(2, "lessons/a")]
-    if method == "list_open_prs":
-        expected = [normalized(1, "lessons/ab"), *expected]
-    assert result == expected
+    result = forge(http, origin=origin).list_open_prs("lessons/a")
+    assert result == [normalized(1, "lessons/ab"), normalized(2, "lessons/a")]
     assert {(r.url.scheme, r.url.host, r.url.port or {"http": 80, "https": 443}[r.url.scheme])
             for r in http.requests} == {address}
     _all_ours(http)
@@ -300,20 +277,18 @@ def test_prefix_listing_counts_only_prs_whose_head_is_the_base_repository():
 
 
 @pytest.mark.parametrize("fork", [FORK, SIBLING_FORK], ids=["other-owner", "same-owner"])
-def test_exact_head_lookup_ignores_a_fork_with_the_same_branch_name(fork):
+def test_a_listing_ignores_a_fork_with_the_same_branch_name(fork):
     http = ForgeHTTP()
     http.pages = {1: [pr_row(1, "lessons/a", repo=fork)], 2: [pr_row(2, "lessons/a")]}
-    assert forge(http).list_prs_for_head("lessons/a") == [normalized(2, "lessons/a")]
+    assert forge(http).list_open_prs("lessons/a") == [normalized(2, "lessons/a")]
     http.pages = {1: [pr_row(1, "lessons/a", repo=fork)]}
-    assert forge(http).list_prs_for_head("lessons/a") == []
+    assert forge(http).list_open_prs("lessons/a") == []
 
 
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_repository_identity_is_the_repository_id(method):
+def test_repository_identity_is_the_repository_id():
     http = ForgeHTTP()
     http.pages = {1: [pr_row(1, "lessons/a", repo=NAMESAKE), pr_row(2, "lessons/a", repo=RENAMED)]}
-    assert getattr(forge(http), method)("lessons/a" if method == "list_prs_for_head" else "lessons/") == \
-        [normalized(2, "lessons/a")]
+    assert forge(http).list_open_prs("lessons/") == [normalized(2, "lessons/a")]
 
 
 # `test_the_writer_lease_is_not_held_by_a_fork_pr` (the lease on `AuthorBranch`) is deleted with
@@ -323,13 +298,11 @@ def test_repository_identity_is_the_repository_id(method):
 # other lane), on both drains; the listing's identity rules stay pinned above.
 
 
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_a_pr_row_without_its_head_repository_is_skipped(method):
+def test_a_pr_row_without_its_head_repository_is_skipped():
     http = ForgeHTTP()
     http.pages = {1: [pr_row(1, "lessons/a", repo=None), pr_row(2, "lessons/a")],
                   2: [pr_row(3, "lessons/a", repo=None)]}
-    assert getattr(forge(http), method)("lessons/a" if method == "list_prs_for_head" else "lessons/") == \
-        [normalized(2, "lessons/a")]
+    assert forge(http).list_open_prs("lessons/") == [normalized(2, "lessons/a")]
 
 
 @pytest.mark.parametrize("origin", ['http://forge.invalid/tenants/blue.git\n',

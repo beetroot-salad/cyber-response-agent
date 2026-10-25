@@ -33,7 +33,7 @@ from defender.learning.leads.lead_extraction import (
     LeadAuthorError,
     collect_general_failures,
 )
-from defender.learning.leads.path_validation import SKILLS_REL
+from defender.learning.leads.path_validation import SKILLS_PREFIX as SKILLS_REL
 from defender.runtime.verbs import engine_for
 from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, seed_executed_query, seed_tree
 from defender.tests.support.learning.curation._lead_author_1134 import (

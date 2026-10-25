@@ -50,9 +50,11 @@ The drains, standalone author commands, frontend, trace and revert commands requ
 
 Since #1108 P4 every corpus write goes through `defender.learning.author.version_control.TenantDelivery`:
 the drains, `tenant.py update`/`propose`/`setup` and the launch-time publish child log in to the
-issuer themselves with the AppRole pair in the issuer client config file (`--issuer-config`,
-default `<repo>/playground-issuer/client/issuer.json` in dev) and the tenant row's forge binding
-(`<T>/tenant.json` `forge: {origin, audience, issuer_role}`). The run process never imports it:
+issuer themselves with the AppRole pair in the tenant's issuer client config file, which the
+tenant row's forge binding names (`<T>/tenant.json`
+`forge: {origin, audience, issuer_role, issuer_config}`, `issuer_config` an absolute path; in
+dev `<repo>/playground-issuer/client/<tenant-id>/issuer.json`). There is no default path and no
+flag: each tenant logs in with its own file. The run process never imports it:
 a run reads its own copy of one published export. Production deployment is not defined yet.
 `delivery.py` owns publish → draft/batch → commit → push/PR and revert. `repository.py`
 owns git semantics, `forgejo.py` the concrete Forgejo API, `auth.py` Vault identities, and
@@ -131,8 +133,8 @@ OpenBao, creates the signing key, the tenant's OIDC role (TTL 600 s, `tenant_id`
 metadata), an AppRole whose policy reads only that role's token and the entity binding them,
 creates the bot's Generic JWT Authorized Integration in Forgejo (the issuer, `tenant_id` equal to
 the tenant, restricted to the repository, `write:repository` and `write:issue`) and sets the
-role's `client_id` to the audience Forgejo generated, writes `client/issuer.json` and the tenant
-row's forge binding, warns if the bot can push `main`, and revokes the root token it used (a
+role's `client_id` to the audience Forgejo generated, writes `client/<tenant-id>/issuer.json` and
+the tenant row's forge binding naming it, warns if the bot can push `main`, and revokes the root token it used (a
 later run regenerates one from the recovery keys inside the issuer container). Forgejo 17 has no
 API for Authorized Integrations: the script fills the web form as the bot, after resetting the
 bot's unused password. The signing role is created before the integration because Forgejo caches

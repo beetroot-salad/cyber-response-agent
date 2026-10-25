@@ -1,6 +1,6 @@
 """#1108 P4 (OD14, O11, U7): the in-process stand-in for `run.main`'s launch-time publish.
 
-Only the CLI binds the real publish child (`run.launch_publish`, a separate process); an
+Only the CLI binds the real publish child (`publish_launch.launch_publish`, a separate process); an
 in-process caller of `run.main` passes `publish=`. This stand-in does what the child does, at
 the moment `run.main` calls it and with exactly the identifiers it is handed (the tenant id and
 the data root, nothing else — U7/O8): it publishes the tenant's knowledge folder AS IT IS NOW,

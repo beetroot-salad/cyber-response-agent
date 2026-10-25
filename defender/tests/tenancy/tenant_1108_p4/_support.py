@@ -30,7 +30,8 @@ Interface (other slices code against this; ask the orchestrator for changes):
                      .origin_main() -> str
     current_commit(tenant) -> str | None          # raw `<T>/exports/current`, no parsing policy
     export_dir(tenant, commit) -> Path            # `<T>/exports/<commit>/`
-    bind_forge(t, *, origin=None, audience=ISSUER_AUDIENCE, issuer_role=None) -> dict
+    bind_forge(t, *, origin=None, audience=ISSUER_AUDIENCE, issuer_role=None,
+               issuer_config=None) -> dict
                                                   # writes row `forge: {origin, audience, issuer_role}`
     unbind_forge(t) -> None                       # removes the row's `forge` field
     fixture_agent_files() -> dict[str, bytes]     # the committed fixture's agent/ files
@@ -305,19 +306,30 @@ def _row_path(t: PublishedTenant) -> Path:
 
 
 def bind_forge(t: PublishedTenant, *, origin: str | None = None,
-               audience: str = ISSUER_AUDIENCE, issuer_role: str | None = None) -> dict:
+               audience: str = ISSUER_AUDIENCE, issuer_role: str | None = None,
+               issuer_config: Path | None = None) -> dict:
     """Write the forge binding r3's data model gives the tenant row (`<T>/tenant.json` gains
-    `forge: {origin, audience, issuer_role}`; operator config, not secret) and return it.
-    Defaults agree with the fakes: `t.origin`, the issuer fake's audience, and the role
-    `VaultHTTP.identity()` uses (`tenant-<id>`). Other row fields are kept. `published_tenant`
-    never binds: P3's publish does not read the binding."""
+    `forge: {origin, audience, issuer_role, issuer_config}`; operator config, not secret) and
+    return it. Defaults agree with the fakes: `t.origin`, the issuer fake's audience, the role
+    `VaultHTTP.identity()` uses (`tenant-<id>`), and an issuer client config path beside the
+    data root (`<data root>/../operator/issuer.json`; a test that logs in for real writes its
+    config there or passes its own). Other row fields are kept. `published_tenant` never binds:
+    P3's publish does not read the binding."""
+    if issuer_config is None:
+        issuer_config = default_issuer_config(t)
     binding = {"origin": t.origin if origin is None else origin, "audience": audience,
-               "issuer_role": f"tenant-{t.tenant_id}" if issuer_role is None else issuer_role}
+               "issuer_role": f"tenant-{t.tenant_id}" if issuer_role is None else issuer_role,
+               "issuer_config": str(Path(issuer_config).absolute())}
     path = _row_path(t)
     row = json.loads(path.read_text(encoding="utf-8"))
     row["forge"] = binding
     path.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return binding
+
+
+def default_issuer_config(t: PublishedTenant) -> Path:
+    """Where `bind_forge`'s binding names the tenant's issuer client config by default."""
+    return Path(t.data_root).absolute().parent / "operator" / "issuer.json"
 
 
 def unbind_forge(t: PublishedTenant) -> None:
@@ -333,7 +345,22 @@ def fixture_agent_files() -> dict[str, bytes]:
     return files_under(FIXTURE_AGENT)
 
 
+def committed_blobs(clone: Path, rev: str, pathspec: str) -> dict[str, bytes]:
+    """Every regular-file blob under `pathspec` at `rev` in `clone`, by repo-relative path, with
+    its stored bytes: git's own read of the commit (`ls-tree -r`, then `cat-file blob` each),
+    which no worktree entry can redirect."""
+    from defender import _git
+
+    listing = _git.git_bytes(["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-name", rev,
+                              "--", pathspec], cwd=clone)
+    return {path: _git.git_bytes(["cat-file", "blob", oid], cwd=clone)  # lint-oracle: ok — live tests read the lab repo's committed tree as data; no production reader is the oracle
+            for mode, kind, oid, path in _git.tree_records(listing)
+            if kind == "blob" and mode in ("100644", "100755")}
+
+
 __all__ = [
+    "committed_blobs",
+    "default_issuer_config",
     "DEFENDER",
     "FIXTURE",
     "FIXTURE_AGENT",

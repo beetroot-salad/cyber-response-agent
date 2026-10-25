@@ -6,31 +6,32 @@ raised from stays its cause. `classify` reads that chain: an outage that may pas
 out, the tenant lock busy) is `transient`; anything else needs a human (`operator`): a refused
 login or token, `main` unprotected, a dirty or diverged clone, a commit refused on content.
 
-Every publish trigger records its outcome in `<T>/publish-status.json` — the refusal, or the
-commit it published (which clears the refusal) — so `tenant.py check` can say why `current`
-trails `origin/main` (a sealed issuer, a refused human commit) instead of staying silent.
+Every publish trigger records its outcome in `<T>/publish-status.json`
+(`tenancy._publish_status`): the refusal classified here, or the commit it published.
 """
 
 from __future__ import annotations
 
 import contextlib
-import json
 import re
 import subprocess
 from collections.abc import Iterator
-from datetime import UTC, datetime
 
 import httpx
 
-from defender import _git, _io
+from defender import _git
 from defender._text import one_line
+from defender.tenancy._publish_status import (
+    OPERATOR,
+    TRANSIENT,
+    read_status,
+    record_published,
+    record_refusal,
+)
 from defender.tenancy._tenant import Tenant
 
 from .forgejo import ForgeError
 from .model import LockBusy
-
-TRANSIENT = "transient"
-OPERATOR = "operator"
 
 #: What git says when it could not reach the remote at all (no answer, not a refusal).
 _GIT_UNREACHABLE = re.compile(
@@ -81,27 +82,12 @@ def _fault_kind(error: BaseException) -> str:
     return OPERATOR
 
 
-def _recorded_at() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def _write(tenant: Tenant, record: dict) -> None:
-    """Best effort: a status that cannot be written never hides the outcome it records."""
-    with contextlib.suppress(OSError):
-        _io.write_guarded(tenant.publish_status, json.dumps(record, sort_keys=True) + "\n")
-
-
-def record_published(tenant: Tenant, commit: str, *, by: str) -> None:
-    """A publish by `by` (the trigger) succeeded at `commit`: any earlier refusal is over."""
-    _write(tenant, {"at": _recorded_at(), "by": by, "published": commit})
-
-
 def record_refused(tenant: Tenant, error: BaseException, *, by: str) -> None:
     """A publish by `by` was refused (the lock busy is not a refusal, and is not recorded)."""
     if isinstance(error, LockBusy):
         return
     kind, reason = classify(error)
-    _write(tenant, {"at": _recorded_at(), "by": by, "refused": reason, "kind": kind})
+    record_refusal(tenant, kind=kind, reason=reason, by=by)
 
 
 @contextlib.contextmanager
@@ -114,11 +100,7 @@ def recording(tenant: Tenant, *, by: str) -> Iterator[None]:
         raise
 
 
-def read_status(tenant: Tenant) -> dict | None:
-    """The last publish outcome recorded, or `None` when none is (or it cannot be read)."""
-    try:
-        text = _io.read_text_utf8(tenant.publish_status)
-    except OSError:
-        return None
-    obj, bad = _io.load_json_artifact(text)
-    return obj if bad is None and isinstance(obj, dict) else None
+__all__ = [
+    "OPERATOR", "TRANSIENT", "classify", "read_status", "record_published",
+    "record_refused", "recording",
+]

@@ -11,17 +11,20 @@ before the run begins, publishes the tenant's merged `main` and reports ONE line
 The child exits 0 for every outcome it reports (OD20); anything else is the parent's to read
 as a failed child. The run process never imports this package (P-3): it only spawns
 `python -m defender.learning.author.version_control.publish_child <tenant id> --data-root
-<root>`
-and reads the line. The child accepts the tenant itself, reads the issuer client config
-(its own path, never handed over the environment) and the row's forge binding itself, and
-logs in itself (A-ID); none of that material reaches its report (O8).
+<root> --budget <seconds>`
+and reads the line. The child accepts the tenant itself, reads the row's forge binding and the
+issuer client config file it names itself (never handed over the environment), and logs in
+itself (A-ID); none of that material reaches its report (O8). It holds ONE deadline over its
+whole network phase (`--budget`, inside the launcher's own wait), so an outage ends as its own
+recorded `stale:transient` report rather than as the launcher stopping it.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import signal
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING
@@ -37,10 +40,17 @@ from defender.tenancy._tenant import (
 
 from .auth import ForgejoIdentity
 from .exports import _pointed_at, publish_locked, tenant_lock
-from .issuer import DEV_ISSUER_CONFIG, issuer_login, read_issuer_config
+from .issuer import issuer_config_path, issuer_login, read_issuer_config
 from .model import DeliveryRefused, LockBusy, _refusals
 from .repository import GitRepository
-from .status import OPERATOR, classify, record_published, record_refused
+from .status import (
+    OPERATOR,
+    TRANSIENT,
+    classify,
+    record_published,
+    record_refusal,
+    record_refused,
+)
 
 if TYPE_CHECKING:
     import httpx
@@ -51,8 +61,8 @@ STALE_OPERATOR = "stale:operator"
 MISCONFIGURED = "misconfigured"
 #: Every report line's first word.
 REPORT_CLASSES = (FRESH, STALE_TRANSIENT, STALE_OPERATOR, MISCONFIGURED)
-#: Each network call's own bound in the child (issuer, forge, fetch), well inside the
-#: launcher's budget, so a stalled call ends in the child before the parent gives up.
+#: Each network call's own bound in the child (issuer, forge, fetch). The calls together are
+#: bounded by the child's one deadline (`--budget`), which this never outlasts.
 CHILD_NETWORK_TIMEOUT = 30.0
 #: Who records a launch-time publish's outcome (`tenant.py check` names the trigger).
 _TRIGGER = "launch-time publish"
@@ -65,55 +75,62 @@ def report(kind: str, detail: str) -> str:
     return f"{kind} {one_line(detail)}"
 
 
-def publish_for_run(
+def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process stand-ins
     tenant_id: str,
     *,
     data_root: Path,
-    issuer_config: Path,
+    issuer_config: Path | None = None,
     client: httpx.Client | None = None,
     issuer_transport: httpx.BaseTransport | None = None,
     identity: ForgejoIdentity | None = None,
     network_timeout: float | None = None,
     locked_hook: Callable[[], None] | None = None,
+    budget: float | None = None,
 ) -> str:
     """The child's work, in-process: accept the tenant from its id and the data root; decide
-    misconfiguration (issuer client config file, forge binding) before anything is sent; log in
+    misconfiguration (the forge binding, and the issuer client config file it names —
+    `issuer_config` is an in-process stand-in for that path) before anything is sent; log in
     (or use the injected `identity`); open the tenant's delivery against the binding's origin
     with the forge `client`; fetch; then, under the tenant lock (`locked_hook` first, the
     locked phase's one injectable slow point), publish. Returns the report line; records the
     outcome for `tenant.py check` (O-SEE). With the lock busy the outcome is `fresh` when
-    `current` already names the fetched `origin/main`, else `stale:transient`."""
+    `current` already names the fetched `origin/main`, else `stale:transient`. `budget` is
+    the one deadline over the network phase (login, open, fetch; none when `None`): past it,
+    `stale:transient`, recorded. Clients made here are closed before it returns."""
     try:
         tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
     except TenantRefused as refused:
         return report(STALE_OPERATOR, f"the tenant was not accepted: {refused}")
     try:
-        read_issuer_config(issuer_config)
         binding = read_forge_binding(tenant)
+        issuer_config = issuer_config_path(binding, issuer_config)
+        read_issuer_config(issuer_config)
     except (DeliveryRefused, TenantRefused) as misconfigured:
         record_refused(tenant, misconfigured, by=_TRIGGER)
         return report(MISCONFIGURED, str(misconfigured))
     timeout = CHILD_NETWORK_TIMEOUT if network_timeout is None else network_timeout
     repository: GitRepository | None = None
     try:
-        with _refusals():
-            if identity is None:
-                identity = issuer_login(
-                    tenant, issuer_config=issuer_config, transport=issuer_transport
-                )
-            if client is None:
-                import httpx
+        with contextlib.ExitStack() as owned, _refusals():
+            with _deadline(budget):
+                if identity is None:
+                    identity = issuer_login(
+                        tenant, issuer_config=issuer_config, transport=issuer_transport
+                    )
+                    owned.callback(identity.client.close)
+                if client is None:
+                    import httpx
 
-                client = httpx.Client()
-            repository = GitRepository.open(
-                tenant.knowledge,
-                tenant_id=str(tenant.id),
-                identity=identity,
-                origin=binding.origin,
-                client=client,
-                network_timeout=timeout,
-            )
-            repository.fetch()
+                    client = owned.enter_context(httpx.Client())
+                repository = GitRepository.open(
+                    tenant.knowledge,
+                    tenant_id=str(tenant.id),
+                    identity=identity,
+                    origin=binding.origin,
+                    client=client,
+                    network_timeout=timeout,
+                )
+                repository.fetch()
             with tenant_lock(tenant):
                 _LOCKED.enter()
                 try:
@@ -122,6 +139,11 @@ def publish_for_run(
                     export = publish_locked(tenant, repository)
                 finally:
                     _LOCKED.leave()
+    except _OutOfTime as late:
+        reason = (f"the launch-time publish did not finish its network phase within its "
+                  f"{late.budget:g}s budget")
+        record_refusal(tenant, kind=TRANSIENT, reason=reason, by=_TRIGGER)
+        return report(STALE_TRANSIENT, reason)
     except LockBusy as busy:
         return _lock_busy(tenant, repository, busy)
     except DeliveryRefused as refused:
@@ -171,9 +193,38 @@ class _Stopped(BaseException):
     `finally` on the way out (a network git call kills its own process group there)."""
 
 
+class _OutOfTime(BaseException):
+    """The deadline over the network phase passed (SIGALRM): unwinds as `_Stopped` does, and
+    `publish_for_run` reports and records it as `stale:transient`."""
+
+    def __init__(self, budget: float) -> None:
+        super().__init__(budget)
+        self.budget = budget
+
+
 def _on_terminate(_signum: int, _frame: FrameType | None) -> None:
     if not _LOCKED.held:
         raise _Stopped()
+
+
+@contextlib.contextmanager
+def _deadline(budget: float | None) -> Iterator[None]:
+    """`_OutOfTime` once `budget` seconds pass inside the block (nothing when `None`). Scoped
+    to the network phase, so the locked phase and the report after it are never cut off."""
+    if budget is None:
+        yield
+        return
+
+    def expired(_signum: int, _frame: FrameType | None) -> None:
+        raise _OutOfTime(budget)
+
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, budget)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def publish_child_main(
@@ -185,26 +236,26 @@ def publish_child_main(
     network_timeout: float | None = None,
     locked_hook: Callable[[], None] | None = None,
 ) -> int:
-    """The child process's entry: `<tenant id> --data-root <root> [--issuer-config <path>]`
-    (identifiers and one path, never a secret). Prints the report line and returns 0 for every
-    outcome it reports. The keywords are in-process stand-ins (as `publish_for_run`'s);
-    `issuer_config` defaults to `--issuer-config`, else the dev config path."""
+    """The child process's entry: `<tenant id> --data-root <root> [--budget <seconds>]`
+    (identifiers and a number, never a secret or a path to one). Prints the report line and
+    returns 0 for every outcome it reports. The keywords are in-process stand-ins (as
+    `publish_for_run`'s); with no `--budget` the child holds no deadline of its own."""
     parser = argparse.ArgumentParser(prog="publish-child", add_help=False)
     parser.add_argument("tenant_id")
     parser.add_argument("--data-root", dest="root", required=True, type=Path)
-    parser.add_argument("--issuer-config", type=Path, default=None)
+    parser.add_argument("--budget", type=float, default=None)
     ns = parser.parse_args(list(argv))
-    config = issuer_config or ns.issuer_config or DEV_ISSUER_CONFIG
     previous = signal.signal(signal.SIGTERM, _on_terminate)
     try:
         line = publish_for_run(
             ns.tenant_id,
             data_root=ns.root,
-            issuer_config=config,
+            issuer_config=issuer_config,
             client=client,
             identity=identity,
             network_timeout=network_timeout,
             locked_hook=locked_hook,
+            budget=ns.budget,
         )
     except _Stopped:
         return 128 + signal.SIGTERM

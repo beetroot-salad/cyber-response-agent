@@ -68,7 +68,7 @@ def test_r6_a_clone_missing_one_half_of_its_tree_is_refused_at_run_start(
 
 # --- inputs-07: a forge binding with an empty or non-string field ------------------------------
 
-@pytest.mark.parametrize("field", ["origin", "audience", "issuer_role"])
+@pytest.mark.parametrize("field", ["origin", "audience", "issuer_role", "issuer_config"])
 @pytest.mark.parametrize("bad", ["", None, 7, ["x"]])
 def test_r6_a_forge_binding_with_an_empty_or_non_string_field_is_refused(p4_tenant, field, bad):
     from defender.tenancy import _tenant
@@ -81,6 +81,21 @@ def test_r6_a_forge_binding_with_an_empty_or_non_string_field_is_refused(p4_tena
     row["forge"][field] = bad
     path.write_text(json.dumps(row), encoding="utf-8")
     with pytest.raises(_tenant.TenantRefused):
+        _tenant.read_forge_binding(p4_tenant.tenant)
+
+
+def test_r6_a_forge_binding_naming_a_relative_issuer_config_is_refused(p4_tenant):
+    """The binding names its tenant's issuer client config by an absolute path: a relative
+    one would resolve against whatever directory a delivery process happens to run in."""
+    from defender.tenancy import _tenant
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
+
+    bind_forge(p4_tenant)
+    path = _row_path(p4_tenant)
+    row = json.loads(path.read_text(encoding="utf-8"))
+    row["forge"]["issuer_config"] = "playground-issuer/client/issuer.json"
+    path.write_text(json.dumps(row), encoding="utf-8")
+    with pytest.raises(_tenant.TenantRefused, match="relative issuer_config"):
         _tenant.read_forge_binding(p4_tenant.tenant)
 
 
