@@ -432,6 +432,26 @@ def test_empty_payload_is_an_error_not_an_empty_result(payload):
     assert "NOT an empty result set" in proc.stderr
 
 
+def test_a_closed_stdin_is_refused_like_an_empty_one():
+    """fd 0 closed (Python's `sys.stdin` is None) carries no payload, the same as zero bytes:
+    exit 2 with the empty-payload message, never a traceback. Whether a launcher reopens a
+    closed fd 0 onto /dev/null differs by OS (uutils `env` does, GNU `env` does not), so the
+    engine has to answer both the same way."""
+    proc = run_sql_py("SELECT count(*) FROM data", closed_stdin=True)
+    assert proc.returncode == EXIT_INPUT_ERROR, proc.stderr
+    assert proc.stdout == ""
+    assert "no input on stdin" in proc.stderr
+    assert "Traceback" not in proc.stderr
+
+
+def test_a_huge_single_line_payload_is_read_whole():
+    """A multi-megabyte payload on one line, no newline anywhere, is read to its end: nothing
+    caps it at a line or buffer size."""
+    payload = "[" + ",".join(f'{{"a":{i}}}' for i in range(300_000)) + "]"
+    assert _rows(payload, "SELECT count(*) AS n, max(a) AS top FROM data") == [
+        {"n": 300_000, "top": 299_999}]
+
+
 def test_markdown_payload_is_an_input_error():
     """The other non-payload: an adapter's rendered text rather than JSON. Same contract —
     exit 2, nothing on stdout, a message that names the cause."""

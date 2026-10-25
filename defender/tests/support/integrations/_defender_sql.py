@@ -50,13 +50,17 @@ def run_sql_py(
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
     timeout: float = 120,
+    closed_stdin: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """`cat <payload> | defender-sql '<query>'` as a lead types it: `args` is the argv after
-    the program, `stdin` the payload text. Text mode, UTF-8 both ways, output captured."""
+    the program, `stdin` the payload text. Text mode, UTF-8 both ways, output captured.
+    `closed_stdin` starts the engine with fd 0 closed instead (`stdin` is then ignored); the
+    engine is spawned directly, so no launcher in between can reopen it."""
     proc = subprocess.run(
         [*SQL_ARGV, *args],
-        input=stdin, capture_output=True, text=True, encoding="utf-8",
-        timeout=timeout, env=sql_env(env), cwd=cwd,
+        input=None if closed_stdin else stdin, capture_output=True, text=True,
+        encoding="utf-8", timeout=timeout, env=sql_env(env), cwd=cwd,
+        preexec_fn=(lambda: os.close(0)) if closed_stdin else None,
     )
     if proc.returncode == EXIT_NO_RUNTIME and not _DUCKDB_INSTALLED:
         pytest.skip(f"duckdb is not installed in {sys.executable} (the `runtime` extra)")
