@@ -576,6 +576,15 @@ def _no_runtime(module: str) -> int:
 _MISSING_MODULE = re.compile(r"Required module '([^']+)' failed to import")
 
 
+def _read_stdin(declared: bool) -> bytes:
+    """The payload bytes. A closed stdin (`sys.stdin` is None) carries none, so it reads as
+    empty and is refused like an empty one. Under the flag the payload is parsed in Python, so
+    the cap is checked before that; one byte over is enough to know."""
+    if sys.stdin is None:
+        return b""
+    return sys.stdin.buffer.read(_MAX_OBJECT_SIZE + 1) if declared else sys.stdin.buffer.read()
+
+
 def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) -> int:
     if (rows_path is None) != (names_path is None):
         print("defender-sql: --rows and --names go together: --rows says where the positional "
@@ -589,9 +598,7 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
     except ImportError:
         return _no_runtime("duckdb")
 
-    # Under the flag the payload is parsed in Python, so the cap is checked before that; one
-    # byte over is enough to know.
-    raw = sys.stdin.buffer.read(_MAX_OBJECT_SIZE + 1) if declared else sys.stdin.buffer.read()
+    raw = _read_stdin(declared)
     if not raw.strip():
         print(
             "defender-sql: no input on stdin — the payload is empty. This is NOT an "
