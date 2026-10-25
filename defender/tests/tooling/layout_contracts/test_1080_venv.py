@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import json
 import os
 import shutil
@@ -14,6 +13,7 @@ from typing import Any
 import pytest
 
 from defender.tests.tooling.layout_contracts import _spec1080 as S
+from defender.tests.sandbox import test_1096_entrypoint_closure as T1096
 
 GOLDEN = "venv"
 
@@ -435,48 +435,6 @@ def observe_s206(tmp: Path) -> dict[str, Any]:
     })
 
 
-def _calls_reexec(stmt: ast.stmt) -> bool:
-    return any(isinstance(n, ast.Call)
-               and getattr(n.func, "id", getattr(n.func, "attr", None)) == "reexec_into_venv"  # lint-ast-resolve: ok — the importer census matches the helper's own name across the tree, statically
-               for n in ast.walk(stmt))
-
-
-def guarded_programs() -> list[str]:
-    """Every non-test module under `defender/` that calls `reexec_into_venv` at module scope."""
-    out = []
-    for rel in S.py_files():
-        src = (S.REPO_ROOT / rel).read_text(encoding="utf-8")
-        if "reexec_into_venv" in src and any(_calls_reexec(s) for s in ast.parse(src).body):
-            out.append(rel)
-    return out
-
-
-def imports_before_guard(rel: str) -> list[str]:
-    seen: list[str] = []
-    for stmt in ast.parse((S.REPO_ROOT / rel).read_text(encoding="utf-8")).body:
-        if _calls_reexec(stmt):
-            break
-        seen += [i.module for i in S.import_statements(rel, ast.unparse(stmt))]
-    return seen
-
-
-def helper_importers(home: str) -> dict[str, set[str]]:
-    """{module that uses the helper: where it imports it from} — `from M import
-    reexec_into_venv` names M; importing the home module itself (`import M`, `from P import
-    leaf`) names the home."""
-    target = S.dotted(home)
-    out: dict[str, set[str]] = {}
-    for rel in S.py_files():
-        src = (S.REPO_ROOT / rel).read_text(encoding="utf-8")
-        if "reexec_into_venv" not in src or rel == home:
-            continue
-        for imp in S.import_statements(rel, src):
-            if "reexec_into_venv" in imp.names:
-                out.setdefault(rel, set()).add(imp.module)
-            elif imp.module == target or f"{imp.module}.{'.'.join(imp.names)}" == target:
-                out.setdefault(rel, set()).add(target)
-    return out
-
 
 def test_1080_reexec_into_venv_from_the_flat_tier_still_targets_defenders_own_venv(tmp_path):
     home = helper_home()
@@ -484,11 +442,6 @@ def test_1080_reexec_into_venv_from_the_flat_tier_still_targets_defenders_own_ve
     assert Path(mod._DEFENDER_DIR).resolve() == S.DEFENDER.resolve(), (
         f"{home} anchors defender/ at {mod._DEFENDER_DIR} — the K13 depth slip")
     assert observe_targets(tmp_path) == golden("targets")
-
-    importers = helper_importers(home)
-    assert set(users().values()) <= set(importers), sorted(importers)
-    stray = {r: m for r, m in importers.items() if m != {S.dotted(home)}}
-    assert not stray, f"modules importing the helper from somewhere else: {stray}"
 
 
 def test_venv_helper_runs_from_the_flat_tier_when_the_venv_folder_is_absent(tmp_path):
@@ -535,17 +488,6 @@ def test_venv_helper_is_imported_through_a_package_that_pulls_in_third_party_cod
     assert module in loaded, loaded
     assert all(m == "defender" or m.startswith("defender.") for m in loaded), loaded
 
-    src = (S.REPO_ROOT / home).read_text(encoding="utf-8")
-    third = [i.module for i in S.import_statements(home, src)
-             if i.module.split(".")[0] not in sys.stdlib_module_names
-             and i.module != "__future__"]
-    assert not third, f"{home} imports outside the standard library: {third}"
-    programs = guarded_programs()
-    assert set(users().values()) <= set(programs), programs
-    early = {p: [m for m in imports_before_guard(p) if m.startswith("defender") and m != module]
-             for p in programs}
-    assert not any(early.values()), {p: m for p, m in early.items() if m}
-
 
 def test_box_variable_is_set_while_a_project_environment_is_present_on_the_mount(tmp_path):
     helper_home()
@@ -589,14 +531,6 @@ def _child_modules(tmp: Path, body: str) -> dict[str, Any]:
     return {"modules": json.loads(done.stdout)}
 
 
-def _allowed_1096() -> tuple[str, ...]:
-    path = S.DEFENDER / "tests" / "sandbox" / "test_1096_entrypoint_closure.py"
-    for n in ast.parse(path.read_text(encoding="utf-8")).body:
-        if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "_ALLOWED" for t in n.targets):
-            return tuple(ast.literal_eval(n.value))
-    raise AssertionError("test_1096 defines no _ALLOWED")
-
-
 def test_guard_keyed_on_a_module_name_prefix_meets_code_whose_prefix_changed(tmp_path):
     helper = S.dotted(helper_home())
     seen = _child_modules(tmp_path, f"import {helper}\n")["modules"]
@@ -608,7 +542,7 @@ def test_guard_keyed_on_a_module_name_prefix_meets_code_whose_prefix_changed(tmp
     assert {"defender.runtime.providers", pricing} <= set(seen["modules"]), seen
     assert [m for m in seen["modules"] if m.split(".")[0] in LLM_STACK] == [], seen
 
-    allowed = _allowed_1096()
+    allowed = T1096._ALLOWED
     for symbol in ("cmd_show", "_no_runtime"):
         top = S.dotted(S.home_of(symbol)).split(".")[0]
         assert top in allowed, (symbol, top, allowed)

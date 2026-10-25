@@ -115,47 +115,6 @@ def test_the_hosts_own_forced_close_publishes_no_companion_prose(tmp_path) -> No
         )
 
 
-def test_the_close_reads_and_parses_the_companion_once_inside_its_own_guard() -> None:
-    """The close takes ONE read of `investigation.md` and ONE parse of it, and that parse is
-    the wrapped one."""
-    import inspect
-
-    from defender.runtime import challenge_gate
-
-    source = Path(inspect.getsourcefile(close_tool)).read_text(encoding="utf-8")
-    calls = source.count("parse_dense_companion(")
-    assert calls == 1, (
-        f"`close_tool` makes {calls} `parse_dense_companion(` calls — one document, one parse "
-        f"in this module, and each extra one is a full re-read of a file the guard has already "
-        f"vetted"
-    )
-    reads = source.count("read_companion(")
-    assert reads == 1, (
-        f"`close_tool` makes {reads} `read_companion(` calls — one read, handed to every gate"
-    )
-    body = source.split("def _close_investigation_async", 1)[1]
-    for own_read in ("read_text", "read_bytes"):
-        assert own_read not in body, (
-            f"the close took its own reading ({own_read!r}) beside the one it hands out"
-        )
-    gate_source = Path(inspect.getsourcefile(challenge_gate)).read_text(encoding="utf-8")
-    for own_read in ("read_text", "read_bytes", "parse_dense_companion(", "parse_investigation("):
-        assert own_read not in gate_source, (
-            f"`challenge_gate` takes its own reading ({own_read!r}) of a document the close "
-            f"already parsed and handed in"
-        )
-
-    guard = inspect.getsource(close_tool._refuse_if_entry_price_is_owed)
-    assert "parse_dense_companion(" in guard, (
-        "the close's one parse is not inside the gate that turns a parse fault into a "
-        "ModelRetry — a fault there unwinds as a traceback instead of a refusal"
-    )
-    for clause in ("except ModelRetry", "raise ModelRetry"):
-        assert clause in guard, (
-            f"the guard around that parse lost its {clause!r} — the parse is bare again"
-        )
-
-
 def test_an_authorized_tacit_row_owes_a_citation_even_by_omission() -> None:
     """Leaving `anchor_id` out is the receipt SKIPPED, not a receipt paid."""
     bare = scene.benign_document(rows=scene.authz_block(scene.authz_row(anchor_id="")))

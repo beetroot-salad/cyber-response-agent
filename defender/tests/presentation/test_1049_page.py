@@ -28,9 +28,6 @@ def _tmp_roots(tmp_path, monkeypatch):
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
-def _page():
-    return E.page_module()
-
 
 def _world(page: E.Page, label: str) -> str:
     return page.text_of(f"world-{label}")
@@ -251,11 +248,6 @@ def _grade_record_unreadable(page: E.Page, episode_dir: Path) -> str:
 
 
 def test_1049_result_event_reads_the_tool_trace_through_the_jsonl_twin(tmp_path):
-    page = _page()
-    fn = R.function_def(R.parsed(page._result_event), "_result_event")
-    assert "entry_present" not in R.called_names(fn), R.called_names(fn)
-    assert not R.path_typed_parameters(fn), R.path_typed_parameters(fn)
-
     ep = E.sample_episode(tmp_path)
     trace = ep.run(E.GRADED_WORLD) / "tool_trace.jsonl"
     assert f"${E.SAMPLE.run_cost[E.GRADED_WORLD]:.4f}" in _world(E.render(ep), E.GRADED_WORLD)

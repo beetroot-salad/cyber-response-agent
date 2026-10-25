@@ -2,7 +2,7 @@
  "_meta": {
   "base": "80888efb",
   "how": "each producer in test_1080_sql_engine.PRODUCERS run at the base under SPEC1080_AT_BASE=1: the base bin/defender-sql and bin/defender-lessons shims, their engines by path, the box closure child and the permission gate, over the fixed inputs in the test module, normalised by its _norm",
-  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Six values re-observed: dir_unset.{box,host} (the shell names the shim's line 8, where DEFENDER_DIR is now read) and spellings.{defender-sql,defender-lessons}.moved-away.{box,host} (a DEFENDER_DIR naming no directory is refused by the shim, exit 2 as before, instead of python3's can't-open-file). Every other value is the base capture, unchanged. 2026-10-08 (#1206 review, human-decided): every defender-lessons --show stdout gained the salted untrusted frame around each lesson's frontmatter; nothing else moved."
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Six values re-observed: dir_unset.{box,host} (the shell names the shim's line 8, where DEFENDER_DIR is now read) and spellings.{defender-sql,defender-lessons}.moved-away.{box,host} (a DEFENDER_DIR naming no directory is refused by the shim, exit 2 as before, instead of python3's can't-open-file). Every other value is the base capture, unchanged. 2026-10-08 (#1206 review, human-decided): every defender-lessons --show stdout gained the salted untrusted frame around each lesson's frontmatter; nothing else moved. 2026-10-25 (human): the stdin.* values are retired. stdin.closed depended on the runner's `env` (uutils reopens a closed fd 0 onto /dev/null, GNU does not), and a closed stdin is now refused like an empty one; every stdin case is a stated rule in tests/integrations/test_sql_idioms.py and test_sql.py."
  },
  "arg_shapes.bare-separator": {
   "dict": [
@@ -2723,102 +2723,6 @@
    [
     "model_reads",
     "exit=0\n--- stdout ---\n[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
-   ]
-  ]
- },
- "stdin.closed": {
-  "dict": [
-   [
-    "rc",
-    1
-   ],
-   [
-    "stdout",
-    ""
-   ],
-   [
-    "stderr",
-    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'buffer'\n"
-   ]
-  ]
- },
- "stdin.empty": {
-  "dict": [
-   [
-    "rc",
-    2
-   ],
-   [
-    "stdout",
-    ""
-   ],
-   [
-    "stderr",
-    "defender-sql: no input on stdin — the payload is empty. This is NOT an empty result set: the query that produced it recorded no observation at all, so nothing here supports a claim about what is present or absent.\n"
-   ]
-  ]
- },
- "stdin.huge-single-line": {
-  "dict": [
-   [
-    "rc",
-    0
-   ],
-   [
-    "stdout",
-    "[{\"n\": 300000, \"top\": 299999}]\n"
-   ],
-   [
-    "stderr",
-    ""
-   ]
-  ]
- },
- "stdin.non-text": {
-  "dict": [
-   [
-    "rc",
-    2
-   ],
-   [
-    "stdout",
-    ""
-   ],
-   [
-    "stderr",
-    "defender-sql: stdin is not valid JSON or NDJSON: Invalid Input Error: Malformed JSON in file \"<SCRATCH>/data.json\", at byte 1 in record/value 2: UTF-16 encoding is not supported. \n\nLINE 1: CREATE TABLE data AS SELECT * FROM read_json_auto(?, maximum_object_size=1073741824)\n                                           ^\n"
-   ]
-  ]
- },
- "stdin.non-text-declared": {
-  "dict": [
-   [
-    "rc",
-    2
-   ],
-   [
-    "stdout",
-    ""
-   ],
-   [
-    "stderr",
-    "defender-sql: stdin is not one JSON document (--rows/--names need one; NDJSON cannot be declared): Expecting value: line 1 column 1 (char 0)\n"
-   ]
-  ]
- },
- "stdin.whitespace": {
-  "dict": [
-   [
-    "rc",
-    2
-   ],
-   [
-    "stdout",
-    ""
-   ],
-   [
-    "stderr",
-    "defender-sql: no input on stdin — the payload is empty. This is NOT an empty result set: the query that produced it recorded no observation at all, so nothing here supports a claim about what is present or absent.\n"
    ]
   ]
  },

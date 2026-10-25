@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
-import ast
 import inspect
 import json
 from dataclasses import dataclass
@@ -395,24 +394,3 @@ def marker_body(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def fn_node(path: Path, name: str) -> ast.AST:
-    """The named function's node in `path` (a composition claim's instrument)."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return node
-    raise AssertionError(f"{path.name} defines no `{name}` — re-site this demand")
-
-
-def call_order(path: Path, name: str) -> list[str]:
-    """The names called inside `path::name`, in source-position order; attribute calls
-    collapse to the attribute (`_run.visualize(...)` reads as `visualize`)."""
-    hits: list[tuple[tuple[int, int], str]] = []
-    for node in ast.walk(fn_node(path, name)):
-        if not isinstance(node, ast.Call):
-            continue
-        f = node.func
-        called = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
-        if called:
-            hits.append(((node.lineno, node.col_offset), called))
-    return [n for _, n in sorted(hits)]

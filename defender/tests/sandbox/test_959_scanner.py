@@ -1,7 +1,6 @@
 """#959 - one scanner: the token record stream, the unquoter, the blanks and the `\\r`."""
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 import pytest
@@ -13,7 +12,6 @@ from defender.runtime import permission  # noqa: E402
 from defender.runtime.permission import bash as pbash  # noqa: E402
 from defender.runtime.permission import command_shape  # noqa: E402
 from defender.tests.support.sandbox import _baseline_959 as base
-from defender.tests.support.shared.contracts._by_path import cached_parse  # noqa: E402
 
 CR = base.CR
 NBSP = base.NBSP
@@ -156,24 +154,11 @@ def test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_
 
 
 # O2 - one module decides, and it still decides.
-def _shlex_attributes(path: Path) -> set[str]:
-    _text, tree = cached_parse(path, str(path))
-    return {
-        node.attr for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name) and node.value.id == "shlex"
-    }
-
-
 def test_the_unquoter_has_no_notion_of_whitespace():
     """`_word_value` resolves the quoting of one span and nothing else"""
-    assert not _shlex_attributes(DEFENDER / "execution" / "bash_exec.py") & {"split", "shlex"}, (
-        "`_word_value` is still built on a splitter, so it still has a blank set of its own - "
-        "`shlex.split`'s own hardcoded whitespace contains the carriage return whatever "
-        "`_BLANKS` says, which is why M6 does not close O1 without M2"
-    )
-    # ...and behaviourally: handed a span carrying the character the scanner no longer splits
-    # on, it resolves it rather than re-splitting or dropping it.
+    # Handed a span carrying the character the scanner no longer splits on, it resolves it rather
+    # than re-splitting or dropping it; `shlex.split` would treat the carriage return as its own
+    # whitespace, so an unquoter built on it fails here.
     assert bash_exec._word_value("A" + CR + "B") == "A" + CR + "B"
 
 

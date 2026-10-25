@@ -6,13 +6,15 @@ from pathlib import Path
 
 
 from defender.integrations import cmdb_adapter
-from defender.tests.tenancy.tenant_1107_settings import _census_1107 as C
+from defender.tests.support.shared.contracts._by_path import import_lint_lib
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
+
+_LINT = import_lint_lib("lint_tenant_env_reads")
 
 
 def _skeleton(root: Path) -> Path:
-    """Give `root` all four swept trees (C.SWEPT), each holding one clean module, and return it."""
-    for rel in C.SWEPT:
+    """Give `root` all four swept trees (the lint's SWEPT), each holding one clean module, and return it."""
+    for rel in _LINT.SWEPT:
         target = rel if rel.endswith(".py") else f"{rel}/clean_1107.py"
         S.plant_module(root, target, "VALUE = 1\n")
     return root
