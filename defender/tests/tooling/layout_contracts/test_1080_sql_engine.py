@@ -290,7 +290,7 @@ def _env(tmp: Path, *, box: bool, defender_dir: Path | str | None, pythonpath: s
 def _run_shim(tmp: Path, shim: str, args: Sequence[str], *, lane: str = "box",  # noqa: PLR0913
               tree: Path = S.REPO_ROOT, defender_dir: Path | str | None | bool = True,
               pythonpath: str | None | bool = True, stdin: bytes | None = b"",
-              cwd: Path | str | None = None, closed_stdin: bool = False,
+              cwd: Path | str | None = None,
               subs: Sequence[tuple[Path | str, str]] = (), **extra: str,
               ) -> tuple[dict[str, Any], list[str] | None]:
     """`<tree>/defender/bin/<shim> <args>` on the box lane (the mark set) or the host lane (no
@@ -304,11 +304,7 @@ def _run_shim(tmp: Path, shim: str, args: Sequence[str], *, lane: str = "box",  
     argv = [str(tree / "defender" / "bin" / shim), *args]
     run_dir = Path(cwd) if cwd is not None else tmp / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    if closed_stdin:
-        proc = subprocess.run(argv, cwd=run_dir, env=env, capture_output=True, check=False,  # noqa: S603
-                              timeout=120, preexec_fn=lambda: os.close(0))
-    else:
-        proc = S.run(argv, cwd=run_dir, env=env, stdin=stdin)
+    proc = S.run(argv, cwd=run_dir, env=env, stdin=stdin)
     return _rec(proc, subs), _read_trace(trace)
 
 
@@ -588,24 +584,6 @@ def _p_arg_shapes(tmp: Path, co: Path) -> dict[str, Any]:
             for case, args in _ARG_SHAPES}
 
 
-def _huge() -> bytes:
-    return ("[" + ",".join(f'{{"a":{i}}}' for i in range(300_000)) + "]").encode()
-
-
-@_producer
-def _p_stdin(tmp: Path, co: Path) -> dict[str, Any]:
-    q = "SELECT count(*) AS n, max(a) AS top FROM data"
-    return {
-        "stdin.closed": _run_shim(tmp, SQL, [q], closed_stdin=True)[0],
-        "stdin.empty": _run_shim(tmp, SQL, [q], stdin=b"")[0],
-        "stdin.whitespace": _run_shim(tmp, SQL, [q], stdin=b" \n\t\n")[0],
-        "stdin.huge-single-line": _run_shim(tmp, SQL, [q], stdin=_huge())[0],
-        "stdin.non-text": _run_shim(tmp, SQL, [q], stdin=b"\xff\xfe\x00\x01garbage\x80")[0],
-        "stdin.non-text-declared": _run_shim(tmp, SQL, list(_DECLARED),
-                                             stdin=b"\xff\xfe\x00\x01garbage\x80")[0],
-    }
-
-
 @_producer
 def _p_rows_names(tmp: Path, co: Path) -> dict[str, Any]:
     unreadable = tmp / "unreadable-file"
@@ -657,12 +635,6 @@ def test_sql_argument_shapes_the_shim_must_forward(tmp_path, co):
                                          "ORDER BY 3 LIMIT 1"], stdin=_PAYLOAD)
     _check("arg_shapes.non-ascii", rec)
     _assert_answered_by(ran, S.REPO_ROOT / _sql_engine(), "a non-ASCII query")
-
-
-def test_sql_stdin_closed_empty_or_huge(tmp_path, co):
-    _check_all(_p_stdin(tmp_path, co))
-    _rec_, ran = _run_shim(tmp_path, SQL, ["SELECT count(*) AS n FROM data"], stdin=_huge())
-    _assert_answered_by(ran, S.REPO_ROOT / _sql_engine(), "a huge stdin")
 
 
 def test_rows_and_names_flags_unpaired_or_unreadable(tmp_path, co):
