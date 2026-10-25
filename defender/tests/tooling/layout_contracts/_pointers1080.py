@@ -127,7 +127,7 @@ def _slash_hits(line: str, *, skip_placeholders: bool = False) -> Iterator[tuple
 
 def _named_entries(line: str) -> Iterator[tuple[str, str]]:
     """`(text as spelled, base entry)` for every pointer on one line."""
-    for text, tail, _anchored in _slash_hits(line):
+    for text, tail, _ in _slash_hits(line):
         entry = _entry_of(tail.split("/"))
         if entry:
             yield text, entry

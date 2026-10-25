@@ -367,9 +367,6 @@ def called_names(tree: ast.AST) -> set[str]:
     return out
 
 
-def attribute_names(tree: ast.AST) -> set[str]:
-    return {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-
 
 def path_typed_parameters(fn: ast.FunctionDef) -> list[str]:
     """The parameters of `fn` that could carry a ROOT: annotated `Path` or `PathLike`, or
@@ -393,37 +390,3 @@ def function_def(tree: ast.AST, name: str) -> ast.FunctionDef:
     raise AssertionError(f"no function {name!r} in the parsed source")
 
 
-def module_tree(module: Any) -> ast.AST:
-    return ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-
-
-def calls_by_function(tree: ast.AST, callees: frozenset[str]) -> dict[str, dict[str, int]]:
-    """For every top-level function in `tree`, how many times it calls each of `callees`
-    (`{fn: {callee: n}}`, functions with zero calls omitted); module-level calls under the
-    key `<module>`."""
-    out: dict[str, dict[str, int]] = {}
-
-    def count(owner: str, node: ast.AST) -> None:
-        for n in ast.walk(node):
-            if isinstance(n, ast.Call):
-                f = n.func
-                callee = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
-                if callee in callees:
-                    out.setdefault(owner, {})
-                    out[owner][callee] = out[owner].get(callee, 0) + 1
-
-    assert isinstance(tree, ast.Module)
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            count(node.name, node)
-        elif isinstance(node, ast.ClassDef):
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    count(f"{node.name}.{item.name}", item)
-        else:
-            count("<module>", node)
-    return out
-
-
-def defined_functions(tree: ast.AST) -> set[str]:
-    return {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}

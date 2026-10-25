@@ -6,7 +6,6 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
-import ast
 import contextlib
 import importlib
 import json
@@ -2059,38 +2058,6 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
 # Census helpers (parity demands): who calls / writes what, over the shipped tree.
 # --------------------------------------------------------------------------------------
 
-
-def _shipped_trees(under: str) -> Iterator[tuple[str, ast.AST]]:
-    base = DEFENDER / under if under else DEFENDER
-    for path in sorted(base.rglob("*.py")):
-        rel = path.relative_to(DEFENDER).as_posix()
-        if "__pycache__" in rel or rel.startswith(("tests/", ".venv/")):
-            continue
-        try:
-            yield rel, ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-
-
-def call_sites(name: str, *, under: str = "learning/judge") -> list[str]:
-    """`rel:line` of every call to a function or method named `name` in shipped Python under
-    `defender/<under>` (AST, so a comment or a string never counts)."""
-    hits: list[str] = []
-    for rel, tree in _shipped_trees(under):
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                fn = node.func
-                called = fn.attr if isinstance(fn, ast.Attribute) else (
-                    fn.id if isinstance(fn, ast.Name) else None)
-                if called == name:
-                    hits.append(f"{rel}:{node.lineno}")
-    return hits
-
-
-def defs_named(name: str, *, under: str = "") -> list[str]:
-    """`rel:line` of every `def name` (module-level or nested) in shipped Python."""
-    return [f"{rel}:{n.lineno}" for rel, tree in _shipped_trees(under) for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
 
 
 def word_re(word: str) -> re.Pattern[str]:

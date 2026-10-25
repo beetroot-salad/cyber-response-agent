@@ -1,8 +1,6 @@
 """Shared harness for the #680 systemic-stage-frame suite (split out by #720)."""
 from __future__ import annotations
 
-import ast
-import functools
 import importlib.util
 import inspect
 import re
@@ -440,15 +438,3 @@ def _drive_learning_bash(
     return _tool_bash(deps, command)
 
 
-def _python_sources() -> list[Path]:
-    return [
-        p
-        for p in DEFENDER.rglob("*.py")
-        if ".venv" not in p.parts and "tests" not in p.relative_to(DEFENDER).parts
-    ]
-
-
-@functools.cache
-def _parsed_sources() -> tuple[tuple[Path, ast.Module], ...]:
-    """Every production source parsed once per process: d1 and d2 each walk the whole set."""
-    return tuple((p, ast.parse(p.read_text(encoding="utf-8"))) for p in _python_sources())

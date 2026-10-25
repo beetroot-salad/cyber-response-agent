@@ -24,15 +24,12 @@ from typing import Any
 SUITE = Path(__file__).resolve().parent
 REPO_ROOT = SUITE.parents[3]
 DEFENDER = REPO_ROOT / "defender"
-SCRIPTS = DEFENDER / "scripts"
 CLI = DEFENDER / "cli"
 IMAGE_CLI = DEFENDER / "box" / "image_cli.py"
 BIN = DEFENDER / "bin"
 LESSONS_CONTENT = DEFENDER / "lessons"
 GOLDENS = SUITE / "goldens"
 
-#: The commit the spec branch forked from; every golden was captured here.
-BASE_SHA = "80888efb"
 
 #: The authoring-time self-check switch (module docstring). Read once, at import.
 AT_BASE = os.environ.get("SPEC1080_AT_BASE") == "1"
@@ -41,14 +38,10 @@ AT_BASE = os.environ.get("SPEC1080_AT_BASE") == "1"
 # Pinned homes (repo-relative). `under=` takes one of these, or any repo-relative dir/file.
 # ======================================================================================
 
-#: dF0 (human): the two package paths the design pins.
-INTEGRATIONS = "defender/integrations"
 REPORTS = "defender/reports"
 #: Pinned by demand text.
 RUNTIME = "defender/runtime"
-PROVIDERS = "defender/runtime/providers"
 VERBS = "defender/runtime/verbs.py"
-EXIT_CODES = "defender/_exit_codes.py"
 #: The flat tier: a module directly under `defender/` whose name starts with `_`.
 FLAT_TIER = "defender/_*.py"
 #: The price table and process bootstrap keep dependency-free package initializers; neither
