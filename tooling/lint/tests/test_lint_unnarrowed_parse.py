@@ -273,3 +273,14 @@ def test_a_marker_buried_in_the_body_does_not_suppress(tmp_path):
 
 
 # (d) ScanBlind, and the ratchet
+
+
+def test_the_real_run_scans_the_oracle_golden_tooling_under_evaluations():
+    """#1268 moved the oracle-golden tooling from defender/evals/ to evaluations/. A
+    defender-only scope kept its baselined seams in the file and out of the gate."""
+    covered = _GATE.REPO_ROOT / "evaluations" / "oracle_golden" / "judge.py"
+    assert any(covered.is_relative_to(scope) for scope in _GATE.SCOPES)
+
+
+def test_an_injected_scope_that_does_not_exist_is_exit_2(tmp_path):
+    assert _GATE.main([], scope=tmp_path / "gone", baseline_path=tmp_path / "b.json") == 2

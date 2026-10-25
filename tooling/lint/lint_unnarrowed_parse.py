@@ -50,6 +50,11 @@ helper (any non-parser call is treated as owning its return shape, so the helper
 finding); and a single ``isinstance`` on any tainted local clears the whole function — generous
 on purpose, since partial checking is a review question.
 
+The scan covers ``defender/`` and ``evaluations/``. The oracle-golden tooling lived under
+``defender/evals/`` until #1268 moved it to ``evaluations/``; a ``defender/``-only scope dropped
+its baselined seams from the gate while the code stayed, so every root in ``SCOPES`` must
+exist or the run is exit 2.
+
 Pre-existing sites are ratcheted via ``lint_unnarrowed_parse_baseline.json`` (see
 tooling/lint/_baseline.py) with ``require_reasons=True``: the fingerprint is
 file:function:check, no line number, so an unrelated edit above the seam does not churn it.
@@ -77,6 +82,7 @@ except ImportError:  # direct ``python tooling/lint/...`` execution
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
+SCOPES = (DEFENDER, REPO_ROOT / "evaluations")
 BASELINE_PATH = Path(__file__).with_name("lint_unnarrowed_parse_baseline.json")
 EXCLUDED_DIRS = frozenset(
     {".venv", "__pycache__", "tests", ".worktrees"}
@@ -419,16 +425,18 @@ HEADER = (
 def main(
     argv: list[str],
     *,
-    scope: Path = DEFENDER,
+    scope: Path | None = None,
     baseline_path: Path = BASELINE_PATH,
 ) -> int:
-    if not scope.is_dir():
-        print(f"scan scope not found at {scope}", file=sys.stderr)
+    scopes = SCOPES if scope is None else (scope,)
+    missing = [s for s in scopes if not s.is_dir()]
+    if missing:
+        print(f"scan scope not found at {missing[0]}", file=sys.stderr)
         return 2
     # An unreadable file never entered the corpus, so a seam could hide in it. Exit 2: the
     # gate could not run, which is not "clean".
     try:
-        findings = _scan(scope)
+        findings = [f for s in scopes for f in _scan(s)]
     except ScanBlind as exc:
         print(f"lint_unnarrowed_parse: {exc}", file=sys.stderr)
         return 2
