@@ -46,7 +46,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_ci_hygiene_baseline.json")
 # Files where these patterns are deliberate; do not flag.
 PATH_ALLOWLIST = {
     "defender/CLAUDE.md",
-    "defender/learning/actor-settings.json",
 }
 
 # Directories under defender/ that are either out-of-scope or are

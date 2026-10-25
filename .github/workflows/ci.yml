@@ -693,8 +693,9 @@ jobs:
       - name: Scrub-order fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_scrub_order.py
 
-      # Isolated modules (#1092, #983): the box image scripts import only the standard library, and
-      # the tacit-knowledge registry adapter never writes.
+      # Isolated modules (#1092, #983, #631, #1107): the box image scripts import only the standard
+      # library, the tacit-knowledge registry adapter never writes, the budget enforcer reads no
+      # environment, and the ticket writer and lead-zero modules are handed theirs.
       - name: Isolated-module fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_isolated_modules.py
 
@@ -707,6 +708,16 @@ jobs:
       # challenge gate reads nothing, and the one parse is guarded.
       - name: Close single-read fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_close_single_read.py
+
+      # Paths resolve (#1080): the paths the lints' scope lists, the baselines' keys and CI's own
+      # commands name still exist.
+      - name: Paths-resolve fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_paths_resolve.py
+
+      # Working-investigation I/O (#1165): every file I/O occurrence on a run's records in the
+      # runtime, hooks, box and ticket writer is a handled record operation or counted residue.
+      - name: Working-I/O fence (counted residue)
+        run: defender/.venv/bin/python tooling/lint/lint_working_io.py
 
       # Episode paths (#1133, #1187): episode trees are reached only through the Episode handle and
       # the runs repository's walk. The migrated modules make no episode I/O but the declared

@@ -88,7 +88,7 @@ REMOVED_PY_IMPORT = re.compile(
 # ordinary use of the word in the tree.
 GENERIC_NAMES = {
     "main", "handle", "author", "format_output",
-    "successful", "interrupted",
+    "successful", "interrupted", "baselines", "deviations",
     "Callable", "Iterable", "Iterator", "Optional", "Union", "Any",
     "typing", "dataclass", "field", "Path", "List", "Dict",
     # A stdlib protocol method: deleting a test's `sys.meta_path` finder would otherwise

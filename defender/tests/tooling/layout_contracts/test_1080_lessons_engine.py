@@ -818,7 +818,7 @@ def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(t
     assert seen == golden("s062")
     # #1222 A6/O10: a failed vocabulary shim is named in its section, not dropped, so a row shows
     # the section exactly when the run recorded a signature; an unsigned run is told so instead.
-    signed = {label for label, _v, sig, _spec, _gone in ORIENT_ROWS if sig}
+    signed = {label for label, _v, sig, _spec, _g in ORIENT_ROWS if sig}
     assert {label for label, r in seen["orient"].items() if r["vocabulary_section"]} == signed
 
 

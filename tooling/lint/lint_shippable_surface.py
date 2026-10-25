@@ -57,7 +57,6 @@ EXCLUDED_PREFIXES = (
 
 EXCLUDED_FILES = {
     "defender/CLAUDE.md",              # internal structure doc
-    "defender/learning/actor-settings.json",  # settings file
     "defender/uv.lock",
     "defender/pyproject.toml",         # may name vendor-specific deps
 }

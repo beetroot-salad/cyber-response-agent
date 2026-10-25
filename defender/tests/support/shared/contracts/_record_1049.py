@@ -1,12 +1,9 @@
 """Shared machinery for #1049's episode-tree reader spec — NO test scripts."""
 from __future__ import annotations
 
-import ast
 import contextlib
 import errno
-import inspect
 import os
-import textwrap
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -349,81 +346,3 @@ def restore_tree(root: Path) -> None:
 # --------------------------------------------------------------------------------------
 
 
-def parsed(obj: Any) -> ast.AST:
-    """The AST of a function's or class's own source (dedented, so a method parses)."""
-    return ast.parse(textwrap.dedent(inspect.getsource(obj)))
-
-
-def called_names(tree: ast.AST) -> set[str]:
-    """Every `f(...)` / `x.f(...)` callee name in `tree`."""
-    out: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            f = node.func
-            if isinstance(f, ast.Name):
-                out.add(f.id)
-            elif isinstance(f, ast.Attribute):
-                out.add(f.attr)
-    return out
-
-
-def attribute_names(tree: ast.AST) -> set[str]:
-    return {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-
-
-def path_typed_parameters(fn: ast.FunctionDef) -> list[str]:
-    """The parameters of `fn` that could carry a ROOT: annotated `Path` or `PathLike`, or
-    named like a root (`path`, `root`, `episode_dir`, `world_dir`, `run_dir`, `*_path`)."""
-    rooty = {"path", "root", "episode_dir", "world_dir", "run_dir"}
-    out = []
-    a = fn.args
-    for p in (*a.posonlyargs, *a.args, *a.kwonlyargs):
-        names = {n.id for n in ast.walk(p.annotation) if isinstance(n, ast.Name)} if p.annotation else set()
-        attrs = {n.attr for n in ast.walk(p.annotation) if isinstance(n, ast.Attribute)} if p.annotation else set()
-        typed = bool({"Path", "PathLike"} & (names | attrs))
-        if typed or p.arg in rooty or p.arg.endswith("_path"):
-            out.append(p.arg)
-    return out
-
-
-def function_def(tree: ast.AST, name: str) -> ast.FunctionDef:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return node
-    raise AssertionError(f"no function {name!r} in the parsed source")
-
-
-def module_tree(module: Any) -> ast.AST:
-    return ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-
-
-def calls_by_function(tree: ast.AST, callees: frozenset[str]) -> dict[str, dict[str, int]]:
-    """For every top-level function in `tree`, how many times it calls each of `callees`
-    (`{fn: {callee: n}}`, functions with zero calls omitted); module-level calls under the
-    key `<module>`."""
-    out: dict[str, dict[str, int]] = {}
-
-    def count(owner: str, node: ast.AST) -> None:
-        for n in ast.walk(node):
-            if isinstance(n, ast.Call):
-                f = n.func
-                callee = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
-                if callee in callees:
-                    out.setdefault(owner, {})
-                    out[owner][callee] = out[owner].get(callee, 0) + 1
-
-    assert isinstance(tree, ast.Module)
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            count(node.name, node)
-        elif isinstance(node, ast.ClassDef):
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    count(f"{node.name}.{item.name}", item)
-        else:
-            count("<module>", node)
-    return out
-
-
-def defined_functions(tree: ast.AST) -> set[str]:
-    return {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
