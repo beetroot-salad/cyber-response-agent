@@ -18,11 +18,13 @@ pytestmark = pytest.mark.skipif(
 defender_sql = load_module(DEFENDER / "runtime" / "sql_engine" / "sql.py", name="defender_sql")
 
 
-def _run_full(monkeypatch, capsys, payload, query: str) -> tuple[int, str, str]:
+def _run_full(monkeypatch, capsys, payload, query: str,
+              *declared: str) -> tuple[int, str, str]:
+    """`declared` is the (rows, names) pair of `--rows`/`--names`, or nothing."""
     data = payload.encode() if isinstance(payload, str) else payload
     fake_stdin = types.SimpleNamespace(buffer=io.BytesIO(data))
     monkeypatch.setattr("sys.stdin", fake_stdin)
-    code = defender_sql._run(query)
+    code = defender_sql._run(query, *declared)
     captured = capsys.readouterr()
     return code, captured.out, captured.err
 
@@ -148,6 +150,18 @@ def test_non_utf8_payload_is_clean_input_error(monkeypatch, capsys):
     code, out = _run(monkeypatch, capsys, b'{"u":"a\xff b"}\n', "SELECT u FROM data")
     assert code == defender_sql.EXIT_INPUT_ERROR
     assert out == ""
+
+
+@pytest.mark.parametrize("declared", [False, True], ids=["undeclared", "declared"])
+def test_binary_garbage_is_a_clean_input_error(monkeypatch, capsys, declared):
+    """Bytes that are no text at all (a UTF-16 BOM, NUL, a stray continuation byte) are
+    refused as not-JSON, with or without --rows/--names, never answered or crashed on."""
+    flags = ("values", "columns") if declared else ()
+    code, out, err = _run_full(monkeypatch, capsys, b"\xff\xfe\x00\x01garbage\x80",
+                               "SELECT count(*) FROM data", *flags)
+    assert code == defender_sql.EXIT_INPUT_ERROR
+    assert out == ""
+    assert err.startswith("defender-sql: stdin is not "), err
 
 
 def test_non_finite_floats_serialize_as_null(monkeypatch, capsys):
