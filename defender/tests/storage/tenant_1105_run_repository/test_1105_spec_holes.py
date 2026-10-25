@@ -45,11 +45,6 @@ def _every_function(t, *, run_id: str = R1):
             ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id)))]
 
 
-def _one_line_exit(err: BaseException | None) -> bool:
-    return (isinstance(err, SystemExit) and isinstance(err.code, str)
-            and len(err.code.splitlines()) == 1)
-
-
 # -- A: run setup over a non-directory runs folder -------------------------------------------
 
 
@@ -66,9 +61,9 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
         H.make_fifo(runs)
     else:
         os.symlink(tmp_path / "nowhere", runs)
-    err = H.raised(run_common.materialize_run, alert, R1, tenant=t)
+    err = H.raised(run_common.materialize_run, alert, tenant=t)
     assert isinstance(err, _tenant.TenantRefused), f"{kind}: materialize_run raised {err!r}"
-    err = H.raised(run_py._materialize_run, alert, R1, tenant=t, model=None)
+    err = H.raised(run_py._materialize_run, alert, tenant=t, model=None)
     assert H.message(err).startswith("[run.py] "), f"{kind}: run.py gave {err!r}"
     assert not isinstance(err, OSError), f"{kind}: a raw OSError escaped: {err!r}"
     assert os.path.lexists(runs), f"{kind}: run setup removed it"
@@ -169,11 +164,6 @@ def test_1105_a_surrogate_escaped_run_id_is_refused_not_a_raw_encoding_error(tmp
 
     err = H.raised(RunId.parse, "r\udcff1")
     assert H.is_a(err, RunRefused), f"RunId.parse('r\\udcff1') raised {err!r}"
-    alert = H.alert_file(tmp_path / "in")
-    t = H.tenant(data_root, H.T_ID)
-    err = H.raised(run_common.materialize_run, alert, "r\udcff1", tenant=t)
-    assert _one_line_exit(err), f"run setup over 'r\\udcff1' gave {err!r}"
-    assert H.message(err).startswith("invalid run id: "), f"run setup said {err!r}"
 
 
 # -- E: the tenant record is judged before the listing -----------------------------------------

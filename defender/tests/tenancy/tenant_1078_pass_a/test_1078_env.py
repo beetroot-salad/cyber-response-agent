@@ -15,23 +15,22 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 
 TENANT = H.VALID_ID
-R1, R2 = fixture_uuid("1078-env-r1"), fixture_uuid("1078-env-r2")
+R1 = fixture_uuid("1078-env-r1")
 
 
-def _fresh_run(root: Path, run_id: str = R2, tenant_id: str = TENANT) -> Path:
-    'A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the\ndata root this process resolves (the tenant is created first, through `create_tenant`\nover a placed knowledge folder, then accepted there as the entry does).'
+def _fresh_run(root: Path, tenant_id: str = TENANT) -> Path:
+    'A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the\ndata root this process resolves (the tenant is created first, through `create_tenant`\nover a placed knowledge folder, then accepted there as the entry does). #1279 (A3): the run id is minted by setup.'
     if not location_path(H.row_path)(root, tenant_id).is_file():
         H.make_tenant(root, tenant_id)
-    alert = H.plant_alert(root.parent / f"alert-{run_id}")
+    alert = H.plant_alert(root.parent / f"alert-{tenant_id}")
     tenant = H.accept(H.resolve_data_root(), tenant_id)
-    return H.run_common().materialize_run(alert, run_id, tenant=tenant).run_dir
+    return H.run_common().materialize_run(alert, tenant=tenant).run_dir
 
 
 
 def _box_env(run_dir: Path) -> dict[str, str]:
     """The env a run's box is created with, read off the real `docker run` argv builder."""
-    argv = H.mod("box")._create_argv(
-        "defender-r1", Path(run_dir), H.DEFENDER, H.mod("box._spec").DEFAULT_SPEC).argv
+    argv = H.mod("box")._create_argv("defender-r1", Path(run_dir), H.DEFENDER, H.mod("box._spec").DEFAULT_SPEC, lane=H.mod("box")._run_lane_mounts(Path(run_dir), H.DEFENDER, None)).argv
     return dict(argv[i + 1].partition("=")[::2] for i, a in enumerate(argv) if a == "--env")
 
 
@@ -58,7 +57,7 @@ def _plant_corpus_layout(root: Path) -> tuple[Path, Path, Path]:
     H.make_tenant(root, TENANT)
     prior = T.corpus_document(H.runs_dir(root, TENANT) / R1)
     planted = T.corpus_document(root / TENANT / "episodes" / "x" / "runs" / "y")
-    run_dir = _fresh_run(root, R2)
+    run_dir = _fresh_run(root)
     return Path(run_dir), prior, planted
 
 
@@ -68,7 +67,8 @@ def test_o8_corpus_is_own_runs_base(tmp_path, monkeypatch):
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     run_dir, prior, _planted = _plant_corpus_layout(root)
-    assert run_dir == H.runs_dir(root, TENANT) / R2, f"the fresh run landed at {run_dir}"
+    assert run_dir.parent == H.runs_dir(root, TENANT), f"the fresh run landed at {run_dir}"
+    assert run_dir != H.runs_dir(root, TENANT) / R1
     env = H.run_common().run_env(H.DEFENDER, run_dir)
     assert Path(env["DEFENDER_RUNS_BASE"]) == H.runs_dir(root, TENANT)
     assert prior.resolve() in _corpus_paths(env["DEFENDER_RUNS_BASE"]), (
@@ -98,7 +98,7 @@ def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
     'Host subprocesses a run spawns inherit DEFENDER_DATA_ROOT unchanged, alongside the\nderived DEFENDER_RUNS_BASE.'
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    run_dir = _fresh_run(root, R1)
+    run_dir = _fresh_run(root)
     env = H.run_common().run_env(H.DEFENDER, run_dir)
     child = subprocess.run(  # noqa: S603 — the test's own interpreter
         [sys.executable, "-c",
@@ -122,8 +122,7 @@ def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
     box = H.mod("box")
     assert H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == \
         str(run_dir.parent)
-    argv = box._create_argv("defender-r1", run_dir, H.DEFENDER,
-                            H.mod("box._spec").DEFAULT_SPEC).argv
+    argv = box._create_argv("defender-r1", run_dir, H.DEFENDER, H.mod("box._spec").DEFAULT_SPEC, lane=box._run_lane_mounts(run_dir, H.DEFENDER, None)).argv
     exported = [a for a in argv if a.startswith("DEFENDER_RUNS_BASE=")]
     # #1255 (design rev 4, P1): the box's value is the model view's constant, which still
     # overwrites the stale inherited one.

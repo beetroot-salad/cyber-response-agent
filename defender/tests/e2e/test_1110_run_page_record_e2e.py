@@ -9,6 +9,7 @@ import errno
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -29,6 +30,8 @@ from defender.tests.e2e.test_1084_mirror_e2e import (
     _assert_one_warning_naming_the_destination_once,
     _assert_record_written,
     _warnings,
+    area,
+    tenant_of,
 )
 
 pytestmark = pytest.mark.e2e
@@ -214,7 +217,7 @@ def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_
     assert sorted(p.name for p in run_dir.iterdir()) == listing, (
         "render_page wrote into the run dir — generation must write nothing (M1)")
 
-    run_common.visualize(run)
+    run_common.visualize(run, tenant=tenant_of(run))
 
     writes = io.writes_to(record)
     assert len(writes) == 1, (
@@ -279,8 +282,8 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
     io = ArgRecordingIo()
     handles: list[Run] = []
 
-    def materialize(alert: Path, run_id: str | None, **kw: Any) -> Run:
-        real = run_common.materialize_run(alert, run_id, **kw)
+    def materialize(alert: Path, **kw: Any) -> Run:
+        real = run_common.materialize_run(alert, **kw)
         assert location_path(real.runs_base) == entrypoint_env, "the builder bound another runs base"
         # #1187 (R1): `Run.for_tenant` is retired with the runs base's record it read;
         # `Run.under(container, id, tenant_id=)` is its replacement.
@@ -322,22 +325,22 @@ def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
         monkeypatch.delenv(MIRROR_ENV)
     caplog.set_level(logging.DEBUG)
 
-    run_common.visualize(run)  # a failed copy is not a failed render: no VisualizeFailed
+    run_common.visualize(run, tenant=tenant_of(run))  # a failed copy is not a failed render: no VisualizeFailed
 
     _assert_record_written(run_dir)
     if fault == "unwritable-destination":
         _assert_one_warning_naming_the_destination_once(
-            caplog, blocker / "run-visualizations" / run_dir.name / PAGE)
+            caplog, area(blocker / "run-visualizations", run))
         assert blocker.read_bytes() == b"a file, not a folder\n"
     else:
         warned = _warnings(caplog)
-        assert any("MirrorRootRefused" in w or "is unset under pytest" in w for w in warned), (
+        assert any("DEFENDER_RUN_VISUALIZATIONS_DIR is unset" in w for w in warned), (
             f"the refused copy was not warned with the resolver's reason; warnings: {warned!r}")
 
     monkeypatch.setenv(MIRROR_ENV, str(run_visualizations_dir))
     caplog.clear()
-    run_common.visualize(run)
-    assert (run_visualizations_dir / run_dir.name / PAGE).read_bytes() == (run_dir / PAGE).read_bytes()
+    run_common.visualize(run, tenant=tenant_of(run))
+    assert area(run_visualizations_dir, run).read_bytes() == (run_dir / PAGE).read_bytes()
     assert _warnings(caplog) == [], f"a copy that landed was warned about: {_warnings(caplog)!r}"
 
 
@@ -353,14 +356,14 @@ def test_1110_o4_a_run_whose_store_cannot_be_resolved_is_not_rendered_and_writes
     pointer.unlink()
 
     with pytest.raises(run_common.VisualizeFailed) as failed:
-        run_common.visualize(run)
+        run_common.visualize(run, tenant=tenant_of(run))
 
     _assert_a_render_failure(failed, run_dir)
     assert not record.exists(), "a refused render left a page behind for a reader to trust"
     assert io.writes_to(record) == [], "the record was written before the precondition refused"
 
     pointer.write_bytes(saved)
-    run_common.visualize(run)
+    run_common.visualize(run, tenant=tenant_of(run))
     _assert_record_written(run_dir)
     assert len(io.writes_to(record)) == 1
 
@@ -372,13 +375,13 @@ def test_1110_o4_o7_a_renderer_crash_is_visualize_failed_and_writes_no_page(tmp_
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
     record = RunPaths(run_dir).runtime_html
-    run_common.visualize(run)
+    run_common.visualize(run, tenant=tenant_of(run))
     _assert_record_written(run_dir)
     record.unlink()
     _plant_crashing_row(run_dir, row)
 
     with pytest.raises(run_common.VisualizeFailed) as failed:
-        run_common.visualize(run)
+        run_common.visualize(run, tenant=tenant_of(run))
 
     cause = failed.value.__cause__
     assert type(cause).__name__ == cause_type, (
@@ -393,13 +396,13 @@ def test_1110_o4_o7_a_renderer_that_cannot_be_imported_is_visualize_failed(tmp_p
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
     record = RunPaths(run_dir).runtime_html
-    run_common.visualize(run)
+    run_common.visualize(run, tenant=tenant_of(run))
     _assert_record_written(run_dir)
     record.unlink()
     _make_renderer_unimportable(monkeypatch)
 
     with pytest.raises(run_common.VisualizeFailed) as failed:
-        run_common.visualize(run)
+        run_common.visualize(run, tenant=tenant_of(run))
 
     _assert_a_load_failure(failed.value, run_dir)
     assert not record.exists(), "a render that could not import its renderer left a page"
@@ -420,7 +423,7 @@ def test_1110_o4_a_record_write_the_handle_refuses_is_visualize_failed(tmp_path,
         (record / "keep").write_bytes(b"KEEP\n")
 
     with pytest.raises(run_common.VisualizeFailed) as failed:
-        run_common.visualize(run)
+        run_common.visualize(run, tenant=tenant_of(run))
 
     assert getattr(failed.value.__cause__, "errno", None) == errno.ELOOP, (
         f"VisualizeFailed is not the handle's refusal: {failed.value.__cause__!r}")
@@ -435,7 +438,7 @@ def test_1110_o4_a_record_write_the_handle_refuses_is_visualize_failed(tmp_path,
         (record / "keep").unlink()
         record.rmdir()
 
-    run_common.visualize(run)
+    run_common.visualize(run, tenant=tenant_of(run))
     _assert_record_written(run_dir)
 
 
@@ -511,3 +514,58 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
     child = _standalone(tenant, run_dir)
     assert child.returncode == 0, f"the re-render failed: {child.stderr}"
     assert MARKER in record.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------------------
+# #1279 O2/O4 — where the dev copy goes, through the two real callers
+
+
+def test_1279_o2_the_standalone_re_render_publishes_into_the_accepted_tenants_area(
+        run_visualizations_dir, monkeypatch):
+    """O2/A4: the visualize CLI's opener hands the accepted tenant on; on dev the copy is `<root>/<T>/runs/<R>/`."""
+    tenant, run_dir = _repository_run()
+    record = RunPaths(run_dir).runtime_html
+
+    child = _standalone(tenant, run_dir, **{_env.DEPLOYMENT_ENV: "dev"})
+
+    assert child.returncode == 0, f"the re-render failed: {child.stderr}"
+    published = run_visualizations_dir / tenant / "runs" / run_dir.name / PAGE
+    assert published.read_bytes() == record.read_bytes()
+    assert [p.name for p in run_visualizations_dir.iterdir()] == [tenant], "something landed outside the tenant area"
+
+    shutil.rmtree(run_visualizations_dir / tenant)
+    child = _standalone(tenant, run_dir, **{_env.DEPLOYMENT_ENV: "production"})
+    assert child.returncode == 0, f"the re-render failed outside dev: {child.stderr}"
+    assert MARKER in record.read_text(encoding="utf-8"), "the record is kept outside dev"
+    assert not list(run_visualizations_dir.iterdir()), "a production re-render published a page"
+
+
+def test_1279_a_and_b_run_the_same_fixture_get_two_minted_ids_and_two_pages_in_two_tenant_areas(
+        tmp_path, entrypoint_env, data_root, run_visualizations_dir, monkeypatch):
+    """Scenario: tenants A and B run one fixture through `run.main`; two ids, two pages, two areas."""
+    from defender import run as run_py
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
+    b_id = fixture_uuid("tenant:second-run-1279")
+    H5.tenant(data_root, b_id)
+    ran: dict[str, _ReplayLifecycle] = {}
+    for tenant_id in (D9_TENANT_ID, b_id):
+        ran[tenant_id] = _ReplayLifecycle()
+        rc = run_py.main([str(GOLDEN / "alert.json"), "--tenant", tenant_id, "--no-learn"],
+                         preflight=lambda _model: 0, lifecycle=ran[tenant_id],
+                         publish=in_process_publish())
+        assert rc == 0
+
+    ids = {t: lc.run_dirs[0].name for t, lc in ran.items()}
+    assert len(set(ids.values())) == 2, f"the two runs did not get two ids: {ids}"
+    for tenant_id, run_id in ids.items():
+        page = run_visualizations_dir / tenant_id / "runs" / run_id / PAGE
+        assert page.read_bytes() == (ran[tenant_id].run_dirs[0] / PAGE).read_bytes(), (
+            f"{tenant_id}'s page is not in its own area")
+    assert sorted(p.name for p in run_visualizations_dir.iterdir()) == sorted(ids)
+    for tenant_id in ids:
+        assert [p.name for p in (run_visualizations_dir / tenant_id / "runs").iterdir()] == [ids[tenant_id]]

@@ -354,7 +354,7 @@ def _run_main_over(tree: Path, tmp_path: Path, tenant: S.Planted, *, main: S.Mai
     alert = S.operator_input(tmp_path)
     alert.parent.mkdir(parents=True, exist_ok=True)
     alert.write_bytes(S.alert_bytes(_alert()))
-    argv = [str(alert), "--tenant", tenant.tenant_id, "--run-id", S.fresh_run_id(), "--no-learn"]
+    argv = [str(alert), "--tenant", tenant.tenant_id, "--no-learn"]
     out: dict[str, Any] = {"rc": None, "raised": None, "refusal": None}
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 

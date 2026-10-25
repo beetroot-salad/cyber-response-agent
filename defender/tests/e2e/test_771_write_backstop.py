@@ -244,6 +244,19 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
 
+# #1279 A5 — retired in rev 5: the run folder's exclusive create is `_io.hold_new(..., exclusive=True)`,
+# which takes one name; `make_run_dir`'s refusals are pinned in test_1105_run_setup.py (O8)
+def test_the_default_mkdir_still_accepts_an_existing_final_name(tmp_path):
+    """default_mkdir_is_idempotent — an existing final directory is accepted."""
+    run = run_tree(tmp_path)
+    (run / "gather_raw" / "l-023").mkdir()
+    (run / "gather_raw" / "l-023" / "kept.txt").write_text("kept\n", encoding="utf-8")
+
+    guarded_mkdir(run / "gather_raw" / "l-023", base=run)
+
+    assert (run / "gather_raw" / "l-023" / "kept.txt").read_text(encoding="utf-8") == "kept\n"
+
+
 # §7 D1 — the staged name, and the collision class it dissolves
 def test_a_replacing_write_stages_under_an_unpredictable_name(tmp_path):
     """staged_name_is_unpredictable — the replacing write stages its payload under a name that is

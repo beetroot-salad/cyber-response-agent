@@ -342,13 +342,13 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
     alert = S.fixture_alert("v2-sshd-success-after-failures")
     alert_id, rule_id = alert["alert_id"], alert["rule"]["id"]
     planted = S.plant_tenant(alert_mapping=S.ALERT_ID_MAPPING)
-    first = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=fixture_uuid("o8-first"),
+    first = S.run_alert(tmp_path, alert=alert, tenant=planted,
                         orient_shim=S.RecordingShim())
     assert first.rc == 0, (first.rc, first.refusal, first.raised)
     S.plant_lesson("fd-o8-mapped", source_signature=[alert_id])
     S.plant_lesson("fd-o8-rule-id", source_signature=[rule_id])
 
-    later = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=fixture_uuid("o8-later"),
+    later = S.run_alert(tmp_path, alert=alert, tenant=planted,
                         orient_shim=S.RecordingShim())
     hits = _listed(_lessons_section(later))
     assert "fd-o8-mapped" in hits, (
@@ -621,9 +621,9 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
 def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
     sig = "R-P065"
     planted = S.plant_tenant(fixture_uuid("tenant:acme-a"))
-    failed = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p065-failed"),
+    failed = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted,
                          orient_shim=S.RecordingShim(fail=("defender-invlang",)))
-    empty = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p065-empty"),
+    empty = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted,
                         orient_shim=S.RecordingShim())
     unavailable = _vocab_section(failed)
     assert unavailable is not None, (
@@ -637,7 +637,7 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
                                                                      "description": "past"}))
     d = S.run_alert(tmp_path, alert=S.generic_alert(rule_id="R-other", rule={"id": "R-other", "uuid": "SIG-P065",
                                                                               "description": "now"}),
-                    tenant=mapped, run_id=fixture_uuid("p065-recorded"), orient_shim=S.RecordingShim())
+                    tenant=mapped, orient_shim=S.RecordingShim())
     section = _vocab_section(d) or ""
     assert _probes(section) == {"pc"}, (
         f"the corpus did not attribute the past run by its recorded signature:\n{section}")
@@ -716,13 +716,13 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     recorded = [_past_run(location_path(planted.runs), f"past-{tag}", tag=tag, rule_id=sig, signature=sig)
                 for tag, sig in (("pr", "R"), ("plonger", "R-1001"), ("plower", "r"))]
 
-    one = S.run_alert(tmp_path, alert=_lesson_alert("R"), tenant=planted, run_id=fixture_uuid("p080-one"),
+    one = S.run_alert(tmp_path, alert=_lesson_alert("R"), tenant=planted,
                       orient_shim=S.RecordingShim())
     hits = sorted(_listed(_lessons_section(one)))
     assert hits == ["fd-p080-r", "fd-p080-second"], f"orientation's lookup of 'R' listed {hits}"
     assert _probes(_vocab_section(one) or "") == {"pr"}, _vocab_section(one)
 
-    blank = S.run_alert(tmp_path, alert=_lesson_alert(" "), tenant=planted, run_id=fixture_uuid("p080-blank"),
+    blank = S.run_alert(tmp_path, alert=_lesson_alert(" "), tenant=planted,
                         orient_shim=S.RecordingShim())
     assert _listed(_lessons_section(blank)) == [], (
         f"a blank value was looked up as a signature: {_listed(_lessons_section(blank))}")
@@ -746,16 +746,16 @@ def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
     assert shown == _WRITTEN_P182, f"the manifest shows {shown}, not the text written"
 
     for i, sig in enumerate(_WRITTEN_P182):
-        d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid(f"p182-{i}"),
+        d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted,
                         orient_shim=S.RecordingShim())
         section = _lessons_section(d)
         if i == 0:
             assert _tag_counts(section) == dict.fromkeys(_WRITTEN_P182, 1), (
                 f"the tags listing does not show the text written: {_tag_frame(section)}")
         assert _listed(section) == [name], f"orientation's lookup of {sig!r}: {_listed(section)}"
-    for i, sig in enumerate(["83", "True"]):
+    for sig in ["83", "True"]:
         d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted,
-                        run_id=fixture_uuid(f"p182-retyped-{i}"), orient_shim=S.RecordingShim())
+                        orient_shim=S.RecordingShim())
         assert _listed(_lessons_section(d)) == [], (
             f"orientation found the lesson for its retyped value {sig!r}")
 
@@ -767,9 +767,9 @@ def _ids(rows: Iterable[dict]) -> list[str]:
     return [r["finding_id"] for r in rows]
 
 
-def _later_hits(tmp_path: Path, planted: S.Planted, sig: str, run_id: str) -> list[str]:
+def _later_hits(tmp_path: Path, planted: S.Planted, sig: str) -> list[str]:
     """Orientation's lesson hits on a later run of an alert whose `rule.id` is `sig`."""
-    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=run_id,
+    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted,
                     orient_shim=S.RecordingShim())
     return sorted(_listed(_lessons_section(d)))
 
@@ -812,8 +812,8 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
     committed = _adopt(planted, lane, "fd-p072-a", "fd-p072-b")
     assert committed["fd-p072-a"].lines("source_signature") == [sig_a]
     assert committed["fd-p072-b"].lines("source_signature") == [sig_b]
-    assert _later_hits(tmp_path, planted, sig_a, fixture_uuid("p072-later-a")) == ["fd-p072-a"]
-    assert _later_hits(tmp_path, planted, sig_b, fixture_uuid("p072-later-b")) == ["fd-p072-b"]
+    assert _later_hits(tmp_path, planted, sig_a) == ["fd-p072-a"]
+    assert _later_hits(tmp_path, planted, sig_b) == ["fd-p072-b"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
@@ -830,7 +830,7 @@ def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
     planted = S.plant_tenant()
     committed = _adopt(planted, lane, "fd-p074")
     assert committed["fd-p074"].lines("source_signature") == [sig]
-    assert _later_hits(tmp_path, planted, sig, fixture_uuid("p074-later")) == ["fd-p074"]
+    assert _later_hits(tmp_path, planted, sig) == ["fd-p074"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
@@ -852,6 +852,6 @@ def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
             f"{name}: the saved lesson reads back {committed[name].lines('source_signature')}, "
             f"not the recorded signature {sig!r}")
         assert set(committed[name].fm) == _LESSON_KEYS, sorted(committed[name].fm)
-    assert _later_hits(tmp_path, planted, colon, fixture_uuid("p077-later-colon")) == ["fd-p077-colon"]
-    assert _later_hits(tmp_path, planted, mixed, fixture_uuid("p077-later-mixed")) == ["fd-p077-mixed"]
+    assert _later_hits(tmp_path, planted, colon) == ["fd-p077-colon"]
+    assert _later_hits(tmp_path, planted, mixed) == ["fd-p077-mixed"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"

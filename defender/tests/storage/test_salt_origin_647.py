@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.runtime.state._1255_view import model_path
 
@@ -38,12 +37,14 @@ PAYLOAD = [
 ]
 
 
-def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-647"):
+def build(tmp_path, monkeypatch, golden: Path = GOLDEN):
     """Materialize a run dir with the REAL production builder.
 
     The data root is redirected into `tmp_path` and the tenant set up there (#1120: the
     builder is handed the accepted `Tenant`, whose runs base it builds under); everything
     else — the directory layout, the alert copy — is production code.
+
+    #1279 (A3): run setup mints the id, so `build` takes none.
 
     Returned a `(run_dir, salt)` pair until #875. The builder no longer mints a token at all:
     `wrap_fresh` mints each frame's delimiter after its content is in hand, so there is no
@@ -55,7 +56,7 @@ def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-64
     # The D9 tenant: the replay harness's `drive` runs the run under the fixture tenant it sets
     # up in this same data root, and a data root holds one tenant (O10).
     tenant = set_up_tenant(data_root)
-    return run_common.materialize_run(golden / "alert.json", fixture_uuid(run_id), tenant=tenant).run_dir
+    return run_common.materialize_run(golden / "alert.json", tenant=tenant).run_dir
 
 
 def tokens(*transcripts: str) -> set[str]:
@@ -109,7 +110,7 @@ def run_dir_listing(message_zero: str) -> list[str]:
 
 def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeypatch):
     """Every frame the model is shown carries a DISTINCT delimiter."""
-    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="per-frame-647")
+    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3)
     main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
 
     main_seen, gather_seen = "\n".join(main.seen), "\n".join(gather.seen)
@@ -125,7 +126,7 @@ def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeyp
 
 def test_no_frames_salt_occurs_inside_the_content_it_delimits(tmp_path, monkeypatch):
     """A frame's delimiter never appears in that frame's own body."""
-    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="no-echo-647")
+    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3)
     main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
 
     checked = 0
@@ -142,7 +143,7 @@ def test_no_frames_salt_occurs_inside_the_content_it_delimits(tmp_path, monkeypa
 
 def test_the_gather_subagent_is_bound_with_no_salt_at_all(tmp_path, monkeypatch):
     """The gather subagent inherits NO token, because there is none to inherit."""
-    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="no-inherit-647")
+    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3)
     main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
 
     main_seen, gather_seen = "\n".join(main.seen), "\n".join(gather.seen)
@@ -163,7 +164,7 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     tmp_path, monkeypatch
 ):
     """MAIN's first model request enumerates the run dir's REAL children, and the removed file is not among them."""
-    run_dir = build(tmp_path, monkeypatch, run_id="msg0-647")
+    run_dir = build(tmp_path, monkeypatch)
     assert run_dir.is_dir(), (
         "there is no materialized run dir for the orientation to enumerate"
     )
@@ -200,7 +201,7 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
         "golden now carries one — the production builder would copy it and the harness would "
         "not, so the scope condition no longer holds and the claim must be re-derived"
     )
-    prod_dir = build(tmp_path, monkeypatch, run_id="parity-647")
+    prod_dir = build(tmp_path, monkeypatch)
     assert prod_dir.is_dir(), (
         "the production builder produced no run dir to compare file sets with"
     )

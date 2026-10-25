@@ -108,14 +108,13 @@ def make_layout(base: Path, tenant_id: str, *, checkout: Path | None = None) -> 
 
 
 def natural_run(layout: Layout, alert_bytes: bytes, label: str) -> Path:
-    """Materialize a natural run through its tenant's runs repository."""
+    """Materialize a natural run through its tenant's runs repository. #1279 (A3): setup mints
+    the run id; `label` only names the staged alert file."""
     from defender import run_common
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-    run_id = fixture_uuid(label)
-    staged = location_path(layout.data_root).parent / f"alert-{run_id}.json"
+    staged = location_path(layout.data_root).parent / f"alert-{label}.json"
     staged.write_bytes(alert_bytes)
-    run = run_common.materialize_run(staged, run_id, tenant=layout.tenant)
+    run = run_common.materialize_run(staged, tenant=layout.tenant)
     return Path(run.run_dir)
 
 

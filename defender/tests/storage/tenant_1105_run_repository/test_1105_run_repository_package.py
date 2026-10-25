@@ -150,8 +150,8 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6).
-    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6; +1 for #1279's `sidecar_names`).
+    assert _out(proc).split()[0] == "72", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 
@@ -184,7 +184,7 @@ def test_1105_a_failed_first_import_through_the_door_propagates_and_is_retried()
 def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_path):
     from defender.run_repository import RunId
     from defender.box import BoxSpec
-    from defender.box._lifecycle import _create_argv
+    from defender.box._lifecycle import _create_argv, _run_lane_mounts
 
     t = H.tenant(tmp_path / "data", H.T_ID)
     runs = H.runs_folder(t)
@@ -195,8 +195,7 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     plant_alert(runs / rid)
     run = t.runs_repository().open(RunId.parse(rid))
     assert getattr(run, "run_dir", None) == runs / rid, f"runs.open handed out {run!r}"
-    create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER,
-                          BoxSpec(runtime="runc", rootfs="busybox"), tenant_agent=t.agent)
+    create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER, BoxSpec(runtime="runc", rootfs="busybox"), lane=_run_lane_mounts(run.run_dir, H.DEFENDER, t.agent))
     argv = create.argv
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     binds = []

@@ -128,8 +128,6 @@ def test_daemon_path_translation_preserves_the_run_process_agent_target(tmp_path
     agent = tmp_path / 'tenants' / fixture_uuid("tenant:acme") / 'knowledge' / 'agent'
     agent.mkdir(parents=True)
     shared = ((tmp_path, Path('/daemon/shared')),)
-    create = box_mod._create_argv('defender-run-p2', run_dir, defender_dir,
-                                 box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared,
-                                 tenant_agent=agent)
+    create = box_mod._create_argv('defender-run-p2', run_dir, defender_dir, box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared, lane=box_mod._run_lane_mounts(run_dir, defender_dir, agent))
     expected = Path('/daemon/shared') / agent.relative_to(tmp_path)
     assert f'type=bind,source={expected},target=/agent,readonly' in create.argv

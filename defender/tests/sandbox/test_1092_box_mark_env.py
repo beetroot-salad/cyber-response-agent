@@ -39,6 +39,7 @@ def test_the_run_dir_lane_argv_carries_env_defender_box_1(tmp_path):
     run_dir = make_run_dir(tmp_path)
     argv = box_mod._create_argv(
         "defender-run-1092", run_dir, tmp_path / "srv" / "defender", BoxSpec(rootfs=STOCK_ROOTFS), (),
+        lane=box_mod._run_lane_mounts(run_dir, tmp_path / "srv" / "defender", None),
     ).argv
     pairs = env_pairs(argv)
     assert pairs.count(("DEFENDER_BOX", "1")) == 1, pairs

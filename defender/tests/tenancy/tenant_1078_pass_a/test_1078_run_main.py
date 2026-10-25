@@ -58,6 +58,28 @@ def _stamp_tenant(run_dir: Path, tenant_id: str) -> None:
     stamp.write_text(json.dumps(doc), encoding="utf-8")
 
 
+def test_1279_o5_run_py_takes_no_run_id(tmp_path, data_root, capsys):
+    """O5: `--run-id` is not an option of `run.py`; the refusal names it and nothing is spent."""
+    alert = H.plant_alert(tmp_path / "in")
+    H.make_tenant(data_root, H.VALID_ID)
+    before = H.census(data_root)
+    said = _refused([str(alert), "--run-id", CASE_X, "--tenant", H.VALID_ID],
+                    H.Recorder(tmp_path / "run"), capsys)
+    assert "--run-id" in said, f"the refusal does not name the rejected option: {said!r}"
+    assert H.census(data_root) == before
+
+
+def test_1279_o5_the_run_id_is_announced_as_the_first_stdout_line(tmp_path, data_root, capsys):
+    """O5: right after setup, `run_id=<id of the run setup built>` is the first stdout line."""
+    alert = H.plant_alert(tmp_path / "in")
+    H.make_tenant(data_root, H.VALID_ID)
+    rec = H.Recorder(tmp_path / fixture_uuid("announced-run"))
+    _accepted([str(alert), "--tenant", H.VALID_ID], rec)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines, "run.py wrote nothing to stdout"
+    assert lines[0] == f"run_id={rec.run_dir_at.name}", lines[:3]
+
+
 def test_o1_fresh_run_without_tenant_refused(tmp_path, data_root, capsys):
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(data_root)
@@ -226,7 +248,8 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     H.set_data_root(monkeypatch, new)
 
     alert = H.plant_alert(tmp_path / "in")
-    argv = [str(alert), "--run-id", CASE_X, "--tenant", fixture_uuid("tenant:acme")]
+    # #1279 (O5): `run.py` takes no run id; the old root still holds run X, and the new root has none.
+    argv = [str(alert), "--tenant", fixture_uuid("tenant:acme")]
     _refused(argv, H.Recorder(tmp_path / "run"))
 
     H.place_knowledge(new, fixture_uuid("tenant:acme"))  # #1120 DC2: the operator's clone, before setup

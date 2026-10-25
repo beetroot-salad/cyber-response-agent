@@ -168,8 +168,10 @@ def main(argv: list[str]) -> int:
     import argparse
 
     use_utf8_stdio()
-    parser = argparse.ArgumentParser(description="The lessons posture page's contract")
-    parser.add_argument("--stdout", action="store_true")
+    parser = argparse.ArgumentParser(description="The lessons posture page's contract, on stdout "
+                                     "(the pages are published per tenant by build.py, #1279)")
+    parser.add_argument("--stdout", action="store_true", help="kept for existing callers; "
+                        "the contract always goes to stdout")
     where = parser.add_mutually_exclusive_group(required=True)
     where.add_argument("--tenant", help="show the tenant's published knowledge")
     where.add_argument("--agent-root", type=Path, help="show the knowledge at this agent root")
@@ -185,14 +187,7 @@ def main(argv: list[str]) -> int:
             agent_root = published_agent_root(tenant)
         except (_tenant.TenantRefused, DeliveryRefused) as refused:
             parser.error(str(refused))
-    view = stamped_view(agent_root)
-    if args.stdout:
-        sys.stdout.write(dump_contract(view))
-    else:
-        out = HERE.parent / "lessons.json"
-        out.write_text(dump_contract(view), encoding="utf-8")
-        counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
-        print(f"wrote {out.relative_to(REPO_ROOT)} — {counts}")
+    sys.stdout.write(dump_contract(stamped_view(agent_root)))
     return 0
 
 

@@ -91,7 +91,7 @@ class _FailingRender(SpecTail):
     """The tail, with a render step that records what it was handed and then fails the way
     the real step reports a failed render."""
 
-    def visualize(self, run: Any, *, update_ticket: bool = False) -> None:
+    def visualize(self, run: Any, *, tenant: Any, update_ticket: bool = False) -> None:
         from defender import run_common
 
         super().visualize(run, update_ticket=update_ticket)
@@ -115,6 +115,32 @@ def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materiali
     assert run.tenant_id == runs_base.parent.name, (
         "the handle does not carry the tenant whose runs folder holds the run")
     assert run.observability.runtime_html.path == run.run_dir / "runtime.html"
+
+
+class _TenantRecording(SpecTail):
+    """The tail, noting the tenant the render step is handed beside the run (#1279 A4)."""
+
+    def __init__(self, *a: Any, **kw: Any) -> None:
+        super().__init__(*a, **kw)
+        self.visualize_tenants: list[Any] = []
+
+    def visualize(self, run: Any, *, tenant: Any, update_ticket: bool = False) -> None:
+        self.visualize_tenants.append(tenant)
+        super().visualize(run, update_ticket=update_ticket)
+
+
+def test_1279_a4_main_hands_the_render_step_the_tenant_it_accepted(tmp_path, state):
+    """A4: run.py's accepted `Tenant` rides the visualize seam; nothing downstream accepts it again."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+    from defender.tests.support.tenancy._tenants1106 import accept
+
+    tail = _TenantRecording(state)
+    assert drive_tail(run_py.main, plant_alert(tmp_path / "a4"), tail, "--no-learn") == 0
+
+    (run,) = tail.visualized
+    (tenant,) = tail.visualize_tenants
+    assert tenant == accept(current_data_root(), run.tenant_id), (
+        "the render step was not handed the tenant run.py accepted for this run")
 
 
 def test_1110_o7_a_failed_render_step_leaves_the_exit_code_at_0(tmp_path, state, capfd):

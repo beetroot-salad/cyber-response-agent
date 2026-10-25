@@ -182,6 +182,63 @@ def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(
         assert str(path) not in rendered, path
 
 
+_DRAFT_ROOTS = {
+    "inside the staged draft root": lambda batch: batch.draft_root / "published",
+    "inside a writable lane": lambda batch: batch.draft_root / "agent" / "lessons" / "published",
+    "inside the code tree": lambda batch: DEFENDER / "published-1279",
+    "above the draft root": lambda batch: batch.draft_root.parent,
+}
+
+
+@pytest.mark.parametrize("where", sorted(_DRAFT_ROOTS))
+def test_1279_o3_the_tenant_draft_box_refuses_a_mount_overlapping_the_publish_root(
+        repo, tmp_path, monkeypatch, where):
+    """O3 through `Batch.box_request`, started by the delivery (which requires a sandbox, even with
+    the opt-out on): the refusal is the non-degradable subtype and leaves nothing under drafts/."""
+    from defender.tests.support.sandbox import _box1279 as X
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+
+    d, batch = _batch(repo, "pub1279")
+    request = replace(batch.box_request(), spec=_PINNED)
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    clear = FakeDaemon(tmp_path / "clear")
+    d.start_box(request, docker=clear)
+    rendered = X.bound_sources(clear.docker_calls())
+    assert {Path(m.source).resolve() for m in request.mounts} <= {p.resolve() for p in rendered}
+
+    root = X.dev_root(monkeypatch, _DRAFT_ROOTS[where](batch))
+    X.allow_unsandboxed(monkeypatch)
+    drafts_before = _snapshot(batch.draft_root.parent)
+    daemon = FakeDaemon(tmp_path / "refused")
+    with pytest.raises(X.conflict_type()) as refused:
+        d.start_box(request, docker=daemon)
+    X.assert_refused_for_overlap(
+        refused.value, root=root,
+        mounts=X.overlapping([Path(m.source) for m in request.mounts], root), rendered=rendered)
+    assert daemon.created() == []
+    assert _snapshot(batch.draft_root.parent) == drafts_before, "a refused start left something under drafts/"
+
+
+def test_1279_o6_the_tenant_draft_box_refuses_a_finished_container_of_its_name(
+        repo, tmp_path, monkeypatch):
+    from defender.tests.support.sandbox import _box1279 as X
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+
+    d, batch = _batch(repo, "name1279")
+    request = replace(batch.box_request(), spec=_PINNED)
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    daemon = FakeDaemon(tmp_path)
+    daemon.hold(request.name, "exited")
+    drafts_before = _snapshot(batch.draft_root.parent)
+    with pytest.raises(X.conflict_type()) as refused:
+        d.start_box(request, docker=daemon)
+    assert request.name in str(refused.value)
+    assert daemon.names() == [request.name]
+    assert not X.removed(daemon.docker_calls())
+    assert daemon.created() == []
+    assert _snapshot(batch.draft_root.parent) == drafts_before
+
+
 def test_explicit_defender_dir_also_owns_host_fallback_environment(tmp_path):
     code = tmp_path / "code/defender"
     request = box.BoxRequest(name="defender-test", defender_dir=code,

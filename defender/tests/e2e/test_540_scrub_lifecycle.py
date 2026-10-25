@@ -727,30 +727,6 @@ def test_reaper_does_not_treat_stderr_as_failure(tmp_path):
         stop_box(box, docker=loud_failure)
 
 
-def test_a_stopped_box_of_the_same_name_does_not_block_a_new_run(tmp_path):
-    run = _clean_run_dir(tmp_path)
-
-    class StoppedCollision(FakeDocker):
-        """The stateful daemon rule, and NOTHING about `inspect`."""
-
-        def __call__(self, argv, **kwargs):
-            call = _DockerCall(list(argv))
-            if call.verb in ("rm", "kill"):
-                self.calls.append(call)
-                self.existing = None
-                return subprocess.CompletedProcess(list(argv), *C43A_RM_MISSING)
-            if call.verb == "run" and self.existing is not None:
-                self.calls.append(call)
-                return subprocess.CompletedProcess(list(argv), *C43B_NAME_COLLISION)
-            return super().__call__(argv, **kwargs)
-
-    docker = StoppedCollision(existing="exited")
-    box = start_box(run, DEFENDER, docker=docker)
-    assert box is not None
-    assert docker.verbs.index("rm") < docker.verbs.index("run"), \
-        "the reap must precede the create, or the stopped collision is never cleared"
-
-
 def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
     """d_never_falls_back_in_process — there is NO in-process execution path on any box failure."""
     secret = "MARKER-e2b7-executed-in-process"
@@ -891,7 +867,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     try:
-        run = run_common.materialize_run(alert, None, tenant=tenant)
+        run = run_common.materialize_run(alert, tenant=tenant)
     except SystemExit as refused:
         pytest.fail(f"the alert's filename stem still reaches the minted run id: {refused}")
     run_id = run.run_dir.name

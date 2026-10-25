@@ -208,8 +208,8 @@ estimate invites the point estimate to be read.
    python3 defender/run.py <out.json> --tenant "$TENANT_ID" --no-learn
    ```
 
-   The run is named by a minted UUID (`--run-id` takes only a UUID since #1187); note the
-   run id it reports to find the run under `$DEFENDER_DATA_ROOT/playground/runs/`.
+   The run is named by a minted UUID (`run.py` takes no run id since #1279); note the
+   `run_id=` line it prints first, which gives the run id to find the run under `$DEFENDER_DATA_ROOT/playground/runs/`.
 
    The run's leads + queries become the oracle-visible envelope. Prefer this over
    authoring leads: the calibration premise is *the envelope production actually

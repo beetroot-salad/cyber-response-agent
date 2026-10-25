@@ -193,7 +193,7 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - O2 one tenant, one revision, every surface → `test_run_isolation_e2e.py`, `test_run_copy.py`, `tests/runtime/permissions/test_permission.py`, `runtime/engine/test_read_confine_bash.py`, `test_gather_template_discovery.py`, `e2e/test_gather_template_index.py`, `alert_front_door_1222/test_1222_lessons_and_corpus.py`, `layout_contracts/test_1080_*`, `invlang/validation/test_frontier_recall_919.py`
 - O-A box mounts stage only, token read-back, in-box `.tenant-id` retired → `test_run_copy.py`, `test_run_start.py`, `tenant_1108_p2/test_run_start.py`, `e2e/test_1106_box_mount.py`
 - O-B one export commit for settings/knowledge/stamp → `test_run_start.py`, `test_branch_replay.py`, `e2e/test_1106_run_start.py`
-- O-PIN `--knowledge-commit`, branch siblings, held-out → `test_run_start.py`, `test_branch_replay.py`, `test_held_out_pinning.py`, `storage/ids_1187/test_1187_held_out.py`
+- O-PIN `--knowledge-commit`, branch siblings → `test_run_start.py`, `test_branch_replay.py` (the held-out launcher that pinned each index is gone, #1279 A10; scoring skips its pin line: `storage/ids_1187/test_1187_held_out.py`)
 - O4 symbol census → `test_census.py`, `tests/tenancy/test_1108_knowledge_owner.py`
 - O-TEXT model-facing spellings → `test_model_text.py`, `test_connect_propose.py`
 - O5 lesson load recorded → `test_lesson_load.py`, `learning/retrieval/test_record_lesson_load.py`

@@ -9,7 +9,7 @@ via `run_common.py`.
 Usage (every run names its tenant, and there is no default; on the host,
 clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
     `python3 defender/cli/tenant.py setup <tenant>`):
-    python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
+    python3 defender/run.py <alert.json> --tenant <tenant> [--no-learn] [--model M]
         [--knowledge-commit SHA]
 
 Every launch first publishes the tenant's latest approved knowledge in a separate short-lived
@@ -106,13 +106,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "tenant's own episodes folder)")
     p.add_argument("--world", default=None,
                    help="which world of --episode's manifest this process is")
-    p.add_argument("--run-id", default=None,
-                   help="Pin the run id for a named A/B or live run (learning-loop "
-                        "commits reference it) instead of a freshly minted one: canonical "
-                        "lowercase UUID text only. An existing run dir under this id is "
-                        "RESUMED (setup finishes "
-                        "what an interrupted attempt left undone and re-stamps) — for the same "
-                        "alert; a different alert under a used id is refused")
     p.add_argument("--no-learn", action="store_true",
                    help="Skip enqueuing for learning (also skips catalog curation — the "
                         "flag now governs both lanes)")
@@ -585,18 +578,21 @@ def _copy_knowledge(tenant: _tenant.Tenant, source: run_knowledge.KnowledgeSourc
     return copy
 
 
-def _early_run_id(ns: argparse.Namespace, world: Any, episode_runs: Any) -> str:
-    """The run's id, settled before its knowledge is copied (the copy is named by it): a
-    sibling's arm id from its episode's roster, an operator's `--run-id`, or a fresh one."""
-    if world is not None:
-        from defender.run_repository import RunRefused
+def _early_run(ns: argparse.Namespace, accepted: _tenant.Tenant, world: Any,
+               episode_runs: Any) -> Run:
+    """The run's handle, settled before its knowledge is copied (the copy is named by its id) and
+    handed to setup whole (#1279 rev 6): a sibling's arm from its episode's roster, else a fresh
+    one the tenant's runs repository mints. No caller names the id (A3); nothing is made on disk
+    for an arm, and only the natural runs container for an ordinary run."""
+    from defender.run_repository import RunRefused
 
-        try:
-            return str(episode_runs.arm_id(world.world_id))
-        except RunRefused as refused:
-            sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
-    return str(_run._admit_run_id(ns.run_id))
-
+    try:
+        if world is not None:
+            return episode_runs.create(episode_runs.arm_id(world.world_id))
+        return accepted.runs_repository().create()
+    except (RunRefused, _tenant.TenantRefused) as refused:
+        where = f"--episode {ns.episode}: " if world is not None else ""
+        sys.exit(f"[run.py] {where}{refused}")
 
 def _write_knowledge_record(run_dir: Path, source: run_knowledge.KnowledgeSource) -> None:
     """The host-held knowledge-source record beside the run dir (U12): what every reader of
@@ -736,22 +732,21 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 
 def _materialize_run(  # noqa: PLR0913 — the builder's whole call
-    alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None,
-    world: Any = None, episode_runs: Any = None, settings: Path | None = None,
+    alert: Path, *, tenant: _tenant.Tenant, model: str | None, run: Run | None = None,
+    world: Any = None, settings: Path | None = None,
     knowledge: run_knowledge.KnowledgeSource | None = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
     handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
-    world and lineage. A sibling's arm is made in its episode's container, through the view
-    `main` opened (`episode_runs`).
+    world and lineage. `run` is the handle `main` settled first (`_early_run`): a sibling's arm
+    from its episode's roster, or a fresh ordinary run.
 
     The single call site of the builder and the seam `main` injects; turns a tenant refusal
     (a runs-base record naming another tenant, say) into a named `[run.py]` exit.
     """
     try:
-        run = _run.materialize_run(alert, run_id, tenant=tenant, model=model, world=world,
-                                   episode_runs=episode_runs, settings=settings,
-                                   knowledge=knowledge)
+        run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
+                                   settings=settings, knowledge=knowledge)
     except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
@@ -821,20 +816,13 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
 
-def _case_input(ns: argparse.Namespace, world: Any,
-                episode_runs: Any) -> tuple[Path, str | None]:
-    """The alert this run investigates and its run id: a sibling's from its world (the source
-    run's alert, screened before the preflight like other argument errors) and the arm id its
-    episode's roster holds for it, else the operator's."""
+def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any) -> Path:
+    """The alert this run investigates: a sibling's from its world (the source run's alert,
+    screened before the preflight like other argument errors), else the operator's. The run's id
+    is no input: setup mints it, or for an arm reads the one its episode's roster holds."""
     if world is not None:
-        from defender.run_repository import RunRefused
-
-        try:
-            arm_id = episode_runs.arm_id(world.world_id)
-        except RunRefused as refused:
-            sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
-        return _screened_source_alert(episode_runs.episode), str(arm_id)
-    return ns.alert.resolve(), ns.run_id
+        return _screened_source_alert(episode_runs.episode)
+    return ns.alert.resolve()
 
 
 def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None) -> dict[str, Any]:
@@ -921,9 +909,9 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
         # #1108 P4 (flow 3): the knowledge this run reads — the launch-time publish's outcome
         # (or the pin), one export — copied into the run's own folder, named by its run id,
         # before anything reads it. The copy is the run's alone and is removed when it ends.
-        run_id = _early_run_id(ns, world, episode_runs)
+        early = _early_run(ns, accepted, world, episode_runs)
         knowledge = _knowledge_source(accepted, pin=pin, publish=publish, data_root=data_root)
-        copy = _copy_knowledge(accepted, knowledge, run_id)
+        copy = _copy_knowledge(accepted, knowledge, early.run_dir.name)
         try:
             # The tenant's settings (and with them the one tenant check), over the run's copy:
             # resolved before the input is read and before anything billable is spent; nothing
@@ -953,15 +941,19 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
             # The input is read after the tenant check and the role preflight: a tenant the check
             # refuses is told so before anything about its input is — save that an ordinary
             # run's alert file is absent, refused above before the publish spends anything.
-            alert, _arm_id = _case_input(ns, world, episode_runs)
+            alert = _case_input(ns, world, episode_runs)
 
             # The handle, not just its directory: the post-run step saves the run page through it.
             # The alert mapping is the run copy's, and the stamp records the export copied (O-B).
-            read = {"settings": copy.settings, "knowledge": knowledge}
-            run = (materialize(alert, run_id, tenant=accepted, model=model, **read) if world is None
-                   else materialize(alert, run_id, tenant=accepted, model=model, world=world,
-                                    episode_runs=episode_runs, **read))
+            run = (materialize(alert, run=early, tenant=accepted, model=model,
+                               settings=copy.settings, knowledge=knowledge)
+                   if world is None
+                   else materialize(alert, run=early, tenant=accepted, model=model, world=world,
+                                    settings=copy.settings, knowledge=knowledge))
             run_dir = run.run_dir
+            # The run's id, announced as the first line of stdout (#1279 O5), before the ticket
+            # or the box exists.
+            print(f"run_id={run_dir.name}", flush=True)
             _write_knowledge_record(run_dir, knowledge)
 
             # Every log line from here on, the crash included, names this run and the tenant this
@@ -1034,7 +1026,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                     _logger.info("enqueued for catalog curation")
 
                 try:
-                    visualize(run, update_ticket=ns.update_ticket)
+                    visualize(run, tenant=accepted, update_ticket=ns.update_ticket)
                 except _run.VisualizeFailed:
                     _logger.warning("the run page was not saved", exc_info=True)
                 return _exit_code(summary)

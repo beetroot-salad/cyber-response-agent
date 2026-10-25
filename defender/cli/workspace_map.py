@@ -27,10 +27,11 @@ def main(argv: list[str]) -> int:
     from defender.execution._command_line_run import open_command_line_run
     from defender.runtime.verbs import RegistryError, read_roster
 
-    run = open_command_line_run(ns.tenant, ns.run_id)
-    if isinstance(run, str):
-        sys.stderr.write(f"workspace_map: {run}\n")
+    opened = open_command_line_run(ns.tenant, ns.run_id)
+    if isinstance(opened, str):
+        sys.stderr.write(f"workspace_map: {opened}\n")
         return 2
+    _, run = opened
     try:
         roster = read_roster(adapters_under(DEFENDER_DIR))
     except RegistryError as e:

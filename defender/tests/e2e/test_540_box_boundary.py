@@ -347,7 +347,7 @@ def test_host_path_outside_the_binds_is_absent(box, run_dir, tmp_path):
 @requires_box
 def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
     mounts = box_mod._shared_mounts(box_mod._docker)
-    argv = box_mod._create_argv(box.name, run_dir, DEFENDER, box.spec, mounts).argv
+    argv = box_mod._create_argv(box.name, run_dir, DEFENDER, box.spec, mounts, lane=box_mod._run_lane_mounts(run_dir, DEFENDER, None)).argv
     binds = [
         dict(part.split("=", 1) for part in spec.split(",") if "=" in part)
         for spec in argv if spec.startswith("type=bind,")

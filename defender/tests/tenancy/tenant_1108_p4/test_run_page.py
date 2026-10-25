@@ -46,10 +46,15 @@ def _page(run_dir: Path) -> str:
     """Save the run's page through the real post-run step and read it back."""
     from defender import run_common
     from defender.tests.e2e.test_922_renderer import tenant_run
+    from defender.tests.support.shared.contracts._data_root_1078 import (
+        current_data_root,
+        set_up_tenant,
+    )
 
     page_file = run_dir / "runtime.html"
     page_file.unlink(missing_ok=True)
-    run_common.visualize(tenant_run(run_dir))
+    run = tenant_run(run_dir)
+    run_common.visualize(run, tenant=set_up_tenant(current_data_root(), run.tenant_id))
     return page_file.read_text(encoding="utf-8")
 
 

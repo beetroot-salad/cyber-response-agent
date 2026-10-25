@@ -438,14 +438,6 @@ def clone_halves(tenant: Tenant) -> tuple[Path, Path]:
     return tenant.agent, tenant.settings
 
 
-def exports_folder_of(data_root: DataRoot, tenant_id: str) -> Path:
-    """`<T>/exports/` of the tenant `tenant_id` names under `data_root`, before (or without)
-    accepting it: a launcher that pins its runs to one commit reads the pointer there, and each
-    run it starts accepts the tenant itself (#1108 P4 OD10). The data root and the tenant id
-    meet the layout's own guards."""
-    return _TenantPaths(data_root, tenant_id).exports
-
-
 def requested_tenant_id(raw: object) -> TenantId:
     """The tenant a request names (`--tenant`), checked against the id grammar — the ONE rule
     every entry point applies to it before accepting: absent is refused (there is no default
@@ -989,18 +981,7 @@ def data_root_from_path(path: Path) -> DataRoot:
     return DataRoot(path)
 
 
-def data_root_contains(root: DataRoot, path: Path) -> bool:
-    """Whether an already absolute candidate is at or below the configured root."""
-    location = _unwrap_data_root(root)
-    return path == location or location in path.parents
-
-
 def data_root_for_child(root: DataRoot) -> Path:
     """Explicit owner export of a configured root to a child process, which is handed
     identifiers only (the tenant id and this root, #1108 P4 O8) and accepts the tenant itself."""
     return _unwrap_data_root(root)
-
-
-def data_root_description(root: DataRoot) -> str:
-    """Explicit owner display of a configured root for operator refusals."""
-    return str(_unwrap_data_root(root))

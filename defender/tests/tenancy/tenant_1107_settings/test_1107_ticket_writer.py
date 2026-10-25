@@ -532,7 +532,7 @@ def test_s7_f6_run_env_handed_to_the_correlation_lead(tmp_path, monkeypatch):
 
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as FD
 
-    lead = FD.run_alert(tmp_path / "lz-run", tenant=FD.plant_tenant(), run_id=fixture_uuid("lz1107-f6"),
+    lead = FD.run_alert(tmp_path / "lz-run", tenant=FD.plant_tenant(),
                         leads={FD.L3: [FD.query("elastic", "alerts", {"native_query": "*"}),
                                        FD.text(FD.DEFAULT_CORRELATION_SUMMARY)]})
     assert lead.backend.rec.calls, "the correlation lead issued no backend call"

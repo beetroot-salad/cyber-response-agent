@@ -33,15 +33,14 @@ def _utc(text: object) -> _dt.datetime:
     return parsed
 
 
-def _setup(tmp_path: Path, data_root: Path, alert_name: str, folder: str, *,
-           run_id: str | None = None) -> tuple[Any, _dt.datetime, _dt.datetime]:
+def _setup(tmp_path: Path, data_root: Path, alert_name: str, folder: str) -> tuple[Any, _dt.datetime, _dt.datetime]:
     """Run setup for a fresh natural run of tenant `acme` from `<tmp>/<folder>/<alert_name>`."""
     from defender import run_common
 
     t = H.tenant(data_root, H.T_ID)
     alert = H.alert_file(tmp_path / folder, alert_name)
     before = _dt.datetime.now(_dt.UTC)
-    run = run_common.materialize_run(alert, run_id, tenant=t)
+    run = run_common.materialize_run(alert, tenant=t)
     after = _dt.datetime.now(_dt.UTC)
     return run, before, after
 
@@ -82,11 +81,9 @@ def _shows_time(page: str, instant: _dt.datetime) -> bool:
 # O7 — run setup stamps the display facts
 
 @pytest.mark.parametrize(("alert_name", "folder", "label"), ALERTS)
-@pytest.mark.parametrize("pinned", [False, True], ids=["minted", "pinned"])
 def test_run_setup_stamps_display_facts_without_encoding_them_in_identity(
-        tmp_path, data_root, alert_name, folder, label, pinned):
-    run_id = X.new_id() if pinned else None
-    run, before, after = _setup(tmp_path, data_root, alert_name, folder, run_id=run_id)
+        tmp_path, data_root, alert_name, folder, label):
+    run, before, after = _setup(tmp_path, data_root, alert_name, folder)
     stamp = _stamp(run)
     assert stamp["tenant_id"] == H.T_ID
     assert stamp["commit"] or stamp["unavailable"], "control: the stamp records the code"
@@ -97,8 +94,6 @@ def test_run_setup_stamps_display_facts_without_encoding_them_in_identity(
     assert "base_world_id" not in _stamp_path(run).read_text(encoding="utf-8")
     name = run.run_dir.name
     assert X.is_canonical_uuid(name), name
-    if pinned:
-        assert name == run_id, "the pinned id names the run folder"
     assert label not in name
     for moment in (before, after):
         assert f"{moment:%Y%m%d}" not in name.replace("-", "").casefold()
@@ -109,7 +104,7 @@ def test_run_setup_stamps_display_facts_without_encoding_them_in_identity(
 
 @pytest.mark.parametrize("source", ["setup", "rewritten"])
 def test_the_run_page_reads_its_display_facts_only_from_the_stamp(tmp_path, data_root, source):
-    run, _before, _after = _setup(tmp_path, data_root, "ssh-brute-force.json", "in", run_id=X.new_id())
+    run, _before, _after = _setup(tmp_path, data_root, "ssh-brute-force.json", "in")
     stamp = (_rewrite_stamp(run, started_at="2031-03-04T05:06:07Z", alert_label="planted-label-xyz")
              if source == "rewritten" else _stamp(run))
     started = _utc(stamp["started_at"])
@@ -127,7 +122,7 @@ def test_the_run_page_reads_its_display_facts_only_from_the_stamp(tmp_path, data
 
 
 def test_a_forged_label_is_shown_as_text_never_as_markup(tmp_path, data_root):
-    run, _b, _a = _setup(tmp_path, data_root, "ssh-brute-force.json", "in", run_id=X.new_id())
+    run, _b, _a = _setup(tmp_path, data_root, "ssh-brute-force.json", "in")
     forged = '<img src=x onerror=alert(1)>'
     _rewrite_stamp(run, alert_label=forged)
     page = _page(run)
@@ -145,7 +140,7 @@ def test_a_forged_label_is_shown_as_text_never_as_markup(tmp_path, data_root):
     (12345, ""),
 ])
 def test_unusable_display_facts_never_stop_the_page(tmp_path, data_root, started, label):
-    run, _b, _a = _setup(tmp_path, data_root, "ssh-brute-force.json", "in", run_id=X.new_id())
+    run, _b, _a = _setup(tmp_path, data_root, "ssh-brute-force.json", "in")
     assert _page(run), "control: the page renders with the stamp as run setup wrote it"
     _rewrite_stamp(run, started_at=started, alert_label=label)
     page = _page(run)
@@ -162,7 +157,7 @@ def test_the_stamp_reader_preserves_the_record_over_display_fact_changes(
         tmp_path, data_root, changes, expected):
     from defender.records import _provenance
 
-    run, _b, _a = _setup(tmp_path, data_root, "ssh-brute-force.json", "in", run_id=X.new_id())
+    run, _b, _a = _setup(tmp_path, data_root, "ssh-brute-force.json", "in")
     _rewrite_stamp(run, **changes)
     read = _provenance.read(_stamp_path(run))
     assert read is not None, changes

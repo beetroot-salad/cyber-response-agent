@@ -363,11 +363,11 @@ class Recorder:
         self.preflight_branching.append(branching)
         return 0
 
-    def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Any:
+    def materialize(self, alert: Path, **kw: Any) -> Any:
         """Records the call and answers what `main` reads off the builder's handle (#1110:
         the builder answers the run's `Run`): its `run_dir`."""
         self.order.append("materialize")
-        self.materialize_calls.append({"alert": alert, "run_id": run_id, **kw})
+        self.materialize_calls.append({"alert": alert, **kw})
         self.run_dir_at.mkdir(parents=True, exist_ok=True)
         return SimpleNamespace(run_dir=self.run_dir_at)
 

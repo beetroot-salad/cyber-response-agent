@@ -100,10 +100,10 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
 
 def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
     """The box still runs with `--network none` and the run dir as its one read-write bind."""
-    from defender.box._lifecycle import _create_argv
+    from defender.box._lifecycle import _create_argv, _run_lane_mounts
     from defender.box._spec import BoxSpec
 
-    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), ()).argv
+    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), (), lane=_run_lane_mounts(run_dir, DEFENDER, None)).argv
     joined = " ".join(argv)
     assert argv[argv.index("--network") + 1] == "none", (
         "N7: the box's network stays `none`; a future store's client is the driver process")

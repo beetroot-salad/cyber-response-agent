@@ -744,52 +744,189 @@ def test_content_that_spells_a_placeholder_is_content(view):
 
 
 @pytest.mark.usefixtures("frontend_outputs_lock")
-def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, data_root, tmp_path):
-    frontend = Path(build.__file__).resolve().parent
-    names = ("lessons.json", "lessons.html", "queues.json", "queues.html")
-    before = {
-        n: (frontend / n).read_bytes() if (frontend / n).is_file() else None for n in names
-    }
+def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
+        paths, data_root, run_visualizations_dir, monkeypatch):
+    """O1 (conflict updated from `..._beside_the_lessons_pages`): `main` writes the pages to `<root>/<T>/learning/`, not the tree."""
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
+    import shutil
+
+    tenant = set_up_tenant(data_root, H.TID)
+    # `main(tenant)` derives the tenant's own LoopPaths (the learning-build flow): seed the tenant's state.
+    shutil.copytree(location_path(paths.state_root), location_path(tenant.learning), dirs_exist_ok=True)
+    area = run_visualizations_dir / tenant.id / "learning"
+    area.mkdir(parents=True)
+    (area / "queues.html").write_text("STALE", encoding="utf-8")
+    before = _in_tree_pages()
     try:
-        assert build.main(paths) == 0
-        queues = json.loads((frontend / "queues.json").read_text(encoding="utf-8"))
+        assert build.main(tenant) == 0
+
+        assert sorted(p.name for p in area.iterdir()) == sorted(_PAGE_NAMES)
+        queues = json.loads((area / "queues.json").read_text(encoding="utf-8"))
         assert [ch["name"] for ch in queues["channels"]] == [
             "findings", "questioner_findings", "pitfalls",
         ]
         assert queues["generated_at"]
-        assert Path(queues["state_root"]) == location_path(paths.state_root)
-        # Hermetic: the seeded root's two tainted trees, not whatever this checkout holds.
-        assert [t["batch_id"] for t in queues["quarantine"]["tainted"]["rows"]] == [
-            "b-later", "a-earlier",
-        ]
-        assert _embedded_data((frontend / "queues.html").read_text(encoding="utf-8")) == queues
-        assert (frontend / "lessons.json").is_file()
-        assert (frontend / "lessons.html").is_file()
+        assert Path(queues["state_root"]) == location_path(tenant.learning)
+        assert _channel(queues, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
+        # The quarantine dir is the tenant's own LoopPaths' (host-wide until #1108 P4), not the
+        # fixture's: its rows are not asserted here.
+        assert Path(queues["quarantine"]["tainted"]["dir"]) == LoopPaths.for_tenant(tenant).quarantine_dir
+        assert _embedded_data((area / "queues.html").read_text(encoding="utf-8")) == queues
+        lessons = json.loads((area / "lessons.json").read_text(encoding="utf-8"))
+        assert set(lessons["groups"]) == {"defender", "questioner"}  # U5 (#1108 P4)
+        assert 'href="queues.html"' in (area / "lessons.html").read_text(encoding="utf-8")
+        assert 'href="lessons.html"' in (area / "queues.html").read_text(encoding="utf-8")
+        assert [p.name for p in run_visualizations_dir.iterdir()] == [tenant.id]
+        assert _in_tree_pages() == before, "main wrote its pages into the source tree"
+    finally:
+        _restore_in_tree_pages(before)
 
-        # #1186 O3: the operator CLI must resolve the selected tenant, rather than the
-        # package checkout or a still-exported legacy state variable.
-        import shutil
-        from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
-        from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
-        tenant = set_up_tenant(data_root, H.TID)
-        shutil.copytree(location_path(paths.state_root), location_path(tenant.learning), dirs_exist_ok=True)
-        poison = tmp_path / "ambient-state"
-        poison.mkdir()
-        proc = H.run_script(Path(build.__file__), "--tenant", H.TID, root=data_root,
+# --------------------------------------------------------------------------------------
+# #1279 O1/O4 — the learning pages are published per tenant, never into the source tree
+
+_PAGE_NAMES = ("lessons.json", "lessons.html", "queues.json", "queues.html")
+
+
+def _in_tree_pages() -> dict[str, bytes | None]:
+    frontend = Path(build.__file__).resolve().parent
+    return {n: (frontend / n).read_bytes() if (frontend / n).is_file() else None
+            for n in _PAGE_NAMES}
+
+
+def _restore_in_tree_pages(before: dict[str, bytes | None]) -> None:
+    frontend = Path(build.__file__).resolve().parent
+    for name, blob in before.items():
+        if blob is None:
+            (frontend / name).unlink(missing_ok=True)
+        else:
+            (frontend / name).write_bytes(blob)
+
+
+def _build_cli(tenant_id: str, data_root: Path, **env: str):
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+
+    return H.run_script(Path(build.__file__), "--tenant", tenant_id, root=data_root, **env)
+
+
+@pytest.mark.parametrize("order", ["a-then-b", "b-then-a"])
+@pytest.mark.usefixtures("frontend_outputs_lock")
+def test_1279_o1_two_tenants_each_keep_their_own_pages_in_their_own_publish_area(
+        paths, data_root, run_visualizations_dir, order):
+    """O1: each tenant's four pages land in `<root>/<T>/learning/`, built in either order; none in the tree."""
+    import shutil
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+
+    # `create_tenant` admits one tenant per root; H5 plants the second by hand (F36).
+    a, b = H5.tenant(data_root, H.TID), H5.tenant(data_root, H.OTHER)
+    shutil.copytree(location_path(paths.state_root), location_path(a.learning), dirs_exist_ok=True)
+    Path(location_path(b.learning)).mkdir(parents=True, exist_ok=True)
+    area = {t.id: run_visualizations_dir / t.id / "learning" for t in (a, b)}
+    before = _in_tree_pages()
+    try:
+        first, second = (a, b) if order == "a-then-b" else (b, a)
+        proc = _build_cli(first.id, data_root, DEFENDER_DEPLOYMENT="dev")
+        assert proc.returncode == 0, H.output(proc)
+        first_pages = {n: (area[first.id] / n).read_bytes() for n in _PAGE_NAMES}
+        proc = _build_cli(second.id, data_root, DEFENDER_DEPLOYMENT="dev")
+        assert proc.returncode == 0, H.output(proc)
+
+        assert {n: (area[first.id] / n).read_bytes() for n in _PAGE_NAMES} == first_pages, (
+            "the second tenant's build rewrote the first tenant's pages")
+        for t in (a, b):
+            assert sorted(p.name for p in area[t.id].iterdir()) == sorted(_PAGE_NAMES)
+            queues = json.loads((area[t.id] / "queues.json").read_text(encoding="utf-8"))
+            assert Path(queues["state_root"]) == location_path(t.learning)
+            assert _embedded_data((area[t.id] / "queues.html").read_text(encoding="utf-8")) == queues
+        a_q = json.loads((area[a.id] / "queues.json").read_text(encoding="utf-8"))
+        b_q = json.loads((area[b.id] / "queues.json").read_text(encoding="utf-8"))
+        assert _channel(a_q, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
+        assert _channel(b_q, "findings")["deadletter"] == [], "B's page shows A's dead letters"
+        a_text, b_text = (area[t.id] / "queues.json" for t in (a, b))
+        assert '"g-1"' in a_text.read_text(encoding="utf-8"), "positive control: A's page shows its own dead letter"
+        assert '"g-1"' not in b_text.read_text(encoding="utf-8"), "B's page carries A's state-root rows"
+        assert _in_tree_pages() == before, "the build wrote its pages into the source tree"
+    finally:
+        _restore_in_tree_pages(before)
+
+
+@pytest.mark.usefixtures("frontend_outputs_lock")
+def test_1279_o1_the_cli_builds_the_selected_tenants_state_not_an_ambient_one(
+        paths, data_root, run_visualizations_dir, tmp_path):
+    """O1/#1186 O3 (moved with the pages): the CLI publishes the selected tenant's state, whatever a legacy variable names."""
+    import shutil
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    tenant = set_up_tenant(data_root, H.TID)
+    shutil.copytree(location_path(paths.state_root), location_path(tenant.learning), dirs_exist_ok=True)
+    poison = tmp_path / "ambient-state"
+    poison.mkdir()
+    before = _in_tree_pages()
+    try:
+        proc = _build_cli(tenant.id, data_root, DEFENDER_DEPLOYMENT="dev",
                             DEFENDER_LEARNING_STATE_DIR=str(poison))
         assert proc.returncode == 0, H.output(proc)
-        selected = json.loads((frontend / "queues.json").read_text(encoding="utf-8"))
+
+        area = run_visualizations_dir / tenant.id / "learning"
+        selected = json.loads((area / "queues.json").read_text(encoding="utf-8"))
         assert Path(selected["state_root"]) == location_path(tenant.learning)
         assert _channel(selected, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
-        assert _embedded_data((frontend / "queues.html").read_text(encoding="utf-8")) == selected
+        assert _embedded_data((area / "queues.html").read_text(encoding="utf-8")) == selected
         assert not list(poison.iterdir())
+        assert _in_tree_pages() == before
     finally:
-        for name, blob in before.items():
-            if blob is None:
-                (frontend / name).unlink(missing_ok=True)
-            else:
-                (frontend / name).write_bytes(blob)
+        _restore_in_tree_pages(before)
+
+
+@pytest.mark.usefixtures("frontend_outputs_lock")
+def test_1279_o4_the_learning_build_outside_dev_refuses_naming_the_deployment(
+        data_root, run_visualizations_dir):
+    """O4: with no publish destination (production), the build refuses, names the deployment, writes nothing."""
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    t = set_up_tenant(data_root, H.TID)
+    Path(location_path(t.learning)).mkdir(parents=True, exist_ok=True)
+    before = _in_tree_pages()
+    try:
+        proc = _build_cli(t.id, data_root, DEFENDER_DEPLOYMENT="production")
+        out = H.output(proc)
+        H.assert_ran(proc)
+        assert proc.returncode != 0, f"the build ran outside dev: {out}"
+        assert "production" in out, f"the refusal does not name the deployment: {out}"
+        assert not list(run_visualizations_dir.iterdir()), "a refused build published a page"
+        assert _in_tree_pages() == before, "a refused build wrote into the source tree"
+    finally:
+        _restore_in_tree_pages(before)
+
+
+@pytest.mark.usefixtures("frontend_outputs_lock")
+def test_1279_a11_the_learning_build_in_dev_with_no_folder_set_refuses_naming_the_setting(
+        data_root, run_visualizations_dir):
+    """A9/A11: in dev with no publish folder set there is nowhere to publish: the build refuses
+    cleanly, naming the setting, with no traceback, and writes nothing."""
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    t = set_up_tenant(data_root, H.TID)
+    Path(location_path(t.learning)).mkdir(parents=True, exist_ok=True)
+    before = _in_tree_pages()
+    try:
+        proc = _build_cli(t.id, data_root, DEFENDER_DEPLOYMENT="dev",
+                          DEFENDER_RUN_VISUALIZATIONS_DIR="")
+        out = H.output(proc)
+        H.assert_ran(proc)
+        assert proc.returncode == 2, f"the build did not refuse: {out}"
+        assert "DEFENDER_RUN_VISUALIZATIONS_DIR is unset" in out, f"the refusal does not name the setting: {out}"
+        assert not list(run_visualizations_dir.iterdir()), "a refused build published a page"
+        assert _in_tree_pages() == before, "a refused build wrote into the source tree"
+    finally:
+        _restore_in_tree_pages(before)
 
 
 # --------------------------------------------------------------------------------------

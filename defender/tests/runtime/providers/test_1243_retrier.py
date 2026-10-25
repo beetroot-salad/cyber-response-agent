@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.runtime.providers import _spec1243 as P
@@ -539,7 +538,7 @@ def _scenario1(tmp: Path, tenant: S.Planted, kind: str, plans: dict[str, P.Plan]
     the gather model sits behind the REAL retrier (no waiting); `plans` fails attempts."""
     stores: list = []
     router = P.LeadsFailing({"l-001": LEAD_TURNS}, plans)
-    d = S.run_alert(tmp, tenant=tenant, run_id=fixture_uuid(f"r1243-s1-{kind}"),
+    d = S.run_alert(tmp, tenant=tenant,
                     main=[S.gather("l-001", "cmdb"), S.text(S.DONE)], router=router,
                     store_factory=S.store_factory(tmp, sink=stores), stores=stores,
                     wrap_model=P.wrap_with(P.instant_policy(), kinds=("gather",)))

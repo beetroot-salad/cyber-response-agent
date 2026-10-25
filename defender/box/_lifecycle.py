@@ -12,11 +12,13 @@ import stat
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
 from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.tenancy._tenant import TenantId
+from defender.configuration import publish_root
 from defender.run_repository import RUN_LAYOUT
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
@@ -36,7 +38,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender.runtime.model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
@@ -74,28 +76,91 @@ def _input_dir_source(run_dir: Path) -> Path:
     return where
 
 
+@dataclass(frozen=True)
+class _LaneMount:
+    """One host tree the run lane mounts: what it is, its host source, the remedy when no shared
+    mount covers it, and where and how it sits in the box."""
+
+    what: str
+    source: Path
+    remedy: str
+    target: PurePosixPath
+    readonly: bool
+
+
+def _run_lane_mounts(
+    run_dir: Path, defender_dir: Path, tenant_agent: Path | None,
+    staged_token: Path | None = None,
+) -> list[_LaneMount]:
+    """The host trees the run lane mounts, in argv order: the one list the lane's argv is
+    rendered from and the publish-root check judges (#1279 O3), so the check sees exactly what
+    is mounted. Reads nothing: `_create_argv` checks the input directory before it binds it."""
+    data_root = "Set DEFENDER_DATA_ROOT to a path"
+    mounts = [
+        _LaneMount("run dir", run_dir, data_root, MODEL_RUN, readonly=False),
+        # Over the writable run folder, a directory of its own: a file bind is undone by a host
+        # rename, a directory bind is not (#1222 A1).
+        _LaneMount("run input directory", Path(run_dir) / RUN_LAYOUT.alert_input_dir, data_root,
+                   MODEL_RUN / RUN_LAYOUT.alert_input_dir.as_posix(), readonly=True),
+        _LaneMount("defender dir", defender_dir, "Check out the tree", MODEL_DEFENDER, readonly=True),
+    ]
+    if tenant_agent is not None:
+        # The run copy's agent half (#1108 P4, U9: `stage/agent/`), under the data root, read-only;
+        # nothing is ever planted in it. Identity was checked once, when its commit was published.
+        mounts.append(_LaneMount("tenant agent half", tenant_agent, data_root, MODEL_AGENT,
+                                 readonly=True))
+    if staged_token is not None:
+        # The rest of the copy's `stage/` — the startup token beside `agent/` — read-only at a
+        # target of its own, outside the model view, read back once the box is up.
+        mounts.append(_LaneMount("run copy stage", staged_token.parent, data_root,
+                                 PurePosixPath(STAGE_TARGET), readonly=True))
+    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root:
+    # the file the image's time-faking preload reads, outside every tree the model view shows.
+    mounts.append(_LaneMount("run clock directory", clock_dir(run_dir), data_root, PurePosixPath(CLOCK_TARGET),
+                             readonly=True))
+    return mounts
+
+
+def _refuse_a_start_that_conflicts(
+    docker: DockerFn, name: str, sources: Sequence[tuple[str, Path]],
+) -> None:
+    """The two pre-create refusals (#1279 O3, O6), neither degraded by the unsandboxed opt-out.
+
+    O3: no mount source may overlap the host-wide publish root (the source contains it, it
+    contains the source, or they are equal; judged on resolved paths). The root is this
+    process's, asked exactly as the publisher asks (A8), so the check judges the folder pages
+    land in. With no root there is nothing to compare: outside `dev` silently, and in `dev` with
+    a warning that no publish folder is set (A9, A11) — this process then publishes nothing. O6: a container already holding the box's name. The overlap needs no daemon, so it
+    is judged first."""
+    root = publish_root.publish_root()
+    if isinstance(root, publish_root.NoRoot):
+        if root.kind == "unset":
+            _logger.warning("box %s: no publish root, so no mount is checked against it: %s",
+                            name, root.reason)
+    else:
+        resolved_root = root.resolve()
+        for what, source in sources:
+            there = Path(source).resolve()
+            if there.is_relative_to(resolved_root) or resolved_root.is_relative_to(there):
+                raise BoxStartConflict(
+                    f"the {what} {source} overlaps the publish root {root} — a published view "
+                    "is never inside a tree a box mounts, so the box is not started")
+    _refuse_an_existing_container(docker, name)
+
+
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
-    *, tenant_agent: Path | None = None, staged_token: Path | None = None,
+    *, lane: Sequence[_LaneMount],
 ) -> Create:
+    """The run box's create argv, its binds rendered from `lane`: the run lane's mount list
+    (`_run_lane_mounts`) as `_start_boxed` built it for the publish-root check, so the argv
+    mounts exactly what was judged."""
     # The uncovered-mount refusal runs before the image resolver: a topology fault must not be
     # masked by the resolver's file-read refusal on the same tree.
-    subjects = [
-        ("run dir", run_dir, "Set DEFENDER_DATA_ROOT to a path"),
-        ("defender dir", defender_dir, "Check out the tree"),
-    ]
-    if tenant_agent is not None:
-        # The agent half lives under the data root, beside the run dir: moving it means moving
-        # the data root.
-        subjects.append(("tenant agent half", tenant_agent, "Set DEFENDER_DATA_ROOT to a path"))
-    if staged_token is not None:
-        subjects.append(("run copy stage", staged_token.parent, "Set DEFENDER_DATA_ROOT to a path"))
-    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root.
-    subjects.append(("run clock directory", clock_dir(run_dir), "Set DEFENDER_DATA_ROOT to a path"))
-    for subject, path, remedy in subjects:
-        if mounts and not _covered(path, mounts):
-            raise _uncovered_fault(subject, path, mounts, remedy)
+    for m in lane:
+        if mounts and not _covered(m.source, mounts):
+            raise _uncovered_fault(m.what, m.source, mounts, m.remedy)
     # Resolved here, not at BoxSpec construction, which reads nothing off the tree.
     rootfs = resolve_rootfs(spec.rootfs, defender_dir)
     # #1255 P1: inside the box every tree sits at its model path, so the working directory and
@@ -103,12 +168,9 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     # Only the bind SOURCES name host paths; the daemon needs them, and the box never sees them.
     env_pairs = {**infra_env(Path(MODEL_DEFENDER), Path(MODEL_RUN)), **_LOCALE_ENV,
                  **CLOCK_ENV, **_BOX_MARK_ENV}
-    if tenant_agent is not None:
+    if any(m.target == MODEL_AGENT for m in lane):
         env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
-    run_src = _daemon_source(run_dir, mounts)
-    input_dir = _input_dir_source(run_dir)
-    model_input_dir = MODEL_RUN / RUN_LAYOUT.alert_input_dir.as_posix()
-    defender_src = _daemon_source(defender_dir, mounts)
+    _input_dir_source(run_dir)
     argv = [
         "docker", "run", "--detach", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
@@ -118,36 +180,10 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         *_BOX_ULIMITS,
-        "--mount", f"type=bind,source={run_src},target={MODEL_RUN}",
-        # Over the writable run folder, a directory of its own: a file bind is undone by a host
-        # rename, a directory bind is not (#1222 A1).
-        "--mount",
-        f"type=bind,source={_daemon_source(input_dir, mounts)},target={model_input_dir},readonly",
-        "--mount", f"type=bind,source={defender_src},target={MODEL_DEFENDER},readonly",
     ]
-    if tenant_agent is not None:
-        # The run copy's agent half (#1108 P4, U9: `stage/agent/`), read-only; nothing is ever
-        # planted in it. Identity was checked once, when its commit was published.
-        argv += [
-            "--mount",
-            f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
-            f"target={MODEL_AGENT},readonly",
-        ]
-    if staged_token is not None:
-        # The rest of the copy's `stage/` — the startup token beside `agent/` — read-only at a
-        # target of its own, outside the model view, read back once the box is up.
-        argv += [
-            "--mount",
-            f"type=bind,source={_daemon_source(staged_token.parent, mounts)},"
-            f"target={STAGE_TARGET},readonly",
-        ]
-    # The run clock's own read-only mount (#1255 "Into the box"): the file the image's
-    # time-faking preload reads, outside every tree the model view shows.
-    argv += [
-        "--mount",
-        f"type=bind,source={_daemon_source(clock_dir(run_dir), mounts)},"
-        f"target={CLOCK_TARGET},readonly",
-    ]
+    for m in lane:
+        bind = f"type=bind,source={_daemon_source(m.source, mounts)},target={m.target}"
+        argv += ["--mount", bind + (",readonly" if m.readonly else "")]
     argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(MODEL_RUN),
@@ -429,16 +465,18 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
-        _reap_stale_before_create(docker, name)
+        lane = _run_lane_mounts(run_dir, defender_dir, tenant_agent, staged_token)
+        _refuse_a_start_that_conflicts(docker, name, [(m.what, m.source) for m in lane])
     except BoxFault as e:
         # Every startup fault path writes the did-not-run marker, so the tree never reads as
-        # "not yet judged". This arm fires on any leaked container under a reused name.
+        # "not yet judged". This arm fires on a mount overlapping the publish root and on any
+        # container already holding the name.
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
     start_token = uuid.uuid4().hex
     create = _create_argv(
         name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
-        tenant_agent=tenant_agent, staged_token=staged_token,
+        lane=lane,
     )
     try:
         # Confirm the image before the create, so a missing image is its own refusal (with
@@ -554,7 +592,8 @@ def _start_boxed_request(
             f"(allowed: {RUN_ID_ALLOWED})"
         )
     try:
-        _reap_stale_before_create(docker, request.name)
+        _refuse_a_start_that_conflicts(
+            docker, request.name, [("mount source", Path(m.source)) for m in request.mounts])
     except BoxFault as e:
         # As in `_start_boxed`. A lane with no writable mount gets no marker.
         _did_not_run_for_request(request, f"box start refused before create: {e}")
@@ -610,7 +649,10 @@ def _probe_cwd_for_request(request: BoxRequest) -> Path:
 def _opt_out_or_raise(fault: BoxFault) -> None:
     """Without `DEFENDER_ALLOW_UNSANDBOXED=1` a startup fault aborts; with it, the caller
     degrades to `unboxed_executor` after a warning carrying the fault verbatim (so remedies
-    such as the image build command still reach the operator)."""
+    such as the image build command still reach the operator). A `BoxStartConflict` is never
+    degraded (#1279 A2): the opt-out is for "no sandbox here", not for a leak or a collision."""
+    if isinstance(fault, BoxStartConflict):
+        raise fault
     if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
         raise fault
     _logger.warning(

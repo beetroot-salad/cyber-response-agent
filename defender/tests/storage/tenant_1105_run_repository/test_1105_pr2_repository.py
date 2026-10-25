@@ -208,9 +208,9 @@ def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_
     t = H.tenant(root, H.T_ID)
     runs = t.runs_repository()
 
-    r9 = str(uuid.uuid4())
-    run = runs.create(_rid(r9))
-    assert Path(run.run_dir) == Path(location_path(t.runs)) / r9
+    run = runs.create()
+    assert Path(run.run_dir).parent == Path(location_path(t.runs))
+    assert str(uuid.UUID(Path(run.run_dir).name)) == Path(run.run_dir).name, run.run_dir
     assert str(run.tenant_id) == H.T_ID
     assert Path(location_path(t.runs)).is_dir()
     assert not Path(location_path(t.runs)).is_symlink()
@@ -226,7 +226,7 @@ def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_
     target = tmp_path / "link-target"
     target.mkdir()
     os.symlink(target, location_path(u.runs))
-    linked = H.raised(u.runs_repository().create, _rid(r9))
+    linked = H.raised(u.runs_repository().create)
     assert isinstance(linked, _refusal_classes()), repr(linked)
     assert list(target.iterdir()) == [], "the create wrote through a linked runs folder"
 

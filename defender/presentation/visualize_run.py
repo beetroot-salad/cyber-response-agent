@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -13,13 +11,12 @@ from typing import TYPE_CHECKING, Literal
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.configuration import _env
 from defender.records import _knowledge_status, _provenance
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows, read_text_utf8
 from defender.records._report import ReportRead
 from defender.run_repository import RunPaths
 from defender.learning import lead_repository
-from defender.presentation import _mirror_write
+from defender.presentation.publisher import NoPublishRoot, Publisher
 from defender.presentation._page_failed import VisualizeFailed
 from defender.presentation.visualize_data import (
     build_transcript,
@@ -64,92 +61,14 @@ from defender.presentation.visualize_runtime import (
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 
-#: The override for where run pages are mirrored. Read at call time so a test's `setenv`
-#: reaches an already-imported module.
-MIRROR_DIR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
-MIRROR_DIR_NAME = "run-visualizations"
-_MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
-
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from defender.run_repository import Run
+    from defender.tenancy._tenant import Tenant
 
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
 CopyOutcome = Literal["copied", "skipped", "failed"]
-
-
-class MirrorRootRefused(Exception):
-    """Under pytest, the mirror root was about to resolve to a real checkout.
-
-    The conftest sets the override for every test, so reaching the default means a test
-    bypassed it and would write into the operator's real folder."""
-
-
-def mirror_root(start: Path | None = None) -> Path:
-    """Where run pages are mirrored: `<main checkout>/run-visualizations/`.
-
-    Order: the `MIRROR_DIR_ENV` override; else the main checkout reached from `start` (by
-    default this package's checkout), so a worktree's render lands in the one folder the
-    operator opens; else `start` itself. Found by reading `.git` rather than running git, which
-    as root in a user-owned repo depends on `safe.directory` and inherited `GIT_DIR`.
-    """
-    override = os.environ.get(MIRROR_DIR_ENV)
-    if override:
-        return Path(override)
-    if start is None:
-        if "PYTEST_CURRENT_TEST" in os.environ:
-            raise MirrorRootRefused(
-                f"{MIRROR_DIR_ENV} is unset under pytest; refusing the real checkout's "
-                f"{MIRROR_DIR_NAME}/")
-        start = _DEFENDER_DIR.parent
-    return _main_checkout(start) / MIRROR_DIR_NAME
-
-
-def _main_checkout(start: Path) -> Path:
-    """`start`, or the main checkout its `.git` file points back to. A chain that cannot be
-    followed, or that lands somewhere without `defender/`, falls back to `start` — loudly,
-    since the page then lands where the operator is not looking."""
-    dot_git = start / ".git"
-    if dot_git.is_dir() or not dot_git.exists():
-        return start
-    try:
-        pointer = read_text_utf8(dot_git).strip()
-        if not pointer.startswith("gitdir:"):
-            raise ValueError(f"{dot_git} is not a gitdir pointer")
-        admin = (start / pointer[len("gitdir:"):].strip()).resolve()
-        common = (admin / read_text_utf8(admin / "commondir").strip()).resolve()
-        main = common.parent
-        if not (main / "defender").is_dir():
-            raise ValueError(f"{main} (from {dot_git}) holds no defender/")
-    except (OSError, ValueError) as exc:
-        _logger.warning("mirroring under %s: %s", start, exc)
-        return start
-    return main
-
-
-def _mirror(page: bytes, dest: Path, root: Path) -> None:
-    """Write the mirror copy as the owner of the folder holding the mirror root.
-
-    Only root writing into a user's folder drops privileges: the copy then runs as that user,
-    so a link they planted cannot take it anywhere they could not write. Otherwise it writes
-    in-process."""
-    try:
-        owner = os.lstat(root.parent)
-    except FileNotFoundError:
-        owner = None
-    if os.geteuid() != 0 or owner is None or owner.st_uid == 0:
-        _mirror_write.write_page(dest, page)
-        return
-    proc = subprocess.run(  # noqa: S603 — fixed argv: this interpreter, the writer module
-        [sys.executable, "-I", str(_MIRROR_WRITER), str(dest)],
-        input=page, capture_output=True, cwd="/", check=False,
-        user=owner.st_uid, group=owner.st_gid, extra_groups=[],
-    )
-    if proc.returncode != 0:
-        raise OSError(
-            f"mirror write as uid {owner.st_uid} failed (exit {proc.returncode}): "
-            f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
 def render_page(run: Run, *, update_ticket: bool = False) -> str:
@@ -167,11 +86,12 @@ def render_page(run: Run, *, update_ticket: bool = False) -> str:
     return render_runtime_page(run.run_dir, update_ticket=update_ticket)
 
 
-def publish_page(run: Run, *, update_ticket: bool = False) -> CopyOutcome:
+def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> CopyOutcome:
     """The post-run step: render the run's page, save it as the run's `runtime_html` record
     through `run` — so whatever backend the handle sits on receives it like every other record —
     then hand it to the dev-only copy, and answer what the copy did (#1110).
 
+    `tenant` is the one its caller accepted; the copy lands in that tenant's area (#1279 O2).
     A failed render and a refused record save are each `VisualizeFailed`, saying which, with
     the cause chained: the caller's single "no record" signal. The copy never raises.
     """
@@ -185,28 +105,31 @@ def publish_page(run: Run, *, update_ticket: bool = False) -> CopyOutcome:
     except Exception as e:
         raise VisualizeFailed(f"the page record {record.path} could not be saved") from e
     _logger.info("saved the run page as %s", record.path)
-    return mirror_page(page, run.run_dir.name)
+    return mirror_page(page, run.run_dir.name, tenant)
 
 
-def mirror_page(page: str, run_id: str) -> CopyOutcome:
+def mirror_page(page: str, run_id: str, tenant: Tenant) -> CopyOutcome:
     """The dev-only copy, whole: whether to copy, where, the write, and what to say about it.
 
-    Copies the page to `<mirror root>/<run_id>/runtime.html`, written as the mirror folder's
-    owner (#1084), only on a `dev` deployment (#1110) — the rule lives here, beside the write, so
-    no caller can reach the copy without it. Best-effort, and never raises: everything after the
-    deployment check sits in one `try`. A skipped copy is logged at INFO; a failed one at
+    Copies the page to the tenant's publish area (`Publisher.run_page`), written as the publish
+    folder's owner (#1084), only on a `dev` deployment (#1110) — the rule lives in the publish
+    root's owner, so no caller can reach the copy without it. Best-effort, and never raises:
+    everything after the deployment rule sits in one `try`. A skipped copy (not `dev`) is logged
+    at INFO; a failed one — a `dev` root that cannot be determined, or a failed write — at
     WARNING, naming the destination when one resolved and the error's reason.
     """
-    deployment = _env.deployment()
-    if deployment != "dev":
-        _logger.info("page not copied: this deployment counts as %r, and only %s=dev copies",
-                     deployment, _env.DEPLOYMENT_ENV)
-        return "skipped"
     dest: Path | None = None
     try:
-        root = mirror_root()
-        dest = RunPaths(root / run_id).runtime_html
-        _mirror(page.encode("utf-8"), dest, root)
+        try:
+            publisher = Publisher.for_tenant(tenant)
+        except NoPublishRoot as none:
+            if none.no_root.kind != "not-dev":
+                raise  # a dev root that cannot be determined is a failed copy (#1279 A9)
+            _logger.info("page not copied: %s", none)
+            return "skipped"
+        target = publisher.run_page(run_id)
+        dest = target.path
+        target.write(page)
     except Exception as e:
         # The reason alone: an OSError's `str()` repeats the path the message already names.
         reason = e.strerror if isinstance(e, OSError) and e.strerror else str(e)
@@ -670,13 +593,14 @@ def main(argv: list[str]) -> int:
         print("usage: visualize_run.py --tenant T [--episode EPISODE_ID] <run_id> "
               f"[--update-ticket] ({bad})", file=sys.stderr)
         return 64
-    run = open_command_line_run(ns.tenant, ns.run_id, episode_id=ns.episode)
-    if isinstance(run, str):
-        print(f"visualize_run: {run}", file=sys.stderr)
+    opened = open_command_line_run(ns.tenant, ns.run_id, episode_id=ns.episode)
+    if isinstance(opened, str):
+        print(f"visualize_run: {opened}", file=sys.stderr)
         return 1
+    tenant, run = opened
     with _log.run_context(ns.run_id, str(run.tenant_id), logger=_logger):
         try:
-            copy = publish_page(run, update_ticket=ns.update_ticket)
+            copy = publish_page(run, tenant=tenant, update_ticket=ns.update_ticket)
         except VisualizeFailed:
             _logger.error("the re-render failed", exc_info=True)
             return 1

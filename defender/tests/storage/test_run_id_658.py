@@ -6,7 +6,7 @@ import pytest
 
 from defender import run_common
 from defender.records._run_id import is_valid_run_id
-from defender.run_repository import RunPaths
+from defender.run_repository import RunId, RunPaths
 from defender.box import container_name
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 from defender.tests.storage.ids_1187 import _spec1187 as S
@@ -30,10 +30,6 @@ VALID_RUN_IDS = (
     "a.b",
     "a..b",
 )
-
-MATERIALIZABLE_RUN_IDS = (S.SAMPLE_UUID, "00000000-0000-4000-8000-000000000001")
-
-MIXED_CASE_RUN_IDS = ("A_1", "Run-123", "20260101T000000Z-solo")
 
 INVALID_RUN_IDS = (
     "",
@@ -65,73 +61,45 @@ def test_run_id_slug_rejects_values_outside_the_container_name_grammar(run_id):
         container_name(run_id)
 
 
-@pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
-def test_materialize_rejects_an_invalid_explicit_run_id_before_writing(
-    tmp_path, monkeypatch, run_id
-):
+@pytest.mark.parametrize("extra", ["positional", "run_id", "pinned"])
+def test_materialize_takes_no_run_id_and_writes_nothing_for_one(tmp_path, monkeypatch, extra):
+    """#1279 A3 (conflict updated): run setup is handed no id, so the old "refuse an invalid
+    explicit id before writing" cases (invalid slug, mixed case, absolute path, `../escape`) are
+    unrepresentable. What is left of their point: an id offered in any form is refused before
+    anything is written."""
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)
     runs_base = location_path(tenant.runs)
 
-    with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run(alert, run_id, tenant=tenant)
+    args, kwargs = {"positional": ((S.SAMPLE_UUID,), {}),
+                    "run_id": ((), {"run_id": S.SAMPLE_UUID}),
+                    "pinned": ((), {"pinned": True})}[extra]
+    with pytest.raises(TypeError):
+        run_common.materialize_run(alert, *args, tenant=tenant, **kwargs)
 
     assert not runs_base.exists()
 
 
-@pytest.mark.parametrize("run_id", MIXED_CASE_RUN_IDS)
-def test_run_id_slug_accepts_mixed_case_and_materialize_refuses_it(tmp_path, monkeypatch, run_id):
-    """The slug grammar is case-blind (a container name may carry either case); the run"""
-    assert is_valid_run_id(run_id)
+def test_materialize_mints_a_canonical_run_id_inside_the_runs_base(tmp_path, monkeypatch):
+    """#1279 A3 (conflict updated from `test_materialize_accepts_a_valid_run_id` and the
+    mixed-case test's tail): the id is the system's own mint — canonical lowercase UUID text,
+    different per call, the run dir directly under the runs base with only setup's entries."""
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)
     runs_base = location_path(tenant.runs)
 
-    with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run(alert, run_id, tenant=tenant)
-    assert not runs_base.exists()
-    # The host's own mint never produces what its admission refuses (#1187 declared change 2:
-    # `RunId.mint()` takes no label and returns a canonical UUID, where `mint_run_id(label)`
-    # returned a case-folded `<stamp>-<label>`).
-    from defender.run_repository import RunId
-    minted = str(RunId.mint())
-    assert minted == minted.casefold()
-    assert run_common.materialize_run(
-        alert, minted, tenant=tenant).run_dir == runs_base / minted
+    first = run_common.materialize_run(alert, tenant=tenant).run_dir
+    second = run_common.materialize_run(alert, tenant=tenant).run_dir
 
-
-@pytest.mark.parametrize("run_id", MATERIALIZABLE_RUN_IDS)
-def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
-    """#1187 declared change 1: a canonical UUID is the pinned id run setup accepts; the old
-    `VALID_RUN_IDS` slugs are refused (`test_1187_o2_run_py_refuses_a_pinned_id_that_is_not_a_
-    canonical_uuid`)."""
-    alert = tmp_path / "fixture.json"
-    alert.write_text("{}\n", encoding="utf-8")
-    tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs_base = location_path(tenant.runs)
-
-    run_dir = run_common.materialize_run(alert, run_id, tenant=tenant).run_dir
-
-    assert run_dir == runs_base / run_id
-    rp = RunPaths(run_dir)
-    assert sorted(path.name for path in run_dir.iterdir()) == sorted(
-        p.name for p in (rp.alert_input_dir, rp.gather_raw, rp.provenance)
-    )
-
-
-@pytest.mark.parametrize("kind", [("absolute",), ("traversal",)])
-def test_materialize_cannot_create_a_run_outside_the_runs_base(tmp_path, monkeypatch, kind):
-    alert = tmp_path / "fixture.json"
-    alert.write_text("{}\n", encoding="utf-8")
-    outside = tmp_path / "escape"
-    run_id = str(outside) if kind == "absolute" else "../escape"
-    tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs_base = location_path(tenant.runs)
-
-    with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run(alert, run_id, tenant=tenant)
-
-    assert not runs_base.exists()
-    assert not outside.exists()
+    assert first != second
+    for run_dir in (first, second):
+        assert run_dir.parent == runs_base
+        assert is_valid_run_id(run_dir.name)
+        assert run_dir.name == run_dir.name.casefold()
+        assert str(RunId.parse(run_dir.name)) == run_dir.name
+        rp = RunPaths(run_dir)
+        assert sorted(path.name for path in run_dir.iterdir()) == sorted(
+            p.name for p in (rp.alert_input_dir, rp.gather_raw, rp.provenance)
+        )

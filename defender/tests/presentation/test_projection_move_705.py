@@ -12,6 +12,7 @@ from pathlib import Path
 
 from defender.tests.support.shared.contracts._by_path import WORKTREE, load_module
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
 import pytest
 
@@ -37,6 +38,14 @@ from defender.tests.e2e._replay_harness import (
 pytestmark = pytest.mark.e2e
 
 SALT = "0011223344556677"
+
+
+def _visualize(run_dir: Path) -> None:
+    """`run_common.visualize` over the fixture run, with its accepted `Tenant` (#1279 A4)."""
+    from defender import run_common
+
+    run = _view_run_1165(run_dir)
+    run_common.visualize(run, tenant=set_up_tenant(current_data_root()))
 
 
 def _load_run_stats():
@@ -120,7 +129,6 @@ def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
 
 def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     """`runtime.html`'s data layers render from the store-derived event stream with the same"""
-    from defender import run_common
     from defender.presentation import visualize_run
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
@@ -139,7 +147,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
         f"the re-minted coordinate must carry the session component; got {ids}")
     assert all("#" in i for i in ids), ids
 
-    run_common.visualize(_view_run_1165(run_dir))
+    _visualize(run_dir)
     assert (run_dir / "runtime.html").is_file(), "the post-run step saved no page record"
     footer_page = (run_dir / "runtime.html").read_text(encoding="utf-8")
     assert "result" in footer_page or str(replay.calls) in footer_page, (
@@ -184,7 +192,6 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
 
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path, capsys):
     """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two"""
-    from defender import run_common
     from defender.presentation import visualize_run
 
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
@@ -212,7 +219,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
         "count comparison below is between two zeroes")
 
     # driver B — the post-run step `run.py main` takes, over the SAME run_id
-    run_common.visualize(_view_run_1165(run_dir))
+    _visualize(run_dir)
     after_b = pages()
     for name, page in after_b.items():
         assert marker in page, (
@@ -251,7 +258,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         f"control: the re-render of the intact run exited {healthy.returncode}: "
         f"{healthy.stderr!r}")
     (run_dir / "runtime.html").unlink(missing_ok=True)
-    run_common.visualize(_view_run_1165(run_dir))
+    _visualize(run_dir)
     for name in ("runtime.html",):
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
         (run_dir / name).unlink()
@@ -280,7 +287,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 
     # and the post-run step surfaces it rather than swallowing it to stderr
     with pytest.raises(run_common.VisualizeFailed) as raised:
-        run_common.visualize(_view_run_1165(run_dir))
+        _visualize(run_dir)
     assert str(run_dir) in str(raised.value), (
         "the surfaced failure must name the run dir it could not render")
     assert not (run_dir / "runtime.html").is_file(), (
@@ -291,8 +298,6 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 
 def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     """Model-authored payload text that is HTML/script-shaped cannot break out of its"""
-    from defender import run_common
-
     payload = crafted_html_payload()
     run_dir = materialize(tmp_path, GOLDEN, run_id='escaping')
     inv = (GOLDEN / "investigation.md").read_text()
@@ -314,7 +319,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
         "the crafted payload never reached the store — the fixture, not the renderer, "
         "would be what this test measured")
 
-    run_common.visualize(_view_run_1165(run_dir))
+    _visualize(run_dir)
     for page_name in ("runtime.html",):
         page = (run_dir / page_name).read_text(encoding="utf-8")
         assert html.escape(payload) in page or "&lt;script&gt;" in page, (

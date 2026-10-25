@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _io
-from defender.records._locations import DataRoot, _unwrap_exports_root, _unwrap_knowledge_lock
-from defender.tenancy._tenant import Tenant, exports_folder_of
+from defender.records._locations import _unwrap_exports_root, _unwrap_knowledge_lock
+from defender.tenancy._tenant import Tenant
 
 
 class DeliveryRefused(Exception):
@@ -52,14 +52,6 @@ def current_export(tenant: Tenant) -> TenantExport:
     (P4's runs have neither). An absent or empty pointer, one that is not an object id (one
     leading out of `exports/` included), or one naming a missing export is `DeliveryRefused`."""
     return _current_at(_unwrap_exports_root(tenant.exports), tenant.id)
-
-
-def current_export_of(data_root: DataRoot, tenant_id: str) -> TenantExport:
-    """`current_export` of the tenant `tenant_id` names under `data_root`, read from its files
-    before (or without) accepting it: a launcher that pins the runs it starts to one commit
-    (`evaluations/held_out`, #1108 P4 OD10) reads the pointer, and each run it starts accepts
-    the tenant itself. The data root and the tenant's folder meet the layout's own guards."""
-    return _current_at(exports_folder_of(data_root, tenant_id), tenant_id)
 
 
 def _current_at(exports: Path, tenant_id: object) -> TenantExport:

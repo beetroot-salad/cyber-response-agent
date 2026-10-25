@@ -8,12 +8,18 @@ corpora `lessons-actor`/`lessons-environment` are deleted (U5), so the page has 
 """
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from defender.learning.frontend import serialize  # noqa: E402
+from defender.tests.support.shared.contracts._frontend_outputs import frontend_outputs_lock  # noqa: E402,F401 — shared pytest fixture
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+
+DEFENDER = Path(__file__).resolve().parents[3]
 
 #: The groups the posture page shows after U5: the defender's corpus and the questioner's.
 LIVE_GROUPS = {"defender", "questioner"}
@@ -108,3 +114,32 @@ def test_json_safe_coerces_exotic_types():
     assert out["d"] == "2026-06-02"
     assert isinstance(out["t"], str)
     json.dumps(out)
+
+
+def _serialize_cli(*args: str) -> subprocess.CompletedProcess:
+    import os
+
+    env = {**os.environ, "PYTHONPATH": f"{DEFENDER.parent}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+    return subprocess.run(  # noqa: S603 — this interpreter, the serializer script
+        [sys.executable, str(Path(serialize.__file__).resolve()), *args],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env, timeout=180)
+
+
+@pytest.mark.usefixtures("frontend_outputs_lock")
+def test_1279_serialize_keeps_only_stdout_and_never_writes_into_the_tree(export_agent: Path):
+    """#1279 migration: the contract goes to stdout, with or without `--stdout`; the file mode is
+    gone — no `lessons.json` appears in the tree."""
+    in_tree = Path(serialize.__file__).resolve().parent / "lessons.json"
+    before = in_tree.read_bytes() if in_tree.is_file() else None
+    try:
+        for extra in (("--stdout",), ()):
+            shown = _serialize_cli("--agent-root", str(export_agent), *extra)
+            assert shown.returncode == 0, shown.stderr
+            assert set(json.loads(shown.stdout)["groups"]) == LIVE_GROUPS, extra
+        after = in_tree.read_bytes() if in_tree.is_file() else None
+        assert after == before, "serialize.py still writes lessons.json into the tree"
+    finally:
+        if before is None:
+            in_tree.unlink(missing_ok=True)
+        else:
+            in_tree.write_bytes(before)

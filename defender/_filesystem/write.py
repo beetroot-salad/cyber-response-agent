@@ -389,7 +389,8 @@ def guarded_mkdir(path: Path, *, base: Path) -> None:
     component below it is judged. Checking up to `/` instead would refuse common host setups
     (`/tmp` is a symlink on macOS) with no security gain. `base` is required so each call site
     names the tree it trusts. Containment is judged lexically; `resolve()` would collapse the
-    very symlinks being refused."""
+    very symlinks being refused. (An exclusive create of one folder is `_io.hold_new(parent,
+    name, exclusive=True)`, which takes a name, not a path.)"""
     path = Path(path)
     base = Path(base)
     try:
@@ -413,7 +414,8 @@ def guarded_mkdir(path: Path, *, base: Path) -> None:
     if not base.is_dir():
         os.makedirs(base, exist_ok=True)
     accum = base
-    for part in rest.parts:
+    parts = rest.parts
+    for part in parts:
         accum = accum / part
         _ensure_dir_component(accum)
 

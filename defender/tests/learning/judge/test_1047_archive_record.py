@@ -170,7 +170,7 @@ def test_a_symlink_planted_inside_the_run_dir_at_the_sidecars_basename_is_not_re
 def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path):
     """NOT reachable: the investigation box mounts exactly the run dir (rw), the defender dir (ro)
     and a tmpfs (claims h23, n2), and the sidecar's parent is not bound."""
-    from defender.box._lifecycle import _create_argv
+    from defender.box._lifecycle import _create_argv, _run_lane_mounts
     from defender.box._spec import BoxSpec
 
     run_dir = tmp_path / "defender-runs" / "2026-09-16T12-00-00Z_case-1047"
@@ -179,10 +179,7 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
     sidecar = S.sidecar_path(run_dir)
     # An explicit rootfs: the tree is fake (no `box.Dockerfile`/`uv.lock`/`pyproject.toml`),
     # and with `rootfs` unset the builder would resolve the image from it and refuse (#1092).
-    argv = _create_argv(
-        "defender-run-1047", run_dir, tmp_path / "srv" / "defender",
-        BoxSpec(rootfs="python:3.11-slim"), (),
-    ).argv
+    argv = _create_argv("defender-run-1047", run_dir, tmp_path / "srv" / "defender", BoxSpec(rootfs="python:3.11-slim"), (), lane=_run_lane_mounts(run_dir, tmp_path / "srv" / "defender", None)).argv
     rw_specs = [spec for spec in argv if spec.startswith("type=bind,") and "readonly" not in spec]
     writable = [spec.split("source=", 1)[1].split(",", 1)[0] for spec in rw_specs]
     assert writable == [str(run_dir)], (

@@ -4,10 +4,14 @@ import argparse
 import logging
 import sys
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
+
+if TYPE_CHECKING:
+    from defender.tenancy._tenant import Tenant
 
 _logger = logging.getLogger(__name__)
 
@@ -62,15 +66,19 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         return 2
 
 
-def command_line_paths(parser: argparse.ArgumentParser, raw_tenant: str) -> LoopPaths:
+def command_line_tenant(parser: argparse.ArgumentParser, raw_tenant: str) -> Tenant:
     """Accept an explicitly selected tenant before a command touches state or outputs."""
     from defender.tenancy import _tenant
 
     try:
-        return LoopPaths.for_tenant(
-            _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant))
+        return _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
     except _tenant.TenantRefused as refused:
         parser.error(str(refused))
+
+
+def command_line_paths(parser: argparse.ArgumentParser, raw_tenant: str) -> LoopPaths:
+    """The selected tenant's loop paths, its tenant accepted first."""
+    return LoopPaths.for_tenant(command_line_tenant(parser, raw_tenant))
 
 
 def main(argv: list[str]) -> int:

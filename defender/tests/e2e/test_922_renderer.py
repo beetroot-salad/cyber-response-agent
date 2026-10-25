@@ -13,6 +13,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender import _io, run_common
 from defender.run_repository import Run
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
 
 pytestmark = pytest.mark.e2e
@@ -53,7 +54,8 @@ def tenant_run(run_dir: Path, *, io=_io) -> Run:
 def test_the_two_column_wrapper_never_ships_without_the_sidebar_that_fills_it(tmp_path):
     """GUARD — the sidebar and the space reserved for it are one decision, not two."""
     run_dir = driven_run(tmp_path)
-    run_common.visualize(tenant_run(run_dir))
+    run = tenant_run(run_dir)
+    run_common.visualize(run, tenant=set_up_tenant(current_data_root(), run.tenant_id))
 
     checked = 0
     for page in ("runtime.html",):

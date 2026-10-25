@@ -15,11 +15,12 @@ from defender._shown import escaped
 
 if TYPE_CHECKING:
     from defender.run_repository import Run
+    from defender.tenancy._tenant import Tenant
 
 
 def open_command_line_run(raw_tenant: str, raw_run_id: str, *,
-                          episode_id: str | None = None) -> Run | str:
-    """The run the request names, opened — or its refusal as one line of text, never raised
+                          episode_id: str | None = None) -> tuple[Tenant, Run] | str:
+    """The run the request names, opened, beside its tenant as accepted — or its refusal as one line of text, never raised
     or logged: the data root's own (unset or unusable), or the opener's (the tenant's, the
     run's, the episode's). The command line prints it on stderr and exits with its own status
     (defender/CLAUDE.md: a refusal is a value, not a diagnostic)."""

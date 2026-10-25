@@ -79,14 +79,9 @@ def test_r6_a_second_copy_for_a_run_id_whose_owner_lives_is_refused_and_leaves_t
         child.wait()
 
 
-def test_r6_a_launch_naming_a_live_owned_run_id_does_not_start_and_leaves_the_copy(tenant,
-                                                                                    tmp_path):
-    run_id = str(uuid.uuid4())
-    first = _planted(tenant, run_id, os.getpid(), process_start(os.getpid()))
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   argv_extra=("--run-id", run_id))
-    assert not out.reached, f"a run started over a live run's copy: {out.text()}"
-    assert (first / "stage" / "agent" / "marker.md").is_file(), "the live run's copy was replaced"
+# #1279: no launch names a run id (the system mints it) and a run is never resumed, so a launch
+# cannot meet a live or a dead copy at its id; `copy_for_run`'s own refusal and replacement are
+# pinned directly above and below.
 
 
 # --- D04: a dead owner's copy at the run id is replaced ---------------------------------------
@@ -102,19 +97,6 @@ def test_r6_a_dead_owners_copy_at_the_run_id_is_replaced_by_a_fresh_one(tenant):
     assert any((old / "stage" / "agent").rglob("*.md"))
     assert (old / "settings").is_dir()
     assert [p.name for p in B.run_copies(tenant).iterdir()] == [run_id]
-
-
-def test_r6_a_relaunch_of_a_killed_runs_id_starts_over_a_fresh_copy(tenant, tmp_path):
-    run_id = str(uuid.uuid4())
-    dead_pid, dead_start = _dead_process()
-    _planted(tenant, run_id, dead_pid, dead_start)
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   argv_extra=("--run-id", run_id),
-                   during=lambda seen: (B.copy_root(tenant, seen.run_dir) / "stage" / "agent"
-                                        / "marker.md").exists())
-    assert out.reached, out.text()
-    assert out.rc == 0, out.text()
-    assert out.seen[0].during is False, "the dead run's file is in the new run's copy"
 
 
 # --- D02 / inputs-01: the owner record is written first ---------------------------------------

@@ -1,4 +1,4 @@
-"""Serialize tests that snapshot and restore the shared frontend build outputs."""
+"""Serialize tests that snapshot the in-tree frontend build outputs to prove a build writes nothing there (#1279)."""
 from __future__ import annotations
 
 import fcntl

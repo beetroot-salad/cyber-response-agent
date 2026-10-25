@@ -34,7 +34,7 @@ if TYPE_CHECKING:
         RunRefused, RunAbsent, RunUnreachable,
     )
     from defender.run_repository._held import (
-        hold_runs_folder, run_name_fault,
+        hold_runs_folder, run_name_fault, sidecar_names,
     )
 
 #: Each public name and the submodule that defines it.
@@ -60,7 +60,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
                      "open_requested_run", "check_arm_roster_capacity",), "_lookup"),
     **dict.fromkeys(("RunRefused", "RunAbsent", "RunUnreachable",), "_errors"),
-    **dict.fromkeys(("hold_runs_folder", "run_name_fault",), "_held"),
+    **dict.fromkeys(("hold_runs_folder", "run_name_fault", "sidecar_names",), "_held"),
 }
 
 __all__ = [
@@ -79,7 +79,7 @@ __all__ = [
     "contained_payload", "Run", "RunRecord", "ArchivedWorld",
     "RecordHandle", "case_ref", "case_ref_of_digest", "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
     "open_requested_run", "check_arm_roster_capacity", "RunRefused", "RunAbsent", "RunUnreachable", "hold_runs_folder",
-    "run_name_fault",
+    "run_name_fault", "sidecar_names",
 ]
 
 

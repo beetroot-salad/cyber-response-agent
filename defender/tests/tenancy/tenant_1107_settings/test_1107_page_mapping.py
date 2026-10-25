@@ -22,7 +22,7 @@ from defender.tests.support.runtime.engine import _spec767 as M
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.storage._alert_plant import plant_alert as plant_with_record
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant, set_up_tenant
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
@@ -43,6 +43,12 @@ TICKET_TABLE = """dispositions:
     health-check: {roles: [gather]}
     list-tickets: {roles: [gather]}
 """
+
+
+def _accepted() -> Any:
+    """The accepted `Tenant` the post-run step is handed beside the run (#1279 A4); the page's
+    publish copy is off here (production), so only its type matters."""
+    return set_up_tenant(current_data_root())
 
 
 def _seeded_run(tmp_path: Path, name: str) -> Path:
@@ -158,7 +164,7 @@ def test_o6_run_page_renders_receipt(tmp_path):
 
     run_dir = _seeded_run(tmp_path, "r-o6")
     # The page with no receipt and no flag — the standalone renderer, handed nothing.
-    visualize_run.publish_page(_view_run_1165(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir), tenant=_accepted())
     bare = S.page_html(run_dir)
     assert _header(run_dir) in bare, "the standalone page did not render"
     assert "commented" not in bare, "the bare page already says 'commented'; pick another probe"
@@ -272,10 +278,10 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
     assert S.receipt(run_dir) is not None, "the flagged run left no receipt"
     flagged = S.page_html(run_dir)
     # The standalone render of the SAME dir, receipt still present: handed no flag.
-    visualize_run.publish_page(_view_run_1165(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir), tenant=_accepted())
     standalone = S.page_html(run_dir)
     S.receipt_path(run_dir).unlink()
-    visualize_run.publish_page(_view_run_1165(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir), tenant=_accepted())
     no_receipt = S.page_html(run_dir)
     assert _header(run_dir) in no_receipt, "the receipt-less page did not render"
     assert "SOC-FLAG-PG-1107" in flagged, "with --update-ticket the receipt's key is not shown"
@@ -298,7 +304,7 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
     ):
         tag = "left" if "earlier" in label else "link"
         rec = S.RunRecorder(tmp_path / "runs" / f"r-pg-{tag}", before_lifecycle=plant)
-        rc, refused = S.drive_run(S.run_argv(alert, root, run_id=f"r-pg-{tag}"), rec,
+        rc, refused = S.drive_run(S.run_argv(alert, root), rec,
                                   visualize=run_common.visualize)
         run_dir = rec.run_dir_at
         assert (rc, refused) == (0, None), f"{label}: the run did not finish: {refused}"
@@ -309,7 +315,7 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
         for needle in needles:
             assert needle not in page, f"{label}: without --update-ticket {needle!r} rendered"
         at_name.unlink()
-        visualize_run.publish_page(_view_run_1165(run_dir))
+        visualize_run.publish_page(_view_run_1165(run_dir), tenant=_accepted())
         assert page == S.page_html(run_dir), (
             f"{label}: without --update-ticket the page is not the receipt-less page")
 
@@ -334,7 +340,7 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
         _write_receipt(run_dir, forged)
 
     rec = S.RunRecorder(tmp_path / "runs" / "r-box", before_lifecycle=box_writes)
-    rc, refused = S.drive_run(S.run_argv(alert, root, run_id="r-box"), rec,
+    rc, refused = S.drive_run(S.run_argv(alert, root), rec,
                               visualize=run_common.visualize)
     run_dir = rec.run_dir_at
     assert (rc, refused) == (0, None), f"the run did not finish: {refused}"
@@ -347,12 +353,12 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 
     # The same dir without the receipt, standalone: the page run.py rendered is exactly that.
     S.receipt_path(run_dir).unlink()
-    visualize_run.publish_page(_view_run_1165(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir), tenant=_accepted())
     assert page == S.page_html(run_dir), "the page run.py rendered carries a ticket line"
 
     # Positive control, same planted run dir: handed run.py's flag as true, the line renders.
     _write_receipt(run_dir, forged)
-    run_common.visualize(_view_run_1165(run_dir), update_ticket=True)
+    run_common.visualize(_view_run_1165(run_dir), tenant=_accepted(), update_ticket=True)
     flagged = S.page_html(run_dir)
     assert "SOC-FORGED-BOX-1107" in flagged, (
         "handed the flag, the renderer still shows no ticket line — the absence above proves "

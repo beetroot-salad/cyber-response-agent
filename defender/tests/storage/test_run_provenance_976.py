@@ -150,7 +150,7 @@ def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
 
-    run_dir = run_common.materialize_run(alert, fixture_uuid("976-a1"), tenant=tenant).run_dir
+    run_dir = run_common.materialize_run(alert, tenant=tenant).run_dir
     stamp = RunPaths(run_dir).provenance
     assert stamp.is_file()
     rec = _provenance.read(stamp)
@@ -326,25 +326,32 @@ def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
 
 def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, capsys):
     from defender import run_common
+    from defender.tests.support.storage._setup_faults_1279 import PlantAfterRunDirIo, tenant_with_runs_io
 
     tenant = _set_up_tenant(tmp_path, monkeypatch)
     runs = location_path(tenant.runs)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
     # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
-    # shapes `write_guarded` refuses, and it is the shape a previous crashed run can leave.
-    run_id = fixture_uuid("976-wedge")  # #1187: a run id is a uuid4
-    (runs / run_id).mkdir(parents=True)
-    (runs / run_id / PROVENANCE).mkdir()
+    # shapes `write_guarded` refuses. #1279 (conflict updated): setup takes no id and never
+    # resumes a dir, so a crashed run's leftover can no longer be planted at a chosen id; the
+    # obstruction is planted by the runs repository's `io=` seam right after the REAL run-dir
+    # creation, and the REAL `materialize_run` is driven through to its stamp.
+    planted: list[Path] = []
 
-    # A directory holding nothing but setup's own names is an interrupted setup: resumed, and
-    # the stamp's obstruction is met by the guarded write, which refuses it loudly and lets the
-    # run continue unstamped.
-    assert run_common.materialize_run(
-        alert, run_id, tenant=tenant).run_dir == runs / run_id
+    def obstruct(run_dir: Path) -> None:
+        (run_dir / PROVENANCE).mkdir()
+        planted.append(run_dir)
+
+    run = run_common.materialize_run(
+        alert, tenant=tenant_with_runs_io(tenant, PlantAfterRunDirIo(obstruct)))
+
+    assert planted, "the obstruction was never planted: setup made no run dir through the seam"
     assert "could not stamp" in capsys.readouterr().err
-    assert (runs / run_id / PROVENANCE).is_dir(), "the refusal removed the obstruction"
-
+    assert (run.run_dir / PROVENANCE).is_dir(), "the refusal removed the obstruction"
+    assert run.run_dir == planted[0]
+    assert run.run_dir.parent == runs
+    assert RunPaths(run.run_dir).alert_input_dir.is_dir(), "the run did not finish setup after the failed stamp"
 
 
 def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
@@ -354,8 +361,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     runs = location_path(tenant.runs)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
-    run_dir = run_common.materialize_run(
-        alert, fixture_uuid("976-solo"), tenant=tenant).run_dir
+    run_dir = run_common.materialize_run(alert, tenant=tenant).run_dir
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
@@ -363,11 +369,10 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     # hoisted-capture path this change removed, and it is refused rather than accepted and
     # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
-    handed_id = fixture_uuid("976-handed")
+    before = sorted(p.name for p in runs.iterdir())
     with pytest.raises(TypeError):
-        run_common.materialize_run(
-            alert, handed_id, tenant=tenant, provenance=handed)
-    assert not (runs / handed_id).exists()
+        run_common.materialize_run(alert, tenant=tenant, provenance=handed)
+    assert sorted(p.name for p in runs.iterdir()) == before
 
 
 

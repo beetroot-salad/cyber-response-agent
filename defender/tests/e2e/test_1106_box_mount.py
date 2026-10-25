@@ -85,10 +85,7 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path
     run_dir = make_run_dir(tmp_path / "r")
     agent = tmp_path / "tenants" / ACME / "knowledge" / "agent"
     shared = ((tmp_path, Path("/daemon/shared")),)
-    argv = box_mod._create_argv(
-        "defender-run-r1106", run_dir, defender_dir,
-        box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared, tenant_agent=agent,
-    ).argv
+    argv = box_mod._create_argv("defender-run-r1106", run_dir, defender_dir, box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared, lane=box_mod._run_lane_mounts(run_dir, defender_dir, agent)).argv
     source = Path("/daemon/shared") / agent.relative_to(tmp_path)
     assert f"type=bind,source={source},target=/agent,readonly" in argv
 
@@ -100,10 +97,6 @@ def test_an_agent_source_on_no_shared_mount_refuses_the_box_naming_it():
 
     shared = ((Path("/workspace"), Path("/home/dev/projects/repo")),)
     with pytest.raises(BoxFault) as caught:
-        box_mod._create_argv(
-            "defender-run-r1106", Path("/workspace/.runs/r1106"), Path("/workspace/defender"),
-            box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared,
-            tenant_agent=Path("/srv/tenants/acme/agent"),
-        )
+        box_mod._create_argv("defender-run-r1106", Path("/workspace/.runs/r1106"), Path("/workspace/defender"), box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared, lane=box_mod._run_lane_mounts(Path("/workspace/.runs/r1106"), Path("/workspace/defender"), Path("/srv/tenants/acme/agent")))
     assert "/srv/tenants/acme/agent" in str(caught.value)
     assert "C46" in str(caught.value)

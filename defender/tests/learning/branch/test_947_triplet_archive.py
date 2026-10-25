@@ -15,7 +15,6 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 def _archive():
@@ -278,7 +277,7 @@ def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch)
     # run-folder-to-tenant derivation `tenant_of_run_dir` is gone, F-13).
     tenant_id = src.parent.parent.name
     ordinary = T.mod("run_common").materialize_run(
-        RunPaths(src).alert, fixture_uuid("947-archive-ordinary-run"),
+        RunPaths(src).alert,
         tenant=T1106.accept(current_data_root(), tenant_id)).run_dir
     assert ordinary.parent == base
     found = sorted(p.parent.name for p in base.rglob("provenance.json"))

@@ -80,6 +80,8 @@ def test_b1_two_host_layouts_render_the_same_create_command(tmp_path):
     a = V.make_layout(tmp_path / "a", V.TENANT_A)
     b = V.make_layout(tmp_path / "b" / "deeper" / "still",
                       V.TENANT_B, checkout=V.mirror_checkout(tmp_path / "b" / "elsewhere" / "src"))
+    # #1279 (A3): each host's setup mints its own run id, so the two commands also agree across
+    # different ids (the name and the sources are masked).
     run_id = "20261015t120000z-view-two"
     ca = _created(V.natural_run(a, ALERT, run_id), a)
     cb = _created(V.natural_run(b, ALERT, run_id), b)
@@ -143,7 +145,7 @@ def test_b1_o2_an_arm_and_a_natural_run_get_the_same_create_command(tmp_path, mo
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     staged = tmp_path / "alert.json"
     staged.write_bytes(ALERT)
-    natural = run_common.materialize_run(staged, fixture_uuid("20261015t120000z-view-nat"), tenant=layout.tenant)
+    natural = run_common.materialize_run(staged, tenant=layout.tenant)
     arm = _arm_run(layout, tmp_path, monkeypatch)
 
     cn = _lifecycle_create(natural, layout)

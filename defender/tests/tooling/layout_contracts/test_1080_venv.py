@@ -299,7 +299,7 @@ _SITECUSTOMIZE = (
 )
 
 #: What each user is started with once it settles: something short and side-effect free where
-#: the program offers it (the frontend build takes no arguments and writes its pages into the copy).
+#: the program offers it (the frontend build is started with no arguments, so it refuses for want of `--tenant` before it publishes anything; #1279).
 SETTLE_ARGS = {"api server": ("--help",), "frontend build": (),
                "frontend serializer": ("--stdout",), "lessons shim": ("--tags",)}
 

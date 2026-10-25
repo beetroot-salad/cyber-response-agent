@@ -28,6 +28,10 @@ pytestmark = pytest.mark.e2e
 
 SALT = "s665geo"
 
+#: Both lanes' container name here is a substring of this (run lane `defender-run-<run dir name>`,
+#: request lane `defender-runcycle-abc`); the refusal names the container whichever it is.
+NAME_1279 = r"defender-run"
+
 
 def _run_cycle_mounts(run_dir: Path):
     """A minimal run-cycle geography a caller composes (M2): learning_run_dir + the ro
@@ -252,7 +256,7 @@ def test_the_pre_create_sweep_refuses_a_container_that_is_not_finished(tmp_path,
         if lane == "investigation"
         else (lambda: start_box_request(_request(run_dir), docker=rec))
     )
-    with pytest.raises(box_mod.BoxFault, match="refusing rather than reaping"):
+    with pytest.raises(box_mod.BoxStartConflict, match=NAME_1279):
         start()
     assert not any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls), \
         f"the pre-create sweep reaped a container in {state!r}, which nobody has finished with"
@@ -261,19 +265,25 @@ def test_the_pre_create_sweep_refuses_a_container_that_is_not_finished(tmp_path,
 
 
 @pytest.mark.parametrize("lane", ["investigation", "request"])
-def test_the_pre_create_sweep_still_clears_a_finished_container(tmp_path, lane):
-    """The other half of F-49, and the half that keeps the fix from being a wedge."""
+@pytest.mark.parametrize("state", ["exited", "dead"])
+def test_the_pre_create_check_refuses_a_finished_container_too_and_removes_nothing(
+        tmp_path, lane, state):
+    """#1279 O6 (conflict updated: this was `..._still_clears_a_finished_container`). Every box
+    name is fresh, so an existing container is never legitimate, finished or not: the start
+    refuses, removes nothing and creates nothing."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
-    rec = RecordingDocker(status="exited")
-    if lane == "investigation":
-        box_mod.start_box(run_dir, DEFENDER, docker=rec)
-    else:
-        start_box_request(_request(run_dir), docker=rec)
-    assert rec.create_argv is not None, "a finished container blocked the start"
-    reap = next(i for i, c in enumerate(rec.calls) if c[:3] == ["docker", "rm", "-f"])
-    create = next(i for i, c in enumerate(rec.calls) if len(c) > 1 and c[1] == "run")
-    assert reap < create, "the stale container was cleared after the create, not before it"
+    rec = RecordingDocker(status=state)
+    start = (
+        (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec))
+        if lane == "investigation"
+        else (lambda: start_box_request(_request(run_dir), docker=rec))
+    )
+    with pytest.raises(box_mod.BoxStartConflict, match=NAME_1279):
+        start()
+    assert not any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls), \
+        "the start removed a finished container that holds its name"
+    assert rec.create_argv is None, "a box was created on a name another container holds"
 
 
 def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
@@ -281,7 +291,7 @@ def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="running")
-    with pytest.raises(box_mod.BoxFault, match="refusing rather than reaping"):
+    with pytest.raises(box_mod.BoxStartConflict):
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
     assert box_mod.verdict_path(run_dir).is_file(), \
         "the pre-create refusal left no §7 D2 verdict — the tree reads as unjudged"
@@ -292,12 +302,13 @@ def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
         f"the verdict does not say WHICH startup fault produced it: {verdict['reason']!r}"
 
 
-def test_a_daemon_answer_the_sweep_cannot_read_is_not_taken_as_finished(tmp_path):
-    """`_FINISHED_STATES` membership is the test, so an unparseable answer fails CLOSED."""
+def test_a_daemon_answer_the_start_cannot_read_is_still_a_container_holding_the_name(tmp_path):
+    """An unparseable status still means the name is held: the start refuses and removes
+    nothing (#1279 O6), so the answer fails CLOSED."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="")
-    with pytest.raises(box_mod.BoxFault, match="refusing rather than reaping"):
+    with pytest.raises(box_mod.BoxStartConflict):
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
     assert not any(c[:3] == ["docker", "rm", "-f"] for c in rec.calls)
 

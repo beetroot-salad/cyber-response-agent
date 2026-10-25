@@ -232,7 +232,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     for run_id, url in (("r-nf4-a", "http://cmdb-run-a:1"), ("r-nf4-b", "http://cmdb-run-b:1")):
         S.set_key(folder, "cmdb", "CMDB_URL_BASE", url)
         rec_ = S.RunRecorder(tmp_path / "runs" / run_id)
-        rc, refused = S.drive_run(S.run_argv(alert, root, run_id=run_id), rec_,
+        rc, refused = S.drive_run(S.run_argv(alert, root), rec_,
                                   visualize=rec_.visualize)
         assert refused is None, (rc, refused)
         assert rc == 0, (rc, refused)

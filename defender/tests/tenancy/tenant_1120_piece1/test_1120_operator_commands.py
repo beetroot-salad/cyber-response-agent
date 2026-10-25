@@ -346,9 +346,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         f"start_box was handed {agent}, not the run copy's stage/agent under the data root")
 
     # #1187: the recorder's run folder is `fixture_uuid("run")` — read it off the recorder.
-    argv = box_mod._create_argv(
-        "defender-run-spec1120", rec.run_dir_at, H.DEFENDER,
-        box_mod.DEFAULT_SPEC, (), tenant_agent=agent).argv
+    argv = box_mod._create_argv("defender-run-spec1120", rec.run_dir_at, H.DEFENDER, box_mod.DEFAULT_SPEC, (), lane=box_mod._run_lane_mounts(rec.run_dir_at, H.DEFENDER, agent)).argv
     mounts = _mount_specs(argv)
     agent_mounts = [m for m in mounts if m.get("target") == MODEL_AGENT]
     assert len(agent_mounts) == 1, mounts
@@ -379,8 +377,7 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
     off_mount = tmp_path / "data"
     agent = H.agent_dir(off_mount)
     with pytest.raises(box_mod.BoxFault) as refused:
-        box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
-                             box_mod.DEFAULT_SPEC, mounts, tenant_agent=agent)
+        box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER, box_mod.DEFAULT_SPEC, mounts, lane=box_mod._run_lane_mounts(run_dir, H.DEFENDER, agent))
     text = str(refused.value)
     assert str(agent) in text, f"the refusal does not name the agent half {agent}:\n{text}"
     assert "tenants root" not in text, (
@@ -390,8 +387,7 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
         f"agent half now lives:\n{text}")
 
     plant_alert_with_record(run_dir, {})
-    box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
-                         box_mod.DEFAULT_SPEC, mounts, tenant_agent=H.agent_dir(on_mount))
+    box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER, box_mod.DEFAULT_SPEC, mounts, lane=box_mod._run_lane_mounts(run_dir, H.DEFENDER, H.agent_dir(on_mount)))
 
 
 #: #1255 K3's preload/clock env keys — `test_1255_clock_box._PRELOAD_KEY`'s pattern, kept in step
@@ -413,9 +409,7 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     assert "DEFENDER_DIR" in rendered, rendered
 
     plant_alert_with_record(tmp_path / "run", {})
-    argv = box_mod._create_argv(
-        "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
-        box_mod.DEFAULT_SPEC, ()).argv
+    argv = box_mod._create_argv("defender-run-spec1120", tmp_path / "run", H.DEFENDER, box_mod.DEFAULT_SPEC, (), lane=box_mod._run_lane_mounts(tmp_path / "run", H.DEFENDER, None)).argv
     env_keys = {v.partition("=")[0] for f, v in zip(argv, argv[1:], strict=False) if f == "--env"}
     assert H.DATA_ROOT_ENV not in env_keys, env_keys
     assert not [k for k in env_keys if "TENANT" in k.upper()], env_keys
@@ -439,19 +433,21 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     data_root: Path, tmp_path: Path, script: str, args: list[str], identity: list[str],
+    run_visualizations_dir: Path,
 ):
-    """O3: neither absent nor malformed tenant identity can select an ambient queue."""
+    """O3: neither absent nor malformed tenant identity can select an ambient queue. #1279: nor publish a page."""
     poison = tmp_path / "ambient-state"
     poison.mkdir()
     (poison / "operator-sentinel").write_bytes(b"untouched")
     before_state = {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()}
-    # The old frontend writes to its package before discovering state errors. Restore the
-    # existing build outputs even when this contract fails against that implementation.
+    # The old frontend wrote to its package before discovering state errors; the build now
+    # publishes per tenant (#1279), so a refusal leaves the tree and the publish root alone.
+    # Restore the existing build outputs even when this contract fails against an old build.
     frontend = H.REPO_ROOT / "defender/learning/frontend"
     outputs = [frontend / n for n in ("lessons.json", "lessons.html", "queues.json", "queues.html")]
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
     try:
-        proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root,
+        proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root, DEFENDER_DEPLOYMENT="dev",
                             DEFENDER_LEARNING_STATE_DIR=str(poison))
         out = H.output(proc)
         assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
@@ -459,6 +455,7 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
         assert "traceback" not in out.lower(), out
         assert {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()} == before_state
         assert {p: p.read_bytes() if p.exists() else None for p in outputs} == before_pages
+        assert not list(run_visualizations_dir.iterdir()), "identity refusal published a page"
         assert not list(data_root.iterdir()), "identity refusal touched a tenant directory"
     finally:
         for p, blob in before_pages.items():

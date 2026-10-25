@@ -32,6 +32,18 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1279
+
+`run.py --run-id` is gone: the system mints every run id, announced as the first stdout line
+`run_id=<uuid>`. A run dir is created exclusively and never resumed. Learning pages are published per tenant
+(dev only) under `<publish root>/<tenant>/learning/`, and the dev run-page copy under
+`<publish root>/<tenant>/runs/<run id>/`. The publish root is no longer worked out from the
+checkout: a `dev` host sets `DEFENDER_RUN_VISUALIZATIONS_DIR` (the devcontainer sets it to the main
+checkout's `run-visualizations/`); unset, nothing is published. By hand, once: delete
+`defender/learning/frontend/{lessons,queues}.{json,html}` and the pre-#1186 debris under
+`defender/learning/` (`_author.lock`, `.author-drain.lock`, `author-queue/`); delete old flat
+`run-visualizations/<run id>/` folders.
+
 ## Upgrade from before #1187
 
 Tenant, run, episode and world ids are opaque UUIDs and episodes live under each tenant's data root. Before upgrading a

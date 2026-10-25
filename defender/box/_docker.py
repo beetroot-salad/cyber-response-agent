@@ -178,12 +178,6 @@ def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
         raise BoxFault(f"could not invoke docker ({argv[:2]}): {e}") from e
 
 
-#: States in which nothing can still be starting or running, so reaping is safe. `created`
-#: is excluded: `docker run --detach` is create-then-start, so a concurrent lane's box sits
-#: in `created` during exactly the window two lanes can collide on one name.
-_FINISHED_STATES = frozenset({"exited", "dead"})
-
-
 def _inspect_field(docker: DockerFn, name: str, fmt: str) -> str | None:
     """One `-f` field off `docker inspect`, or `None` when the daemon answered non-zero.
     Callers decide what `None` means."""
@@ -196,7 +190,7 @@ def _inspect_field(docker: DockerFn, name: str, fmt: str) -> str | None:
 def _container_status(docker: DockerFn, name: str) -> str | None:
     """Docker's word for what this name holds, or `None` for no such container.
 
-    An unparseable answer is `""`, which is not in `_FINISHED_STATES` and so never reaped.
+    An unparseable answer is `""`: something holds the name, so a start refuses (#1279 O6).
     A non-zero rc means either "no such object" or "daemon unreachable"; since `None` here
     licenses a create, the daemon is probed and an unreachable one raises."""
     status = _inspect_field(docker, name, "{{.State.Status}}")
@@ -248,25 +242,28 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
 
 
-def _reap_stale_before_create(docker: DockerFn, name: str) -> None:
-    """The pre-create sweep. Unlike `_reap_on_fault` it may raise: no fault is being carried,
-    so an unreachable daemon should abort the start.
+class BoxStartConflict(BoxFault):
+    """A start refused for what it would collide with, never degraded by the unsandboxed opt-out
+    (#1279 A2): a mount that overlaps the publish root (O3), or a container that already holds
+    the box's name (O6). These are configuration and collision faults, not "no sandbox here"."""
 
-    Ownership is decided by state, since no start token exists yet. Only a finished container
-    is reaped; anything else may be another lane mid-start and is refused. A leaked container
-    is cheap to clear by hand; reaping another lane's box loses its artifacts."""
+
+def _refuse_an_existing_container(docker: DockerFn, name: str) -> None:
+    """The pre-create check (#1279 O6): every box name is fresh, so a container already holding
+    it is never legitimate, whatever its state, and is neither named as ours nor removed.
+
+    Unlike `_reap_on_fault` it may raise: no fault is being carried, so an unreachable daemon
+    aborts the start (a plain `BoxFault`, which the opt-out may degrade: only the daemon's
+    answer "a container with this name exists" is a `BoxStartConflict`)."""
     status = _container_status(docker, name)
     if status is None:
         return
-    if status not in _FINISHED_STATES:
-        described = status or "in a state this daemon would not name"
-        raise BoxFault(
-            f"a container named {name} already exists and is {described} — refusing rather "
-            "than reaping it, because a container that is not finished may belong to another "
-            "lane still writing its artifacts. If it is a leak, "
-            f"`docker rm -f {name}` clears it."
-        )
-    _remove_container(docker, name)
+    described = status or "in a state this daemon would not name"
+    raise BoxStartConflict(
+        f"a container named {name} already exists and is {described} — refusing, and removing "
+        "nothing, because every box name is fresh and this one may belong to another run still "
+        f"writing its artifacts. If it is a leak, `docker rm -f {name}` clears it."
+    )
 
 
 def _reap_on_fault(docker: DockerFn, name: str, *, owned_token: str | None = None) -> None:
