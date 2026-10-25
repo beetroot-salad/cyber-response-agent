@@ -389,6 +389,22 @@ def _check_stage(staged_token: Path) -> None:
             f"startup token {staged_token.name}; it holds {sorted(listed.stats)}")
 
 
+def _judge_stage(run_dir: Path, tenant_agent: Path | None, staged_token: Path,
+                 write_verdict: Callable[[dict], None] | None) -> None:
+    """The run's agent half is its run copy's `stage/agent/`, and that stage holds exactly it
+    and the startup token (`_check_stage`): judged before the box-or-host choice, so a fault
+    here is a refusal on either path and never the unsandboxed opt-out's to swallow. A refusal
+    writes the did-not-run marker, as every startup fault does."""
+    try:
+        if tenant_agent != staged_token.parent / "agent":
+            raise BoxFault(f"the run's agent folder {tenant_agent} is not its run copy's "
+                           f"{staged_token.parent / 'agent'}")
+        _check_stage(staged_token)
+    except BoxFault as e:
+        write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
+        raise
+
+
 def _read_back_stage_token(staged_token: Path, docker: DockerFn, name: str) -> None:
     """Startup reads the staged token back through the box, byte for byte (O-A): a box bound to
     another copy, or to none, refuses before any workload runs."""
@@ -420,12 +436,6 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
     start_token = uuid.uuid4().hex
-    try:
-        if staged_token is not None:
-            _check_stage(staged_token)
-    except BoxFault as e:
-        write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
-        raise
     create = _create_argv(
         name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
         tenant_agent=tenant_agent, staged_token=staged_token,
@@ -697,6 +707,8 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
         spec = BoxSpec.from_env(os.environ)
     if tenant_agent is None and staged_token is not None:
         raise TypeError("staged_token needs tenant_agent")
+    if staged_token is not None:
+        _judge_stage(run_dir, tenant_agent, staged_token, write_verdict)
     try:
         return _start_boxed(run_dir, defender_dir, spec, docker,
                             tenant_agent=tenant_agent, staged_token=staged_token,

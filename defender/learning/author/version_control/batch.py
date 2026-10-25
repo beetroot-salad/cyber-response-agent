@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from .exports import TenantExport, agent_blobs
 from .files import _folders_of, _resync
 from .model import AgentChange, ChangeSet, _refusals, _require_in_lanes
 from .repository import GitRepository
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(eq=False)
@@ -101,7 +104,11 @@ class Batch:
 
     def discard(self) -> None:
         """Remove the draft (no link below it followed). The branch and its commits stay:
-        a branch with commits is `deliver`'s to pick up."""
-        with _refusals():
-            folder = self.draft_root.parent
+        a branch with commits is `deliver`'s to pick up. Cleanup, best effort: a draft that
+        cannot be removed is logged, never raised, so it never replaces the outcome of the
+        work it follows (a refusal, or a delivered PR); the owner sweep removes it later."""
+        folder = self.draft_root.parent
+        try:
             _remove_entry(folder.parent, folder.name)
+        except OSError as e:
+            _logger.error(f"batch {self.id}: its draft {folder} could not be removed: {e!r}")

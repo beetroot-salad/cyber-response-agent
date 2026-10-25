@@ -144,7 +144,8 @@ query(system="{system}", verb="{verb}", params={...}, query_id="{system}.<id>")
   Reach for it only when the aggregation genuinely could not be expressed in the query, and
   **Read `{defender_dir}/skills/gather/defender-sql.md` before you write the SQL** — the
   `data` table contract, the idiom for each payload shape, and the truncation check a count
-  needs first.
+  needs first — and, when your Dispatch names a `reducer_pitfalls` page, its
+  `## Common pitfalls` section: prior SQL mistakes on this tenant's data; don't repeat them.
 - The aggregation result — the `{columns, row_count, values}` table — **is your
   summary**: computed over the full match server-side (the `COUNT`/`SUM`/`MIN`/`MAX`
   scalars are exact), small — report those values. (A `row_count` of exactly 1000

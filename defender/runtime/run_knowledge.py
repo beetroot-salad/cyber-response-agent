@@ -27,15 +27,21 @@ from defender.tenancy._exports import (
     remove_entry,
 )
 from defender.tenancy._owner import owned_temporary, owner_alive, write_owner
+from defender.tenancy._publish_status import (
+    FRESH,
+    MISCONFIGURED,
+    OPERATOR,
+    STALE_OPERATOR,
+    STALE_PREFIX,
+    TRANSIENT,
+)
 from defender.tenancy._tenant import Tenant, TenantRefused
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
 
-#: The report line's classes (OD2). `stale:*` keeps a run with a snapshot going; `misconfigured`
-#: refuses it (O9); anything else is a failed child (U11).
-FRESH, STALE, PINNED = "fresh", "stale", "pinned"
-TRANSIENT, OPERATOR = "transient", "operator"
-MISCONFIGURED = "misconfigured"
-_STALE_PREFIX = "stale:"
+#: The report line's classes (OD2) are `tenancy._publish_status`'s, shared with the child that
+#: writes them. `stale:*` keeps a run with a snapshot going; `misconfigured` refuses it (O9);
+#: anything else is a failed child (U11). A source is fresh, stale or pinned.
+STALE, PINNED = "stale", "pinned"
 
 #: How long a failed child's summary may run in the reason, so one line stays one line.
 _SUMMARY_LIMIT = 300
@@ -75,6 +81,12 @@ def child_failed(summary: object) -> PublishReport:
                          unreadable=True)
 
 
+def failed_line(summary: object) -> str:
+    """U11's report line for a child with no valid one of its own (`child_failed`'s, as a
+    line): what the launcher returns, and records, in the child's place."""
+    return f"{STALE_OPERATOR} {child_failed(summary).reason}"
+
+
 def read_publish_report(line: object) -> PublishReport:
     """The child's report line (OD2: `fresh <commit>`, `stale:transient <reason>`,
     `stale:operator <reason>`, `misconfigured <reason>`), or U11's `stale:operator` for anything
@@ -90,8 +102,8 @@ def read_publish_report(line: object) -> PublishReport:
         if OID.fullmatch(rest):
             return PublishReport(FRESH, commit=rest)
         return child_failed(f"fresh without a full commit id: {text!r}")
-    if head in (f"{_STALE_PREFIX}{TRANSIENT}", f"{_STALE_PREFIX}{OPERATOR}") and rest:
-        return PublishReport(STALE, stale_kind=head.removeprefix(_STALE_PREFIX), reason=rest)
+    if head in (f"{STALE_PREFIX}{TRANSIENT}", f"{STALE_PREFIX}{OPERATOR}") and rest:
+        return PublishReport(STALE, stale_kind=head.removeprefix(STALE_PREFIX), reason=rest)
     if head == MISCONFIGURED and rest:
         return PublishReport(MISCONFIGURED, reason=rest)
     return child_failed(f"unrecognised report line: {text!r}")
@@ -270,6 +282,6 @@ def write_host_record(path: Path, source: KnowledgeSource) -> None:
 __all__ = [
     "FRESH", "MISCONFIGURED", "OPERATOR", "PINNED", "STALE", "STAGE", "STAGE_TOKEN",
     "TRANSIENT", "KnowledgeRefused", "KnowledgeSource", "PublishReport", "RunCopy",
-    "child_failed", "copy_for_run", "pinned_commit", "read_publish_report", "resolve_source",
+    "child_failed", "copy_for_run", "failed_line", "pinned_commit", "read_publish_report", "resolve_source",
     "write_host_record",
 ]

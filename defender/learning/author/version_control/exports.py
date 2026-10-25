@@ -16,7 +16,7 @@ from typing import IO
 
 from defender import _flock, _io
 from defender.tenancy._exports import POINTER as _POINTER
-from defender.tenancy._exports import TenantExport, current_export
+from defender.tenancy._exports import TenantExport, current_export, lock_pid
 from defender.tenancy._exports import remove_entry as _remove_entry
 from defender.tenancy._tenant import Tenant, parse_tenant_id_bytes
 
@@ -45,9 +45,9 @@ def _lock_holder(handle: IO[str]) -> str:
     as it has the lock, so an empty file is read again briefly before giving up on naming it."""
     for _attempt in range(25):
         handle.seek(0)
-        written = handle.read(32).strip()
-        if written.isdigit():
-            return f"pid {written}"
+        pid = lock_pid(handle.read(32))
+        if pid is not None:
+            return f"pid {pid}"
         time.sleep(0.02)
     return "another process (its pid is not written yet)"
 

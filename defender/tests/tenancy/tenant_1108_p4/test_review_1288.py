@@ -6,6 +6,16 @@ seam that now carries it.
 - the publish child holds ONE deadline over its network phase and reports, and records, running
   out of it itself;
 - the launcher records the outcomes only it sees (a child that crashed or printed nothing).
+
+Second round:
+- every outcome the child reports is recorded from the report line itself (lock busy too);
+- a deadline that is not positive is already out, never "no deadline";
+- the run's agent folder and its stage are judged before the box-or-host choice, so the
+  unsandboxed opt-out never swallows a stage refusal;
+- the reducer pitfalls page the curator writes is the page a gather dispatch names, and the
+  tenant template ships it;
+- removing a batch's draft never raises; a missing alert is refused before any publish; two
+  launches into one held-out index cannot interleave their pin read and append.
 """
 from __future__ import annotations
 
@@ -139,3 +149,193 @@ def test_control_a_child_that_reports_validly_is_not_recorded_by_the_launcher(p4
     assert line == "stale:transient the forge is down"
     status = _status(p4_tenant)
     assert status is None or "publish child failed" not in status.get("refused", ""), status
+
+
+# --- second round: one recorder for every reported outcome -------------------------------------
+
+def _lock(t):
+    from defender.learning.author.version_control import tenant_lock
+
+    return tenant_lock(t.tenant)
+
+
+def test_a_lock_busy_publish_records_its_outcome_and_clears_an_earlier_refusal(
+        child_tenant, tmp_path):
+    """A refusal is recorded; then every launch overlaps a drain holding the lock while
+    `current` already names `origin/main`. Each reports `fresh`, and `check` must say so
+    rather than keep showing the old refusal."""
+    from defender.tenancy._publish_status import OPERATOR, record_refusal
+
+    t = child_tenant
+    config = B.write_issuer_config(tmp_path / "operator")
+    record_refusal(t.tenant, kind=OPERATOR, reason="the issuer is sealed", by="launch-time publish")
+    with _lock(t):
+        line = B.run_child(t, config)
+    assert line.startswith("fresh "), line
+    status = _status(t)
+    assert status is not None
+    assert status.get("published") == t.commit, status
+    assert "refused" not in status, status
+
+
+def test_a_lock_busy_stale_publish_is_recorded_transient(child_tenant, tmp_path):
+    t = child_tenant
+    config = B.write_issuer_config(tmp_path / "operator")
+    t.merge(B.MERGE_FILES)
+    with _lock(t):
+        line = B.run_child(t, config)
+    assert line.startswith("stale:transient "), line
+    status = _status(t)
+    assert status is not None
+    assert status.get("kind") == "transient", status
+    assert "lock is busy" in status.get("refused", ""), status
+
+
+def test_a_zero_budget_is_already_out_not_unbounded(child_tenant, tmp_path):
+    """`setitimer(0)` disarms a timer: a budget of 0 must end the network phase at once."""
+    t = child_tenant
+    config = B.write_issuer_config(tmp_path / "operator")
+
+    def slow(_request):
+        time.sleep(3.0)
+
+    t.forge.fault = slow
+    began = time.monotonic()
+    line = B.run_child(t, config, budget=0.0)
+    assert time.monotonic() - began < 2.0, "a zero budget let the network phase run"
+    assert line.startswith("stale:transient "), line
+    assert "budget" in line, line
+
+
+@pytest.mark.parametrize("budget", [0.0, -1.0])
+def test_the_launcher_refuses_a_budget_that_is_not_positive(tmp_path, budget):
+    from defender.runtime import publish_launch
+    from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
+
+    spawn = _RecordingSpawn()
+    with pytest.raises(ValueError, match="positive"):
+        publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=budget,
+                                      spawn=spawn)
+    assert spawn.calls == [], "a child was started with no time to run in"
+
+
+def test_the_launcher_and_run_start_build_one_failed_child_line():
+    from defender.runtime import run_knowledge
+
+    line = run_knowledge.failed_line("it printed no report line")
+    report = run_knowledge.read_publish_report(line)
+    assert report.kind == run_knowledge.STALE, report
+    assert report.stale_kind == "operator", report
+    assert report.reason == run_knowledge.child_failed("it printed no report line").reason
+
+
+# --- second round: the stage is judged on both paths -------------------------------------------
+
+def _stage(tmp_path: Path) -> tuple[Path, Path]:
+    stage = tmp_path / "copy" / "stage"
+    (stage / "agent").mkdir(parents=True)
+    token = stage / "token"
+    token.write_text("t0ken", encoding="utf-8")
+    return stage, token
+
+
+def _no_docker(*_a, **_k):
+    raise AssertionError("docker was reached before the stage was judged")
+
+
+@pytest.mark.parametrize("fault", ["another-agent", "extra-entry"])
+def test_a_stage_fault_is_refused_even_with_the_unsandboxed_opt_out(tmp_path, monkeypatch, fault):
+    """With `DEFENDER_ALLOW_UNSANDBOXED=1` a box fault degrades to the host. A stage that is not
+    this run's must still refuse, on the host path too, and write the did-not-run marker."""
+    from defender.box import BoxFault, BoxSpec
+    from defender.box import _lifecycle
+
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    stage, token = _stage(tmp_path)
+    agent = stage / "agent"
+    if fault == "another-agent":
+        agent = tmp_path / "elsewhere" / "agent"
+        agent.mkdir(parents=True)
+    else:
+        (stage / "settings").mkdir()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    verdicts: list[dict] = []
+    with pytest.raises(BoxFault):
+        _lifecycle._start_run_box(run_dir, tmp_path, BoxSpec(), _no_docker, agent, token,
+                                  verdicts.append)
+    assert verdicts, "the refusal wrote no did-not-run marker"
+
+
+# --- second round: the reducer pitfalls page is one name, shipped and named ---------------------
+
+def test_the_template_ships_the_reducer_pitfalls_page_the_curator_edits():
+    from defender.knowledge._knowledge import AGENT_REL, REDUCER_PITFALLS
+    from defender.learning.leads.pitfalls_curator import PITFALLS_SECTION, REDUCER_REL
+    from defender.tenancy._tenants import template_dir
+    from defender._git import REPO_ROOT
+
+    assert f"{AGENT_REL}/{REDUCER_PITFALLS}" == REDUCER_REL
+    page = template_dir(REPO_ROOT) / REDUCER_REL
+    assert page.is_file(), "a fresh tenant has no reducer pitfalls page: the curator would mint it"
+    assert PITFALLS_SECTION in page.read_text(encoding="utf-8").splitlines()
+
+
+def test_a_gather_dispatch_names_the_run_copys_reducer_pitfalls_page():
+    from defender.runtime import tools as tools_mod
+    from defender.runtime.agent_definition import compile_policy_for
+    from defender.runtime.driver import MAIN_DEF
+    from defender.runtime.tools_gather import GatherRequest, _gather_prompt
+    from defender.tests.support.tenancy import _tenants1106 as T1106
+
+    defender_dir = Path(__file__).resolve().parents[3]
+    run_dir = Path("/tmp/x")
+    deps = tools_mod.AgentDeps(
+        run_dir=run_dir, defender_dir=defender_dir, run_id="r",
+        policy=compile_policy_for(MAIN_DEF, run_dir=run_dir, defender_dir=defender_dir),
+        cwd_anchor=run_dir, tenant=T1106.fixture_run_tenant())
+    page = deps.knowledge.reducer_pitfalls
+    assert page.is_file(), "the fixture tenant carries the page"
+    prompt = _gather_prompt(deps, GatherRequest("l-1", "elastic", "g", ("x",)), catalog=None)
+    assert f"reducer_pitfalls: {deps.view.to_model(page)}" in prompt, prompt
+    skill = (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
+    assert "reducer_pitfalls" in skill, "the gather skill never tells the agent to read it"
+
+
+# --- second round: cleanup, alert, held-out index ----------------------------------------------
+
+def test_a_draft_that_cannot_be_removed_is_logged_not_raised(tmp_path, caplog):
+    from types import SimpleNamespace
+
+    from defender.learning.author.version_control.batch import Batch
+
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("x", encoding="utf-8")
+    batch = SimpleNamespace(id="b1", draft_root=blocker / "draft" / "root")
+    Batch.discard(batch)  # type: ignore[arg-type]
+    assert any("could not be removed" in r.getMessage() for r in caplog.records), caplog.text
+
+
+def test_a_missing_alert_is_refused_before_the_launch_time_publish(p4_tenant, tmp_path):
+    def publish(*_a, **_k):
+        raise AssertionError("the publish ran for a run with no alert")
+
+    out = B.launch(p4_tenant, tmp_path, publish=publish, alert_dir=tmp_path / "nowhere")
+    assert out.publish_calls == [], out.text()
+    assert out.refusal is not None, out.text()
+    assert "alert not found" in out.refusal, out.text()
+
+
+def test_an_exclusively_held_index_folder_excludes_another_process(tmp_path):
+    from defender import _io
+
+    probe = ("import fcntl, os, sys\n"
+             "fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)\n"
+             "try:\n    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\nexcept OSError:\n"
+             "    sys.exit(7)\n")
+    with _io.hold(tmp_path) as held:
+        with held.exclusive():
+            busy = subprocess.run([sys.executable, "-c", probe, str(tmp_path)], check=False)  # noqa: S603
+        free = subprocess.run([sys.executable, "-c", probe, str(tmp_path)], check=False)  # noqa: S603
+    assert busy.returncode == 7, "another process took the folder while it was held"
+    assert free.returncode == 0, "control: the folder is free once released"

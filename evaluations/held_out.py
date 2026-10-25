@@ -190,11 +190,14 @@ def launch(slug: str, index: Path, fixtures_dir: Path, *, tenant_id: str, spawn:
         if data_root_contains(data_root, absolute):
             raise IndexRefused(f"it is under the data root {data_root_description(data_root)}, where a box or the loop can "
                                "write it")
-        pin, record = _index_pin(held, leaf, data_root, tenant_id)
         run_id = str(RunId.mint())
         row = json.dumps({"slug": slug, "run_id": run_id})  # lint-jsonl-io: ok — one row through the held folder's no-follow append; `append_jsonl` follows the spelling
+        # F's folder held exclusively from the pin's read to this launch's append: two first
+        # launches into one F cannot both find no pin and each record their own (OD10).
         try:
-            held.write(leaf, record + row + "\n", mode="append", durable=True)
+            with held.exclusive():
+                pin, record = _index_pin(held, leaf, data_root, tenant_id)
+                held.write(leaf, record + row + "\n", mode="append", durable=True)
         except OSError as exc:
             raise IndexRefused(f"its row could not be appended: {exc.strerror or exc}") from None
     print(f"{slug} {run_id}")

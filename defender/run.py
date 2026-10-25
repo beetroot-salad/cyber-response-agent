@@ -882,6 +882,13 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
         source = (None if world is None
                   else _open_world_source(accepted.runs_repository(), world))
 
+        # The one refusal knowable without the run's knowledge, made before the launch-time
+        # publish spends up to its budget on the issuer and the forge: an ordinary run's alert
+        # file is not there (looked at, not read). The tenant's readiness and the billable role
+        # preflight are judged over the run's own copy of its knowledge, so they follow it.
+        if world is None and not ns.alert.is_file():
+            sys.exit(f"alert not found: {ns.alert.resolve()}")
+
         # #1108 P4 (flow 3): the knowledge this run reads — the launch-time publish's outcome
         # (or the pin), one export — copied into the run's own folder, named by its run id,
         # before anything reads it. The copy is the run's alone and is removed when it ends.
@@ -889,8 +896,9 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
         knowledge = _knowledge_source(accepted, pin=pin, publish=publish, data_root=data_root)
         copy = _copy_knowledge(accepted, knowledge, run_id)
         try:
-            # The tenant's settings (and with them the one tenant check), resolved before the input
-            # is read and before anything is spent; nothing below reads them again.
+            # The tenant's settings (and with them the one tenant check), over the run's copy:
+            # resolved before the input is read and before anything billable is spent; nothing
+            # below reads them again.
             tenant = tenant_of()
             # The run's one judgement of its systems (#1256), before the run is made: the roster
             # this run reads (the injected one, or the checkout's, read once here), judged by the
@@ -914,7 +922,8 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
             seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
 
             # The input is read after the tenant check and the role preflight: a tenant the check
-            # refuses is told so before anything about its input is.
+            # refuses is told so before anything about its input is — save that an ordinary
+            # run's alert file is absent, refused above before the publish spends anything.
             alert, _arm_id = _case_input(ns, world, episode_runs)
 
             # The handle, not just its directory: the post-run step saves the run page through it.

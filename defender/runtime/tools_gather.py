@@ -278,9 +278,15 @@ def _gather_prompt(
     wts = "\n".join(
         f"  - {_yaml_scalar(d, '      ', parent_indent=2)}" for d in request.what_to_summarize
     ) or "  - (unspecified)"
+    # The tenant's pitfalls add-on to the product's `defender-sql` page, the file the pitfalls
+    # curator writes (one name, `knowledge.REDUCER_PITFALLS`); named only when the run's copy
+    # carries it, so gather never spends a turn on a failing read.
+    reducer = knowledge.reducer_pitfalls
+    pitfalls = (f"reducer_pitfalls: {view.to_model(reducer)}\n" if reducer.is_file() else "")
     block += (
         "\n## Dispatch\n```yaml\n"
         f"defender_dir: {view.to_model(deps.defender_dir)}\n"
+        f"{pitfalls}"
         f"run_dir: {view.to_model(deps.run_dir)}\n"
         f"lead_id: {request.lead_id}\n"
         f"system: {request.system}\n"

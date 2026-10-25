@@ -15,6 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.knowledge._corpus import _FENCE_RE
+from defender.knowledge._knowledge import AGENT_REL, REDUCER_PITFALLS
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
@@ -54,11 +55,11 @@ _logger = logging.getLogger(__name__)
 LEAD_PITFALLS_PROMPT = LEARNING_DIR / "leads" / "lead_pitfalls.md"
 
 #: The reducer surface: the one literal `_pitfalls_path_rule` admits beyond a declared system's
-#: `execution.md` — the tenant's pitfalls add-on to the product's `defender-sql` page, which
-#: the gather subagent reads beside it before writing SQL (the same before-the-attempt criterion
-#: that put system pitfalls in `execution.md`). The product page itself is never written
-#: (#1108 P4 O1, O7).
-REDUCER_REL = f"{SKILLS_PREFIX}gather/defender-sql.pitfalls.md"  # lint-stage-frame: ok — a path
+#: `execution.md` — the tenant's pitfalls add-on to the product's `defender-sql` page
+#: (`knowledge.REDUCER_PITFALLS`, the same name the gather dispatch hands the subagent, which
+#: reads it beside the product page before writing SQL). The product page itself is never
+#: written (#1108 P4 O1, O7).
+REDUCER_REL = f"{AGENT_REL}/{REDUCER_PITFALLS}"  # lint-stage-frame: ok — a path
 
 #: The one section a curator addition may land in, on either surface. `_pitfalls_content_rule`
 #: enforces it on the reducer surface; the prompt asks for it on both.

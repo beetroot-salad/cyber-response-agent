@@ -20,6 +20,11 @@ RUNTIME_LESSON_CORPORA = frozenset({LESSONS})
 SKILLS = "skills"
 #: The saved query catalog, under the agent root.
 CATALOG = f"{SKILLS}/gather/queries"
+#: The tenant's pitfalls add-on to the product's `defender-sql` reducer page, under the agent
+#: root: the pitfalls curator's one write target beyond a system's `execution.md`, and the page
+#: a gather dispatch names beside the product page (#1108 P4 O1: the product page is never
+#: written). The tenant template ships it, so the curator only ever edits it.
+REDUCER_PITFALLS = f"{SKILLS}/gather/defender-sql.pitfalls.md"
 #: A name no catalog file may take: the catalog's schema once lay beside its templates under
 #: this name, and the lead lane's gates still refuse it (the format is the product's
 #: `skills/gather/query-schema.md` now).
@@ -64,6 +69,10 @@ class KnowledgePaths:
     @property
     def catalog_dir(self) -> Path:
         return self.agent_root / CATALOG
+
+    @property
+    def reducer_pitfalls(self) -> Path:
+        return self.agent_root / REDUCER_PITFALLS
 
     def rel(self, sub: str) -> str:
         """`sub`'s spelling relative to the tenant repo (`agent/<sub>/`), with a trailing slash."""

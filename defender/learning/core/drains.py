@@ -868,10 +868,7 @@ def _run_opened_batch(  # noqa: PLR0913 — one batch, kept whole
                 f"{label}: batch not consumed — left for the next tick's reclaim, up to: "
                 f"{disposition.retained_summary()}"
             )
-        try:
-            batch.discard()
-        except Exception as e:  # noqa: BLE001 — best-effort cleanup; the real fault outranks it
-            _logger.error(f"{label}: the batch's draft could not be removed: {e!r}")
+        batch.discard()
     return 0
 
 

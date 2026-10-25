@@ -22,11 +22,16 @@ import httpx
 from defender import _git
 from defender._text import one_line
 from defender.tenancy._publish_status import (
+    FRESH,
+    MISCONFIGURED,
     OPERATOR,
+    STALE_OPERATOR,
+    STALE_TRANSIENT,
     TRANSIENT,
     read_status,
     record_published,
     record_refusal,
+    record_report,
 )
 from defender.tenancy._tenant import Tenant
 
@@ -101,6 +106,7 @@ def recording(tenant: Tenant, *, by: str) -> Iterator[None]:
 
 
 __all__ = [
-    "OPERATOR", "TRANSIENT", "classify", "read_status", "record_published",
-    "record_refused", "recording",
+    "FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT",
+    "classify", "read_status", "record_published", "record_refused", "record_report",
+    "recording",
 ]

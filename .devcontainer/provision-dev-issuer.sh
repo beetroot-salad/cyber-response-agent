@@ -237,19 +237,33 @@ client_config() {  # client_config tenant -> the tenant's own AppRole client con
 }
 
 write_client_config() {  # write_client_config token tenant rotate: one file per tenant
-  local t=$1 tenant=$2 rotate=$3 config secret
+  local t=$1 tenant=$2 rotate=$3 config secret minted keep
   config=$(client_config "$tenant")
   mkdir -p "$(dirname "$config")"
   chmod 0700 "$(dirname "$config")"
   if [ "$rotate" = yes ] || [ ! -s "$config" ] || [ "$(jq -r .role_id "$config")" != "$ROLE_ID" ]; then
-    secret=$(bao "$t" write -f -field=secret_id auth/approle/role/"$APPROLE"/secret-id)
+    minted=$(bao "$t" write -f -format=json auth/approle/role/"$APPROLE"/secret-id)
+    secret=$(jq -r .data.secret_id <<<"$minted")
+    keep=$(jq -r .data.secret_id_accessor <<<"$minted")
     jq -n --arg issuer "$IDENTITY" --arg ca "$STATE/trust/dev-issuer-ca.pem" \
       --arg role_id "$ROLE_ID" --arg secret_id "$secret" \
       '{issuer: $issuer, ca_cert: $ca, role_id: $role_id, secret_id: $secret_id}' > "$config.tmp"
     chmod 0600 "$config.tmp"
     mv "$config.tmp" "$config"
+    # The tenant's role keeps exactly the secret just written: every earlier one (secret_ids
+    # never expire here) is destroyed, so a rotation retires a leaked config.
+    revoke_other_secrets "$t" "$keep"
     say "wrote the AppRole client config $config"
   fi
+}
+
+revoke_other_secrets() {  # revoke_other_secrets token keep: destroy every role secret but keep
+  local t=$1 keep=$2 accessor
+  for accessor in $(bao "$t" list -format=json auth/approle/role/"$APPROLE"/secret-id 2>/dev/null                     | jq -r '.[]'); do
+    [ "$accessor" = "$keep" ] && continue
+    bao "$t" write auth/approle/role/"$APPROLE"/secret-id-accessor/destroy \
+      secret_id_accessor="$accessor" >/dev/null
+  done
 }
 
 bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, issuer_role, issuer_config}

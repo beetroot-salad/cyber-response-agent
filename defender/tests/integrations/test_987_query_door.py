@@ -117,7 +117,7 @@ def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None
     # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
     # the dispatch's breaker screen reads it.
     deps = replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
-                   run_state=RunState(run_dir, "r-987"))
+                   run_state=RunState(run_dir, "r-987"), tenant=T1106.fixture_run_tenant())
 
     def factory(agent_id: str, system: str, request_limit: int):
         if handed is not None:

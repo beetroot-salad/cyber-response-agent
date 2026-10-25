@@ -44,21 +44,18 @@ from .issuer import issuer_config_path, issuer_login, read_issuer_config
 from .model import DeliveryRefused, LockBusy, _refusals
 from .repository import GitRepository
 from .status import (
+    FRESH,
+    MISCONFIGURED,
     OPERATOR,
-    TRANSIENT,
+    STALE_OPERATOR,
+    STALE_TRANSIENT,
     classify,
-    record_published,
-    record_refusal,
-    record_refused,
+    record_report,
 )
 
 if TYPE_CHECKING:
     import httpx
 
-FRESH = "fresh"
-STALE_TRANSIENT = "stale:transient"
-STALE_OPERATOR = "stale:operator"
-MISCONFIGURED = "misconfigured"
 #: Every report line's first word.
 REPORT_CLASSES = (FRESH, STALE_TRANSIENT, STALE_OPERATOR, MISCONFIGURED)
 #: Each network call's own bound in the child (issuer, forge, fetch). The calls together are
@@ -96,17 +93,36 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
     outcome for `tenant.py check` (O-SEE). With the lock busy the outcome is `fresh` when
     `current` already names the fetched `origin/main`, else `stale:transient`. `budget` is
     the one deadline over the network phase (login, open, fetch; none when `None`): past it,
-    `stale:transient`, recorded. Clients made here are closed before it returns."""
+    `stale:transient`. Clients made here are closed before it returns. Every outcome reported
+    for an accepted tenant is recorded, once, from the report line itself."""
     try:
         tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
     except TenantRefused as refused:
         return report(STALE_OPERATOR, f"the tenant was not accepted: {refused}")
+    line = _publish_unrecorded(
+        tenant, issuer_config=issuer_config, client=client, issuer_transport=issuer_transport,
+        identity=identity, network_timeout=network_timeout, locked_hook=locked_hook,
+        budget=budget)
+    record_report(tenant, line, by=_TRIGGER)
+    return line
+
+
+def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outcome unrecorded
+    tenant: Tenant,
+    *,
+    issuer_config: Path | None,
+    client: httpx.Client | None,
+    issuer_transport: httpx.BaseTransport | None,
+    identity: ForgejoIdentity | None,
+    network_timeout: float | None,
+    locked_hook: Callable[[], None] | None,
+    budget: float | None,
+) -> str:
     try:
         binding = read_forge_binding(tenant)
         issuer_config = issuer_config_path(binding, issuer_config)
         read_issuer_config(issuer_config)
     except (DeliveryRefused, TenantRefused) as misconfigured:
-        record_refused(tenant, misconfigured, by=_TRIGGER)
         return report(MISCONFIGURED, str(misconfigured))
     timeout = CHILD_NETWORK_TIMEOUT if network_timeout is None else network_timeout
     repository: GitRepository | None = None
@@ -140,17 +156,13 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
                 finally:
                     _LOCKED.leave()
     except _OutOfTime as late:
-        reason = (f"the launch-time publish did not finish its network phase within its "
-                  f"{late.budget:g}s budget")
-        record_refusal(tenant, kind=TRANSIENT, reason=reason, by=_TRIGGER)
-        return report(STALE_TRANSIENT, reason)
+        return report(STALE_TRANSIENT, f"the launch-time publish did not finish its network "
+                                       f"phase within its {late.budget:g}s budget")
     except LockBusy as busy:
         return _lock_busy(tenant, repository, busy)
     except DeliveryRefused as refused:
-        record_refused(tenant, refused, by=_TRIGGER)
         kind, reason = classify(refused)
         return report(STALE_OPERATOR if kind == OPERATOR else STALE_TRANSIENT, reason)
-    record_published(tenant, export.commit, by=_TRIGGER)
     return report(FRESH, export.commit)
 
 
@@ -209,11 +221,14 @@ def _on_terminate(_signum: int, _frame: FrameType | None) -> None:
 
 @contextlib.contextmanager
 def _deadline(budget: float | None) -> Iterator[None]:
-    """`_OutOfTime` once `budget` seconds pass inside the block (nothing when `None`). Scoped
-    to the network phase, so the locked phase and the report after it are never cut off."""
+    """`_OutOfTime` once `budget` seconds pass inside the block (nothing when `None`; at once,
+    on entry, when it is not positive: an interval timer of 0 is no timer). Scoped to the
+    network phase, so the locked phase and the report after it are never cut off."""
     if budget is None:
         yield
         return
+    if budget <= 0:
+        raise _OutOfTime(budget)
 
     def expired(_signum: int, _frame: FrameType | None) -> None:
         raise _OutOfTime(budget)

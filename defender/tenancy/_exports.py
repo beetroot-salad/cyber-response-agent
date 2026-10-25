@@ -95,7 +95,12 @@ def knowledge_lock_holder(tenant: Tenant) -> int | None:
     path = _unwrap_knowledge_lock(tenant.knowledge_lock)
     with _io.bind(path.parent) as folder:
         read = folder.read(path.name, errors="replace")
-    written = (read.text or "").strip()
+    return lock_pid(read.text or "")
+
+
+def lock_pid(written: str) -> int | None:
+    """The pid a knowledge lock file's text names (its holder writes it bare), or `None`."""
+    written = written.strip()
     return int(written) if written.isdigit() else None
 
 

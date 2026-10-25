@@ -30,11 +30,10 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from defender._text import one_line
 from defender.run_common import provider_scrubbed_environ
 from defender.runtime import run_knowledge
 from defender.tenancy._exports import knowledge_lock_holder
-from defender.tenancy._publish_status import OPERATOR, TRANSIENT, record_refusal
+from defender.tenancy._publish_status import STALE_TRANSIENT, record_report
 from defender.tenancy._tenant import (
     Tenant,
     TenantRefused,
@@ -53,8 +52,6 @@ _REPORT_MARGIN = 5.0
 _TRIGGER = "launch-time publish"
 #: How long a child asked to stop (SIGTERM) may take to unwind before it is killed.
 _STOP_GRACE = 5.0
-#: The most of a failed child's own words a summary carries.
-_SUMMARY_LIMIT = 200
 
 Spawn = Callable[..., Any]
 
@@ -66,16 +63,13 @@ def _tenant(tenant_id: str, data_root: Path) -> Tenant | None:
         return None
 
 
-def _recorded(tenant_id: str, data_root: Path, line: str, *, kind: str) -> str:
-    """`line`, an outcome the child never recorded, recorded as `kind` for `tenant.py check`."""
+def _recorded(tenant_id: str, data_root: Path, line: str) -> str:
+    """`line`, an outcome the child never recorded, recorded for `tenant.py check` by the
+    child's own recorder (`record_report`), so it reads as the child's would."""
     tenant = _tenant(tenant_id, data_root)
     if tenant is not None:
-        record_refusal(tenant, kind=kind, reason=line.partition(" ")[2], by=_TRIGGER)
+        record_report(tenant, line, by=_TRIGGER)
     return line
-
-
-def _failed(summary: str) -> str:
-    return f"stale:operator publish child failed: {one_line(summary)[:_SUMMARY_LIMIT]}"
 
 
 def child_budget(budget: float) -> float:
@@ -93,7 +87,10 @@ def launch_publish(
 ) -> str:
     """Run the publish child for `tenant_id` under `data_root` and return its report line (module
     doc). `command` replaces the child's argv prefix (the launcher appends `<tenant id>
-    --data-root <root> --budget <seconds>`); `spawn` is `subprocess.Popen`'s stand-in."""
+    --data-root <root> --budget <seconds>`); `spawn` is `subprocess.Popen`'s stand-in. A
+    `budget` that is not positive is a caller's error (`ValueError`): there is no wait to give."""
+    if not budget > 0:
+        raise ValueError(f"the launch-time publish budget must be positive, not {budget!r}")
     prefix = list(command) if command is not None else [sys.executable, "-m", CHILD_MODULE]
     argv = [*prefix, str(tenant_id), "--data-root", str(data_root),
             "--budget", f"{child_budget(budget):g}"]
@@ -103,9 +100,9 @@ def launch_publish(
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=provider_scrubbed_environ(), cwd=str(_REPO_ROOT), start_new_session=True)
     except (OSError, ValueError) as unstarted:
-        return _recorded(tenant_id, data_root, _failed(
+        return _recorded(tenant_id, data_root, run_knowledge.failed_line(
             f"it could not be started: {type(unstarted).__name__}: "
-            f"{getattr(unstarted, 'strerror', None) or unstarted}"), kind=OPERATOR)
+            f"{getattr(unstarted, 'strerror', None) or unstarted}"))
     try:
         out, err = proc.communicate(timeout=budget)
     except subprocess.TimeoutExpired:
@@ -113,11 +110,11 @@ def launch_publish(
             _stop(proc, tenant_id, data_root)
             return _recorded(
                 tenant_id, data_root,
-                f"stale:transient the launch-time publish did not finish its network phase "
-                f"within the {budget:g}s budget", kind=TRANSIENT)
+                f"{STALE_TRANSIENT} the launch-time publish did not finish its network phase "
+                f"within the {budget:g}s budget")
         out, err = proc.communicate()
     line, failed = _read_report(proc.returncode, out, err)
-    return _recorded(tenant_id, data_root, line, kind=OPERATOR) if failed else line
+    return _recorded(tenant_id, data_root, line) if failed else line
 
 
 def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:
@@ -162,14 +159,15 @@ def _read_report(
     said = [line.strip() for line in text(out).splitlines() if line.strip()]
     if returncode != 0:
         why = text(err).strip().splitlines()
-        return _failed(
+        return run_knowledge.failed_line(
             f"it exited with status {returncode}" + (f": {why[-1]}" if why else "")), True
     if not said:
-        return _failed("it printed no report line"), True
+        return run_knowledge.failed_line("it printed no report line"), True
     # The report is the child's last line: a stray line printed before it (a library's
     # warning on stdout) does not turn a reported outcome into a failure. Its grammar is run
     # start's own (`run_knowledge.read_publish_report`), judged once there.
     line = said[-1]
     if run_knowledge.read_publish_report(line).unreadable:
-        return _failed(f"its report is not one of the publish outcomes: {line!r}"), True
+        return run_knowledge.failed_line(
+            f"its report is not one of the publish outcomes: {line!r}"), True
     return line, False
