@@ -425,7 +425,8 @@ PLANTS: dict[str, Plant] = {
     "lint_unowned_field": Plant('def produce_1191():\n    """@owns"""\n'),
     "lint_unnarrowed_parse": Plant(
         "import json\n\n\ndef parse_1191(text: str) -> dict[str, int]:\n"
-        "    return json.loads(text)\n"),
+        "    return json.loads(text)\n",
+        support=lambda: {"evaluations/inert_1191.py": ""}),
     "lint_monkeypatch": Plant(MONKEYPATCH_PLANT),
     "lint_ungated_artifact_write": Plant(
         'def write_1191(d):\n    (d / "report.md").write_text("x", encoding="utf-8")\n'),

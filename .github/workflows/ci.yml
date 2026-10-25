@@ -925,10 +925,11 @@ jobs:
       # readers institutionalizes the per-reader hardening that caused the defect. The second
       # check is the same rule for time: a bare `datetime.fromisoformat` outside the module
       # owning `defender._clock.parse_iso_utc`, whose docstring names the naive-vs-aware
-      # TypeError it produces. 21 entries baselined with `require_reasons=True` — 4 are #878's
-      # own, 9 are oracle_golden readers weak because their input is the checked-in golden
-      # corpus, 8 are older first-party debt; each says what has to fold before it can go. A
-      # clean run means no new SEAM — NOT that no deref is unguarded (see the module docstring).
+      # TypeError it produces. Scans defender/ AND evaluations/: #1268 moved the oracle_golden
+      # tooling out of defender/, and a defender-only scope dropped its seams from the gate while
+      # the code stayed. 9 entries baselined with `require_reasons=True` — 4 in defender/, 5 in
+      # evaluations/oracle_golden; each says what has to fold before it can go. A clean run
+      # means no new SEAM — NOT that no deref is unguarded (see the module docstring).
       - name: Un-narrowed-parse gate (the parse and the shape check are one construction, #878 — baseline-ratcheted)
         run: defender/.venv/bin/python tooling/lint/lint_unnarrowed_parse.py
 
