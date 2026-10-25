@@ -693,6 +693,21 @@ jobs:
       - name: Scrub-order fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_scrub_order.py
 
+      # Isolated modules (#1092, #983): the box image scripts import only the standard library, and
+      # the tacit-knowledge registry adapter never writes.
+      - name: Isolated-module fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_isolated_modules.py
+
+      # Venv guard (#1080): execution/_venv.py is standard-library-only, and every script that
+      # re-executes into the venv does so before any other defender import.
+      - name: Venv-guard fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_venv_guard.py
+
+      # Close single read (#991): the close reads and parses the investigation companion once, the
+      # challenge gate reads nothing, and the one parse is guarded.
+      - name: Close single-read fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_close_single_read.py
+
       # Episode paths (#1133, #1187): episode trees are reached only through the Episode handle and
       # the runs repository's walk. The migrated modules make no episode I/O but the declared
       # residue, the handle does I/O only through hold / hold_new, no function takes a path below

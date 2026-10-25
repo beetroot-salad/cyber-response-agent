@@ -342,9 +342,8 @@ _MUTATING_STEMS = (
 
 def test_the_adapter_module_exports_nothing_that_writes():
     """The tacit-knowledge adapter's own PUBLIC SURFACE carries no write-capable function, and
-    its source performs no filesystem mutation (demand `registry_never_agent_written`)."""
-    import inspect
-    import re
+    its source performs no filesystem mutation (demand `registry_never_agent_written`; the source half
+    is `tooling/lint/lint_isolated_modules.py`)."""
 
     mod = registry()
     public = [n for n in dir(mod) if not n.startswith("_")]
@@ -366,17 +365,6 @@ def test_the_adapter_module_exports_nothing_that_writes():
         f"read-only system of record"
     )
 
-    src = inspect.getsource(mod)
-    for token in (
-        ".write_text(", ".write_bytes(", ".mkdir(", ".unlink(", ".rmdir(", ".rename(",
-        ".touch(", "yaml.safe_dump", "yaml.dump", "shutil.", "os.remove", "os.replace",
-    ):
-        assert token not in src, (
-            f"the adapter's source calls {token!r} — the registry lane is a READ end to end"
-        )
-    assert not re.search(r"open\([^)]*['\"][wax]", src), (
-        "the adapter opens a file for writing or appending"
-    )
 
 
 @pytest.mark.parametrize("verb", ["health-check", LOOKUP])
