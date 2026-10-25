@@ -272,11 +272,6 @@ def golden(name: str) -> Mapping[str, Any]:
     return data
 
 
-def base_inventory() -> Mapping[str, Any]:
-    """The base's `defender/scripts/` tree: tracked files, each module's module-level names,
-    the subfolders, the flat tier, the shims' hashes and which modules carried a `__main__`."""
-    return golden("base_inventory")
-
 
 def canon(value: Any) -> Any:
     """A JSON-shaped, TYPE-PRESERVING encoding of `value`, the one both sides of a golden
@@ -468,45 +463,3 @@ def shim_exec_target(shim: str, root: Path | None = None) -> Path:
     return (root or REPO_ROOT) / (shim_exec_module(shim, root).replace(".", "/") + ".py")
 
 
-def current_path(path: str) -> str:
-    """Translate source addresses while retaining the frozen baseline's contents."""
-    root_helpers = {
-        "defender/_tenant.py": "defender/tenancy/_tenant.py",
-        "defender/_tenants.py": "defender/tenancy/_tenants.py",
-        "defender/_tenant_census.py": "defender/tenancy/_tenant_census.py",
-        "defender/_knowledge.py": "defender/knowledge/_knowledge.py",
-        "defender/_corpus.py": "defender/knowledge/_corpus.py",
-        "defender/_query_rules.py": "defender/knowledge/_query_rules.py",
-        "defender/_scaffold_rules.py": "defender/knowledge/_scaffold_rules.py",
-        "defender/_episode_handle.py": "defender/episodes/_episode_handle.py",
-        "defender/_episode_paths.py": "defender/episodes/_episode_paths.py",
-        "defender/_episodes_root.py": "defender/episodes/_episodes_root.py",
-        "defender/_world_label.py": "defender/episodes/_world_label.py",
-        "defender/_alert_input.py": "defender/records/_alert_input.py",
-        "defender/_artifact_schema.py": "defender/records/_artifact_schema.py",
-        "defender/_provenance.py": "defender/records/_provenance.py",
-        "defender/_report.py": "defender/records/_report.py",
-        "defender/_run_id.py": "defender/records/_run_id.py",
-        "defender/_store_errors.py": "defender/records/_store_errors.py",
-        "defender/_async.py": "defender/execution/_async.py",
-        "defender/_process_group.py": "defender/execution/_process_group.py",
-        "defender/_command_line_run.py": "defender/execution/_command_line_run.py",
-        "defender/_venv.py": "defender/execution/_venv.py",
-        "defender/_env.py": "defender/configuration/_env.py",
-        "defender/_pricing.py": "defender/configuration/_pricing.py",
-    }
-    if path in root_helpers:
-        return root_helpers[path]
-    prefixes = {
-        "defender/learning/ops/": "defender/cli/learning/",
-        "defender/scripts/adapters/": "defender/integrations/",
-        "defender/scripts/visualize/": "defender/presentation/",
-        "defender/scripts/case_history/": "defender/integrations/",
-        "defender/scripts/gather_tools/": "defender/runtime/",
-        "defender/scripts/box_image.py": "defender/box/image_cli.py",
-        "defender/scripts/": "defender/cli/",
-    }
-    for old, new in prefixes.items():
-        if path.startswith(old):
-            return new + path[len(old):]
-    return path
