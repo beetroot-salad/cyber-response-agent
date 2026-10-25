@@ -1,7 +1,6 @@
 """#922 — O3: the cross-cutting invariants keep a witness the guard can still see."""
 from __future__ import annotations
 
-import ast
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -104,29 +103,6 @@ def test_922_the_framing_guard_discriminates_at_the_witnesses_own_construction(t
     assert [f for f in findings if "unwrapped.py" in f.display], (
         f"the guard did not object to an unframed section argument: {findings} — it cannot "
         "witness a witness that stops framing")
-
-
-def definition_modules() -> dict[str, str]:
-    """Each registry entry's DEF symbol -> the dotted module `agents.py` imports it from.
-
-    Read off `agents.py`'s own AST rather than from a list here: the registry tuple and its
-    import block are the two halves the cutover edits together, and a census that carried its
-    own copy of either would be the thing that stops witnessing when they are edited.
-    """
-    tree = ast.parse((DEFENDER / "agents.py").read_text(encoding="utf-8"))
-    registered: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "build_registry":
-            for arg in ast.walk(node):
-                if isinstance(arg, ast.Name):
-                    registered.add(arg.id)
-    out: dict[str, str] = {}
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                if alias.name in registered and alias.name.endswith("_DEF"):
-                    out[alias.name] = node.module
-    return out
 
 
 def test_922_a_verb_bearing_bit_over_an_empty_grant_is_still_refused():
