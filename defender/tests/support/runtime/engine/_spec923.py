@@ -462,18 +462,3 @@ def person_facing_refusal_defects(message: str, *, value: str) -> list[str]:
                 f"author is a person and cannot act on a tool-argument diagnostic"
             )
     return defects
-
-
-def shipping_modules() -> list[Path]:
-    """Every non-test Python module in the shipping tree.
-
-    The census surfaces below pick their SUBJECTS with this and then DRIVE each one; nothing
-    here asserts a structural property of a module, because a structural property the current
-    default already satisfies certifies that a field exists and never that it is wired."""
-    out: list[Path] = []
-    for path in sorted(DEFENDER.rglob("*.py")):
-        parts = set(path.relative_to(DEFENDER).parts)
-        if parts & {".venv", "tests", "__pycache__"}:
-            continue
-        out.append(path)
-    return out
