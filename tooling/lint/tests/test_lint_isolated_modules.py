@@ -16,6 +16,8 @@ _CLEAN = {
     "integrations/tacit_knowledge_adapter.py":
         "import yaml\nfrom pathlib import Path\n"
         "def load(p):\n    return yaml.safe_load(Path(p).read_text())\n",
+    "integrations/ticket_writer.py": "def write(env):\n    return env['X']\n",
+    "runtime/lead_zero/run.py": "def go(env):\n    return env\n",
     "hooks/budget_enforcer.py": "DEFAULT = 5\ndef cap(limits):\n    return limits.get('x', DEFAULT)\n",
 }
 
@@ -80,6 +82,25 @@ def test_a_budget_enforcer_read_of_the_environment_or_a_file_is_found(tmp_path, 
     src = f"import os, json\ndef f(p, f):\n    return {body}\n"
     found = _GATE.scan(_tree(tmp_path, **{"hooks__budget_enforcer.py": src}))
     assert len(found) >= 1 and all("budget_enforcer" in f for f in found), found
+
+
+@pytest.mark.parametrize("rel, body", [
+    ("integrations__ticket_writer.py", "process_defender_dir()"),
+    ("integrations__ticket_writer.py", "Path.cwd()"),
+    ("integrations__ticket_writer.py", "run_env(x)"),
+    ("integrations__ticket_writer.py", "os.environ['X']"),
+    ("runtime__lead_zero__run.py", "os.getenv('X')"),
+    ("runtime__lead_zero__run.py", "run_env(x)"),
+])
+def test_a_module_that_finds_its_own_environment_is_found(tmp_path, rel, body):
+    src = f"import os\ndef f(x):\n    return {body}\n"
+    found = _GATE.scan(_tree(tmp_path, **{rel: src}))
+    assert len(found) == 1, found
+
+
+def test_cwd_is_allowed_in_lead_zero(tmp_path):
+    src = "from pathlib import Path\ndef f():\n    return Path.cwd()\n"
+    assert _GATE.scan(_tree(tmp_path, **{"runtime__lead_zero__run.py": src})) == []
 
 
 def test_a_missing_file_is_a_finding(tmp_path):

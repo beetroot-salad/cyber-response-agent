@@ -1,7 +1,6 @@
 """Ticket writer record step: error receipts, redaction, atomic receipt write, env handed through."""
 from __future__ import annotations
 
-import ast
 import html
 import json
 import logging
@@ -114,24 +113,6 @@ def _records_carried(value: Any, *, _depth: int = 0, _seen: set[int] | None = No
     return out
 
 
-def _calls_in(module_path: Path, names: set[str], *, env_reads: bool = False) -> list[str]:
-    """`file:line call` for every call in `module_path` whose callee's last name is in `names`,
-    plus (`env_reads`) every `os.environ` / `os.getenv` reference — a census of what the module
-    finds for itself."""
-    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
-    hits: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            fn = node.func
-            last = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", None)
-            if last in names:
-                hits.append(f"{module_path.name}:{node.lineno} {last}()")
-        if (env_reads and isinstance(node, ast.Attribute) and node.attr in {"environ", "getenv"}
-                and isinstance(node.value, ast.Name) and node.value.id == "os"):
-            hits.append(f"{module_path.name}:{node.lineno} os.{node.attr}")
-    return hits
-
-
 def test_d_writer_context_from_run(tmp_path, monkeypatch):
     root, folder, alert = _world(tmp_path)
     run_id = "r-ctx"
@@ -158,8 +139,6 @@ def test_d_writer_context_from_run(tmp_path, monkeypatch):
         assert env.get("DEFENDER_RUN_DIR") == str(run_dir), (
             f"the writer's child names DEFENDER_RUN_DIR={env.get('DEFENDER_RUN_DIR')!r}, not "
             f"the run dir run.py passed ({run_dir}) — the process cwd leaked in")
-    found = _calls_in(Path(ticket_writer.__file__), {"process_defender_dir", "cwd"})
-    assert not found, f"the ticket writer finds its own location: {found}"
 
 
 def test_o6_missing_config_receipt(tmp_path, monkeypatch, caplog):
@@ -582,9 +561,3 @@ def test_s7_f6_run_env_handed_to_the_ticket_writer(tmp_path, monkeypatch):
         got = {k: call["env"].get(k) for k in wanted}
         assert got == wanted, (
             f"the writer's docker child was not handed run.py's run env: {got} vs {wanted}")
-
-    # Neither lane builds or reads the environment itself: run.py and the driver hand it in.
-    lanes = [Path(ticket_writer.__file__),
-             *sorted((S.DEFENDER / "runtime" / "lead_zero").glob("*.py"))]
-    found = [hit for lane in lanes for hit in _calls_in(lane, {"run_env"}, env_reads=True)]
-    assert not found, f"a lane builds or reads the environment itself: {found}"

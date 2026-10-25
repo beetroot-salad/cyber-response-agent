@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated-module fence (#1092, #983, #631): three modules held to a narrow contract by what they import
+"""Isolated-module fence (#1092, #983, #631, #1107): four rules over modules held to a narrow contract by what they import
 or call.
 
 * The box image scripts (`box/_image.py`, `box/image_cli.py`) run before the package can be
@@ -12,6 +12,11 @@ or call.
 * The budget enforcer (`hooks/budget_enforcer.py`) reads no environment variable, config file or
   JSON: its caps are set by the caller, so nothing in the environment can move them (`os.environ`,
   `environ.get`, `env_int(`, `open(`, `json.load(`).
+
+* The ticket writer (`integrations/ticket_writer.py`) finds nothing for itself: no call to
+  `process_defender_dir` or `cwd`. It and every `runtime/lead_zero/*.py` build and read no
+  environment: no `run_env` call and no `os.environ` / `os.getenv` (run.py and the driver hand the
+  environment in).
 
 A missing file is a finding (re-site the rule), never a pass. A file that does not parse or decode
 is exit 2. There is no baseline and no suppression: fix the code.
@@ -36,6 +41,8 @@ _REGISTRY = "integrations/tacit_knowledge_adapter.py"
 _MUTATING_ATTRS = frozenset({"write_text", "write_bytes", "mkdir", "unlink", "rmdir", "rename",
                              "touch", "safe_dump", "dump", "remove", "replace"})
 _MUTATING_MODULES = frozenset({"shutil"})
+_TICKET_WRITER = "integrations/ticket_writer.py"
+_LEAD_ZERO = "runtime/lead_zero"
 _BUDGET = "hooks/budget_enforcer.py"
 _BUDGET_CALLS = frozenset({"env_int", "open"})
 
@@ -107,6 +114,24 @@ def _budget(rel: str, tree: ast.Module) -> list[str]:
     return out
 
 
+def _called_name(node: ast.Call) -> str | None:
+    func = node.func
+    return func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+
+
+def _hands_in_environment(rel: str, tree: ast.Module, banned_calls: frozenset[str]) -> list[str]:
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _called_name(node) in banned_calls:
+            out.append(f"{rel}:{node.lineno}: calls `{_called_name(node)}(`; this module is "
+                       "handed its location and environment, it does not find them")
+        elif (isinstance(node, ast.Attribute) and node.attr in {"environ", "getenv"}
+                and isinstance(node.value, ast.Name) and node.value.id == "os"):
+            out.append(f"{rel}:{node.lineno}: reads `os.{node.attr}`; the environment is handed "
+                       "in by run.py and the driver")
+    return out
+
+
 def scan(root: Path) -> list[str]:
     root = Path(root).resolve()
     if not root.is_dir():
@@ -119,6 +144,17 @@ def scan(root: Path) -> list[str]:
         findings.extend(_registry(_REGISTRY, tree))
     if (tree := _tree(root, _BUDGET, findings)) is not None:
         findings.extend(_budget(_BUDGET, tree))
+    if (tree := _tree(root, _TICKET_WRITER, findings)) is not None:
+        findings.extend(_hands_in_environment(
+            _TICKET_WRITER, tree, frozenset({"process_defender_dir", "cwd", "run_env"})))
+    lead_zero = root / _LEAD_ZERO
+    if not lead_zero.is_dir():
+        findings.append(f"{_LEAD_ZERO}: missing; the lead-zero environment rule has nothing to hold")
+    else:
+        for path in sorted(lead_zero.glob("*.py")):
+            rel = path.relative_to(root).as_posix()
+            findings.extend(_hands_in_environment(
+                rel, _astlib.read_and_parse(path, rel)[1], frozenset({"run_env"})))
     return findings
 
 
