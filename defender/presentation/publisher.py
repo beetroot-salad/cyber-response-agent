@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from defender.configuration import publish_root
 from defender.presentation import _mirror_write
+from defender.run_repository import RunId
 
 if TYPE_CHECKING:
     from defender.tenancy._tenant import Tenant
@@ -65,7 +66,10 @@ class Publisher:
         return cls(root, str(tenant.id))
 
     def run_page(self, run_id: str) -> Target:
-        return Target(self.root / self.tenant_id / "runs" / run_id / RUN_PAGE_NAME, self.root)
+        """The page of run `run_id`, which must be a run id (`RunRefused` otherwise), so a
+        path-like name never leaves the tenant's runs area."""
+        run = str(RunId.parse(run_id))
+        return Target(self.root / self.tenant_id / "runs" / run / RUN_PAGE_NAME, self.root)
 
     def learning_page(self, name: str) -> Target:
         if Path(name).name != name or name in ("", ".", ".."):

@@ -302,8 +302,9 @@ def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
         f"the verdict does not say WHICH startup fault produced it: {verdict['reason']!r}"
 
 
-def test_a_daemon_answer_the_sweep_cannot_read_is_not_taken_as_finished(tmp_path):
-    """`_FINISHED_STATES` membership is the test, so an unparseable answer fails CLOSED."""
+def test_a_daemon_answer_the_start_cannot_read_is_still_a_container_holding_the_name(tmp_path):
+    """An unparseable status still means the name is held: the start refuses and removes
+    nothing (#1279 O6), so the answer fails CLOSED."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="")

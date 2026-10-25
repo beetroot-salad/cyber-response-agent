@@ -14,7 +14,8 @@ import stat
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
 from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
@@ -77,22 +78,43 @@ def _input_dir_source(run_dir: Path) -> Path:
     return where
 
 
+@dataclass(frozen=True)
+class _LaneMount:
+    """One host tree the run lane mounts: what it is, its host source, the remedy when no shared
+    mount covers it, and where and how it sits in the box."""
+
+    what: str
+    source: Path
+    remedy: str
+    target: PurePosixPath
+    readonly: bool
+
+
 def _run_lane_mounts(
     run_dir: Path, defender_dir: Path, tenant_agent: Path | None,
-) -> list[tuple[str, Path, str]]:
-    """The host trees the run lane mounts, each as `(what it is, its source, the remedy when no
-    shared mount covers it)`: the one list the lane's argv is rendered from and the publish-root
-    check judges (#1279 O3), so the check sees exactly what is mounted."""
+) -> list[_LaneMount]:
+    """The host trees the run lane mounts, in argv order: the one list the lane's argv is
+    rendered from and the publish-root check judges (#1279 O3), so the check sees exactly what
+    is mounted. Reads nothing: `_create_argv` checks the input directory before it binds it."""
+    data_root = "Set DEFENDER_DATA_ROOT to a path"
     mounts = [
-        ("run dir", run_dir, "Set DEFENDER_DATA_ROOT to a path"),
-        ("defender dir", defender_dir, "Check out the tree"),
+        _LaneMount("run dir", run_dir, data_root, MODEL_RUN, readonly=False),
+        # Over the writable run folder, a directory of its own: a file bind is undone by a host
+        # rename, a directory bind is not (#1222 A1).
+        _LaneMount("run input directory", Path(run_dir) / RUN_LAYOUT.alert_input_dir, data_root,
+                   MODEL_RUN / RUN_LAYOUT.alert_input_dir.as_posix(), readonly=True),
+        _LaneMount("defender dir", defender_dir, "Check out the tree", MODEL_DEFENDER, readonly=True),
     ]
     if tenant_agent is not None:
         # The agent half lives under the data root, beside the run dir: moving it means moving
-        # the data root.
-        mounts.append(("tenant agent half", tenant_agent, "Set DEFENDER_DATA_ROOT to a path"))
-    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root.
-    mounts.append(("run clock directory", clock_dir(run_dir), "Set DEFENDER_DATA_ROOT to a path"))
+        # the data root. Never plant a sentinel here: it would dirty the tenant clone. Its
+        # existing identity marker is read back through the box before the executor is returned.
+        mounts.append(_LaneMount("tenant agent half", tenant_agent, data_root, MODEL_AGENT,
+                                 readonly=True))
+    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root:
+    # the file the image's time-faking preload reads, outside every tree the model view shows.
+    mounts.append(_LaneMount("run clock directory", clock_dir(run_dir), data_root, PurePosixPath(CLOCK_TARGET),
+                             readonly=True))
     return mounts
 
 
@@ -128,14 +150,18 @@ def _refuse_a_start_that_conflicts(
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
-    *, tenant_agent: Path | None = None,
+    *, tenant_agent: Path | None = None, lane: Sequence[_LaneMount] | None = None,
 ) -> Create:
+    """The run box's create argv, its binds rendered from `lane`: the run lane's mount list as
+    `_start_boxed` already built it for the publish-root check, so the argv mounts exactly what
+    was judged. A direct call without it builds the same list from the run's geography."""
+    if lane is None:
+        lane = _run_lane_mounts(run_dir, defender_dir, tenant_agent)
     # The uncovered-mount refusal runs before the image resolver: a topology fault must not be
     # masked by the resolver's file-read refusal on the same tree.
-    subjects = _run_lane_mounts(run_dir, defender_dir, tenant_agent)
-    for subject, path, remedy in subjects:
-        if mounts and not _covered(path, mounts):
-            raise _uncovered_fault(subject, path, mounts, remedy)
+    for m in lane:
+        if mounts and not _covered(m.source, mounts):
+            raise _uncovered_fault(m.what, m.source, mounts, m.remedy)
     # Resolved here, not at BoxSpec construction, which reads nothing off the tree.
     rootfs = resolve_rootfs(spec.rootfs, defender_dir)
     # #1255 P1: inside the box every tree sits at its model path, so the working directory and
@@ -145,10 +171,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
                  **CLOCK_ENV, **_BOX_MARK_ENV}
     if tenant_agent is not None:
         env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
-    run_src = _daemon_source(run_dir, mounts)
-    input_dir = _input_dir_source(run_dir)
-    model_input_dir = MODEL_RUN / RUN_LAYOUT.alert_input_dir.as_posix()
-    defender_src = _daemon_source(defender_dir, mounts)
+    _input_dir_source(run_dir)
     argv = [
         "docker", "run", "--detach", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
@@ -158,28 +181,10 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         *_BOX_ULIMITS,
-        "--mount", f"type=bind,source={run_src},target={MODEL_RUN}",
-        # Over the writable run folder, a directory of its own: a file bind is undone by a host
-        # rename, a directory bind is not (#1222 A1).
-        "--mount",
-        f"type=bind,source={_daemon_source(input_dir, mounts)},target={model_input_dir},readonly",
-        "--mount", f"type=bind,source={defender_src},target={MODEL_DEFENDER},readonly",
     ]
-    if tenant_agent is not None:
-        # Never plant a sentinel here: it would dirty the tenant clone. Its existing
-        # identity marker is read back through the box before the executor is returned.
-        argv += [
-            "--mount",
-            f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
-            f"target={MODEL_AGENT},readonly",
-        ]
-    # The run clock's own read-only mount (#1255 "Into the box"): the file the image's
-    # time-faking preload reads, outside every tree the model view shows.
-    argv += [
-        "--mount",
-        f"type=bind,source={_daemon_source(clock_dir(run_dir), mounts)},"
-        f"target={CLOCK_TARGET},readonly",
-    ]
+    for m in lane:
+        bind = f"type=bind,source={_daemon_source(m.source, mounts)},target={m.target}"
+        argv += ["--mount", bind + (",readonly" if m.readonly else "")]
     argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(MODEL_RUN),
@@ -433,9 +438,8 @@ def _start_boxed(
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
-        _refuse_a_start_that_conflicts(
-            docker, name,
-            [(what, path) for what, path, _ in _run_lane_mounts(run_dir, defender_dir, tenant_agent)])
+        lane = _run_lane_mounts(run_dir, defender_dir, tenant_agent)
+        _refuse_a_start_that_conflicts(docker, name, [(m.what, m.source) for m in lane])
     except BoxFault as e:
         # Every startup fault path writes the did-not-run marker, so the tree never reads as
         # "not yet judged". This arm fires on a mount overlapping the publish root and on any
@@ -445,7 +449,7 @@ def _start_boxed(
     start_token = uuid.uuid4().hex
     create = _create_argv(
         name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
-        tenant_agent=tenant_agent,
+        tenant_agent=tenant_agent, lane=lane,
     )
     try:
         # Confirm the image before the create, so a missing image is its own refusal (with

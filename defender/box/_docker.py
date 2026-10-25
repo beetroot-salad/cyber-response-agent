@@ -178,12 +178,6 @@ def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
         raise BoxFault(f"could not invoke docker ({argv[:2]}): {e}") from e
 
 
-#: States in which nothing can still be starting or running, so reaping is safe. `created`
-#: is excluded: `docker run --detach` is create-then-start, so a concurrent lane's box sits
-#: in `created` during exactly the window two lanes can collide on one name.
-_FINISHED_STATES = frozenset({"exited", "dead"})
-
-
 def _inspect_field(docker: DockerFn, name: str, fmt: str) -> str | None:
     """One `-f` field off `docker inspect`, or `None` when the daemon answered non-zero.
     Callers decide what `None` means."""
@@ -196,7 +190,7 @@ def _inspect_field(docker: DockerFn, name: str, fmt: str) -> str | None:
 def _container_status(docker: DockerFn, name: str) -> str | None:
     """Docker's word for what this name holds, or `None` for no such container.
 
-    An unparseable answer is `""`, which is not in `_FINISHED_STATES` and so never reaped.
+    An unparseable answer is `""`: something holds the name, so a start refuses (#1279 O6).
     A non-zero rc means either "no such object" or "daemon unreachable"; since `None` here
     licenses a create, the daemon is probed and an unreachable one raises."""
     status = _inspect_field(docker, name, "{{.State.Status}}")

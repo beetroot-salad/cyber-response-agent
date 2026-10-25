@@ -568,7 +568,6 @@ def main(argv: list[str]) -> int:
     `dev` copy failed — refreshing that copy is often why an operator re-renders."""
     from defender import _log
     from defender.execution._command_line_run import open_command_line_run
-    from defender.tenancy import _tenant
 
     try:
         ns = _parse_run_page_args(argv[1:])
@@ -576,11 +575,11 @@ def main(argv: list[str]) -> int:
         print("usage: visualize_run.py --tenant T [--episode EPISODE_ID] <run_id> "
               f"[--update-ticket] ({bad})", file=sys.stderr)
         return 64
-    run = open_command_line_run(ns.tenant, ns.run_id, episode_id=ns.episode)
-    if isinstance(run, str):
-        print(f"visualize_run: {run}", file=sys.stderr)
+    opened = open_command_line_run(ns.tenant, ns.run_id, episode_id=ns.episode)
+    if isinstance(opened, str):
+        print(f"visualize_run: {opened}", file=sys.stderr)
         return 1
-    tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), ns.tenant)
+    tenant, run = opened
     with _log.run_context(ns.run_id, str(run.tenant_id), logger=_logger):
         try:
             copy = publish_page(run, tenant=tenant, update_ticket=ns.update_ticket)

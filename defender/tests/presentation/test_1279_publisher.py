@@ -60,6 +60,17 @@ def test_1279_a4_two_tenants_get_disjoint_areas_for_the_same_run_id_and_page_nam
     assert b.run_page(RUN).path.read_text(encoding="utf-8") == "B's page"
 
 
+@pytest.mark.parametrize("bad", ["../escape", "r1", "", RUN.upper()])
+def test_1279_a4_a_run_page_is_only_for_a_run_id(dev, tenants, bad):
+    """A4: the run page's name is a run id, so nothing path-like leaves the tenant's runs area."""
+    from defender.run_repository import RunRefused
+
+    pub = _publisher().Publisher.for_tenant(tenants[0])
+    assert pub.run_page(RUN).path.parent.name == RUN, "positive control: a run id is a page"
+    with pytest.raises(RunRefused):
+        pub.run_page(bad)
+
+
 def test_1279_a4_a_write_makes_the_area_and_replaces_by_a_new_inode_leaving_neighbours(
         dev, tenants, run_visualizations_dir, tmp_path):
     """A4: stage-then-rename — a hard-linked old page is replaced, not written through; other pages stay."""

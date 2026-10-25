@@ -147,8 +147,11 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
     run_id = run_dir.name  # #1187: the run's id is the uuid4 its label names (`fixture_uuid`)
     opened = open_command_line_run(d9_tenant, run_id)
-    assert isinstance(opened, Run), opened
-    assert Path(opened.run_dir) == run_dir
+    assert not isinstance(opened, str), opened
+    tenant, run = opened
+    assert isinstance(run, Run), opened
+    assert str(tenant.id) == d9_tenant
+    assert Path(run.run_dir) == run_dir
 
     argv, main, status = {
         "lead_author": (["--tenant", d9_tenant, run_id], R1._lead_author_main(), 2),

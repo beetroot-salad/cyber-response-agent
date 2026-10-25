@@ -507,8 +507,9 @@ class EpisodeRuns:
     # -- the arm roster (#1187 R2) ---------------------------------------------------------------
 
     def _roster_refused(self, why: str) -> RunRefused:
-        return RunRefused(f"the arm roster {self._roster_path} is refused ({why}) — it fails "
-                          "closed until an operator repairs or removes it")
+        return RunRefused(f"episode {quoted(self.episode_id)}: the arm roster {self._roster_path} "
+                          f"is refused ({why}) — it fails closed until an operator repairs or "
+                          "removes it")
 
     def _roster_document(self) -> dict[str, RunId] | None:
         """Strict UUID-to-UUID roster, or `None` when RUNS has not published one.
@@ -605,7 +606,8 @@ class EpisodeRuns:
                             f"({self._roster_path} is absent): it never reached RUNS, so it has "
                             f"no arm for world {quoted(world_id)}")
         if not isinstance(world_id, str) or world_id not in arms:
-            raise RunAbsent(f"the arm roster {self._roster_path} names no world {quoted(world_id)}")
+            raise RunAbsent(f"episode {quoted(self.episode_id)}: the arm roster {self._roster_path} "
+                            f"names no world {quoted(world_id)}")
         return arms[world_id]
 
     def start_runs(self, world_ids: Sequence[str]) -> dict[str, RunId]:
@@ -690,11 +692,12 @@ class EpisodeRuns:
 
 
 def open_requested_run(data_root: DataRoot, raw_tenant: str, raw_run_id: str, *,
-                       episode_id: str | None = None) -> Run | str:
-    """The run a command line's `--tenant T [--episode E] <run_id>` names — T accepted under
-    `data_root` (the root its entry point resolved), then the run opened by id through T's
-    repository: `runs.open`, or with `episode_id` the episode view's `open` (an arm). Neither
-    follows a link at any level below the tenant's folder."""
+                       episode_id: str | None = None) -> tuple[Tenant, Run] | str:
+    """The run a command line's `--tenant T [--episode E] <run_id>` names, beside T as accepted
+    — T accepted under `data_root` (the root its entry point resolved), then the run opened by
+    id through T's repository: `runs.open`, or with `episode_id` the episode view's `open` (an
+    arm). Neither follows a link at any level below the tenant's folder. The caller gets the
+    accepted `Tenant` too, so it never accepts T again (#1279 A4)."""
     from defender.tenancy._tenant import requested_tenant
 
     try:
@@ -702,9 +705,9 @@ def open_requested_run(data_root: DataRoot, raw_tenant: str, raw_run_id: str, *,
         runs = tenant.runs_repository()
         run_id = RunId.parse(raw_run_id)
         if episode_id is None:
-            return runs.open(run_id)
+            return tenant, runs.open(run_id)
         with runs.episode(episode_id) as view:
-            return view.open(run_id)
+            return tenant, view.open(run_id)
     except (TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
         where = f" of episode {quoted(episode_id)}" if episode_id is not None else ""
         return (f"run {quoted(raw_run_id)}{where} of tenant {quoted(raw_tenant)} cannot be "

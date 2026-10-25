@@ -65,7 +65,6 @@ def materialize_run(
     except RunRefused as refused:
         sys.exit(str(refused))
     run_dir = run.run_dir
-    RunPaths(run_dir)
 
     # A sidecar beside the dir is a trace of an earlier run at this id; nothing clears it.
     for name in sidecar_names(RunId.parse(run_dir.name)):
@@ -79,7 +78,7 @@ def materialize_run(
     except FileExistsError:
         sys.exit(f"run dir already exists: {run_dir} — a run id names one investigation and a "
                  "run dir is never resumed")
-    _write_input_once(run, front_door)
+    _write_input(run, front_door)
     # Every executed run is stamped here, by its own process (branched siblings each reach
     # this, and `verify_family` compares their stamps), before the box exists: the run dir is
     # the box's rw bind, so a later stamp could have been moved by the run. There is no seam to
@@ -137,43 +136,15 @@ def _admit_input(alert: Path, *, tenant: _tenant.Tenant, world: ResumeWorld | No
     return _FrontDoor(raw=raw, record=_alert_input.record_text(admitted.digest, facts))
 
 
-def _read_input_file(path: Path, what: str) -> bytes | None:
-    """A file of the input directory as found: its bytes, `None` when nothing is there, or the
-    exit when something unreadable stands at its name (a squatting directory, a link)."""
-    data, reason = _io.read_bytes_guarded(path)
-    if data is None and _io.entry_present(path):
-        sys.exit(f"{path} is not a readable plain file ({reason}) — refusing to resume over "
-                 f"the run's {what}")
-    return data
-
-
-def _write_input_once(run: Run, door: _FrontDoor) -> None:
-    """The alert and its record are write-once, in the run's read-only input directory: written
-    through the guarded exclusive lane when absent; when present the alert must agree with what
-    run start admitted, byte for byte, and the record must carry that alert's digest (its facts
-    are not compared), or the id is being reused for another case. Nothing present
-    is rewritten (a restart keeps both files' bytes, inode and mtime), and the record found wins
-    over the one just derived (a mapping edited since stays the operator's business for the next
-    run)."""
+def _write_input(run: Run, door: _FrontDoor) -> None:
+    """The alert and its record, written once into the run's read-only input directory through
+    the guarded exclusive lane. The run dir was just created exclusively (O8), so neither file
+    can be there yet."""
     paths = RunPaths(run.run_dir)
-    held_alert = _read_input_file(paths.alert, "alert")
-    held_record = _read_input_file(paths.alert_record, "record")
-    if held_alert is not None and held_alert != door.raw:
-        sys.exit(
-            f"run dir {run.run_dir} already holds a different alert than the one given — a run "
-            "id names one case; pick a fresh id for a different alert")
-    if held_record is not None:
-        kept = _alert_input.parse_alert_record(held_record.decode("utf-8", errors="replace"))
-        if kept is None or kept.digest != _alert_input.digest_of(door.raw):
-            sys.exit(
-                f"run dir {run.run_dir} holds a record that is not this alert's "
-                f"({paths.alert_record.name}) — a run id names one case; pick a fresh id")
     _unseal(paths.alert_input_dir)
     try:
-        if held_alert is None:
-            run.facts.alert.write(door.raw)
-        if held_record is None:
-            _io.rooted_write(run.run_dir, RUN_LAYOUT.alert_record, door.record, mode="create")
+        run.facts.alert.write(door.raw)
+        _io.rooted_write(run.run_dir, RUN_LAYOUT.alert_record, door.record, mode="create")
     except OSError as e:
         sys.exit(f"cannot write the run's input at {paths.alert_input_dir}: {e!r} — no run "
                  f"starts without its alert and {paths.alert_record.name}")
