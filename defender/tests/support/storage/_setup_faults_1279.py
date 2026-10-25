@@ -122,7 +122,7 @@ def materialize_through(io: Any) -> Callable[..., Any]:
     def materialize(alert: Path, *args: Any, tenant: Any, **kwargs: Any) -> Any:
         handed = kwargs.get("run")
         if handed is not None:
-            kwargs["run"] = Run.under(tenant.runs, handed.id, io=io, tenant_id=handed.tenant_id)
+            kwargs["run"] = Run.under(handed.runs_base, handed.id, io=io, tenant_id=handed.tenant_id)
         return run_py._materialize_run(alert, *args, tenant=tenant_with_runs_io(tenant, io), **kwargs)
 
     return materialize
