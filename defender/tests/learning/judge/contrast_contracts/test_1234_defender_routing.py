@@ -1,9 +1,6 @@
 """#1234 judge contrast: routing of judge findings to the defender/user-record queues."""
 from __future__ import annotations
 
-import ast
-import inspect
-import textwrap
 from pathlib import Path
 from typing import Any
 
