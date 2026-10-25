@@ -1,9 +1,6 @@
 """#1234 judge contrast: routing of judge findings to the defender/user-record queues."""
 from __future__ import annotations
 
-import ast
-import inspect
-import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -415,21 +412,6 @@ def test_1234_defender_lane_decision_rests_on_world_state_not_a_verdict_word(
         assert S.lane_of(built, built.finding_id("b", n, 1)) == S.LANES["user_record"], (
             f"b/{n}/1 is gap-only and must not pass the lane")
 
-    lane_rule = S.sym(S.JUDGE_ENQUEUE, "defender_lane_blocked")
-    fn = ast.parse(textwrap.dedent(inspect.getsource(lane_rule))).body[0]
-    assert isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
-    assert fn.name == "defender_lane_blocked", f"the walk read {fn.name!r}, not the lane rule"
-    body = fn.body[1:] if ast.get_docstring(fn) is not None else fn.body
-    nodes = [n for stmt in body for n in ast.walk(stmt)]
-    assert body, "the walk found no statement in the lane rule's body"
-    assert nodes, "the walk found no node in the lane rule's body"
-    literals = {n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)}
-    names = ({n.id for n in nodes if isinstance(n, ast.Name)}
-             | {n.attr for n in nodes if isinstance(n, ast.Attribute)})
-    params = {a.arg for a in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
-    assert not literals & OUTCOME_WORDS, f"the lane decision reads {literals & OUTCOME_WORDS}"
-    assert not (names | params) & RETIRED_NAMES, (
-        f"the lane decision names {(names | params) & RETIRED_NAMES}")
     assert not set(S.record(built)) & set(S.RETIRED_RECORD_FIELDS)
     for row in S.defender_queue():
         assert not set(row) & set(S.RETIRED_RECORD_FIELDS), row

@@ -46,7 +46,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_ci_hygiene_baseline.json")
 # Files where these patterns are deliberate; do not flag.
 PATH_ALLOWLIST = {
     "defender/CLAUDE.md",
-    "defender/learning/actor-settings.json",
 }
 
 # Directories under defender/ that are either out-of-scope or are
@@ -60,14 +59,6 @@ EXCLUDED_PREFIXES = (
     "defender/lessons-actor/",
     "defender/lessons-questioner/",
     "defender/docs/",                                  # POC design notes
-    "defender/skills/wazuh/",
-    "defender/skills/host-query/",
-    "defender/skills/stub-cmdb/",
-    "defender/skills/stub-iam/",
-    "defender/skills/gather/queries/wazuh/",
-    "defender/skills/gather/queries/host-query/",
-    "defender/skills/gather/queries/stub-cmdb/",
-    "defender/skills/gather/queries/stub-iam/",
     "defender/integrations/",                         # per-vendor adapters
 )
 
