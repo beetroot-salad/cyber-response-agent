@@ -209,7 +209,8 @@ def main(
         "(#771 M3) rather than append_jsonl/write_text/write_bytes/mkdir directly."
     )
     print("Mark a sanctioned exception with `# lint-unguarded-tree-write: ok — <reason>`.")
-    return gate(findings, baseline, args, label="lint_unguarded_tree_write", header=HEADER)
+    return gate(findings, baseline, args, label="lint_unguarded_tree_write", header=HEADER,
+                require_reasons=True)
 
 
 if __name__ == "__main__":
