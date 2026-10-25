@@ -1,5 +1,5 @@
-"""Tests for the lint_isolated_modules gate: the box image scripts import only the standard library
-and the tacit-knowledge registry adapter never writes."""
+"""Tests for the lint_isolated_modules gate: the box image scripts import only the standard library,
+the tacit-knowledge registry adapter never writes, and the budget enforcer reads no environment."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,6 +16,7 @@ _CLEAN = {
     "integrations/tacit_knowledge_adapter.py":
         "import yaml\nfrom pathlib import Path\n"
         "def load(p):\n    return yaml.safe_load(Path(p).read_text())\n",
+    "hooks/budget_enforcer.py": "DEFAULT = 5\ndef cap(limits):\n    return limits.get('x', DEFAULT)\n",
 }
 
 
@@ -66,6 +67,19 @@ def test_registry_reads_are_not_writes(tmp_path):
     src = ("import yaml\ndef f(p, d):\n    d.get('x')\n    d.update({})\n"
            "    return open(p).read(), open(p, 'r').read()\n")
     assert _GATE.scan(_tree(tmp_path, **{"integrations__tacit_knowledge_adapter.py": src})) == []
+
+
+@pytest.mark.parametrize("body", [
+    "os.environ.get('X')",
+    "environ['X']",
+    "env_int('X', 1)",
+    "open(p)",
+    "json.load(f)",
+])
+def test_a_budget_enforcer_read_of_the_environment_or_a_file_is_found(tmp_path, body):
+    src = f"import os, json\ndef f(p, f):\n    return {body}\n"
+    found = _GATE.scan(_tree(tmp_path, **{"hooks__budget_enforcer.py": src}))
+    assert len(found) >= 1 and all("budget_enforcer" in f for f in found), found
 
 
 def test_a_missing_file_is_a_finding(tmp_path):

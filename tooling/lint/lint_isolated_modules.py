@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated-module fence (#1092, #983): two modules held to a narrow contract by what they import
+"""Isolated-module fence (#1092, #983, #631): three modules held to a narrow contract by what they import
 or call.
 
 * The box image scripts (`box/_image.py`, `box/image_cli.py`) run before the package can be
@@ -8,6 +8,10 @@ or call.
   lane over a human-authored file: it makes no filesystem mutation (`write_text`, `write_bytes`,
   `mkdir`, `unlink`, `rmdir`, `rename`, `touch`, `yaml` dumps, `shutil`, `os.remove`/`os.replace`)
   and opens no file for writing or appending.
+
+* The budget enforcer (`hooks/budget_enforcer.py`) reads no environment variable, config file or
+  JSON: its caps are set by the caller, so nothing in the environment can move them (`os.environ`,
+  `environ.get`, `env_int(`, `open(`, `json.load(`).
 
 A missing file is a finding (re-site the rule), never a pass. A file that does not parse or decode
 is exit 2. There is no baseline and no suppression: fix the code.
@@ -32,6 +36,8 @@ _REGISTRY = "integrations/tacit_knowledge_adapter.py"
 _MUTATING_ATTRS = frozenset({"write_text", "write_bytes", "mkdir", "unlink", "rmdir", "rename",
                              "touch", "safe_dump", "dump", "remove", "replace"})
 _MUTATING_MODULES = frozenset({"shutil"})
+_BUDGET = "hooks/budget_enforcer.py"
+_BUDGET_CALLS = frozenset({"env_int", "open"})
 
 
 def _tree(root: Path, rel: str, findings: list[str]) -> ast.Module | None:
@@ -85,6 +91,22 @@ def _registry(rel: str, tree: ast.Module) -> list[str]:
     return out
 
 
+def _budget(rel: str, tree: ast.Module) -> list[str]:
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute) and node.attr == "environ") or (
+                isinstance(node, ast.Name) and node.id == "environ"):
+            out.append(f"{rel}:{node.lineno}: reads `environ`; the budget caps are set by the "
+                       "caller and nothing in the environment may move them")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name in _BUDGET_CALLS or (name == "load" and _astlib.root_name(func) == "json"):
+                out.append(f"{rel}:{node.lineno}: calls `{name}(`; the budget enforcer reads no "
+                           "file, JSON or environment")
+    return out
+
+
 def scan(root: Path) -> list[str]:
     root = Path(root).resolve()
     if not root.is_dir():
@@ -95,6 +117,8 @@ def scan(root: Path) -> list[str]:
             findings.extend(_image_script(rel, tree))
     if (tree := _tree(root, _REGISTRY, findings)) is not None:
         findings.extend(_registry(_REGISTRY, tree))
+    if (tree := _tree(root, _BUDGET, findings)) is not None:
+        findings.extend(_budget(_BUDGET, tree))
     return findings
 
 
