@@ -281,6 +281,11 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
 
 
 def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothing(tmp_path):
+    """#1108 P4 O6: the code commit's tree lacks the lesson here, so the run is post-move and the
+    body would come from the tenant's export at its knowledge commit — which this fixture tenant
+    (not a git clone) cannot supply. Either way the slot is marked, never empty. P4 words the
+    mark "unreadable" or keeps "unavailable"; both are accepted (the design names the concept,
+    not the text). The product-repo probe still goes through `git_show` (the assumed seam)."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
 
     for commit, note in (("cafebabe", "absent commit"), ("deadbee", "absent path")):
@@ -289,7 +294,7 @@ def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothin
         git_show = J.FakeGitShow(bodies={})
         lessons = _lessons_view(J.render_at(ep, "b", git_show=git_show))
         assert git_show.asked, f"{note}: the render never asked for the body"
-        assert "unavailable" in lessons.lower(), (
+        assert "unavailable" in lessons.lower() or "unreadable" in lessons.lower(), (
             f"{note}: the slot rendered as nothing, which the judge reads as a lesson with no "
             "content rather than as a lesson it was not shown")
         assert "L1" in lessons, f"{note}: the lesson vanished from the view entirely"

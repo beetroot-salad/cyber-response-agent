@@ -3,7 +3,7 @@
 The mechanical bar is automated. Run:
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant}
+python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged {staged}
 ```
 
 and fix every FAIL before going further. What it checks, and at which
@@ -27,7 +27,7 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
   `${placeholder}` in its body is a declared param of that verb or listed in
   the template's `body_substitutions:`. An **engine** verb's body IS the
   query language, so its placeholders are body text and are NOT checked —
-  the rule is per-verb, not per-system (`adapter.md`, `queries/SCHEMA.md`).
+  the rule is per-verb, not per-system (`adapter.md`, `defender/skills/gather/query-schema.md`).
 
 **WARN** (exit 0 — surfaced, not enforced):
 

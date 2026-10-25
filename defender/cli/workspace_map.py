@@ -37,8 +37,30 @@ def main(argv: list[str]) -> int:
     except RegistryError as e:
         sys.stderr.write(f"workspace_map: {e}\n")
         return 2
-    print(workspace_map(Path(run.run_dir), systems=tuple(roster.accepted)), end="")
+    print(workspace_map(Path(run.run_dir), systems=tuple(roster.accepted),
+                        agent_root=_stamped_agent_root(ns.tenant, Path(run.run_dir))), end="")
     return 0
+
+
+def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
+    """The agent half of the export the run read (#1108 P4: its host-held knowledge record's
+    commit, `<T>/exports/<commit>/agent`), or `None` when the run names none or the export is
+    gone: the map then says it has no tenant knowledge to show."""
+    from defender.records._knowledge_status import read_knowledge_status
+    from defender.run_repository import RunPaths
+    from defender.tenancy import _tenant
+
+    paths = RunPaths(run_dir)
+    status = read_knowledge_status(paths.knowledge_source(), paths.provenance)
+    commit = status.commit if status is not None else None
+    if commit is None:
+        return None
+    try:
+        tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
+    except _tenant.TenantRefused:
+        return None
+    agent = tenant.export_folder(commit) / "agent"
+    return agent if agent.is_dir() else None
 
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text

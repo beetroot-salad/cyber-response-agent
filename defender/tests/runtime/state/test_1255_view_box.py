@@ -1,6 +1,8 @@
 """Check model-view mounts, environment, host independence, and unboxed execution."""
 from __future__ import annotations
 
+import dataclasses
+
 from defender.tests.support.shared._locations_1210 import location_path
 
 import functools
@@ -27,9 +29,10 @@ EPISODE_ID = fixture_uuid("20261015t120000z-view-case-n7")
 
 def _start(run_dir: Path, layout: V.Layout, docker: V.FakeDocker) -> None:
     """Record a real box create for this layout, then refuse it before execution."""
+    agent, token = layout.staged()
     with pytest.raises(BoxFault, match="refused by the #1255 static check"):
         box_mod.start_box(run_dir, layout.checkout, spec=SPEC, docker=docker,
-                          tenant_agent=layout.agent, tenant_id=layout.tenant.id)
+                          tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
 
 
 def _created(run_dir: Path, layout: V.Layout) -> V.Create:
@@ -53,8 +56,8 @@ def test_b1_the_run_box_uses_only_the_model_view(tmp_path):
     assert create.readonly_of(input_dir)
     assert create.target_of(layout.checkout) == V.MODEL_DEFENDER, create.mounts
     assert create.readonly_of(layout.checkout)
-    assert create.target_of(layout.agent) == V.MODEL_AGENT, create.mounts
-    assert create.readonly_of(layout.agent)
+    assert create.target_of(layout.staged()[0]) == V.MODEL_AGENT, create.mounts
+    assert create.readonly_of(layout.staged()[0])
 
 
     assert create.workdir == V.MODEL_RUN, create.workdir
@@ -127,7 +130,9 @@ def _lifecycle_create(run, layout: V.Layout) -> V.Create:
     with pytest.raises(BoxFault, match="refused by the #1255 static check"):
         run_mod._run_investigation_lifecycle(
             run=run, model="m", model_override=None, defender_dir=layout.checkout,
-            tenant=_tenants1106.run_tenant(layout.tenant),
+            tenant=dataclasses.replace(_tenants1106.run_tenant(layout.tenant),
+                                       agent_root=layout.staged()[0],
+                                       stage_token=layout.staged()[1]),
             investigate=investigate,
             start_box=functools.partial(box_mod.start_box, spec=SPEC, docker=docker),
             stop_box=lambda *a, **k: None, scrub=lambda *a, **k: None)
@@ -147,7 +152,7 @@ def test_b1_o2_an_arm_and_a_natural_run_get_the_same_create_command(tmp_path, mo
     ca = _lifecycle_create(arm, layout)
 
     assert V.scan(" ".join(ca.argv), [EPISODE_ID]), "control: the arm's sources name its episode"
-    for tree, source in (("checkout", layout.checkout), ("tenant's agent half", layout.agent)):
+    for tree, source in (("checkout", layout.checkout), ("tenant's agent half", layout.staged()[0])):
         target = cn.target_of(source)
         assert target is not None, (
             f"control: the natural run's box does not bind the {tree} {source}: {cn.mounts}")
@@ -187,8 +192,9 @@ def test_b5_the_unboxed_fallback_never_hands_its_shims_the_real_runs_folder(tmp_
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-unboxed")
+    agent, token = layout.staged()
     box = box_mod.start_box(run_dir, layout.checkout, spec=SPEC, docker=V.FakeDocker(),
-                            tenant_agent=layout.agent, tenant_id=layout.tenant.id)
+                            tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
     assert not box.sandboxed, "control: the fallback is the host executor"
     env = _env_of(box)
 
@@ -212,9 +218,13 @@ def test_b5_the_unboxed_fallback_never_hands_its_shims_the_real_runs_folder(tmp_
     assert ident.out.decode("utf-8").strip() == layout.tenant.id, ident.out
     staged_tags = _run(box, f"{env['DEFENDER_DIR']}/bin/defender-lessons --tags")
     assert staged_tags.rc == 0, staged_tags
+    # #1108 P4 (O1, O4): the shim reads the lessons of the agent root `DEFENDER_AGENT_DIR`
+    # names (the tenant's), never the checkout's, so the control names the same agent half the
+    # box was handed (the staged view of it is what the box's own call reads).
     direct = subprocess.run(
         [str(layout.checkout / "bin" / "defender-lessons"), "--tags"], capture_output=True,
-        timeout=60, env={**os.environ, "DEFENDER_DIR": str(layout.checkout)}, check=True)
+        timeout=60, env={**os.environ, "DEFENDER_DIR": str(layout.checkout),
+                         "DEFENDER_AGENT_DIR": str(layout.agent)}, check=True)
     assert direct.stdout, "control: the checkout's own shim enumerates its tags"
     assert staged_tags.out == direct.stdout, (
         "the staged defender tree does not answer as the run's checkout does")

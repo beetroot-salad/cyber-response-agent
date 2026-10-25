@@ -196,10 +196,16 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
     from defender.runtime.run_tenant import TenantRefused, run_tenant_for
 
     tree = tmp_path / "repo" / "defender"
-    _plant(tree / "skills" / "gather" / "queries", "elastic", "other-alerts", verb="alerts")
+    tree.mkdir(parents=True)
     # The run's tenant, planted outside the tree (its table grants the lead elastic.alerts).
-    T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"),
-                       lead_zero="correlation_template: elastic.other-alerts\n")
+    # #1108 P4 (O1, O2): the catalog the run start frame reads is the tenant's own agent root
+    # (`agent/skills/gather/queries/`), so the template the config names is planted THERE and
+    # the checkout-shaped `tree` handed as `defender_dir` holds no catalog at all — a frame
+    # that still read `defender_dir`'s catalog finds no `elastic.other-alerts` and refuses.
+    knowledge = T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"),
+                                   lead_zero="correlation_template: elastic.other-alerts\n")
+    _plant(knowledge / "agent" / "skills" / "gather" / "queries", "elastic", "other-alerts",
+           verb="alerts")
     tenant = T1106.accept(tmp_path / "tenants", fixture_uuid("tenant:acme"))
     grants = T1106.run_grants(tenant.settings)
     config = lead_zero_config_path(tenant.settings)

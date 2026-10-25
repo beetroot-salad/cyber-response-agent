@@ -149,10 +149,14 @@ def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path)
     frontier, when the closing delimiter STRADDLES the join."""
     from defender.runtime.tools import _frontier_recall
     from defender.skills.invlang.frontier import frontier_from_text
-    from defender.tests.support.learning.retrieval._lessons_corpus import _main_deps, _write_lesson
+    from defender.tests.support.learning.retrieval._lessons_corpus import (
+        _run_copy_main_deps,
+        _write_lesson,
+    )
 
-    deps, _run, dfn = _main_deps(tmp_path)
-    corpus = dfn / "lessons"
+    # #1108 P4 (O2, O4): recall reads the run copy's `lessons/`, never `defender_dir/lessons`.
+    deps, _run, agent_root, _dfn = _run_copy_main_deps(tmp_path)
+    corpus = agent_root / "lessons"
     corpus.mkdir(parents=True, exist_ok=True)
     _write_lesson(corpus, "straddle-probe", nodes=("type: compute, slot: class",))
 

@@ -30,6 +30,8 @@ from defender.knowledge._corpus import PROVENANCE_KEYS
 from defender._model import model
 from defender._untrusted import wrap_fresh
 from defender.runtime.lessons_engine._lessons_common import (
+    NoAgentRoot,
+    agent_knowledge,
     as_list,
     iter_lessons,
     resolve_corpus,
@@ -49,10 +51,11 @@ from defender.skills.invlang.validate import (
     is_open_slot,
 )
 from defender import _yaml
-from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import LESSONS
 
-DEFAULT_CORPUS = CHECKOUT_KNOWLEDGE.lessons_dir
-CORPUS_NAME = DEFAULT_CORPUS.name
+#: The one corpus this engine retrieves: the run's runtime lessons, under its agent root
+#: (`$DEFENDER_AGENT_DIR/lessons`, #1108 P4); `--corpus` relocates the walk, never the corpus.
+CORPUS_NAME = LESSONS
 
 #: Selectors are hidden from the rendered block: the `matched` line already names the vertex
 #: and value that hit.
@@ -501,7 +504,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--corpus", help=f"Relocated {CORPUS_NAME} directory (worktree or fixture); the leaf name must still be {CORPUS_NAME}")
     ns = ap.parse_args(argv[1:])
 
-    corpus = resolve_corpus(ns.corpus, DEFAULT_CORPUS, ap)
+    if ns.corpus is None:
+        try:
+            corpus = agent_knowledge().lessons_dir
+        except NoAgentRoot as missing:
+            print(f"error: {missing} (or pass --corpus)", file=sys.stderr)
+            return 2
+    else:
+        corpus = resolve_corpus(ns.corpus, Path(CORPUS_NAME), ap)
     # Report a missing corpus: `resolve_corpus` checks only the leaf name and
     # `iter_lesson_paths` answers `[]`, so a mistyped path would look like "nothing matched".
     if not corpus.is_dir():

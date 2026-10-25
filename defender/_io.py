@@ -691,6 +691,21 @@ class Held:
         root is closed it answers `Bad file descriptor`."""
         return Bound(self._os, self._root)
 
+    @contextlib.contextmanager
+    def exclusive(self) -> Iterator[None]:
+        """The held folder taken exclusively against every other process's `exclusive` on it (an
+        advisory `flock` on the held root itself, so no lock file is made), released on exit:
+        for a read and the write it decides that no other process may interleave with. The root
+        is a path-only handle, which cannot be locked, so the folder it names is opened through
+        it (`.`, nothing resolved by name) and that open is locked."""
+        with self._dup() as root:
+            fd = os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=root)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
     # -- the verbs ------------------------------------------------------------------------------
 
     def write(self, name: str | PurePath, text: str | bytes, *, mode: str,

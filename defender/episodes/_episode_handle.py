@@ -231,6 +231,11 @@ class Episode:
         return CreateRecord(*self._at(LAYOUT.source_record))
 
     @property
+    def knowledge_pin(self) -> CreateRecord:
+        """The family's knowledge commit (`episodes._knowledge_pin`): created once, at launch."""
+        return CreateRecord(*self._at(LAYOUT.knowledge_pin))
+
+    @property
     def learning_html(self) -> WriteRecord:
         return WriteRecord(*self._at(LAYOUT.learning_html))
 

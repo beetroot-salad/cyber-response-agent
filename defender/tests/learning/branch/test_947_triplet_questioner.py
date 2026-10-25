@@ -44,7 +44,7 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     """The role-model preflight runs at family level, before the questioner is paid for, AND again inside each sibling process — the family-level pass is..."""
     cli = T.mod("learning.branch.cli")
     seen: list[str] = []
-    base, src = location_path(T.runs_base)(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
     data_root = location_path(T.current_tenant().data_root)
     before = set(data_root.glob("*/episodes/*"))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ from defender.learning.core.config import (
     LoopPaths,
 )
 from defender._tree_listing import entry_kind
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.tests.support.learning.core._state1135 import state_for_paths
@@ -32,8 +34,6 @@ from defender.tests.support.learning.curation._curator1134 import (
     world,
 )
 from defender.tests.support.learning.curation._drain719 import finding_row, make_repo, pending, seed, stuck_records
-from defender.tests.e2e import _box665 as B
-from defender.tests.e2e.test_922_spine import RepoBranch
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.learning.curation.test_1134_mount_list import UNKNOWN_LABELS
 
@@ -235,60 +235,82 @@ def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_
     assert stuck_records(w.paths, FINDINGS) == []
 
 
-def _drive_author_drain(paths: LoopPaths, repo: Path) -> int:
-    """`drains.author_drain` with its PRODUCTION `trigger_author` (not injected) over `repo` as
-    the batch worktree, the box lifecycle recorded."""
-    rec = B.BoxLifecycleRecorder()
-    return drains.author_drain(
-        paths, branch=RepoBranch(repo, events=rec.events),
-        start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub,
-    )
+@contextlib.contextmanager
+def _tenant_drain(tmp_path: Path, data_root: Path, files: dict | None = None):
+    """The fixture tenant published for real with its forge bound (#1108 P4), and the drain's
+    learning paths over a scratch product checkout: `(tenant, paths)`."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
+
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+        bind_forge(t)
+        yield t, drain_paths(t, product_repo(tmp_path))
 
 
-def test_author_drains_real_default_seam_carries_the_label_to_the_open(tmp_path, monkeypatch):
+def _drafts(t: Any) -> Path:
+    return Path(location_path(t.tenant.tenant_root)) / "drafts"
+
+
+def test_author_drains_real_default_seam_carries_the_label_to_the_open(
+        tmp_path, data_root, monkeypatch):
+    """#1134 over the P4 drain (#1108 P4 flow 4): the drain's PRODUCTION `trigger_author` opens
+    the author label's trees over the batch's draft — the gate holds the row, nothing is stuck,
+    nothing stays held under the drafts, and nothing is delivered."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        BoxSpy, author_drain, remote_branches)
+
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    w = world(tmp_path)
-    _held_queue(w.paths)
-    w.trees.close()  # the drain's own trees are the only ones under the repo now
+    with _tenant_drain(tmp_path, data_root) as (t, paths):
+        _held_queue(paths)
 
-    rc = _drive_author_drain(w.paths, w.repo)
+        rc = author_drain(t, paths, trigger=None, box=BoxSpy())
 
-    assert rc == 0
-    [row] = pending(w.paths, FINDINGS)
-    assert "held_reason" in row, row
-    assert stuck_records(w.paths, FINDINGS) == []
-    assert stuck_records(w.paths, QUESTIONER_FINDINGS) == []
-    assert descriptors_under(w.repo) == []
+        assert rc == 0
+        [row] = pending(paths, FINDINGS)
+        assert "held_reason" in row, row
+        assert stuck_records(paths, FINDINGS) == []
+        assert stuck_records(paths, QUESTIONER_FINDINGS) == []
+        assert descriptors_under(_drafts(t)) == []
+        assert remote_branches(t.remote) == {}
+        assert t.forge.creates == []
 
 
-def test_a_missing_corpus_mount_is_a_hold_fault_each_curator_records_stuck(tmp_path, monkeypatch):
+def test_a_lane_the_tenant_repo_never_committed_is_still_a_held_mount(
+        tmp_path, data_root, monkeypatch):
+    """#1134 over the P4 drain: the draft makes each lane's folder (amendment 3 C2), so a tenant
+    repo holding no `agent/lessons-questioner/` still gives both curators their held corpus:
+    neither channel records a hold fault, the gate holds the findings row, and the questioner
+    curator serves its row. (Replaces the worktree-era "a missing mount point is a hold fault":
+    a host-made draft has no missing lane.)"""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
+
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
-    repo = make_repo(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    assert not paths.lessons_questioner_dir.exists()
-    _held_queue(paths)
-    seed(paths, QUESTIONER_FINDINGS, [{"schema_version": 1, "finding_id": "w1",
-                                      "subject": "world", "type": "lead-set",
-                                      "finding": "a world finding"}])
+    with _tenant_drain(tmp_path, data_root, files={
+            "agent/lessons-questioner/fixture-questioner-seed.md": None}) as (t, paths):
+        _held_queue(paths)
+        seed(paths, QUESTIONER_FINDINGS, [{"schema_version": 1, "finding_id": "w1",
+                                          "subject": "world", "type": "lead-set",
+                                          "finding": "a world finding"}])
 
-    rc = _drive_author_drain(paths, repo)
+        rc = author_drain(t, paths, trigger=None, box=BoxSpy())
 
-    assert rc == 0
-    assert [r["fault_class"] for r in stuck_records(paths, FINDINGS)] == ["FileNotFoundError"]
-    assert [r["fault_class"] for r in stuck_records(paths, QUESTIONER_FINDINGS)] == [
-        "FileNotFoundError"]
-    assert not os.path.lexists(paths.lessons_questioner_dir), "a missing mount point was made"
-    [row] = pending(paths, FINDINGS)
-    assert "held_reason" not in row, row
-    assert row.get("attempts") is None, row
-    assert descriptors_under(repo) == []
+        assert rc == 0
+        assert stuck_records(paths, FINDINGS) == []
+        assert stuck_records(paths, QUESTIONER_FINDINGS) == []
+        [row] = pending(paths, FINDINGS)
+        assert "held_reason" in row, row
+        assert pending(paths, QUESTIONER_FINDINGS) == [], "the questioner curator never served"
+        assert descriptors_under(_drafts(t)) == []
 
 
 def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     repo = make_repo(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    # make_repo now carries both live corpora (#1108 P4 U5); this case needs one absent
+    subprocess.run(["git", "-C", str(repo), "rm", "-rq", str(paths.lessons_questioner_dir)], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "no questioner corpus"], check=True)
     _held_queue(paths)
 
     with pytest.raises(FileNotFoundError):
@@ -415,22 +437,25 @@ def _harness() -> Path:
 
 
 #: Run in a fresh interpreter, as the harness runs: materialize the scenario into the scratch
-#: repo, commit it (`init_git`), then `run_author` over it; print what it reported.
+#: dir (which, after #1108 P4, sets up everything the run needs: no `init_git` of a product-shaped
+#: scratch repo), then `run_author` over it; print what it reported.
 _HARNESS_RUN = """
 import json, sys
 from pathlib import Path
 evals, scenario, scratch = (Path(a) for a in sys.argv[1:4])
 sys.path.insert(0, str(evals))
 import harness
-from _harness_util import init_git
 harness.materialize(scenario, scratch)
-init_git(scratch)
 run, _wall = harness.run_author(scratch)
 print(json.dumps({"rc": run.returncode, "stdout": run.stdout, "stderr": run.stderr}))
 """
 
 
 def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_path):
+    """The harness runs an empty-queue scenario cleanly in its own scratch dir and never reads
+    the retired `DEFENDER_LEARNING_STATE_DIR`. (Its old pin on a product-shaped
+    `defender/learning/_author.lock` under the scratch repo is gone with #1108 P4's harness
+    against a draft: tenant_1108_p4/test_writers.py::test_o7_the_evals_harness_...)"""
     evals = _harness().parent
     scenario = tmp_path / "scenario"
     scenario.mkdir()
@@ -449,26 +474,25 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
     assert proc.returncode == 0, proc.stderr[-4000:]
     run = json.loads(proc.stdout.strip().splitlines()[-1])
     assert run["rc"] == 0, run
-    assert (scratch / "defender" / "learning" / "_author.lock").exists()
     assert sorted(p.name for p in decoy.iterdir()) == []
+    assert not (scratch / "defender" / "lessons").exists(), "a product-shaped corpus was made"
 
 
-def test_the_trigger_holds_nothing_for_an_injected_seam(tmp_path, monkeypatch):
+def test_the_trigger_holds_nothing_for_an_injected_seam(tmp_path, data_root, monkeypatch):
     """An injected `trigger_author` keeps its call shape (no `label`) and the lane opens nothing
-    around it: the default seam is the only place the author label is consumed."""
+    around it: the default seam is the only place the author label is consumed (over the P4
+    drain's draft, #1108 P4 flow 4)."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
+
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    w = world(tmp_path)
-    _held_queue(w.paths)
-    w.trees.close()
     calls: list[tuple[tuple, dict, list[str]]] = []
+    with _tenant_drain(tmp_path, data_root) as (t, paths):
+        _held_queue(paths)
 
-    def injected(*a, **kw):
-        calls.append((a, kw, sorted(descriptors_under(w.repo))))
+        def injected(*a, **kw):
+            calls.append((a, kw, sorted(descriptors_under(_drafts(t)))))
 
-    rec = B.BoxLifecycleRecorder()
-    rc = drains.author_drain(w.paths, trigger_author=injected,
-                             branch=RepoBranch(w.repo, events=rec.events),
-                             start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub)
+        rc = author_drain(t, paths, trigger=injected, box=BoxSpy())
 
     assert rc == 0
     assert [c[0][4] for c in calls] == ["author", "questioner_curator"]

@@ -70,3 +70,28 @@ def _main_deps(tmp_path: Path):
 
     return replace(bind(MAIN_DEF, run, defender_dir=dfn),
                    run=Run.under(fixture_runs_base(run.parent), run.name)), run, dfn
+
+
+def _run_copy_main_deps(tmp_path: Path):
+    """`_main_deps` bound over a run copy's agent root (#1108 P4): the recall's corpus is the run
+    copy's `lessons/` (`<T>/run-knowledge/<run_id>/agent/lessons`, threaded as
+    `RunScope(tenant_agent=...)`), never `defender_dir/lessons` (O2, O4).
+
+    Returns `(deps, run, agent_root, defender_dir)`: the caller plants lessons under
+    `agent_root / "lessons"` and, where it wants a stale reader caught, a decoy under
+    `defender_dir`. Lazy imports, as `_main_deps`."""
+    from dataclasses import replace
+
+    from defender.agents import MAIN_DEF
+    from defender.run_repository import Run
+    from defender.runtime.agent_definition import RunScope, bind
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    run = tmp_path / fixture_uuid("run")
+    run.mkdir()
+    dfn = tmp_path / "defender"
+    dfn.mkdir()
+    agent = tmp_path / "tenant" / "run-knowledge" / run.name / "agent"
+    agent.mkdir(parents=True)
+    deps = bind(MAIN_DEF, run, defender_dir=dfn, scope=RunScope(tenant_agent=agent))
+    return replace(deps, run=Run.under(fixture_runs_base(run.parent), run.name)), run, agent, dfn

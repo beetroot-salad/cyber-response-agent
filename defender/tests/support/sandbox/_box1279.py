@@ -88,12 +88,14 @@ def fake_main_and_worktree(base: Path) -> tuple[Path, Path]:
 
 @dataclass(frozen=True)
 class RunLane:
-    """A run on `base`: `base/runs/<run>` (rw), `base/agent` (the tenant half, ro), the product
-    code (ro) and the run clock's directory `base/clocks/<run>` (ro)."""
+    """A run on `base`: `base/runs/<run>` (rw), the run copy's `base/stage/agent` (the tenant
+    half, ro) and its `base/stage/` with the startup token beside `agent/` (ro, #1108 P4 U9), the
+    product code (ro) and the run clock's directory `base/clocks/<run>` (ro)."""
 
     base: Path
     run_dir: Path
     agent: Path
+    token: Path
     defender_dir: Path = B.DEFENDER
     tenant_id: str = TENANT
 
@@ -101,22 +103,29 @@ class RunLane:
     def clock(self) -> Path:
         return clock_dir(self.run_dir)
 
+    @property
+    def stage(self) -> Path:
+        return self.token.parent
+
     def sources(self) -> dict[str, Path]:
         """Each mount kind's host source, by the name it goes by."""
         return {"run dir": self.run_dir, "defender dir": self.defender_dir,
-                "tenant agent": self.agent, "run clock directory": self.clock}
+                "tenant agent": self.agent, "run copy stage": self.stage,
+                "run clock directory": self.clock}
 
     def start(self, docker: Any, **kw: Any) -> Any:
         return box_mod.start_box(self.run_dir, self.defender_dir, tenant_agent=self.agent,
-                                 tenant_id=self.tenant_id, docker=docker, **kw)
+                                 staged_token=self.token, tenant_id=self.tenant_id,
+                                 docker=docker, **kw)
 
 
 def run_lane(base: Path) -> RunLane:
     run_dir = B.make_run_dir(base / "runs")
-    agent = base / "agent"
+    agent = base / "stage" / "agent"
     agent.mkdir(parents=True)
-    (agent / ".tenant-id").write_text(f"{TENANT}\n", encoding="utf-8")
-    return RunLane(base, run_dir, agent)
+    token = agent.parent / ".startup-token"
+    token.write_text("run-1279-token\n", encoding="utf-8")
+    return RunLane(base, run_dir, agent, token)
 
 
 # -- the request lane ----------------------------------------------------------------------

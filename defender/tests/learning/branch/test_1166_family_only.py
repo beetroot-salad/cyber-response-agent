@@ -4,6 +4,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 import pytest
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
@@ -43,7 +44,9 @@ def test_1166_the_appender_refuses_a_defender_row_that_is_not_family(tmp_path, d
 @pytest.mark.parametrize("direction", ["benign", "adversarial", None])
 def test_1166_a_queued_non_family_row_is_held_by_name_and_the_batch_still_authors(
         tmp_path, direction):
-    paths = D.make_paths(tmp_path)
+    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     channel = D.channel_of("findings")
     legacy = _family_row("old/0", run_id="fresh-01")
     if direction is None:
@@ -52,7 +55,7 @@ def test_1166_a_queued_non_family_row_is_held_by_name_and_the_batch_still_author
         legacy["direction"] = direction
     D.seed(paths, channel, [legacy, _family_row("ep-1/b/0/0")])
     agent = D.recording(D.committing("family-lesson"))
-    cfg = D.cfg_for(paths, "findings", invoke_agent=agent)
+    cfg = C.draft_author_cfg(lane, invoke_agent=agent)
 
     assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/0"]

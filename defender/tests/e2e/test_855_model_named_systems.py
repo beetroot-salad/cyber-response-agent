@@ -125,6 +125,9 @@ def test_a_schema_rejected_call_cannot_name_a_system_of_record(tmp_path):
 
 
 def test_a_schema_rejected_call_on_a_real_system_still_records_it(tmp_path):
+    """A real system's schema rejection is recorded under that system and reaches the pitfalls
+    curator as ITS system skill's `execution.md` — the tenant's (#1108 P4 O1/O4/O7: spelled from
+    the draft's `KnowledgePaths`), not the product tree's `defender/skills/...`."""
     r = _run(tmp_path, run_id="d855-real", turns=[_bad_args("elastic"), DONE])
 
     rows = _above_guard(r)
@@ -132,9 +135,13 @@ def test_a_schema_rejected_call_on_a_real_system_still_records_it(tmp_path):
     assert rows[0]["system"] == "elastic", "a real system's rejection lost its attribution"
 
     handoffs = _build_pitfalls_handoffs(_queued(rows), systems=frozenset({"elastic"}))
-    assert [h["path"] for h in handoffs] == [
-        "defender/skills/elastic/execution.md"
-    ], "the rejection no longer reaches the pitfalls curator at all"
+    paths = [h["path"] for h in handoffs]
+    assert len(paths) == 1, f"the rejection no longer reaches the pitfalls curator at all: {paths}"
+    assert paths[0].endswith("skills/elastic/execution.md"), paths
+    # #1108 P4 (O1, O4, O7): the system skill the curator is pointed at is the TENANT's (its
+    # draft's `agent/skills/<system>/`, spelled from `KnowledgePaths`), never the product tree's.
+    assert not paths[0].startswith("defender/"), (
+        f"the pitfalls handoff still names the product tree's copy of the skill: {paths[0]}")
 
 
 def test_an_unresolvable_call_cannot_name_a_system_of_record(tmp_path):

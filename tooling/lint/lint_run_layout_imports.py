@@ -124,6 +124,9 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         # F-09: the tracer walks the tenant's runs by id (J8), then reads each opened run's
         # report from the folder it was handed (`_report_disposition(run.run_dir)`).
         "cli/learning/trace_lesson.py",
+        # #1108 P4: the map's CLI opens the run by id (J8), then reads the host-held knowledge
+        # record beside the folder it was handed (`RunPaths.knowledge_source`, U12).
+        "cli/workspace_map.py",
     ),
     "not-a-run": (_VE,),
     "helpers-only": (

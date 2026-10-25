@@ -44,25 +44,35 @@ def test_every_template_row_grants_nobody_and_says_why():
 
 
 def test_the_template_table_is_total_over_the_real_adapters():
+    """O8 / #1108 P4 (N6: adapters stay in the product; skills and markers are the tenant's):
+    the template's table is total over the PRODUCT's adapters. The marker half of
+    `declared_systems` was read off the product tree's `defender/skills/<system>/execution.md`
+    — lab content P4 removes (O1) — and the template's own `agent/` declares no system, so the
+    systems walked are the adapter half alone, read from the checkout's adapters directory."""
     from defender._paths import adapters_under
-    from defender.learning.leads.declared_systems import declared_systems
     from defender.runtime.verbs import read_roster
 
     vd = T.mod("runtime.verb_dispositions")
     roster = read_roster(adapters_under(T.DEFENDER))
-    walked = {s: roster.declared_verbs(s) for s in sorted(declared_systems(T.REPO_ROOT))}
+    assert roster.accepted, "no adapter read: the census would be vacuous"
+    walked = {s: roster.declared_verbs(s) for s in sorted(roster.accepted)}
     gaps = vd.census_gaps(walked, vd.load_dispositions(T.TEMPLATE_SETTINGS / "verb-grants.yaml"))
     assert not gaps, gaps
 
 
 def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
     """M1: the template's `lead-zero.yaml` names a catalog template that EXISTS, so an operator
-    who grants the lead its pair later has nothing else to fix."""
+    who grants the lead its pair later has nothing else to fix.
+
+    #1108 P4 (O1, flow 3 "lead-zero (templates from the copy's catalog)"): the catalog a run
+    resolves the id against is the TENANT's `agent/skills/gather/queries/`, never the
+    checkout's (which P4 empties), so a tenant made from the template finds the id only in the
+    template's own `agent/` catalog."""
     from defender.knowledge._corpus import is_established, iter_query_templates
 
     lz = T.mod("runtime.lead_zero_config")
     template_id = lz.load_correlation_template(lz.lead_zero_config_path(T.TEMPLATE_SETTINGS))
-    catalog = T.DEFENDER / "skills" / "gather" / "queries"
+    catalog = T.TEMPLATE_AGENT / "skills" / "gather" / "queries"
     assert [t.id for t in iter_query_templates(catalog)
             if t.id == template_id and is_established(t)] == [template_id]
 

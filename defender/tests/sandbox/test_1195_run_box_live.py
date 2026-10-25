@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shlex
 import shutil
@@ -7,23 +8,27 @@ import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from defender import _git
-from defender.learning.core import drains
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender import box as box_mod
 from defender.box import BoxFault
 from defender.tests.support.sandbox import _box1195 as X
-from defender.tests.support.learning.curation._claim1175 import claim_git
-from defender.tests.support.runtime.engine._declared869 import commit_all, init_git
 from defender.tests.support.sandbox._docker import dood_anchor, is_dood
-from defender.tests.support.learning.curation._lead_author_1134 import write
 from defender.tests.e2e._spec771 import DEFENDER, requires_real_box
+from defender.tests.tenancy.tenant_1108_delivery._support import (
+    LANES,
+    ForgeHTTP,
+    build_tenant,
+    configured_origin,
+    fixture_identity,
+)
+from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
 
-#: The file run 1's writer appends to, below the `skills/` mount.
-LEFT = "elastic/_draft/left1195.md"
+#: The file run 1's writer appends to, in the draft's one writable lane (`agent/lessons/`).
+LEFT = "left1195.md"
 
 #: What run 1 leaves in the box's scratch space: a run 2 that finds either kept it.
 MARKERS = ("/tmp/m1195", "/dev/shm/m1195")
@@ -49,12 +54,22 @@ print(n)
 """
 
 
-def _worktree(tmp_path: Path) -> Path:
-    wt = init_git(tmp_path / "wt")
-    write(wt / "defender" / "skills" / LEFT, "seed\n")
-    commit_all(wt, "seed")
-    X.plant_image_inputs(wt)
-    return wt
+@contextlib.contextmanager
+def _batch(base: Path) -> Iterator[Any]:
+    """A tenant batch the way a P4 drain cuts one (#1108 P4 re-spelling, OD12 class ii): the
+    tenant, its git-free draft and the product code the box mounts (this checkout's image inputs
+    and code check file) all under `base`, daemon-visible under DooD."""
+    X.plant_image_inputs(base / "product")
+    code = base / "product" / "defender"
+    with build_tenant(base / "tenant") as built:
+        http = ForgeHTTP(remote=built[1])
+        origin = configured_origin(built[0].knowledge)
+        if origin is not None:
+            http.serve(origin)
+        delivery = p3_target().TenantDelivery.open(
+            built[0], defender_dir=code, client=http.client,
+            identity=fixture_identity(str(built[0].id)), origin=origin)
+        yield delivery.start_batch(f"t1195-{uuid.uuid4().hex[:8]}", lanes=LANES), built[0]
 
 
 def _grew(path: Path, past: int, *, within: float = 10.0) -> bool:
@@ -104,7 +119,7 @@ def _one_run(runs: object, ran: list[bool]) -> None:
 
 @pytest.fixture
 def live_worktree_base(tmp_path: Path) -> Iterator[Path]:
-    """Put only this live box's worktree on the daemon-visible shared mount under DooD."""
+    """Put only this live box's tenant and draft on the daemon-visible shared mount under DooD."""
     if not is_dood():
         yield tmp_path
         return
@@ -121,20 +136,27 @@ def live_worktree_base(tmp_path: Path) -> Iterator[Path]:
 
 @requires_real_box
 @pytest.mark.box
-def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa: PLR0915 — one box's whole life
+def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(
         tmp_path: Path, live_worktree_base: Path, monkeypatch):
+    """#1195 on a P4 drain box (`Batch.box_request()` over a tenant draft): a stopped box keeps
+    nothing a run left (no writer, no scratch), keeps its link ban across a restart, refuses a
+    run in a box someone else started, and the draft as run 1 left it is what the batch commits."""
+    with contextlib.ExitStack() as stack:
+        _the_box_life(stack, live_worktree_base, monkeypatch)
+
+
+def _the_box_life(  # noqa: PLR0915 — one box's whole life
+        stack: contextlib.ExitStack, live_worktree_base: Path, monkeypatch: Any) -> None:
     # A startup fault must fail this test, never degrade to a host executor no stop holds.
     X.clear_opt_out(monkeypatch)
-    wt = _worktree(live_worktree_base)
-    paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
-    assert box_mod.image_tag(wt / "defender") == box_mod.image_tag(DEFENDER)
-    left = paths.skills_dir / LEFT
-    request = drains._drain_box_request(
-        wt, f"t1195-{uuid.uuid4().hex[:8]}", LEAD_AUTHOR_DRAIN_LABEL, paths,
-    )
+    batch, tenant = stack.enter_context(_batch(live_worktree_base))
+    assert box_mod.image_tag(batch.defender_dir) == box_mod.image_tag(DEFENDER)
+    request = batch.box_request()
     writable = [m for m in request.mounts if m.writable]
-    assert len(writable) == 1, f"expected one writable skills mount: {writable}"
+    assert len(writable) == 1, f"expected the draft's one writable lane: {writable}"
     host_tree, inside_tree = Path(writable[0].source), Path(writable[0].target)
+    left = host_tree / LEFT
+    left.write_text("seed\n", encoding="utf-8")  # the draft's file run 1's writer appends to
     box = box_mod.start_box(request)
     try:
         assert box.sandboxed, "start_box handed back a host executor"
@@ -164,8 +186,7 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
             assert _writers(box) == 0, "run 1's writer is still in the box's process table"
             for marker in MARKERS:
                 assert _exec(box, "test", "-e", marker)[0] != 0, f"run 1's {marker} survived its stop"
-            draft = paths.skills_dir / "elastic" / "_draft"
-            inside_draft = inside_tree / draft.relative_to(host_tree)
+            draft, inside_draft = host_tree, inside_tree
             rc, out = _exec(box, "sh", "-c", "printf x > plain1195", cwd=inside_draft)
             assert rc == 0, f"an ordinary create in the writable mount failed (control): {out}"
             for argv in (["ln", "-s", "plain1195", "sym1195"], ["ln", "plain1195", "hard1195"]):
@@ -187,8 +208,10 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
 
     probe = box_mod._docker(["docker", "inspect", "-f", "{{.State.Status}}", request.name])
     assert probe.returncode != 0, f"a container still holds {request.name}: {probe.stdout}"
-    rel = f"defender/skills/{LEFT}"
-    sha = claim_git(wt).commit([rel], "learning(lead-author): what run 1 left")
-    assert sha is not None, "nothing was committed"
-    assert _git.git_show_file(wt, "HEAD", rel) == judged
+    rel = f"agent/{LANES[0]}/{LEFT}"
+    changes = batch.change_set()
+    assert [c.path for c in changes.changes] == [rel], changes
+    sha = batch.commit(changes, "learning(lead-author): what run 1 left")
+    assert sha, "nothing was committed"
+    assert _git.git_show_file(tenant.knowledge, sha, rel) == judged
     assert left.read_text(encoding="utf-8") == judged, "the file changed after the commit"

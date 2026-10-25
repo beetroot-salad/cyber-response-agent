@@ -45,6 +45,10 @@ LEARNING_HTML_NAME = "learning.html"
 ARCHIVED_ALERT_RECORD_NAME = "alert_record.json"
 SOURCE_ALERT_NAME = "source_alert.json"
 SOURCE_RECORD_NAME = "source_record.json"
+#: The family's knowledge pin (#1108 P4, flow 7, O-PIN): the one knowledge commit every sibling
+#: reads and the judge reads lesson bodies at, decided by the launcher from the source run's
+#: host-held knowledge record and created once, here, where no box writes.
+KNOWLEDGE_PIN_NAME = "knowledge_pin.json"
 
 WORLDS_DIRNAME = "worlds"
 #: Each sibling's own record of why its world ended without a full run (#1224):
@@ -350,6 +354,10 @@ class EpisodeLayout:
         return PurePosixPath(SOURCE_RECORD_NAME)
 
     @property
+    def knowledge_pin(self) -> PurePosixPath:
+        return PurePosixPath(KNOWLEDGE_PIN_NAME)
+
+    @property
     def served(self) -> PurePosixPath:
         return PurePosixPath(SERVED_DIRNAME)
 
@@ -547,6 +555,11 @@ class EpisodePaths:
     def source_record(self) -> Path:
         """The source run's record, copied beside `source_alert`."""
         return self.episode_dir / LAYOUT.source_record
+
+    @property
+    def knowledge_pin(self) -> Path:
+        """The family's knowledge pin, created once by the launcher."""
+        return self.episode_dir / LAYOUT.knowledge_pin
 
     @property
     def outcome(self) -> Path:

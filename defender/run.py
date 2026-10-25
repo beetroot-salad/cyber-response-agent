@@ -10,6 +10,11 @@ Usage (every run names its tenant, and there is no default; on the host,
 clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
     `python3 defender/cli/tenant.py setup <tenant>`):
     python3 defender/run.py <alert.json> --tenant <tenant> [--no-learn] [--model M]
+        [--knowledge-commit SHA]
+
+Every launch first publishes the tenant's latest approved knowledge in a separate short-lived
+child process, then reads its own copy of that export; `--knowledge-commit` pins the run to an
+export already published and skips the publish (#1108 P4).
 
 Billing / credentials: the engine calls the first-party Anthropic REST API and
 needs a real billable API key. Inside a Claude Code session the *ambient*
@@ -58,6 +63,7 @@ from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 from defender.runtime import run_end  # noqa: E402
+from defender.runtime import run_knowledge  # noqa: E402
 from defender.runtime import system_status  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
@@ -108,6 +114,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
+    p.add_argument("--knowledge-commit", default=None, metavar="SHA",
+                   help="run on the tenant's export at this full commit id (already published "
+                        "or materialised) and skip the launch-time publish")
     p.add_argument("--tenant", default=None,
                    help="the tenant this run belongs to; required on every run, --episode "
                         "included (there is no default). On --episode the episode is looked "
@@ -385,7 +394,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: their own default still see `None` when no override was given.
     model_override: str | None,
     defender_dir: Path,
-    #: The run's tenant: the box mounts only `tenant.agent`, read-only.
+    #: The run's tenant: the box mounts its run copy's `stage/` only (`tenant.agent` and the
+    #: staged token), read-only.
     tenant: RunTenant,
     #: The world this process is, threaded through so the drive function builds the world
     #: registry rather than the production one.
@@ -418,8 +428,13 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     def scrub_tree(tree: Path) -> None:
         scrub(tree, write_verdict=write_verdict)
 
+    # The startup token of the run copy's stage (#1108 P4, U9): the `RunTenant` run start builds
+    # over its run copy carries it, and `start_box` checks the stage and reads it back. A run box
+    # is never started over a tenant with no run copy (`start_box` refuses one).
+    token = getattr(tenant, "stage_token", None)
+    staged = {} if token is None else {"staged_token": token}
     box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
-                    write_verdict=write_verdict)
+                    write_verdict=write_verdict, **staged)
     drive = _judged(investigate, systems)
     investigation_ok = False
     try:
@@ -447,21 +462,147 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
 
 def _resolve_run_tenant(
-    tenant: _tenant.Tenant, *, defender_dir: Path, dispatches_lead_zero: bool,
+    tenant: _tenant.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
+    copy: run_knowledge.RunCopy | None = None,
 ) -> RunTenant:
     """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
-    readiness function — or the refusal, before the run dir, the box and any model call, so
-    tenant misconfiguration fails early. Refusals name the file to edit.
+    readiness function, over the run's own copy of its knowledge (#1108 P4, O-B: settings,
+    catalog and lessons from one export) — or the refusal, before the run dir, the box and any
+    model call, so tenant misconfiguration fails early. Refusals name the file to edit.
 
     `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
-    lead."""
+    lead. Without `copy` (a direct caller), the record is resolved over the tenant's own
+    folder. `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
     from defender.runtime import run_tenant as run_tenant_mod
 
+    del defender_dir
+    roots = ({} if copy is None else
+             {"agent_root": copy.agent, "settings_root": copy.settings,
+              "stage_token": copy.token})
     try:
         return run_tenant_mod.run_tenant_for(
-            tenant, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
+            tenant, dispatches_lead_zero=dispatches_lead_zero, **roots)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
+
+
+def _family_pin(ns: argparse.Namespace, pin: str | None, episode: Any) -> str | None:
+    """The commit a sibling (`--episode`) reads: its family's knowledge pin, read from the
+    episode, where only its launcher writes (`episodes._knowledge_pin`), so a sibling started or
+    resumed by hand reads its family's knowledge, never a newer `current`. A `--knowledge-commit`
+    naming another commit refuses. An episode with no pin (launched before the pin was
+    recorded) keeps `pin` as given, as before. An ordinary run's `pin` is kept."""
+    if episode is None:
+        return pin
+    from defender.episodes._knowledge_pin import PinUnreadable, read_pin
+
+    try:
+        family = read_pin(episode.view())
+    except PinUnreadable as unreadable:
+        sys.exit(f"[run.py] --episode {ns.episode}: the family's knowledge pin is unreadable: "
+                 f"{unreadable}")
+    if family is None:
+        return pin
+    if pin is not None and pin != family:
+        sys.exit(f"[run.py] --episode {ns.episode}: --knowledge-commit {pin} is not the family's "
+                 f"knowledge commit {family}")
+    return family
+
+
+def _knowledge_pin(ns: argparse.Namespace) -> str | None:
+    """`--knowledge-commit`, held to a full commit id (O-PIN), or `None` for an unpinned run."""
+    if ns.knowledge_commit is None:
+        return None
+    try:
+        return run_knowledge.pinned_commit(ns.knowledge_commit)
+    except run_knowledge.KnowledgeRefused as refused:
+        sys.exit(f"[run.py] {refused}")
+
+
+def _publish_report(
+    publish: Callable[..., object] | None, tenant: _tenant.Tenant, data_root: DataRoot,
+) -> run_knowledge.PublishReport:
+    """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
+    — the tenant id and the data root (O8: no login material passes through the run process)
+    — and its one report line is read back. The real launcher never raises and records every
+    outcome itself; a seam that raises is U11's `stale:operator`, never fresh, recorded by the
+    same recorder the launcher uses."""
+    try:
+        launch = publish if publish is not None else _default_publish()
+        line = launch(str(tenant.id), data_root=_tenant.data_root_for_child(data_root))
+    except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
+        from defender.tenancy._publish_status import record_report
+
+        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
+        record_report(tenant, line, by="launch-time publish")
+    return run_knowledge.read_publish_report(line)
+
+
+def _default_publish() -> Callable[..., object]:
+    """The real launch-time publish: a separate child process (O-BUDGET, P-3)."""
+    from defender.runtime.publish_launch import launch_publish as real
+
+    return real
+
+
+def _knowledge_source(
+    tenant: _tenant.Tenant, *, pin: str | None, publish: Callable[..., object] | None,
+    data_root: DataRoot,
+) -> run_knowledge.KnowledgeSource:
+    """Which export this run reads and why: the pinned one (no publish), else `current` after
+    the launch-time publish — or the refusal before the box (O-A, O9)."""
+    report = None if pin is not None else _publish_report(publish, tenant, data_root)
+    try:
+        source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
+    except run_knowledge.KnowledgeRefused as refused:
+        sys.exit(f"[run.py] {refused}")
+    if source.kind == run_knowledge.STALE:
+        _logger.warning(f"knowledge is stale ({source.stale_kind}): the run reads the last "
+                        f"published snapshot {source.commit[:12]}; the publish said: "
+                        f"{source.reason}")
+    return source
+
+
+def _copy_knowledge(tenant: _tenant.Tenant, source: run_knowledge.KnowledgeSource,
+                    run_id: str) -> run_knowledge.RunCopy:
+    """The run's own copy of its export (U9), or the refusal before the box."""
+    try:
+        copy = run_knowledge.copy_for_run(tenant, source, run_id)
+    except (run_knowledge.KnowledgeRefused, OSError) as refused:
+        sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
+    try:
+        _tenant.check_run_settings(copy.settings)
+    except _tenant.TenantRefused as refused:
+        copy.remove()
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    return copy
+
+
+def _early_run(ns: argparse.Namespace, accepted: _tenant.Tenant, world: Any,
+               episode_runs: Any) -> Run:
+    """The run's handle, settled before its knowledge is copied (the copy is named by its id) and
+    handed to setup whole (#1279 rev 6): a sibling's arm from its episode's roster, else a fresh
+    one the tenant's runs repository mints. No caller names the id (A3); nothing is made on disk
+    for an arm, and only the natural runs container for an ordinary run."""
+    from defender.run_repository import RunRefused
+
+    try:
+        if world is not None:
+            return episode_runs.create(episode_runs.arm_id(world.world_id))
+        return accepted.runs_repository().create()
+    except (RunRefused, _tenant.TenantRefused) as refused:
+        where = f"--episode {ns.episode}: " if world is not None else ""
+        sys.exit(f"[run.py] {where}{refused}")
+
+def _write_knowledge_record(run_dir: Path, source: run_knowledge.KnowledgeSource) -> None:
+    """The host-held knowledge-source record beside the run dir (U12): what every reader of
+    the run's knowledge status reads. A run that cannot write it does not start: a missing
+    record would read as unreadable everywhere (OD22')."""
+    path = RunPaths(run_dir).knowledge_source()
+    try:
+        run_knowledge.write_host_record(path, source)
+    except OSError as e:
+        sys.exit(f"[run.py] could not write the run's knowledge record {path}: {e}")
 
 
 def _run_roster(defender_dir: Path) -> RosterRead:
@@ -590,21 +731,22 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
         sys.exit(f"[run.py] --episode {ns.episode}: {refusal}")
 
 
-def _materialize_run(
-    alert: Path, *, tenant: _tenant.Tenant, model: str | None,
-    world: Any = None, episode_runs: Any = None,
+def _materialize_run(  # noqa: PLR0913 — the builder's whole call
+    alert: Path, *, tenant: _tenant.Tenant, model: str | None, run: Run | None = None,
+    world: Any = None, settings: Path | None = None,
+    knowledge: run_knowledge.KnowledgeSource | None = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
     handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
-    world and lineage. A sibling's arm is made in its episode's container, through the view
-    `main` opened (`episode_runs`).
+    world and lineage. `run` is the handle `main` settled first (`_early_run`): a sibling's arm
+    from its episode's roster, or a fresh ordinary run.
 
     The single call site of the builder and the seam `main` injects; turns a tenant refusal
     (a runs-base record naming another tenant, say) into a named `[run.py]` exit.
     """
     try:
-        run = _run.materialize_run(alert, tenant=tenant, model=model, world=world,
-                                   episode_runs=episode_runs)
+        run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
+                                   settings=settings, knowledge=knowledge)
     except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
@@ -634,7 +776,8 @@ def _accept_request_tenant(
     try:
         tenant_id = _tenant.requested_tenant_id(ns.tenant)
         return _tenant.accept_tenant(
-            data_root, tenant_id, defender_dir=DEFENDER_DIR, box_mounted=box_mounted)
+            data_root, tenant_id, defender_dir=DEFENDER_DIR, box_mounted=box_mounted,
+            clone_tree=False)
     except _tenant.TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
@@ -696,7 +839,7 @@ def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None) 
             "source": source}
 
 
-def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injection seams; the unservable exit is one more arm
+def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its injection seams; the unservable exit is one more arm
     argv: list[str],
     *,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
@@ -708,13 +851,18 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     oracle: Any = None,
     verifier: Any = None,
     roster: Any = None,
+    publish: Callable[..., object] | None = None,
 ) -> int:
     """`oracle` / `verifier` are a sibling's oracle and verifier models (#1224; `None` builds
     them from their knobs). `roster` is the adapters roster this run reads (`None`: the
     checkout's, read once here): run start judges each granted system's settings check over it
     (#1256 O-8), once, and the lifecycle hands that judgement — the roster with its verdict, one
     value — to the investigation, so the roster judged and the roster used are one and the run
-    is not judged twice."""
+    is not judged twice.
+
+    `publish` is the launch-time publish (#1108 P4, U7/O11): called once per unpinned launch
+    with the tenant id and the data root, it returns the child's one report line. `None` is the
+    real child process (`launch_publish`); only an in-process caller passes a stand-in."""
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
@@ -729,6 +877,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     # under it; its path is named here, before acceptance, and nothing is opened by it.
     accepted = _accept_request_tenant(
         ns, data_root=data_root, box_mounted=_sibling_box_mounted(ns, data_root))
+    pin = _knowledge_pin(ns)
     # A sibling's door, right after acceptance: its episode walked from the tenant's own
     # folder and its roster publication checked before anything else of the episode is
     # read. The view's episode handle is held for the whole run; it serves the manifest read
@@ -738,127 +887,151 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         contextlib.nullcontext() if episode_runs is None else episode_runs)
     with door:
         episode = None if episode_runs is None else episode_runs.episode
+        # A sibling's knowledge is its family's: the pin its launcher recorded in the episode.
+        pin = _family_pin(ns, pin, episode)
         # One readiness check, shared by the old-manifest judge (only for a manifest recording
-        # no corpus patterns) and the run.
+        # no corpus patterns) and the run; resolved over the run's own copy of its knowledge.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
-            accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.episode is None))
-        world = _resume_target(ns, episode=episode, tenant=tenant_of,
+            accepted, dispatches_lead_zero=ns.episode is None, copy=copy))
+        world = _resume_target(ns, episode=episode, tenant=lambda: tenant_of(),
                                arm_ids=(lambda: None) if episode_runs is None
                                else episode_runs.arm_ids)
         source = (None if world is None
                   else _open_world_source(accepted.runs_repository(), world))
 
-        # The tenant's settings (and with them the one tenant check), resolved before the input
-        # is read and before anything is spent; nothing below reads them again.
-        tenant = tenant_of()
-        # The run's one judgement of its systems (#1256), before the run is made: the roster
-        # this run reads (the injected one, or the checkout's, read once here), judged by the
-        # adapters' own settings checks over those settings — a start at which no granted
-        # system is usable refused here (O-8, a sibling's own start too) — and handed to the
-        # lifecycle whole, so the investigation reads that roster and does not judge again.
-        from defender.runtime.branch._family import family_identities
+        # The one refusal knowable without the run's knowledge, made before the launch-time
+        # publish spends up to its budget on the issuer and the forge: an ordinary run's alert
+        # file is not there (looked at, not read). The tenant's readiness and the billable role
+        # preflight are judged over the run's own copy of its knowledge, so they follow it.
+        if world is None and not ns.alert.is_file():
+            sys.exit(f"alert not found: {ns.alert.resolve()}")
 
-        known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
-        systems = _judge_start(
-            tenant, defender_dir=DEFENDER_DIR,
-            roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
-            known_ids=known_ids)
+        # #1108 P4 (flow 3): the knowledge this run reads — the launch-time publish's outcome
+        # (or the pin), one export — copied into the run's own folder, named by its run id,
+        # before anything reads it. The copy is the run's alone and is removed when it ends.
+        early = _early_run(ns, accepted, world, episode_runs)
+        knowledge = _knowledge_source(accepted, pin=pin, publish=publish, data_root=data_root)
+        copy = _copy_knowledge(accepted, knowledge, early.run_dir.name)
+        try:
+            # The tenant's settings (and with them the one tenant check), over the run's copy:
+            # resolved before the input is read and before anything billable is spent; nothing
+            # below reads them again.
+            tenant = tenant_of()
+            # The run's one judgement of its systems (#1256), before the run is made: the roster
+            # this run reads (the injected one, or the checkout's, read once here), judged by the
+            # adapters' own settings checks over those settings — a start at which no granted
+            # system is usable refused here (O-8, a sibling's own start too) — and handed to the
+            # lifecycle whole, so the investigation reads that roster and does not judge again.
+            from defender.runtime.branch._family import family_identities
 
-        model = driver.resolve_main_model(ns.model)
-        # Runs in siblings too: models are resolved per process, so each sibling must check (and
-        # record) its own; a sibling also checks the oracle roles it serves through (M25=A).
-        rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
-        if rc:
-            return rc
-        seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
+            known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
+            systems = _judge_start(
+                tenant, defender_dir=DEFENDER_DIR,
+                roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
+                known_ids=known_ids)
 
-        # The input is read after the tenant check and the role preflight: a tenant the check
-        # refuses is told so before anything about its input is.
-        alert = _case_input(ns, world, episode_runs)
+            model = driver.resolve_main_model(ns.model)
+            # Runs in siblings too: models are resolved per process, so each sibling must check (and
+            # record) its own; a sibling also checks the oracle roles it serves through (M25=A).
+            rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
+            if rc:
+                return rc
+            seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
 
-        # The handle, not just its directory: the post-run step saves the run page through it.
-        run = (materialize(alert, tenant=accepted, model=model) if world is None
-               else materialize(alert, tenant=accepted, model=model, world=world,
-                                episode_runs=episode_runs))
-        run_dir = run.run_dir
-        # The run's id, announced as the first line of stdout (#1279 O5): a launcher that must
-        # record the run reads it here, before the ticket or the box exists.
-        print(f"run_id={run_dir.name}", flush=True)
+            # The input is read after the tenant check and the role preflight: a tenant the check
+            # refuses is told so before anything about its input is — save that an ordinary
+            # run's alert file is absent, refused above before the publish spends anything.
+            alert = _case_input(ns, world, episode_runs)
 
-        # Every log line from here on, the crash included, names this run and the tenant this
-        # process resolved once above and hands inward as one value.
-        with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
-            if ns.update_ticket:
-                ticket_writer.open_case_ticket(
-                    run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                    env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
+            # The handle, not just its directory: the post-run step saves the run page through it.
+            # The alert mapping is the run copy's, and the stamp records the export copied (O-B).
+            run = (materialize(alert, run=early, tenant=accepted, model=model,
+                               settings=copy.settings, knowledge=knowledge)
+                   if world is None
+                   else materialize(alert, run=early, tenant=accepted, model=model, world=world,
+                                    settings=copy.settings, knowledge=knowledge))
+            run_dir = run.run_dir
+            # The run's id, announced as the first line of stdout (#1279 O5), before the ticket
+            # or the box exists.
+            print(f"run_id={run_dir.name}", flush=True)
+            _write_knowledge_record(run_dir, knowledge)
 
-            _logger.info(f"run_dir={run_dir} model={model}")
-            _announce_provenance(run_dir)
+            # Every log line from here on, the crash included, names this run and the tenant this
+            # process resolved once above and hands inward as one value.
+            with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
+                if ns.update_ticket:
+                    ticket_writer.open_case_ticket(
+                        run, tenant=tenant, defender_dir=DEFENDER_DIR,
+                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
 
-            try:
-                summary = lifecycle(
-                    run=run,
-                    model=model,
-                    model_override=ns.model,
-                    defender_dir=DEFENDER_DIR,
-                    tenant=tenant,
-                    world=world,
-                    episode=episode,
-                    systems=systems,
-                    **seams,
-                )
-            except (ServingAbort, BaseExceptionGroup) as escaped:
-                abort = _serving_abort(escaped)
-                if abort is None or world is None or episode is None:
-                    raise
-                _record_unservable_world(episode, world, abort)
-                _logger.error(f"--episode: world {world.label} is unservable; the sibling ends "
-                              f"({getattr(abort, 'reason', '')})")
-                return UNSERVABLE_EXIT
+                _logger.info(f"run_dir={run_dir} model={model}")
+                _announce_provenance(run_dir)
 
-            # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
-            out = str(summary.get("output") or "")
-            _logger.info(f"done ({summary.get('requests')} model requests); "
-                         f"output: {out[:200]}")
+                try:
+                    summary = lifecycle(
+                        run=run,
+                        model=model,
+                        model_override=ns.model,
+                        defender_dir=DEFENDER_DIR,
+                        tenant=tenant,
+                        world=world,
+                        episode=episode,
+                        systems=systems,
+                        **seams,
+                    )
+                except (ServingAbort, BaseExceptionGroup) as escaped:
+                    abort = _serving_abort(escaped)
+                    if abort is None or world is None or episode is None:
+                        raise
+                    _record_unservable_world(episode, world, abort)
+                    _logger.error(f"--episode: world {world.label} is unservable; the sibling ends "
+                                  f"({getattr(abort, 'reason', '')})")
+                    return UNSERVABLE_EXIT
 
-            artifacts = [entry.name for entry in sorted(run_dir.iterdir())]
-            _logger.info("artifacts: %s", ", ".join(artifacts), extra={"artifacts": artifacts})
-            # The reap-scan verdict sits outside the tree it judges (in-tree, the box could forge
-            # it), so the listing above cannot show it; name it for the operator.
-            verdict = box_mod.verdict_path(run_dir)
-            if verdict.is_file():
-                _logger.info(f"../{verdict.name}: the reap scan's verdict — sits beside the run dir, "
-                             "not in it")
-            else:
-                _logger.warning(f"../{verdict.name} MISSING — this tree was never scrubbed")
+                # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
+                out = str(summary.get("output") or "")
+                _logger.info(f"done ({summary.get('requests')} model requests); "
+                             f"output: {out[:200]}")
 
-            _run.cross_check_tables(run_dir)
+                artifacts = [entry.name for entry in sorted(run_dir.iterdir())]
+                _logger.info("artifacts: %s", ", ".join(artifacts), extra={"artifacts": artifacts})
+                # The reap-scan verdict sits outside the tree it judges (in-tree, the box could
+                # forge it), so the listing above cannot show it; name it for the operator.
+                verdict = box_mod.verdict_path(run_dir)
+                if verdict.is_file():
+                    _logger.info(f"../{verdict.name}: the reap scan's verdict — sits beside the "
+                                 "run dir, not in it")
+                else:
+                    _logger.warning(f"../{verdict.name} MISSING — this tree was never scrubbed")
 
-            # No automatic feed into the learning pipeline; only catalog curation is triggered
-            # here, and its failure does not affect the exit status. The ticket comment (never a
-            # close — that is a person's act) is recorded before the curation marker, which a
-            # drainer may pick up immediately.
-            if ns.update_ticket:
-                # Both inputs come from the driver's summary, not from a possibly stale sidecar.
-                ticket_writer.record_case_ticket(
-                    run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                    env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
-                    closed_before_cut=summary.get("closed_before_cut") is True)
+                _run.cross_check_tables(run_dir)
 
-            # A sibling's evidence was staged on purpose, so it must never feed the catalog.
-            if world is not None:
-                _logger.info("--episode: a sibling world is not enqueued for curation")
-            elif ns.no_learn:
-                _logger.info("--no-learn set; not enqueuing for curation")
-            elif enqueue_curation(run, alert, truncated_by=summary.get("truncated_by")):
-                _logger.info("enqueued for catalog curation")
+                # No automatic feed into the learning pipeline; only catalog curation is triggered
+                # here, and its failure does not affect the exit status. The ticket comment (never a
+                # close — that is a person's act) is recorded before the curation marker, which a
+                # drainer may pick up immediately.
+                if ns.update_ticket:
+                    # Both inputs come from the driver's summary, not from a possibly stale sidecar.
+                    ticket_writer.record_case_ticket(
+                        run, tenant=tenant, defender_dir=DEFENDER_DIR,
+                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
+                        closed_before_cut=summary.get("closed_before_cut") is True)
 
-            try:
-                visualize(run, tenant=accepted, update_ticket=ns.update_ticket)
-            except _run.VisualizeFailed:
-                _logger.warning("the run page was not saved", exc_info=True)
-            return _exit_code(summary)
+                # A sibling's evidence was staged on purpose, so it must never feed the catalog.
+                if world is not None:
+                    _logger.info("--episode: a sibling world is not enqueued for curation")
+                elif ns.no_learn:
+                    _logger.info("--no-learn set; not enqueuing for curation")
+                elif enqueue_curation(run, alert, truncated_by=summary.get("truncated_by")):
+                    _logger.info("enqueued for catalog curation")
+
+                try:
+                    visualize(run, tenant=accepted, update_ticket=ns.update_ticket)
+                except _run.VisualizeFailed:
+                    _logger.warning("the run page was not saved", exc_info=True)
+                return _exit_code(summary)
+        finally:
+            copy.remove()
 
 
 #: A sibling whose world went unservable exits with this (its world record says why).

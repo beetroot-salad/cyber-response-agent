@@ -41,13 +41,13 @@ def _materialize(alert: Path, **kw):
 
 def _arm(alert: Path, world, ep: Path):
     """`materialize_run` for a sibling arm of episode `ep` (#1105 PR 2): made through the
-    episode's view (`episode_runs=`), whose container and arm roster the launcher's RUNS step
+    episode's view (`run=`, the arm's run from its roster id), whose container and arm roster the launcher's RUNS step
     makes before the first sibling (#1187 R2) — here `_triplet_947.episode_view` stands in."""
     tenant = T1106.accept(current_data_root(), T_ID)
     with Episode.open(ep) as episode:
         view = T.episode_view(episode, tenant=tenant)
-        # #1279 (A3): setup reads the arm's id from the roster itself (`episode_runs.arm_id`).
-        return _materialize(alert, world=world, episode_runs=view)
+        # #1279 (A3, rev 6): the caller makes the arm's run from the roster id; setup takes it.
+        return _materialize(alert, world=world, run=view.create(view.arm_id(world.world_id)))
 
 
 def _stamp(run_dir: Path) -> dict:

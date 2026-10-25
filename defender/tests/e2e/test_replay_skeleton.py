@@ -86,10 +86,18 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
         runtime_tools, "_run_gather", _fake_run_gather,
     )
 
-    drive(run_dir, run_id=run_id, main=replay)
+    # #1108 P4 (A8): the golden carries the agent content it reads; the run is a tenant whose
+    # agent half is that tree, published for real, so its recorded `cat /agent/lessons/X.md`
+    # reads are answered by the golden's own lessons, observed below in what MAIN was handed.
+    drive(run_dir, run_id=run_id, main=replay, agent=GOLDEN_AB3 / "agent")
 
     assert replay.calls == len(turns), \
         f"replayed {replay.calls}/{len(turns)} turns (early stop = an unexpected gate deny)"
+    handed = replay.seen[-1]
+    for lesson in sorted((GOLDEN_AB3 / "agent" / "lessons").glob("*.md")):
+        assert lesson.read_text(encoding="utf-8").strip() in handed, (
+            f"MAIN's recorded `cat /agent/lessons/{lesson.name}` came back without the golden's "
+            "lesson: the run did not read its tenant's agent tree")
 
     produced = (run_dir / "investigation.md").read_text()
     golden = (GOLDEN_AB3 / "investigation.md").read_text()

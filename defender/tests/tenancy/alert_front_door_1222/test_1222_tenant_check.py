@@ -5,6 +5,7 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import contextlib
+import json
 import os
 import re
 import stat
@@ -127,7 +128,15 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
     (`T.episode`), so launch and sibling resume can be driven over the tenant afterwards."""
     w = World(tmp=Path(tmp_path), capsys=capsys, planted=S.plant_tenant(**plant))
     if launchable:
+        # #1108 P4 (flow 7, OD5): a branch launch materialises and pins the knowledge commit
+        # its source's stamp names, so the tenant is published for real FIRST and the source
+        # is stamped after, naming that commit (`T.scene_knowledge` reads `exports/current`)
+        # — not the placeholder a never-published tenant leaves in the stamp.
+        published, refusal = S.publish_planted(w.tmp, w.planted)
+        assert published is not None, f"the valid planted tenant did not publish: {refusal}"
         _base, src = location_path(T.runs_base)(w.tmp, tenant_id=w.planted.tenant_id)
+        stamp = json.loads((src / "provenance.json").read_text(encoding="utf-8"))
+        assert stamp.get("knowledge") == {"commit": published.commit}, stamp
         w.source_run = src
         w.episode = T.episode(w.tmp, root=w.planted.root / w.planted.tenant_id / "episodes",
                               doc=T.family_doc(source_run_dir=str(src)))
@@ -212,12 +221,18 @@ def at_run_start(w: World, **run: Any) -> Verdict:
 def at_branch_launch(w: World) -> Verdict:
     assert w.source_run is not None, "the world was not built launchable"
     preflight, spawn = RolePreflight(), T.FakeSpawn()
+    # #1108 P4 (O-B, owner ruling 3): the launch pins the knowledge commit the source's stamp
+    # names, and the live capture stamps that pinned export — not wherever `current` has moved
+    # since (another site of this test may have published the tenant again). The fake live
+    # tree therefore answers with the source's own knowledge revision.
+    stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
     text = ""
     try:
         S.mod("learning.branch.cli").main(
             ["--tenant", w.planted.tenant_id, w.source_run.name,
              str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
-            spawn=spawn, preflight=preflight, live_tree=T.source_capture())
+            spawn=spawn, preflight=preflight,
+            live_tree=T.source_capture(knowledge=stamp["knowledge"]))
     except SystemExit as stop:
         text = _exit_text(stop)
     passed = bool(preflight.calls)
@@ -233,12 +248,16 @@ def at_sibling_resume(w: World) -> Verdict:
         lifecycles.append(kw)
         return {"output": "", "requests": 0, "truncated_by": None}
 
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
     text = ""
     try:
+        # #1108 P4 (OD14, O11): the in-process launch-time publish.
         S.mod("run").main(
             ["--episode", w.episode.name, "--world", "b",
              "--tenant", w.planted.tenant_id],
-            lifecycle=lifecycle, visualize=lambda *_a, **_k: None, preflight=preflight)
+            lifecycle=lifecycle, visualize=lambda *_a, **_k: None, preflight=preflight,
+            publish=in_process_publish())
     except SystemExit as stop:
         text = _exit_text(stop)
     passed = bool(preflight.calls)

@@ -11,7 +11,7 @@ from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
 from defender.knowledge._knowledge import KnowledgePaths
 from defender._untrusted import wrap_fresh
-from defender.runtime.model_view import ModelView
+from defender.runtime.model_view import MODEL_AGENT, ModelView
 from defender.runtime.system_status import NONE_DOWN
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
@@ -98,13 +98,15 @@ def _spoken(sig: str) -> str:
 def _hits_in_view(hits: str | None, view: ModelView) -> str | None:
     """The signature lookup's `<path>\t<description>` lines with each path rendered in the
     model view (#1255 P1, O3): the shim runs on the host and prints each lesson's resolved host
-    path, which names the checkout. A path under the run checkout's corpus is rendered as that
-    corpus's model path; the shim prints no other, and any other line is shown as printed."""
+    path, which names the run copy (#1108 P4: it reads `$DEFENDER_AGENT_DIR/lessons`). A path
+    under the run's corpus is rendered as that corpus's model path; the shim prints no other,
+    and any other line is shown as printed (a view with no agent root renders nothing)."""
     if not hits:
         return hits
-    defender_dir = view.to_host("/defender")
-    assert defender_dir is not None
-    corpus = KnowledgePaths.of_defender_dir(defender_dir).lessons_dir
+    agent_root = view.to_host(str(MODEL_AGENT))
+    if agent_root is None:
+        return hits
+    corpus = KnowledgePaths(agent_root).lessons_dir
     real, shown = corpus.resolve(), view.to_model(corpus)
     lines = []
     for line in hits.splitlines():

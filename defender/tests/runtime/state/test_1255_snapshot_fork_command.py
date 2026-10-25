@@ -20,7 +20,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
         tmp_path, capsys):
     from defender.learning.branch import cli as branch_cli
 
-    _base, src = location_path(T.runs_base)(tmp_path, pre_snapshot=True)
+    _base, src = location_path(T.runs_base)(tmp_path, pre_snapshot=True, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     questioner = T.FakeAgent()  # no replies: a call it should never get fails loudly
     spawn = T.FakeSpawn()
     preflights: list[tuple] = []

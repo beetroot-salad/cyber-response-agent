@@ -91,7 +91,7 @@ claims:
   - id: C2
     kind: referential
     claim: "The legacy drain box is shared across a batch, with writable trees owned by its lane."
-    probe: "Read learning/core/drains.py _run_worktree_batch and _drain_box_request at the grounding base."
+    probe: "Read learning/core/drains.py _run_worktree_batch and _drain_box_request at the grounding base."  # lint-stale-ref: ok — a probe recorded at its grounding base
     probe_kind: read
     observed: "One box is created for the batch; mounts use label.writable_trees."
     verdict: holds
@@ -115,7 +115,7 @@ The executable regression suite is `tests/runtime/engine/test_1262_learning_work
 Legacy framing and sandbox suites migrate model input spellings while retaining their
 behavioral assertions. No stored-record migration or new external publishing action is needed.
 
-Live mechanism confirmation used the production `_drain_box_request` and `start_box`,
+Live mechanism confirmation used the production `_drain_box_request` and `start_box`, <!-- lint-stale-ref: ok — recorded at the grounding base; removed by #1108 P4 -->
 with a temporary checkout carrying the execution modules and `MOUNT_CHECK`, and the
 installed product image pinned in `BoxSpec`. Under `runc`, startup code/writable-mount
 probes passed; `cat /workspace/defender/lessons/live.md | grep /workspace` returned the

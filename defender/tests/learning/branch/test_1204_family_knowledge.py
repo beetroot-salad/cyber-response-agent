@@ -3,8 +3,6 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import json
-import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +13,6 @@ from defender.episodes._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.branch import test_976_family_anchor as A
-from defender.tests.tenancy import test_1204_knowledge_revision as R
-from defender.tests.support.shared.contracts._data_root_1078 import FIXTURE
 
 
 @pytest.fixture(autouse=True)
@@ -206,8 +202,11 @@ def test_1204_a_launch_whose_live_knowledge_matches_the_source_is_accepted(tmp_p
     launch = A._prepare(tmp_path)
     stamp = A._accepted(launch)
     assert launch.live_tree.calls == 1
-    assert stamp["source"]["knowledge"] == {"commit": K}
-    assert stamp["agreed"]["knowledge"] == {"commit": K}
+    # #1108 P4 (OD5): the launch's tenant is published for real; its commit replaces `K`.
+    scene = T.scene_knowledge()
+    assert scene != K, "fixture bug: the launch tenant was not published"
+    assert stamp["source"]["knowledge"] == {"commit": scene}
+    assert stamp["agreed"]["knowledge"] == {"commit": scene}
     assert stamp["waived"] == [], "nothing was waived, and the flag was not given"
 
 
@@ -217,7 +216,8 @@ def test_1204_a_live_tenant_clone_on_another_knowledge_commit_is_refused_and_nev
     for argv in ((), ("--allow-dirty",)):
         launch = A._prepare(tmp_path, live_tree=T.source_capture(knowledge={"commit": K2}))
         message = A._refused_before_spending(launch, *argv)
-        A._never_waivable(message, "live tree", "knowledge", K2, K)
+        # #1108 P4 (OD5): the source names the published tenant's real commit.
+        A._never_waivable(message, "live tree", "knowledge", K2, T.scene_knowledge())
         assert launch.live_tree.calls == 1
 
 
@@ -235,18 +235,28 @@ def test_1204_a_live_capture_whose_knowledge_is_unprovable_is_waivable(tmp_path,
     assert stamp["allow_dirty"] is True
 
 
-@pytest.mark.parametrize("shape", sorted(UNPROVABLE))
+#: #1108 P4 (OD9, fail closed): a SOURCE stamp that says `unversioned` or `unavailable` names
+#: no knowledge commit for the launch to materialise and pin its siblings to, so it is refused
+#: even under `--allow-dirty` — the waiver this case pinned for those two shapes is a mechanism
+#: P4 removes (OD12 class i). Covered by
+#: `tests/tenancy/tenant_1108_p4/test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
+#: The stamp-predates-#1204 shapes (no key, or null) stay waivable here.
+SOURCE_WAIVABLE: dict[str, Any] = {k: v for k, v in UNPROVABLE.items()
+                                   if k not in ("unversioned", "unavailable")}
+
+
+@pytest.mark.parametrize("shape", sorted(SOURCE_WAIVABLE))
 def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unless_waived(
         tmp_path, shape):
-    """O2/A2 at preflight, the source side."""
+    """O2/A2 at preflight, the source side (the shapes OD9 leaves waivable)."""
     launch = A._prepare(tmp_path)
-    A._restamp(launch.src, knowledge=UNPROVABLE[shape])
+    A._restamp(launch.src, knowledge=SOURCE_WAIVABLE[shape])
     message = A._refused_before_spending(launch)
     A._waivable(message, "source", "knowledge")
     _never_called_dirt(message)
 
     waived = A._prepare(tmp_path)
-    A._restamp(waived.src, knowledge=UNPROVABLE[shape])
+    A._restamp(waived.src, knowledge=SOURCE_WAIVABLE[shape])
     stamp = A._accepted(waived, "--allow-dirty")
     assert stamp["allow_dirty"] is True
 
@@ -309,7 +319,8 @@ def test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_kn
     assert stamp["waived"] == (["dirt", "knowledge"] if dirty_source else ["knowledge"])
     assert stamp["source"]["dirty"] is dirty_source
     assert stamp["allow_dirty"] is True
-    assert stamp["agreed"]["knowledge"] == {"commit": K}
+    # #1108 P4 (OD5): the siblings name the published tenant's real commit.
+    assert stamp["agreed"]["knowledge"] == {"commit": T.scene_knowledge()}
 
 
 #: Siblings that name no knowledge commit, in the FIRST position (`a` is handed over first).
@@ -352,44 +363,11 @@ def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, 
     assert stamp["waived"] == ["knowledge"]
 
 
-def _versioned_tenant_knowledge() -> str:
-    """Place the episode tenant's knowledge folder as a real git repo (the committed fixture,
-    committed) BEFORE `A._prepare` sets the tenant up — the tenant set-up then keeps it and
-    the real `accept_tenant` admits it (C10). Returns its HEAD. The episode tenant is the
-    fixture tenant `A._prepare`'s source run belongs to (#1224's live-oracle estate)."""
-    tenant_id = A.S.FIXTURE_TENANT
-    knowledge = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "knowledge"
-    shutil.copytree(FIXTURE, knowledge, symlinks=True)
-    (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
-    R._repo(knowledge)
-    return R._head(knowledge)
-
-
-def test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone(tmp_path):
-    """D3."""
-    from defender import run_common
-
-    code = _provenance.capture_tree(run_common.REPO_ROOT)
-    if not code.commit:
-        pytest.skip("no git answers for this checkout here, so the default live capture names "
-                    "no code commit and the member comparison never reaches knowledge")
-    live = _versioned_tenant_knowledge()
-    assert live not in (K, K2)
-
-    mismatched = A._prepare(tmp_path)
-    mismatched.live_tree = None
-    A._restamp(mismatched.src, knowledge={"commit": K2})
-    message = A._refused_before_spending(mismatched)
-    assert "live tree is at commit" in message, message
-    for phrase in ("knowledge", live, K2):
-        assert phrase in message, (phrase, message)
-
-    matched = A._prepare(tmp_path)
-    matched.live_tree = None
-    A._restamp(matched.src, knowledge={"commit": live})
-    message = A._refused_before_spending(matched)
-    assert "live tree is at commit" in message, message
-    assert "knowledge" not in message, message
+# #1108 P4 (OD12 class i): `test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone`
+# (#1204 D3) pinned the branch CLI's live capture reading the tenant CLONE's checked-out
+# commit — the mechanism P4's O-B retires (the live capture stamps from the pinned export, never
+# the clone's HEAD). Deleted; its successor is
+# `tests/tenancy/tenant_1108_p4/test_branch_replay.py::test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_publish`.
 
 
 #: D4's classification, as the design states it.
@@ -399,6 +377,9 @@ D4 = {
     "dirty": "dedicated", "tenant_id": "dedicated",
     "dirty_paths": "informational", "dirty_path_count": "informational",
     "unavailable": "informational", "alert_label": "informational",
+    # #1108 P4 (O-STALE): where the run's knowledge came from (fresh/stale/pinned, the commit
+    # copied, why) is recorded and never compared; `knowledge` stays the anchored commit.
+    "knowledge_source": "informational",
     "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
     "fork_turn": "expected_to_differ", "started_at": "expected_to_differ",
 }
@@ -413,6 +394,35 @@ DIFFERENT: dict[str, Any] = {
 
 def _table() -> dict[str, str]:
     return T.sym("learning.branch.cli", "STAMP_FIELD_CLASSES")
+
+
+def test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states():
+    """D4's census (and #1108 P4 O-STALE): `STAMP_FIELD_CLASSES` names exactly the fields a
+    `RunProvenance` record carries on the wire, each in one of the five classes, as D4 (plus
+    P4's `knowledge_source: informational`) states. A new stamp field cannot be left out of the
+    fork check, and `knowledge_source` is recorded, never compared.
+
+    OD17: the stamp "may carry" `knowledge_source`, so a bare record's wire keys are the table
+    less that one optional key, and the key reaches the wire (with only `{kind, commit,
+    stale_kind}`, never the reason) when the run hands it to the stamp."""
+
+    table = _table()
+    record = _provenance.RunProvenance(commit="0" * 40, dirty=False)
+    wire = set(json.loads(record.as_json()))
+    optional = {"knowledge_source"}
+    assert set(table) == wire | optional, (
+        f"stamp table vs record fields: only in table {set(table) - wire - optional}, "
+        f"only on the record {wire - set(table)}")
+    assert table["knowledge_source"] == "informational", table
+    source = {"kind": "stale", "commit": "1" * 40, "stale_kind": "operator",
+              "reason": "forge said no"}
+    carried = json.loads(record.as_json(knowledge_source=source))
+    assert set(carried) == wire | optional, set(carried) ^ (wire | optional)
+    assert carried["knowledge_source"] == {
+        "kind": "stale", "commit": "1" * 40, "stale_kind": "operator"}, carried
+    assert set(table.values()) <= CLASSES, table
+    assert table == D4, {k: (table.get(k), D4.get(k)) for k in set(table) | set(D4)
+                         if table.get(k) != D4.get(k)}
 
 
 def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family(tmp_path):

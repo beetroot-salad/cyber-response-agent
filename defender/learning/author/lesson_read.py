@@ -39,7 +39,7 @@ def register_lesson_read_tool(agent) -> None:
     ) -> str:
         """Read a lesson. ``part='body'`` (the default) returns the lesson prose with the YAML
         frontmatter stripped; ``part='full'`` returns the whole file INCLUDING the frontmatter
-        (use it to read a ``_TEMPLATE.md`` schema, which lives in the frontmatter). Pass
+        (use it when the frontmatter itself is what you need). Pass
         ``pattern`` to return only the lines of the selected text containing that substring — the
         grep fold, for scanning a large lesson."""
         return _tool_lesson_read(ctx.deps, path, part, pattern)

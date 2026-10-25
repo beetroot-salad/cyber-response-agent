@@ -161,8 +161,11 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
     script.write_text(_PROBE, encoding="utf-8")
     # Execute in the shared model view; forbidden episode/sibling targets retain host paths.
     command = f"python3 {MODEL_RUN / PROBE_NAME} {MODEL_RUN} {episode} {sibling}"
+    from defender.tests.support.tenancy._run_copy_stage import staged_agent
+
+    agent, token = staged_agent(Path(t.agent), arm.parent.parent / "run-copies")
     box = start_box(arm, H.DEFENDER, spec=BoxSpec(runtime=runtime),
-                    tenant_agent=t.agent, tenant_id=t.id)
+                    tenant_agent=agent, tenant_id=t.id, staged_token=token)
     sandboxed, name = box.sandboxed, box.name
     # The host prepares the run clock at box startup; compare model effects after setup.
     before = _outside_arm(S.tree(episodes), arm_id)

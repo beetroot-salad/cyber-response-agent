@@ -1,5 +1,7 @@
 """The corpus drain tick: halt on a refused state entry, containment of everything else. Drives the
-real `drains.author_drain` through `cli._run_stage` over a created state root and a real git repo."""
+real `drains.author_drain` through `cli._run_stage` over the fixture tenant published for real
+(#1108 P4 flow 4: its learning root, its draft, its forge), the corpus seen-lessons committed in
+the TENANT repo. `_scratch_world` keeps the curator-level case on its scratch repo."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -18,7 +20,6 @@ from typing import Any
 
 import pytest
 
-from defender.learning.core import drains
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.learning.core.cli import _run_stage
 from defender.learning.core.config import (
@@ -28,8 +29,17 @@ from defender.learning.core.config import (
     StageAbort,
 )
 from defender.tests.support.learning.curation import _drain719 as D
-from defender.tests.e2e import _box665 as B
 from defender.tests.learning.state_contracts import _spec1135 as S
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    BoxSpy,
+    CuratorTrigger,
+    author_drain,
+    drain_paths,
+    product_repo,
+    remote_branches,
+    touched,
+)
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
 #: The world row the committed questioner lesson already cites (consumed with no model call).
 SEEN_WORLD_ID = "ep-1/b/0/0"
@@ -51,7 +61,7 @@ def _git(repo: Path, *args: str) -> str:
                           check=True).stdout
 
 
-def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, LoopPaths]:
+def _scratch_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, LoopPaths]:
     """`(repo, root, paths)`: `_drain719.make_repo` plus a `lessons-questioner/` corpus whose one
     committed lesson cites `SEEN_WORLD_ID`, a committed `lessons/` lesson citing
     `SEEN_DEFENDER_IDS`, and `LoopPaths` over a CREATED root."""
@@ -70,6 +80,31 @@ def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path,
     _git(repo, "commit", "-q", "-m", "questioner corpus")
     paths = S.built_paths(tmp_path, repo_root=repo)
     return repo, tmp_path / "learning-state", paths
+
+
+#: The tenant repo's seen lessons (#1108 P4: the corpus lives in the tenant's `agent/`): a
+#: questioner lesson citing `SEEN_WORLD_ID` and a `lessons/` lesson citing `SEEN_DEFENDER_IDS`.
+SEEN_FILES = {
+    "agent/lessons-questioner/seen.md":
+        f"---\nname: seen\nsource_finding_ids:\n- {SEEN_WORLD_ID}\n---\n\nbody\n",
+    "agent/lessons/seen-defender.md":
+        "---\nname: seen-defender\nsource_finding_ids:\n"
+        + "".join(f"- {fid}\n" for fid in SEEN_DEFENDER_IDS) + "---\n\nbody\n",
+}
+
+
+@pytest.fixture
+def world(tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch):
+    """`(tenant, root, paths)`: the fixture tenant published for real with `SEEN_FILES`
+    committed and its forge bound, its CREATED learning root, and the drain's learning paths
+    over a scratch product checkout. Both curators wake at one row."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
+    with published_tenant(tmp_path / "forge", root=data_root, files=SEEN_FILES) as t:
+        bind_forge(t)
+        root = Path(location_path(t.tenant.learning))
+        root.mkdir(parents=True, exist_ok=True)
+        yield t, root, drain_paths(t, product_repo(tmp_path))
 
 
 def _defender_row(fid: str, judge_outcome: str) -> dict:
@@ -112,29 +147,11 @@ def _seed(root: Path, findings: list[dict], questioner: list[dict] | None = None
                   [_world_row()] if questioner is None else questioner)
 
 
-class _RepoBranch(B.RecordingBranch):
-    """`author_drain`'s `branch=` seam over the REAL repo (as e2e/test_922_spine's RepoBranch):
-    the batch's worktree is the repo itself, so a corpus commit is a real `git commit`; the
-    push/PR step is recorded (`finish_batch:<id>` in `events`), never performed."""
-
-    def __init__(self, repo: Path, **kw: Any) -> None:
-        super().__init__(repo.parent, **kw)
-        self._repo = repo
-
-    def start_batch(self, batch_id: str) -> Path:
-        self.events.append(f"start_batch:{batch_id}")
-        return self._repo
-
-
-def _tick(paths: LoopPaths, repo: Path, *, trigger_author: Any = None) -> tuple[int, list[str]]:
-    """One corpus-drain tick through the stage runner: `(exit status, branch/box events)`."""
-    rec = B.BoxLifecycleRecorder()
-    branch = _RepoBranch(repo, events=rec.events)
-    extra = {} if trigger_author is None else {"trigger_author": trigger_author}
-    rc = _run_stage(lambda: drains.author_drain(
-        paths, branch=branch, start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub,
-        **extra))
-    return rc, rec.events
+def _tick(t: Any, paths: LoopPaths, *, trigger_author: Any = None) -> tuple[int, BoxSpy]:
+    """One corpus-drain tick through the stage runner over the tenant's draft: `(exit status,
+    the box spy)`. `trigger_author` None runs the drain's own default step."""
+    box = BoxSpy()
+    return author_drain(t, paths, trigger=trigger_author, box=box), box
 
 
 def _lines(caplog: pytest.LogCaptureFixture, level: int) -> list[str]:
@@ -155,16 +172,16 @@ def _handle_rows(paths: LoopPaths) -> list[dict]:
     return S.rows_of(state.rows(S.coined("FINDINGS")))
 
 
-def test_a_refusal_in_the_first_curator_halts_the_tick_with_exit_2(tmp_path, monkeypatch, caplog):
+def test_a_refusal_in_the_first_curator_halts_the_tick_with_exit_2(tmp_path, world, caplog):
     caplog.set_level(logging.INFO)
-    repo, root, paths = _world(tmp_path, monkeypatch)
+    t, root, paths = world
     row = _defender_row("ep-1/b/0/1", "caught")
     _seed(root, [row])
     target = S.outside(tmp_path, "ledger.jsonl")
     ledger = S.plant(root / "_pending" / "consumed.jsonl", "symlink", target=target)
     before, target_bytes = S.tree_snapshot(root), target.read_bytes()
 
-    rc, _events = _tick(paths, repo)
+    rc, _box = _tick(t, paths)
 
     assert rc == 2, f"a refused consumed ledger did not halt the tick: exit {rc}"
     critical = _lines(caplog, logging.CRITICAL)
@@ -190,15 +207,15 @@ def test_a_refusal_in_the_first_curator_halts_the_tick_with_exit_2(tmp_path, mon
         "the queue read back through the handle is not the queue the tick left"
 
 
-def test_a_non_refusal_fault_in_the_first_curator_stays_contained(tmp_path, monkeypatch, caplog):
+def test_a_non_refusal_fault_in_the_first_curator_stays_contained(world, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-provider-model-1135")
-    repo, root, paths = _world(tmp_path, monkeypatch)
+    t, root, paths = world
     row = _defender_row("ep-1/b/0/2", "survived")
     _seed(root, [row])
     queue_bytes = _queue(root).read_bytes()
 
-    rc, _events = _tick(paths, repo)
+    rc, _box = _tick(t, paths)
 
     assert rc == 0, f"a contained systemic fault reached _run_stage: exit {rc}"
     assert _lines(caplog, logging.CRITICAL) == [], "the contained fault was reported CRITICAL"
@@ -218,7 +235,7 @@ def test_a_refused_stuck_report_raises_instead_of_logging_not_written(
     from defender.learning.author import drain as author_drain_body
 
     caplog.set_level(logging.INFO)
-    repo, root, paths = _world(tmp_path, monkeypatch)
+    repo, root, paths = _scratch_world(tmp_path, monkeypatch)
     row = dict(_defender_row("ep-1/b/0/3", "survived"), subject="world")
     _seed(root, [row])
     target = S.outside(tmp_path, "stuck.jsonl")
@@ -247,41 +264,34 @@ def test_a_refused_stuck_report_raises_instead_of_logging_not_written(
 class _FirstCommitsSecondFaults:
     """The `trigger_author=` seam — the one seam through which a curator's MODEL can be faked
     (no real input commits a lesson without a model). For the lessons curator it runs the REAL
-    folded drain body (`author/drain.run_batch`: gate, commit, closing rotation) over the
-    regression tier's own config builder (`_drain719.cfg_for`), with only the model faked
+    curator over the lane's held trees of the draft (`_drain_support.CuratorTrigger`: the real
+    builder, `run_batch`, gate, commit, closing rotation) with only the model faked
     (`_drain719.committing`); for the questioner curator it raises `StageAbort`, a
     SYSTEMIC_FAULTS member that is not a refusal, at the seam — C32's executed shape (a
     non-OSError systemic fault raised in trigger_author is contained)."""
 
     def __init__(self) -> None:
         self.modules: list[str] = []
+        self._author = CuratorTrigger(author=D.committing("family-lesson"))
 
-    def __call__(self, *args: Any, **kwargs: Any) -> None:
-        values = [*args, *kwargs.values()]
-        module = next(v for v in values if v in ("author", "questioner_curator"))
-        self.modules.append(module)
-        if module == "questioner_curator":
+    def __call__(self, paths: Any, state: Any, channel: Any, threshold_env: str,
+                 module_name: str, pending_label: str, **kwargs: Any) -> None:
+        self.modules.append(module_name)
+        if module_name == "questioner_curator":
             raise StageAbort("questioner curator: a systemic fault that is not a refusal")
-        wt_paths = next((v for v in values if isinstance(v, LoopPaths)), None)
-        assert wt_paths is not None, (
-            "the trigger_author seam carries no worktree LoopPaths — this fake needs the batch "
-            "worktree to build the curator's config (rename the lookup here)")
-        from defender.learning.author import drain as author_drain_body
-
-        cfg = D.cfg_for(wt_paths, "findings", invoke_agent=D.committing("family-lesson"))
-        author_drain_body.run_batch(cfg=cfg, hold_committed=True, box=kwargs.get("box"))
+        self._author(paths, state, channel, threshold_env, module_name, pending_label, **kwargs)
 
 
 def test_1135_second_curator_meets_a_non_refusal_systemic_fault_after_the_first_committed(
-        tmp_path, monkeypatch, caplog):
+        world, caplog):
     caplog.set_level(logging.INFO)
-    repo, root, paths = _world(tmp_path, monkeypatch)
+    t, root, paths = world
     row = _defender_row("ep-1/b/0/4", "survived")
     _seed(root, [row])
-    head_before = _git(repo, "rev-parse", "HEAD").strip()
+    main_before = t.origin_main()
     trigger = _FirstCommitsSecondFaults()
 
-    rc, events = _tick(paths, repo, trigger_author=trigger)
+    rc, _box = _tick(t, paths, trigger_author=trigger)
 
     assert trigger.modules == ["author", "questioner_curator"], trigger.modules
     assert rc == 0, f"a contained systemic fault in the second curator halted the tick: {rc}"
@@ -289,13 +299,15 @@ def test_1135_second_curator_meets_a_non_refusal_systemic_fault_after_the_first_
     assert [r["fault_class"] for r in _stuck(root, "questioner_findings")] == ["StageAbort"], \
         "the second curator's fault was not recorded once on its own channel"
     assert _stuck(root) == [], "a stuck record was written on the first curator's channel"
-    landed = _git(repo, "diff", "--name-only", f"{head_before}..HEAD").split()
-    assert any(n.startswith("defender/lessons/family-lesson-") for n in landed), \
-        f"the first curator's lesson was not committed in the tick: {landed}"
-    assert any(e.startswith("finish_batch:") for e in events), \
-        f"the first curator's batch was not delivered (pushed, PR opened) in the tick: {events}"
-    assert S.tree_snapshot(root / "_pending_delivery") == {}, \
-        "a delivery record was left: the batch sits on an undelivered branch"
+    branches = remote_branches(t.remote)
+    assert len(branches) == 1, f"the first curator's batch was not pushed in the tick: {branches}"
+    [(branch, tip)] = branches.items()
+    landed = touched(t.remote, main_before, tip)
+    assert landed, "the first curator's batch landed nothing"
+    assert all(n.startswith("agent/lessons/family-lesson-") for n in landed), \
+        f"the first curator's lesson was not the batch's one change: {landed}"
+    assert [c["head"] for c in t.forge.creates] == [branch], \
+        "the first curator's batch was not delivered (PR opened on the tenant forge) in the tick"
     assert [r["finding_id"] for r in S.jsonl_rows(_queue(root))] == [row["finding_id"]], \
         "the first curator's committed row did not stay queued (hold_committed)"
     assert row["finding_id"] not in [
@@ -305,15 +317,15 @@ def test_1135_second_curator_meets_a_non_refusal_systemic_fault_after_the_first_
         "the queue read back through the handle is not the queue the tick left"
 
 
-def test_1135_locks_of_a_halted_tick_are_free_for_the_next_tick(tmp_path, monkeypatch, caplog):
+def test_1135_locks_of_a_halted_tick_are_free_for_the_next_tick(tmp_path, world, caplog):
     caplog.set_level(logging.INFO)
-    repo, root, paths = _world(tmp_path, monkeypatch)
+    t, root, paths = world
     row = _defender_row("ep-1/b/0/5", "caught")
     _seed(root, [row])
     ledger = S.plant(root / "_pending" / "consumed.jsonl", "symlink",
                      target=S.outside(tmp_path, "ledger.jsonl"))
 
-    rc, _events = _tick(paths, repo)
+    rc, _box = _tick(t, paths)
     assert rc == 2, f"the planted ledger did not halt the first tick: exit {rc}"
 
     for name in (".author-drain.lock", "_author.lock", "_pending/.lock",
@@ -333,7 +345,7 @@ def test_1135_locks_of_a_halted_tick_are_free_for_the_next_tick(tmp_path, monkey
         assert taken is not False, f"{role}: answered 'not taken' after the halt"
 
     ledger.unlink()
-    rc2, _events = _tick(paths, repo)
+    rc2, _box = _tick(t, paths)
     assert rc2 == 0, f"the next tick did not run through: exit {rc2}"
     assert [r["finding_id"] for r in S.jsonl_rows(root / "_pending" / "consumed.jsonl")] \
         == [row["finding_id"]], "the next tick did not take the locks and consume"
@@ -352,8 +364,10 @@ signal.signal(signal.SIGXFSZ, signal.SIG_IGN)   # the write fails with EFBIG ins
 from defender.learning.core import drains
 from defender.learning.core.cli import _run_stage
 from defender.learning.core.config import LoopPaths
-from defender.tests.e2e import _box665 as B
-from defender.tests.learning.state_contracts.test_1135_drain_halt import _RepoBranch
+from defender.tests.support.tenancy import _tenants1106 as tenants
+from defender.tests.tenancy.tenant_1108_delivery._identity import VaultHTTP
+from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy
+from defender.tests.tenancy.tenant_1108_p4._support import ForgeHTTP
 
 lines = []
 class Keep(logging.Handler):
@@ -361,13 +375,14 @@ class Keep(logging.Handler):
         lines.append([r.levelname, r.getMessage()])
 logging.getLogger().addHandler(Keep())
 logging.getLogger().setLevel(logging.INFO)
-repo = Path(spec["repo"])
-paths = LoopPaths(repo_root=repo, state_dir=Path(spec["root"]))
-rec = B.BoxLifecycleRecorder()
+tenant = tenants.accept(Path(spec["data_root"]), spec["tenant_id"])
+paths = tenant.learning_paths(LoopPaths, repo_root=Path(spec["product"]))
+forge = ForgeHTTP(remote=spec["remote"], origin=spec["origin"])
+box = BoxSpy()
 resource.setrlimit(resource.RLIMIT_FSIZE, (spec["limit"], resource.RLIM_INFINITY))
 rc = _run_stage(lambda: drains.author_drain(
-    paths, branch=_RepoBranch(repo, events=rec.events), start_box=rec.start_box,
-    stop_box=rec.stop_box, scrub=rec.scrub))
+    paths, client=forge.client, identity=VaultHTTP(spec["tenant_id"]).identity(),
+    start_box=box.start, stop_box=box.stop))
 print(json.dumps({"rc": rc, "lines": lines}))
 '''
 
@@ -379,12 +394,16 @@ def _grown(p: Path, unit: str) -> bytes:
     return p.read_bytes()
 
 
-def _tick_in_child(tmp_path: Path, repo: Path, root: Path) -> dict:
+def _tick_in_child(tmp_path: Path, t: Any, paths: LoopPaths) -> dict:
+    """One tick in a child process under `FSIZE_LIMIT`, over the same tenant, product checkout,
+    origin (served by this process) and forge record (kept in the bare remote)."""
     script = tmp_path / "tick_child.py"
     script.write_text(_TICK_CHILD, encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(script),
-         json.dumps({"repo": str(repo), "root": str(root), "limit": FSIZE_LIMIT})],
+         json.dumps({"data_root": str(location_path(t.data_root)), "tenant_id": t.tenant_id,
+                     "product": str(paths.repo_root), "remote": str(t.remote),
+                     "origin": t.origin, "limit": FSIZE_LIMIT})],
         capture_output=True, text=True, timeout=180, env=S.child_env(),
         cwd=str(S.DEFENDER))
     assert proc.returncode == 0, f"the tick's child process failed:\n{proc.stderr[-3000:]}"
@@ -393,8 +412,8 @@ def _tick_in_child(tmp_path: Path, repo: Path, root: Path) -> dict:
 
 @pytest.mark.parametrize("phase", ["retire_unkeyable", "rotation_ledger_append", "held_report"])
 def test_1135_ordinary_write_failure_at_each_phase_under_the_stuck_guard(
-        tmp_path, monkeypatch, phase):
-    repo, root, paths = _world(tmp_path, monkeypatch)
+        tmp_path, world, phase):
+    t, root, paths = world
     pending = root / "_pending"
     caught = _defender_row("ep-1/b/0/6", "caught")
     held = _held_row("ep-9/a/0/1")
@@ -416,7 +435,7 @@ def test_1135_ordinary_write_failure_at_each_phase_under_the_stuck_guard(
     grown_bytes = _grown(grown, unit)
     queue_bytes = _queue(root).read_bytes()
 
-    out = _tick_in_child(tmp_path, repo, root)
+    out = _tick_in_child(tmp_path, t, paths)
 
     assert out["rc"] == 0, f"an ordinary write failure halted the tick: {out}"
     assert not [m for lvl, m in out["lines"] if lvl == "CRITICAL"], out["lines"]
@@ -444,9 +463,9 @@ def test_1135_ordinary_write_failure_at_each_phase_under_the_stuck_guard(
 
 
 def test_1135_a_deadline_lock_name_is_a_planted_entry_when_run_batch_takes_the_repo_lock(
-        tmp_path, monkeypatch, caplog):
+        tmp_path, world, caplog):
     caplog.set_level(logging.INFO)
-    repo, root, paths = _world(tmp_path, monkeypatch)
+    t, root, paths = world
     row = _defender_row("ep-1/b/0/8", "caught")
     _seed(root, [row])
     queue_bytes = _queue(root).read_bytes()
@@ -454,7 +473,7 @@ def test_1135_a_deadline_lock_name_is_a_planted_entry_when_run_batch_takes_the_r
     target.parent.mkdir()  # the link's target is absent; its folder exists (C10's shape)
     lock = S.plant(root / "_author.lock", "symlink", target=target)
 
-    rc, _events = _tick(paths, repo)
+    rc, _box = _tick(t, paths)
 
     assert S.entry_kind(target) == "absent", "the repo lock's open created the link's target"
     assert not [m for m in _lines(caplog, logging.WARNING) if "repo lock unavailable" in m], \

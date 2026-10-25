@@ -217,3 +217,86 @@ def test_a_resumed_run_does_not_orient_again(tmp_path):
     assert opening.count(CORRELATION_HEADING) == 1, (
         f"the correlation section appears {opening.count(CORRELATION_HEADING)} time(s) — a "
         "resumed run must not put a second one in front of the history that holds the first")
+
+
+# --- #1108 P4 OD21 (owner ruling 2026-10-23): a resume never hands the box the source's page --
+
+
+def _bash_answers(recorder) -> list[str]:
+    """What each of MAIN's `bash` calls was answered (a tool return, or the refusal it was
+    handed back as a retry prompt), in call order, from the sibling's last request (the
+    inherited prefix holds none: the source run called no `bash`)."""
+    from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
+
+    return [str(part.content) for message in recorder.requests[-1]
+            for part in getattr(message, "parts", ())
+            if isinstance(part, (ToolReturnPart, RetryPromptPart))
+            and getattr(part, "tool_name", None) == "bash"]
+
+
+def _files_holding(root, text: str) -> list[str]:
+    """Every regular file under `root` (relative names) whose bytes hold `text`."""
+    from pathlib import Path
+
+    root = Path(root)
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*")
+                  if p.is_file() and not p.is_symlink()
+                  and text.encode("utf-8") in p.read_bytes())
+
+
+def test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason(tmp_path):
+    """#1108 P4 OD21/U12 consequence (owner ruling 2026-10-23): the source run's saved
+    `runtime.html` is an operator page written after its box stopped and may show the raw
+    knowledge reason. A sibling resumed over that source re-binds the source run dir (its
+    folder is restored from it), and its box must see neither that page nor the reason in
+    anything mounted to it.
+
+    Two channels, each with its positive control:
+    - INSIDE the sibling's box, MAIN's own `bash` (`cat` is the one opener MAIN's lane allows):
+      `/runs/current/runtime.html` does not answer with the page, while
+      `/runs/current/investigation.md` answers with the document inherited from the source.
+    - Host-side, the box's run-folder bind source (the sibling's run dir, its alert input
+      directory included) holds the reason in no file, while the same walk over the source run
+      dir finds it in the planted page (so the page was there to be carried).
+    The agent half the box mounts is the tenant's export, not derived from the source run."""
+    import uuid
+
+    sink: list = []
+    source = _source_run(tmp_path, sink, docs=NO_DOCS)
+    spec, _prefix_ids = _spec(source, sink[0])
+    inherited_word = "dev.dana"
+    assert inherited_word in RunPaths(source.run_dir).investigation.read_text(encoding="utf-8"), (
+        f"the SOURCE run wrote no document naming {inherited_word!r} ({source.summary_dict}); "
+        "the in-box control below is vacuous")
+    # Minted per run, so the checkout (this file) never holds it.
+    reason = f"od21-raw-knowledge-reason-{uuid.uuid4().hex}"
+    page = RunPaths(source.run_dir).runtime_html
+    page.write_text(
+        "<html><body><div class=\"knowledge-banner\">knowledge stale (operator): "
+        f"{reason}</div></body></html>\n", encoding="utf-8")
+
+    sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
+    sibling = S.Recorder([
+        Turn(tool_calls=[("bash", {"command": "cat /runs/current/runtime.html"})]),
+        Turn(tool_calls=[("bash", {"command": "cat /runs/current/investigation.md"})]),
+        Turn(text="Resumed and stopping."),
+    ])
+    summary = _resume(spec, sibling_dir, main=sibling)
+    assert summary.get("exit_reason") is None, f"the resumed run never started: {summary}"
+
+    answers = _bash_answers(sibling)
+    assert len(answers) == 2, f"the sibling's box answered {len(answers)} of its 2 reads: {answers}"
+    page_read, doc_read = answers
+    assert inherited_word in doc_read, (
+        f"control: the box does not show the document the sibling inherited, so its silence "
+        f"about the page proves nothing: {doc_read[:300]!r}")
+    for needle in (reason, "knowledge-banner"):
+        assert needle not in page_read, (
+            f"OD21: the resumed box can read the source's saved run page (an operator surface "
+            f"carrying the raw knowledge reason): {page_read[:300]!r}")
+    assert _files_holding(source.run_dir, reason) == [RunPaths(source.run_dir).runtime_html.name], (
+        "control: the host walk does not find the planted page in the source run dir, so its "
+        "silence over the sibling's run folder proves nothing")
+    assert _files_holding(sibling_dir, reason) == [], (
+        f"OD21/U12: the raw knowledge reason was carried into the resumed box's run folder: "
+        f"{_files_holding(sibling_dir, reason)}")

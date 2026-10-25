@@ -13,19 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from defender._git import git_head_sha
 from defender import box as box_mod
 from defender.execution.bash_exec import parse
 from defender.execution.box_codec import BoxFault, BoxResult
 from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE as REPO_ROOT
-from defender.tests.support.shared.contracts._repo import seed_repo
 from defender.tests.e2e._box665 import (  # noqa: F401 — re-exported for the test files
     BoxLifecycleRecorder,
     DockerFault,
-    RecordingBranch,
     RecordingDocker,
     _cp,
-    drive_worktree_batch,
     requires_live_box,
 )
 from defender.tests.support.storage._alert_plant import plant_alert
@@ -613,45 +609,6 @@ def run_shim(shim: str, world: ShimWorld, *, marked: bool) -> str:
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("STUB:")]
     assert len(lines) == 1, (shim, proc.stdout, proc.stderr)
     return lines[0][len("STUB:"):]
-
-
-# ---- the drain lane's worktree, as a real git checkout (MF2) -----------------------------------
-class GitWorktreeBranch(RecordingBranch):
-    """`RecordingBranch` whose `start_batch` mints a REAL git repo at the worktree path — one
-    commit, holding the three hash inputs and the code check file under `<wt>/defender` — so `HEAD` there is the
-    commit the drain's fault must name, whatever channel the implementation reads it through
-    (the real `AuthorBranch` cuts the worktree from `origin/main`, so its HEAD is that commit).
-    `cleanup` destroys the tree, as the real one does (drains.py:776-780)."""
-
-    def __init__(self, worktree_base: Path, **kw):
-        super().__init__(worktree_base, destroy_on_cleanup=True, **kw)
-        self.cut_commit: str | None = None
-
-    def start_batch(self, batch_id: str) -> Path:
-        wt = super().start_batch(batch_id)
-        plant_tree(wt, copy_code=False)
-        # The product's committed code check file (#1108 D7 amended): the drain's read-only
-        # worktree is a `code` mount, read back at `<wt>/defender/<box.CODE_CHECK_FILE>`.
-        check = box_mod.CODE_CHECK_FILE
-        shutil.copyfile(DEFENDER / check, wt / "defender" / check)
-        seed_repo(wt)
-        self.cut_commit = git_head_sha(wt)
-        return wt
-
-
-class FaultingStartBox:
-    """An injectable `start_box=` for `_run_worktree_batch` that drives the REAL `start_box`
-    over the drain's own request with a scripted daemon, so the fault the drain handles is the
-    one production's remedy helper raises — never a hand-written BoxFault whose type or text
-    the drain might key on."""
-
-    def __init__(self, docker: RecordingDocker):
-        self.docker = docker
-        self.requests: list = []
-
-    def __call__(self, request, *a, **kw):
-        self.requests.append(request)
-        return box_mod.start_box(request, docker=self.docker)
 
 
 def raise_boxfault_message(fn, *args, **kwargs) -> str:

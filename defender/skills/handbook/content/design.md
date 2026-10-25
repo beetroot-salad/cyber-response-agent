@@ -32,7 +32,7 @@ The defender is really two loops stacked:
    experiment. It forks a finished investigation at a chosen turn and re-runs
    it against a family of worlds that each differ by one authored fact, judges
    which of those differences the defender's verdict actually tracked, and
-   folds the lessons it distills into a `lessons/` corpus that feeds back into the runtime loop at PLAN time. It is
+   folds the lessons it distills into the tenant's `agent/lessons/` corpus that feeds back into the runtime loop at PLAN time. It is
    **operator-initiated** — a finished run is a starting point someone names
    later, never something a run feeds automatically. A run's one automatic
    post-step is the gather-catalog curation enqueue, which `--no-learn` skips.
@@ -88,17 +88,18 @@ discipline, not enforced transitions.
 - **`run.py`** — the canonical entrypoint: materialize the run dir, run
   the agent (which writes the two tables live), render the run page, enqueue
   catalog curation. It does not feed the learning loop; an operator does.
-- **`skills/`** — on-disk skills loaded on demand: `invlang` (block surface
-  + author CLI), `gather` (the subagent's own contract + query templates), and
-  one per-system reference for each system this deployment declares.
+- **`skills/`** — the product's on-disk skills loaded on demand: `invlang` (block surface
+  + author CLI), `gather` (the subagent's own contract), `handbook`, `advisory` and
+  `connect`. The per-system references, query templates and lessons are the tenant's, in
+  its own repo's `agent/` tree (a run reads its copy at `/agent/`).
 - **`learning/`** — the offline loop: `branch/` (the episode), `judge/`,
   `author/` (the two curators), `leads/` (the
   lead-author), `core/` (queues and drains), with `loop.py` as the drains'
   entry point and a role prompt beside each stage's driver.
-- **`lessons/`** — checked-in pitfall lessons, authored by the loop, read
-  by the runtime agent at PLAN time.
-- **`lessons-questioner/`** — the questioner's own corpus, authored by the
-  second curator and read by the questioner, never by the runtime agent.
+- **the tenant's `agent/lessons/`** — pitfall lessons in the tenant repo's `agent/`, authored by
+  the loop as pull requests a human merges, read by the runtime agent at PLAN time.
+- **the tenant's `lessons-questioner/`** — the questioner's own corpus beside it, authored by
+  the second curator and read by the questioner, never by the runtime agent.
 - **`hooks/`** — gate logic the driver imports as libraries (lead claim,
   system-skill descriptors, budget, lesson-load recording); the name is
   historical, nothing here is a Claude Code hook.

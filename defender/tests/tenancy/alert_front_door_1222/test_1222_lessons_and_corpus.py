@@ -19,11 +19,12 @@ import pytest
 
 from defender import _yaml
 from defender.tests.support.runtime.state import _1255_view as V
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
-# The shipped corpus and lesson files
+# The background corpus and lesson files
 
 #: The frontier selector a lesson needs to be on `match_lessons`' lane (an open `class` cell on
 #: a `process` vertex), written through `S.lesson_text(extra_lines=...)`.
@@ -32,19 +33,14 @@ _SELECTOR_LINES = ("frontier_nodes:", "  - {type: process, slot: class}")
 _SOURCE_SIGNATURE_LINE = re.compile(r"^source_signature:\s*\[(.*)\]\s*$", re.M)
 
 
-def _shipped_corpus() -> Path:
-    """The shipped defender corpus, wherever it lives: production's own knowledge location
-    first (`_knowledge.CHECKOUT_KNOWLEDGE.lessons_dir` until #1108 P4), then the committed
-    tenants' agent corpora (where P4 may move it)."""
-    candidates: list[Path] = []
-    knowledge = S.mod("knowledge._knowledge")
-    checkout = getattr(knowledge, "CHECKOUT_KNOWLEDGE", None)
-    if checkout is not None:
-        candidates.append(Path(checkout.lessons_dir))
-    for corpus in candidates:
-        if corpus.is_dir() and any(corpus.glob("*.md")):
-            return corpus
-    raise AssertionError(f"no shipped lesson corpus found among {candidates}")
+def _background_corpus() -> Path:
+    """Background lessons a lookup must NOT match: the committed fixture tenant's made-up runtime
+    corpus (`knowledge/tenant-fixture/agent/lessons/`, #1108 P4 decision 4). Never the lab's
+    corpus, and never the product tree (O1: it holds none)."""
+    corpus = Path(S.mod("tests.tenancy.tenant_1108_p4._support").FIXTURE_AGENT) / "lessons"
+    assert corpus.is_dir(), f"the fixture corpus {corpus} is missing"
+    assert any(corpus.glob("*.md")), f"the fixture corpus {corpus} is empty"
+    return corpus
 
 
 def _declared(text: str) -> list[str]:
@@ -56,17 +52,17 @@ def _declared(text: str) -> list[str]:
     return [e.strip() for e in m.group(1).split(",") if e.strip()]
 
 
-def _plant_shipped(planted: S.Planted) -> dict[str, list[str]]:
-    """Copy the shipped corpus into the isolated checkout corpus; return stem -> declared entries."""
-    shipped: dict[str, list[str]] = {}
-    for path in sorted(_shipped_corpus().glob("*.md")):
+def _plant_background(planted: S.Planted) -> dict[str, list[str]]:
+    """Copy the fixture corpus into `planted`'s own corpus; return stem -> declared entries."""
+    background: dict[str, list[str]] = {}
+    for path in sorted(_background_corpus().glob("*.md")):
         if path.name.startswith("_"):
             continue
         text = path.read_text(encoding="utf-8")
-        S.plant_lesson(path.stem, text=text)
-        shipped[path.stem] = _declared(text)
-    assert shipped, "the shipped corpus holds no lesson"
-    return shipped
+        S.plant_lesson(path.stem, text=text, tenant=planted)
+        background[path.stem] = _declared(text)
+    assert background, "the fixture corpus holds no lesson"
+    return background
 
 
 def _manifest_entries(body: str) -> list[str] | None:
@@ -256,27 +252,37 @@ def _judged(tmp_path: Path, *, signature: str | None, world_rule: str | None = N
 def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = (),
            corpus: Mapping[str, str] | None = None) -> Any:
     """One REAL drain tick (`drain.run_batch`) over the learning state the judge appended to,
-    the curator at `invoke_agent=`; `corpus` lessons are committed to the drain's corpus first
-    (lessons a fold lands in). Returns the drain's `LoopPaths`."""
-    paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    if corpus:
-        for name, text in corpus.items():
-            (Path(paths.lessons_dir) / f"{name}.md").write_text(text, encoding="utf-8")
-        D.git(Path(paths.repo_root), "add", "-A")
-        D.git(Path(paths.repo_root), "commit", "-q", "-m", "existing lessons")
+    the curator at `invoke_agent=`, over a real batch of the fixture tenant (#1108 P4 O7, OD12
+    class ii: a curator commits only into a tenant batch's draft — `_curator1134.draft_lane` /
+    `draft_author_cfg`); `corpus` lessons are published in the tenant's agent half first (lessons
+    a fold lands in). Returns the draft lane, whose batch branch holds what the tick committed."""
+    lane = C.draft_lane(
+        tmp_path, files={f"lessons/{name}.md": text for name, text in (corpus or {}).items()},
+        state_dir=tmp_path / "learning-state")
+    paths = lane.paths
     extra = list(extra_rows)
     if extra:
         D.seed(paths, FINDINGS, D.pending(paths, FINDINGS) + extra)
-    cfg = D.cfg_for(paths, "findings", invoke_agent=curator)
+    cfg = C.draft_author_cfg(lane, invoke_agent=curator)
+    assert Path(cfg.corpus_dir) == lane.lessons_dir, "the curator would write outside the draft"
     rc = S.sym("learning.author.drain", "run_batch")(cfg=cfg)
     assert rc == 0, f"the drain tick failed (rc={rc})"
-    return paths
+    return lane
 
 
-def _committed(paths: Any) -> dict[str, Any]:
-    """The drain corpus as production's own reader yields it: stem -> Lesson."""
+def _committed(lane: Any) -> dict[str, Any]:
+    """What the tick COMMITTED on the batch branch (never the draft), as production's own reader
+    yields it: each landed `agent/lessons/*.md` read from git at the branch tip into a scratch
+    corpus, then stem -> Lesson."""
     iter_lessons = S.sym("knowledge._corpus", "iter_lessons")
-    return {lesson.path.stem: lesson for lesson in iter_lessons(Path(paths.lessons_dir))}
+    out = lane.tmp / "committed-lessons"
+    out.mkdir(exist_ok=True)
+    for rel in lane.landed():
+        if rel.startswith(C.DRAFT_LESSONS_REL) and rel.endswith(".md"):
+            text = lane.text_at_tip(rel)
+            assert text is not None, f"{rel} is in the batch diff but not at its tip"
+            (out / Path(rel).name).write_text(text, encoding="utf-8")
+    return {lesson.path.stem: lesson for lesson in iter_lessons(out)}
 
 
 def _keys_handed(curator: _Curator) -> dict[str, Any]:
@@ -355,33 +361,36 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
 
 
 
-def test_curated_checkout_lesson_is_discovered_and_read_by_main(tmp_path):
-    sig, name, finding = "R-FEEDBACK", "fd-feedback", "feedback/b/0"
+def test_o2_tenant_lesson_is_discovered_and_read_by_main_at_its_agent_path(tmp_path):
+    """#1108 P4 O2 (and O1): a lesson in the TENANT's corpus — where a curator's merged PR puts
+    it (O7; the authoring half is the drain suites') — is listed by orientation and read by
+    MAIN, typed and bash alike, at `/agent/lessons/<name>.md`: the model's spelling of the run
+    copy's `agent/` (#1255 model view; the box mounts the run copy's `agent/` there). The
+    product checkout the run uses holds no corpus (O1), so `/defender/lessons/...` names
+    nothing — the control on the same tool channel."""
+    sig, name = "R-FEEDBACK", "fd-feedback"
     marker = "CURATOR-FEEDBACK-BODY-1222"
-    lesson = _author_lesson(name, [sig], [finding]) + "\n" + marker + "\n"
-    paths = _drain(tmp_path / "author", _Curator({name: lesson}),
-                   extra_rows=[_queued_row(finding, sig)])
-    committed = _committed(paths)[name].path
-    assert committed.parent == paths.lessons_dir
-    assert marker in committed.read_text(encoding="utf-8")
-    product = S.prepare_checkout(Path(paths.repo_root) / "defender")
-    # MAIN names the committed lesson the way a model holds it: under the run's checkout at its
-    # model path `/defender` (#1255 design rev 4, P1), never the checkout's host path.
-    assert committed.is_relative_to(product), (
-        f"control: the committed lesson ({committed}) is not inside the run's checkout {product}")
-    in_view = f"{V.MODEL_DEFENDER}/{committed.relative_to(product).as_posix()}"
+    planted = S.plant_tenant()
+    lesson = S.plant_lesson(name, text=_author_lesson(name, [sig], ["feedback/b/0"])
+                            + "\n" + marker + "\n", tenant=planted)
+    assert lesson.parent == S.tenant_lessons(planted)
+    in_view = f"{V.MODEL_AGENT}/lessons/{name}.md"
+    stale = f"{V.MODEL_DEFENDER}/lessons/{name}.md"
     main = S.MainScript([
         S.call("read_file", path=in_view),
         S.call("bash", command=f"cat {shlex.quote(in_view)}"),
+        S.call("read_file", path=stale),
         S.text(S.DONE),
     ])
-    d = S.run_alert(tmp_path / "later", alert=_lesson_alert(sig), main=main,
-                    defender_dir=product, orient_shim=S.RecordingShim())
+    d = S.run_alert(tmp_path / "later", alert=_lesson_alert(sig), tenant=planted, main=main,
+                    orient_shim=S.RecordingShim())
     assert d.rc == 0, (d.refusal, d.raised)
     assert _listed(_lessons_section(d)) == [name]
     returned = main.seen[-1].tool_returns
-    assert len(returned) == 2, returned
-    assert all(marker in text for text in returned), returned
+    assert len(returned) == 3, returned
+    assert all(marker in text for text in returned[:2]), returned
+    assert marker not in returned[2], (
+        f"the product checkout still serves the tenant's lesson at {stale}: {returned[2]!r}")
 
 
 _GOOD_ENTRY = "R-good-1"
@@ -403,7 +412,7 @@ def test_r6_a_hostile_source_signature_entry_is_inert_in_every_lesson_listing(tm
                for name, entry in _HOSTILE_ENTRIES.items()}
     lessons["fd-r6-good"] = S.lesson_text("fd-r6-good", source_signature=[_GOOD_ENTRY])
     planted = S.plant_tenant(lessons=lessons)
-    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.checkout_lessons())
+    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.tenant_lessons(planted))
     for ch in ("\x1b", "\r"):
         assert ch not in manifest, f"a raw control character {ch!r} reached the manifest"
     sections = re.split(r"(?m)^## ", manifest)[1:]
@@ -700,7 +709,7 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
 
 def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     planted = S.plant_tenant()
-    _plant_shipped(planted)
+    _plant_background(planted)
     for name, entries in {"fd-p080-r": ["R"], "fd-p080-second": ["Q", "R"],
                           "fd-p080-longer": ["R-1001"], "fd-p080-lower": ["r"]}.items():
         S.plant_lesson(name, source_signature=entries)
@@ -730,7 +739,7 @@ def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
     planted = S.plant_tenant()
     S.plant_lesson(name, source_signature=_WRITTEN_P182)
 
-    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.checkout_lessons())
+    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.tenant_lessons(planted))
     entries = _manifest_entries(manifest)
     assert entries is not None, f"the manifest lists no source_signature:\n{manifest}"
     shown = [ln.strip().removeprefix("- ").strip().strip("'\"") for ln in entries]
@@ -765,12 +774,13 @@ def _later_hits(tmp_path: Path, planted: S.Planted, sig: str) -> list[str]:
     return sorted(_listed(_lessons_section(d)))
 
 
-def _adopt(planted: S.Planted, paths: Any, *names: str) -> dict[str, Any]:
-    """Put the lessons the drain committed into the isolated checkout corpus, as written; return them."""
-    committed = _committed(paths)
+def _adopt(planted: S.Planted, lane: Any, *names: str) -> dict[str, Any]:
+    """Put the lessons the drain committed on its batch branch into `planted`'s own corpus, as
+    written (as a merged PR on the tenant repo delivers them, #1108 P4 O7/O2); return them."""
+    committed = _committed(lane)
     for name in names:
         assert name in committed, f"the drain did not commit {name!r}: {sorted(committed)}"
-        S.plant_lesson(name,
+        S.plant_lesson(name, tenant=planted,
                        text=committed[name].path.read_text(encoding="utf-8"))
     return committed
 
@@ -786,7 +796,7 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
     row_b = _queued_row("p072-other/1", sig_b)
     curator = _Curator({"fd-p072-a": _author_lesson("fd-p072-a", [sig_a], _ids(rows_a)),
                         "fd-p072-b": _author_lesson("fd-p072-b", [sig_b], _ids([row_b]))})
-    paths = _drain(tmp_path, curator, extra_rows=[row_b])
+    lane = _drain(tmp_path, curator, extra_rows=[row_b])
 
     handed = _keys_handed(curator)
     assert handed == {**dict.fromkeys(_ids(rows_a), sig_a), row_b["finding_id"]: sig_b}, (
@@ -799,7 +809,7 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
         assert sig in turn, f"the user turn does not carry {sig!r}"
     assert world not in turn, f"the world copies' rule id {world!r} reached the curator"
     planted = S.plant_tenant()
-    committed = _adopt(planted, paths, "fd-p072-a", "fd-p072-b")
+    committed = _adopt(planted, lane, "fd-p072-a", "fd-p072-b")
     assert committed["fd-p072-a"].lines("source_signature") == [sig_a]
     assert committed["fd-p072-b"].lines("source_signature") == [sig_b]
     assert _later_hits(tmp_path, planted, sig_a) == ["fd-p072-a"]
@@ -813,12 +823,12 @@ def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
     rows, copied = _judged(tmp_path, signature=sig, world_rule="R-P074-WORLD")
     assert rows, "the judge enqueued no finding"
     curator = _Curator({"fd-p074": _author_lesson("fd-p074", [sig], _ids(rows))})
-    paths = _drain(tmp_path, curator)
+    lane = _drain(tmp_path, curator)
     assert set(_keys_handed(curator).values()) == {sig}, (
         f"the curator was not handed the recorded signature verbatim: {_keys_handed(curator)}")
     assert sig in "\n".join(curator.user_turns)
     planted = S.plant_tenant()
-    committed = _adopt(planted, paths, "fd-p074")
+    committed = _adopt(planted, lane, "fd-p074")
     assert committed["fd-p074"].lines("source_signature") == [sig]
     assert _later_hits(tmp_path, planted, sig) == ["fd-p074"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
@@ -832,11 +842,11 @@ def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
     other = _queued_row("p077-other/1", mixed)
     curator = _Curator({"fd-p077-colon": _author_lesson("fd-p077-colon", [colon], _ids(rows)),
                         "fd-p077-mixed": _author_lesson("fd-p077-mixed", [mixed], _ids([other]))})
-    paths = _drain(tmp_path, curator, extra_rows=[other])
+    lane = _drain(tmp_path, curator, extra_rows=[other])
     assert _keys_handed(curator) == {**dict.fromkeys(_ids(rows), colon), other["finding_id"]: mixed}, (
         f"the curator was not handed the recorded signatures verbatim: {_keys_handed(curator)}")
     planted = S.plant_tenant()
-    committed = _adopt(planted, paths, "fd-p077-colon", "fd-p077-mixed")
+    committed = _adopt(planted, lane, "fd-p077-colon", "fd-p077-mixed")
     for name, sig in (("fd-p077-colon", colon), ("fd-p077-mixed", mixed)):
         assert committed[name].lines("source_signature") == [sig], (
             f"{name}: the saved lesson reads back {committed[name].lines('source_signature')}, "

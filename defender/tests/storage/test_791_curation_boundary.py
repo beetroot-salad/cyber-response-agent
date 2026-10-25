@@ -23,20 +23,21 @@ from defender.box import _scrub as scrub_mod  # noqa: E402
 from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of, set_state_dir  # noqa: E402
 from defender.tests.support.sandbox._spec791 import (  # noqa: E402
     TAIL_SEAM,
-    SpecBranch,
     SpecTail,
     author_markers,
     drive_tail,
     loop_paths,
     make_run_dir,
     marker_body,
-    noop_scrub,
     noop_start_box,
     noop_stop_box,
     plant_alert,
     require_tail_seam,
     satisfy_entrypoint_keys,
 )
+
+from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo  # noqa: E402
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant  # noqa: E402
 
 HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf-8")
 
@@ -49,6 +50,24 @@ def state(tmp_path, monkeypatch):
     tenant = set_up_tenant(current_data_root())
     location_path(tenant.learning).mkdir(exist_ok=True)
     return replace(loop_paths(tmp_path), state_dir=location_path(tenant.learning))
+
+
+@pytest.fixture
+def published(tmp_path, data_root):
+    """D9's tenant published for real with its forge bound (#1108 P4: the lead-author drain
+    batches into the tenant repo). Requested before `state`, whose `set_up_tenant` then finds
+    the tenant already set up and keeps it."""
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        yield t
+
+
+def _lead_drain(t, paths, **steps) -> int:
+    """The REAL `lead_author_drain` over the tenant path (assumed seams: the tenant forge fake's
+    client, an identity over its issuer fake; `branch=`/`scrub=` are gone)."""
+    return drains.lead_author_drain(
+        paths, client=t.forge.client, identity=t.vault.identity(),
+        start_box=noop_start_box, stop_box=noop_stop_box, **steps)
 
 
 def _certified_run(*, name="case-791", alert_bytes=None, tenant_id=None) -> Path:
@@ -110,7 +129,7 @@ def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_pa
         assert step in tail.names, f"the tail never reached {step} (ran {tail.names})"
 
 
-def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
+def test_791_finished_investigation_drives_catalog_curation(published, tmp_path, state):
     """curation_trigger_at_the_investigation_boundary — a finished investigation asks for
     catalog curation at its own boundary, and the lane that serves the request RUNS."""
     run_dir = _certified_run()
@@ -119,12 +138,10 @@ def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
     assert author_markers(state), "the investigation boundary asked for no curation"
 
     served: list[Path] = []
-    branch = SpecBranch(tmp_path / "worktrees")
-    rc = drains.lead_author_drain(
-        state,
+    rc = _lead_drain(
+        published, drain_paths(published, product_repo(tmp_path)),
         run_lead_author=lambda _paths, _state, run, *, box=None, **_kw: served.append(run.run_dir),
         run_pitfalls=lambda *_a, **_kw: 0,
-        branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
     )
     assert rc == 0
     assert served == [run_dir.resolve()], \
@@ -192,7 +209,7 @@ def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_pat
         "the coalesced request still points at the run the retry replaced"
 
 
-def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state):
+def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(published, tmp_path, state):
     """curation_claim_and_serve_is_atomic — a curation request that arrives while the lane is
     already curating that case survives."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
@@ -208,12 +225,11 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state
             # The operator re-investigates the case while the lane is curating it.
             run_common.enqueue_curation(run_of(second), second / "alert.json")
 
+    paths = drain_paths(published, product_repo(tmp_path))
+
     def drain() -> None:
-        drains.lead_author_drain(
-            state, run_lead_author=serve_and_re_ask, run_pitfalls=lambda *_a, **_kw: 0,
-            branch=SpecBranch(tmp_path / "worktrees"),
-            start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
-        )
+        _lead_drain(published, paths, run_lead_author=serve_and_re_ask,
+                    run_pitfalls=lambda *_a, **_kw: 0)
 
     drain()
     assert served[:1] == [first.resolve()], f"the first pass served {served}, not the queued run"

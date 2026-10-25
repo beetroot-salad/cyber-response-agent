@@ -114,7 +114,6 @@ NON_SOURCE_DIRS = ("seam-harness", "experiments")
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
     "playground-v2/examples/alerts",
-    "defender/lessons", "defender/lessons-actor",
     ".claude/worktrees", "experiments",
     # Task files and design docs reference removed symbols historically;
     # they are not code that should be kept consistent with current names.
@@ -124,8 +123,6 @@ EXCLUDED_GREP_DIRS = (
     # same-prefixed sibling directory; these are listed explicitly rather than relaxing the
     # match to a bare prefix, which would swallow any future `defender/tests-*` sibling.
     "defender/tests/fixtures/e2e",
-    "defender/lessons-environment",
-    "defender/lessons-questioner",
     # Judge-alignment dataset: human-labelled samples whose text quotes the code of its
     # moment. Rewriting them to today's vocabulary would falsify the labels.
     "evaluations/judge_alignment",

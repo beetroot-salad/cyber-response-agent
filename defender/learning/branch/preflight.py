@@ -521,6 +521,9 @@ STAMP_FIELD_CLASSES: dict[str, str] = {
     "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
     "fork_turn": "expected_to_differ",
     "started_at": "expected_to_differ", "alert_label": "informational",
+    # #1108 P4 (O-STALE, OD17): fresh, stale or pinned is how a run came by its knowledge, not
+    # which knowledge it read (`knowledge` holds that), so it is recorded, never compared.
+    "knowledge_source": "informational",
 }
 
 

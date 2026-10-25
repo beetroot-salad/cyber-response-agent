@@ -3,18 +3,21 @@ from __future__ import annotations
 import errno
 import logging
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from defender.configuration._env import FatalConfigError
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.lane_trees import DrainTrees, kind_at
 from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
-from defender.tests.support.learning.curation._lead_author_1134 import outcome, place, raised, scene_over, write
+from defender.tests.support.learning.curation._lead_author_1134 import draft_scene_over, outcome, place, raised, write
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.support.learning.core._state1135 import run_of
@@ -48,27 +51,41 @@ def _bad_fd(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
 
 
+def _draft_lane(tmp_path: Path) -> C.DraftLane:
+    """`_worktree`'s seeded tree after P4: its `skills/` as the tenant's `agent/skills` (one
+    export commit) under a P3 batch with the lead lane `skills`; the product checkout keeps the
+    adapters and no corpus (O1, #1172)."""
+    repo = _worktree(tmp_path)
+    agent = tmp_path / "agent-src"
+    shutil.copytree(repo / "defender" / "skills", agent / "skills")
+    subprocess.run(["git", "rm", "-r", "-q", "defender/skills"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "the product holds no corpus"], cwd=repo,
+                   check=True)
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=repo)
+
+
 def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
         tmp_path: Path, monkeypatch, caplog):
+    """#1134 + #1108 P4 O7: with no deps the tick opens its own trees over the batch's draft,
+    mints each draft there and reaches its agent, leaving no descriptor open below the draft.
+    ASSUMED SEAM (S-H): `lead_author.run(run, *, label, paths, batch)`."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     caplog.set_level(logging.DEBUG)
-    repo = _worktree(tmp_path)
-    (tmp_path / "state").mkdir()  # the state root is never created lazily (#1135)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    lane = _draft_lane(tmp_path)
     run_dir = _run_dir(("wazuh.hunt-creds", "wazuh", "esql"),
                        ("elastic.hunt-creds", "elastic", "esql"))
 
     with pytest.raises(FatalConfigError, match=NO_MODEL):
-        lead_author.run(run_of(run_dir), label=LEAD, paths=paths)
+        lead_author.run(run_of(run_dir), label=LEAD, paths=lane.paths, batch=lane.batch)
 
     for system in ("wazuh", "elastic"):
         qid = f"{system}.hunt-creds"
-        draft = paths.skills_dir / f"gather/queries/{system}/_draft/{_draft_basename(qid)}.md"
+        draft = lane.skills_dir / f"gather/queries/{system}/_draft/{_draft_basename(qid)}.md"
         assert qid in draft.read_text(encoding="utf-8"), draft
     assert not (run_dir / "lead_author" / "done").exists(), "recorded done before its agent"
     assert _bad_fd(caplog) == []
     assert wrote_errors(caplog) == []
-    assert descriptors_under(repo) == []
+    assert descriptors_under(lane.agent) == []
 
 
 @pytest.mark.parametrize("route", ["scandir", "reopen"])
@@ -92,9 +109,11 @@ def test_a_refused_listing_alone_does_not_refuse_the_draft(
 
 @pytest.fixture
 def scene(tmp_path: Path):
-    """The handle file's scene: `seed_skills_repo`, committed, a folder outside it, the lead
-    drain's trees over it, open for the test."""
-    with scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
+    """The handle file's scene after P4 (O7, OD6): `seed_skills_repo`'s skills tree at a
+    tenant-shaped root (`draft_scene_over`: the mount `<root>/agent/skills`, names
+    `agent/skills/...`, the adapters in the product checkout), committed, a folder outside it,
+    the lane's trees over it, open for the test."""
+    with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
 
@@ -141,7 +160,7 @@ def test_a_refused_draft_folder_neither_clears_the_twin_nor_departs_a_draft(
 
 @pytest.mark.parametrize("route", ["reopen", "scandir"])
 def test_kind_at_on_the_mount_point_answers_from_its_own_listing(scene, route: str):
-    rel = "defender/skills"
+    rel = "agent/skills"  # the mount point, repo-relative under the tenant-shaped root (OD6)
     assert kind_at(scene.repo, scene.tree_for, rel) == "dir"
     refuser = RefusesFolder(scene.skills_dir, route, errno.EIO)
     with DrainTrees.open((scene.skills_dir,), os_=refuser) as trees:

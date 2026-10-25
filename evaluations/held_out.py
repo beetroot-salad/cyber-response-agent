@@ -19,6 +19,8 @@ then append its row to F yourself; nothing launches held-out runs for you (#1279
 
 A run that crashes before announcing its id leaves no row unless you write one, and then the
 slug's older row (if any) is scored instead.
+For comparable scores, pin every run of one index to one knowledge revision with
+``--knowledge-commit <K>`` (#1108 P4 OD10); nothing pins it for you.
 
 Score (an evaluation tool outside the application: it takes no tenant and never resolves
 ``DEFENDER_DATA_ROOT``; it scores exactly the runs dir it is handed)::
@@ -138,6 +140,8 @@ def read_index(index: Path, runs_dir: Path) -> dict[str, str]:
         raise IndexRefused(f"{dropped} of its lines are not JSON objects")
     newest: dict[str, str] = {}
     for n, row in enumerate(rows, 1):
+        if set(row) == {"knowledge_commit"}:
+            continue  # the knowledge pin an index written by the old launcher records (#1108 P4)
         slug, run_id = row.get("slug"), row.get("run_id")
         if not isinstance(slug, str) or not isinstance(run_id, str):
             raise IndexRefused(f"row {n} does not carry a text slug and run_id")

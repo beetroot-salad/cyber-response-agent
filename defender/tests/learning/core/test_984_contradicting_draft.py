@@ -1,4 +1,9 @@
-"""#984: a draft that CONTRADICTS a claim already shipped in a system's SKILL.md must not wait behind the lift-threshold queue depth."""
+"""#984: a draft that CONTRADICTS a claim already shipped in a system's SKILL.md must not wait behind the lift-threshold queue depth.
+
+#1108 P4 (OD12 class ii, OD6): the drafts sit in a lead lane's batch draft
+(`test_lead_author._lane`, its `agent/skills`), the deps are built over that lane
+(`test_lead_author._deps`, assumed `batch=` seam), and a draft's handoff path is repo-relative
+`agent/skills/...`."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-from defender.tests.learning.curation.test_lead_author import _deps
+from defender.tests.learning.curation.test_lead_author import _deps, _lane
 from defender.tests.support.learning.curation._lead_author_1134 import skills_view
 
 
@@ -28,35 +33,41 @@ def _write_draft(path: Path, *, contradicts_skill: bool | None = None) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _one_draft(tmp_path: Path, **kw) -> Path:
-    skills = tmp_path / "defender" / "skills"
-    draft_dir = skills / "elastic" / "_draft"
+def _draft_dir(tmp_path: Path):
+    """A lead lane over the seeded tenant and its draft's `elastic/_draft/` folder."""
+    lane = _lane(tmp_path)
+    draft_dir = lane.skills_dir / "elastic" / "_draft"
     draft_dir.mkdir(parents=True, exist_ok=True)
+    return lane, draft_dir
+
+
+def _one_draft(tmp_path: Path, **kw):
+    lane, draft_dir = _draft_dir(tmp_path)
     draft = draft_dir / "a.md"
     _write_draft(draft, **kw)
-    return draft
+    return lane, draft
 
 
 def test_contradicting_draft_bypasses_threshold_alone(run_dir: Path, monkeypatch, tmp_path):
     """One draft flagged `contradicts_skill: true`, alone, far below threshold=5 — surfaces anyway rather than..."""
-    draft = _one_draft(tmp_path, contradicts_skill=True)
+    lane, draft = _one_draft(tmp_path, contradicts_skill=True)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc is None
     assert len(pending) == 1
     assert pending[0]["system"] == "elastic"
-    assert pending[0]["draft_path"] == "defender/skills/elastic/_draft/a.md"
+    assert pending[0]["draft_path"] == "agent/skills/elastic/_draft/a.md"
 
 
 def test_non_contradicting_draft_stays_silenced_below_threshold(
     run_dir: Path, monkeypatch, tmp_path
 ):
     """Same queue depth, flag explicitly false — the pre-#984 behavior is unchanged: a merely-incomplete draft..."""
-    draft = _one_draft(tmp_path, contradicts_skill=False)
+    lane, draft = _one_draft(tmp_path, contradicts_skill=False)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
@@ -64,10 +75,10 @@ def test_non_contradicting_draft_stays_silenced_below_threshold(
 
 
 def test_draft_with_no_contradicts_field_stays_silenced(run_dir: Path, monkeypatch, tmp_path):
-    """A draft written before this field existed (no `contradicts_skill:` key at all) takes the ORIGINAL..."""
-    draft = _one_draft(tmp_path)  # no contradicts_skill key at all
+    """A draft written before this field existed (no `contradicts_skill:` key at all) takes the original..."""
+    lane, draft = _one_draft(tmp_path)  # no contradicts_skill key at all
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
@@ -76,13 +87,11 @@ def test_draft_with_no_contradicts_field_stays_silenced(run_dir: Path, monkeypat
 
 def test_unparseable_draft_does_not_bypass(run_dir: Path, monkeypatch, tmp_path):
     """A draft with no frontmatter fence (malformed) must not crash the gate and must not silently bypass it — an..."""
-    skills = tmp_path / "defender" / "skills"
-    draft_dir = skills / "elastic" / "_draft"
-    draft_dir.mkdir(parents=True)
+    lane, draft_dir = _draft_dir(tmp_path)
     draft = draft_dir / "a.md"
     draft.write_text("not frontmatter at all\n", encoding="utf-8")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
@@ -91,15 +100,13 @@ def test_unparseable_draft_does_not_bypass(run_dir: Path, monkeypatch, tmp_path)
 
 def test_one_contradicting_draft_lifts_the_whole_batch(run_dir: Path, monkeypatch, tmp_path):
     """The handoff is all-or-nothing, same as the at/above-threshold path: one contradicting draft among several..."""
-    skills = tmp_path / "defender" / "skills"
-    draft_dir = skills / "elastic" / "_draft"
-    draft_dir.mkdir(parents=True)
+    lane, draft_dir = _draft_dir(tmp_path)
     contradicting = draft_dir / "a.md"
     plain = draft_dir / "b.md"
     _write_draft(contradicting, contradicts_skill=True)
     _write_draft(plain)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [contradicting, plain])
+    deps = _deps(lane, discover_system_drafts=lambda: [contradicting, plain])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc is None
@@ -110,9 +117,9 @@ def test_contradicting_draft_at_threshold_uses_ordinary_path(
     run_dir: Path, monkeypatch, tmp_path
 ):
     """At/above threshold, a contradicting draft surfaces through the SAME path an ordinary draft would — the..."""
-    draft = _one_draft(tmp_path, contradicts_skill=True)
+    lane, draft = _one_draft(tmp_path, contradicts_skill=True)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc is None
@@ -121,9 +128,7 @@ def test_contradicting_draft_at_threshold_uses_ordinary_path(
 
 def test_body_text_mentioning_the_flag_does_not_bypass(run_dir: Path, monkeypatch, tmp_path):
     """The flag is a FRONTMATTER key, not a substring anywhere in the file. A draft whose `## Notes` prose..."""
-    skills = tmp_path / "defender" / "skills"
-    draft_dir = skills / "elastic" / "_draft"
-    draft_dir.mkdir(parents=True)
+    lane, draft_dir = _draft_dir(tmp_path)
     draft = draft_dir / "a.md"
     draft.write_text(
         "---\nstatus: draft\n---\n\n"
@@ -132,7 +137,7 @@ def test_body_text_mentioning_the_flag_does_not_bypass(run_dir: Path, monkeypatc
         encoding="utf-8",
     )
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
@@ -143,16 +148,14 @@ def test_frontmatter_string_value_mentioning_the_flag_does_not_bypass(
     run_dir: Path, monkeypatch, tmp_path
 ):
     """Same idea, one layer closer: the substring appears inside a DIFFERENT frontmatter key's string value,..."""
-    skills = tmp_path / "defender" / "skills"
-    draft_dir = skills / "elastic" / "_draft"
-    draft_dir.mkdir(parents=True)
+    lane, draft_dir = _draft_dir(tmp_path)
     draft = draft_dir / "a.md"
     draft.write_text(
         '---\nstatus: draft\nnotes: "contradicts_skill: true is documented in the README"\n---\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
@@ -161,13 +164,11 @@ def test_frontmatter_string_value_mentioning_the_flag_does_not_bypass(
 
 def test_quoted_true_string_does_not_bypass(run_dir: Path, monkeypatch, tmp_path):
     """`contradicts_skill: "true"` is a YAML STRING, not the boolean `true` — the schema calls for a real..."""
-    skills = tmp_path / "defender" / "skills"
-    draft_dir = skills / "elastic" / "_draft"
-    draft_dir.mkdir(parents=True)
+    lane, draft_dir = _draft_dir(tmp_path)
     draft = draft_dir / "a.md"
     draft.write_text('---\nstatus: draft\ncontradicts_skill: "true"\n---\n', encoding="utf-8")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
+    deps = _deps(lane, discover_system_drafts=lambda: [draft])
 
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0

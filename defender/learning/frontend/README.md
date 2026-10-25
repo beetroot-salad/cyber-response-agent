@@ -3,7 +3,7 @@
 A read-only view of the learning loop. Two pages, one build:
 
 - **lessons** (`lessons.html`) — the loop's posture: the corpora it authors, read off the
-  checked-in tree.
+  tenant's published knowledge (an export's `agent/`, #1108 P4).
 - **queues** (`queues.html`, #903) — the loop's backlog on THIS host: per channel, the rows it
   gave up on (dead letters, with the reason and the row), the last non-retiring fault (the
   stuck record, append-only — so "last fault", never "stuck now"), and the rows held until a
@@ -21,20 +21,16 @@ A read-only view of the learning loop. Two pages, one build:
   module's own literal (#922's rule). `build.main(paths)` / `stamped_view(paths)` take a
   `LoopPaths` so a test's roots are the whole input surface.
 
-First panel: **lessons** — one corpus the loop still authors, and two it no longer does:
+First panel: **lessons** — the two corpora the loop authors, in the tenant's `agent/`:
 
 | Section | Corpus | Authored by |
 |---------|--------|-------------|
-| Defender lessons | `defender/lessons/` | `learning/author/lessons/run.py` |
-| Actor lessons | `defender/lessons-actor/` | **retired** — producer deleted in #922 |
-| Environment lessons | `defender/lessons-environment/` | **retired** — producer deleted in #922 |
+| Defender lessons | `agent/lessons/` | `learning/author/lessons/run.py` |
+| Questioner lessons | `agent/lessons-questioner/` | `learning/author/questioner/run.py` |
 
-The two retired corpora are **frozen archives**: files left in place, nothing
-writing or reading them. Badged and dimmed rather than hidden — this is an
-author-facing view, and a lesson that was learned should stay findable after its
-channel closes (#922, `e9e11a48`). The headline counts
-live and archived separately, so "the loop's posture" excludes what nothing
-produces.
+The corpora #922 retired (actor and environment lessons) are not in the tenant layout and
+have no group (#1108 P4). A group still declares `retired` + `retired_note`, so a channel
+that loses its producer can be badged rather than hidden.
 
 ## Build
 
@@ -61,7 +57,7 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
  (backend)       (api layer)       (the contract)        (the view)
 ```
 
-- **`serialize.py`** is the api layer: it reads the three corpora (whose
+- **`serialize.py`** is the api layer: it reads the corpora (whose
   frontmatter schemas differ) and normalizes them into one
   schema-agnostic contract. Each group declares `retired` + `retired_note`
   there — retirement is a property of the *channel*, so it is declared per

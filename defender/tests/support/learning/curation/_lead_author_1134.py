@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 
 from defender._io import Bound, Held, hold
-from defender._paths import PATHS
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
 #: `None` outside the lane's mounts.
@@ -88,9 +88,13 @@ def skills_view(root: Path) -> Bound:
 
 
 def repo_skills() -> dict[str, Any]:
-    """`skills=` / `where=` for a reader whose call read this checkout's own catalog (the
-    default it had before step 6): the view of `PATHS.skills_dir`, spelled as that folder."""
-    return {"skills": skills_view(PATHS.skills_dir), "where": PATHS.skills_dir}
+    """`skills=` / `where=` for a reader that needs a real-shaped skills tree it does not write:
+    the committed fixture tenant's `agent/skills` (made-up content), spelled as that folder.
+
+    #1108 P4 O1/O11: it was the view of this checkout's `PATHS.skills_dir`; the product tree
+    holds no tenant skills or catalog after P4, so product tests read the fixture instead."""
+    root = FIXTURE_AGENT / "skills"
+    return {"skills": skills_view(root), "where": root}
 
 
 @contextmanager
@@ -253,3 +257,121 @@ def logged(caplog: pytest.LogCaptureFixture, level: int = logging.WARNING) -> li
 def errors(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [r.getMessage() for r in caplog.records
             if r.levelno == logging.ERROR and r.name.startswith("defender")]
+
+
+# ---------------------------------------------------------------------------------------
+# #1108 P4 (O7, OD6): the same plumbing rooted at a tenant repo / batch draft
+# ---------------------------------------------------------------------------------------
+#
+# After P4 the lead lane's `skills/` mount is `<draft>/agent/skills` (a P3 batch draft: the tenant
+# repo's `agent/` at the batch base, with no `.git`), its rules take that root and repo-relative
+# `agent/skills/...` names, and the adapters stay in the product checkout (#1172). The legacy
+# helpers above stay as they are for the suites not yet moved; these are their P4 siblings.
+
+
+def draft_tree_for(root: Path) -> TreeForFn:
+    """The lead lane's `tree_for` over the tenant-shaped root `root` (it holds `agent/skills`):
+    names are `agent/skills/...`. The trees stay open while the bound method is referenced."""
+    return DrainTrees.open((root / "agent" / "skills",)).tree_for
+
+
+def draft_lead_deps(lane: Any, *, state: Any = None, **replaced: Any) -> Any:
+    """`build_lead_author_deps(lane.paths, trees=<the draft's skills mount>, batch=lane.batch)`
+    over a `_curator1134.DraftLane` (ASSUMED SEAM `batch=`), `replaced` swapped in."""
+    from defender.learning.leads import lead_author
+    from defender.tests.support.learning.curation._curator1134 import open_state
+
+    trees = DrainTrees.open((lane.skills_dir,))
+    try:
+        deps = lead_author.build_lead_author_deps(
+            lane.paths, state=state if state is not None else open_state(lane.paths),
+            trees=trees, batch=lane.batch)
+    except BaseException:
+        trees.close()
+        raise
+    return dataclasses.replace(deps, **replaced) if replaced else deps
+
+
+@dataclasses.dataclass
+class DraftScene(Scene):
+    """`Scene` rooted at a tenant-shaped root: `repo` holds `agent/skills` (the mount), `rel`
+    spells `agent/skills/<name>`, and `product` is the product checkout the adapters sit in."""
+
+    product: Path | None = None
+
+    @property
+    def skills_dir(self) -> Path:
+        return self.repo / "agent" / "skills"
+
+    @property
+    def skills(self) -> Held:
+        return self.trees.mount(self.skills_dir)
+
+    def rel(self, name: str) -> str:
+        return f"agent/skills/{name}"
+
+
+@contextmanager
+def draft_scene_over(tmp_path: Path, product: Path) -> Iterator[DraftScene]:
+    """`scene_over` after P4: `product`'s `defender/skills` tree (a `seed_tree` fixture) moved
+    to a tenant-shaped root `<tmp>/tenant/agent/skills`, committed when `product` has commits
+    (the batch base the rules compare against; a P3 draft is this tree without `.git`), and the
+    lane's one `skills/` mount held over it. `product` keeps the adapters."""
+    from defender.tests.support.learning.curation._drain719 import git
+
+    root = tmp_path / "tenant"
+    n = 1
+    while root.exists():
+        n += 1
+        root = tmp_path / f"tenant-{n}"
+    skills = root / "agent" / "skills"
+    source = product / "defender" / "skills"
+    if source.is_dir():
+        shutil.copytree(source, skills, symlinks=True)
+    else:
+        skills.mkdir(parents=True)
+    if git(product, "rev-parse", "--verify", "-q", "HEAD", check=False).returncode == 0:
+        git(root, "init", "-q", "-b", "main")
+        git(root, "config", "user.email", "t@t")
+        git(root, "config", "user.name", "t")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "--allow-empty", "-m", "tenant base")
+    outside = tmp_path / "outside"
+    outside.mkdir(exist_ok=True)
+    run_dir = tmp_path / "run-x"
+    (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
+    paths = LoopPaths(repo_root=product, state_dir=tmp_path / "state")
+    with DrainTrees.open((skills,)) as trees:
+        yield DraftScene(tmp=tmp_path, repo=root, outside=outside, paths=paths, run_dir=run_dir,
+                         trees=trees, product=product)
+
+
+def product_lane(tmp_path: Path, product: Path) -> Any:
+    """A lead lane over `product`'s seeded `defender/skills` (a `seed_tree` fixture) after P4:
+    that tree published as the tenant's `agent/skills` (one export commit) under a real P3 batch
+    with the lead lane `skills`; the product checkout keeps the adapters and loses the corpus
+    (O1, #1172)."""
+    import subprocess
+
+    from defender.tests.support.learning.curation import _curator1134 as C
+
+    agent = tmp_path / "agent-src"
+    shutil.copytree(product / "defender" / "skills", agent / "skills")
+    subprocess.run(["git", "rm", "-r", "-q", "defender/skills"], cwd=product, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "the product holds no corpus"], cwd=product,
+                   check=True)
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=product)
+
+
+@contextmanager
+def lane_scene(tmp_path: Path, lane: Any) -> Iterator[DraftScene]:
+    """A `DraftScene` over a `_curator1134.DraftLane`'s draft: `repo` is the draft's root (it
+    holds `agent/skills`), `paths` the lane's (product-rooted, OD16), the lane's one `skills/`
+    mount held for the `with`. What landed is the lane's to read (`lane.landed()`)."""
+    outside = tmp_path / "outside"
+    outside.mkdir(exist_ok=True)
+    run_dir = tmp_path / "run-x"
+    (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
+    with DrainTrees.open((lane.skills_dir,)) as trees:
+        yield DraftScene(tmp=tmp_path, repo=lane.root, outside=outside, paths=lane.paths,
+                         run_dir=run_dir, trees=trees, product=lane.paths.repo_root)

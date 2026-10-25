@@ -138,7 +138,10 @@ def test_o5_requires_row(tmp_path, data_root):
 
 def test_d4_launch_location_check(tmp_path, monkeypatch, data_root):
     episodes = _episodes_root(tmp_path, monkeypatch)
-    H.make_tenant(data_root, TID)
+    # #1108 P4: the good half launches a branch, which needs a published tenant (flow 7).
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    set_up_tenant(data_root, TID, published=True)
     _base, src = _old_layout_source(tmp_path)
     before = {data_root: H.census(data_root)}
     owner = _repository_refusal(data_root, src.name)
@@ -163,7 +166,7 @@ def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     episodes = _episodes_root(tmp_path, monkeypatch)
     del episodes  # #1187 (O9): the episode is `<root>/<T>/episodes/<uuid>`, the variable a decoy
-    _base, src = H.tenant_source(root, TID)
+    _base, src = H.tenant_source(root, TID, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     if collide:
         (H.runs_dir(root, TID) / "b").mkdir()
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))

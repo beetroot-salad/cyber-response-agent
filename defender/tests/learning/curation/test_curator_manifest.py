@@ -211,10 +211,18 @@ def test_p1_prompt_splices_manifest_and_keeps_the_rest(tmp_path):
     assert json.dumps(_ROWS, indent=2) in prompt
 
 
-def test_p4_both_callers_forward_the_abs_corpus_path(tmp_repo, tmp_path):
+def test_p4_both_callers_forward_the_abs_corpus_path(tmp_path):
     """demand: P4 — the thin caller forwards the abs corpus Path it holds: findings
-    ``build_user_prompt`` → cfg.corpus_dir, asserted through the prompt it renders."""
-    _findings_lesson(tmp_repo.cfg.corpus_dir, "wrapper-lesson")
-    prompt = build_user_prompt(_ROWS, "batch-1", tmp_repo.cfg)
+    ``build_user_prompt`` → cfg.corpus_dir, asserted through the prompt it renders.
+
+    #1108 P4 (OD6, OD12 class ii): the config is the REAL one over a batch's draft, and the
+    prompt names the corpus by its tenant-repository spelling, `agent/lessons/` (the legacy
+    `cfg.corpus_dir_rel` attribute spelled the checkout's `defender/lessons/`)."""
+    from defender.tests.support.learning.curation import _curator1134 as C
+
+    cfg = C.draft_author_cfg(C.draft_lane(tmp_path))
+    _findings_lesson(cfg.corpus_dir, "wrapper-lesson")
+    prompt = build_user_prompt(_ROWS, "batch-1", cfg)
     assert "## wrapper-lesson" in prompt
-    assert tmp_repo.cfg.corpus_dir_rel in prompt
+    assert C.DRAFT_LESSONS_REL in prompt
+    assert "defender/lessons" not in prompt

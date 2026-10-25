@@ -53,10 +53,10 @@ def test_write_allow_roots_at_the_worktree_corpus_not_run_dir(tmp_path):
 def test_the_curator_cannot_write_outside_its_own_corpus(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
-    _denied_on_both_write_surfaces(deps, rel("lessons-actor", "x.md"))    # a sibling corpus
+    _denied_on_both_write_surfaces(deps, rel("lessons-questioner", "x.md"))    # a sibling corpus
     _denied_on_both_write_surfaces(deps, str(rd / "x.md"))                # run_dir
     _denied_on_both_write_surfaces(deps, "defender/skills/x.md")          # MAIN checkout, not the corpus
-    assert not (corpus(wt, "lessons-actor") / "x.md").exists()            # nothing landed cross-corpus
+    assert not (corpus(wt, "lessons-questioner") / "x.md").exists()            # nothing landed cross-corpus
     _admitted_in_corpus(wt, deps, "lessons")                             # positive control
 
 
@@ -103,8 +103,7 @@ def test_a_shipped_corpus_write_is_denied_when_its_read_confine_excludes_it(tmp_
     """MD-1 / D1 ISOLATED from MD-6 (the F18 scenario)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     excludes_lessons = (
-        corpus(wt, "lessons-actor").resolve(),
-        corpus(wt, "lessons-environment").resolve(),
+        corpus(wt, "lessons-questioner").resolve(),
     )                                                              # a confine that omits `lessons`
     with pytest.raises(ValueError, match=r"confine|scope|outside|author|contain"):
         bind_curator(wt, rd, "lessons", read_confine=excludes_lessons)  # write scope ⊄ the confine
@@ -120,7 +119,7 @@ def test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert bash_decision(deps, "rm defender/lessons/draft.md").allow          # own corpus (control)
-    assert not bash_decision(deps, "rm defender/lessons-actor/draft.md").allow  # sibling
+    assert not bash_decision(deps, "rm defender/lessons-questioner/draft.md").allow  # sibling
     assert not bash_decision(deps, "rm -rf defender/lessons/draft.md").allow    # a flag
     assert not bash_decision(deps, "rm defender/lessons/a.md defender/lessons/b.md").allow  # two paths
 
@@ -129,15 +128,15 @@ def test_all_write_lanes_deny_a_symlink_out_of_corpus(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     # a symlink inside the corpus pointing at the sibling corpus
-    (corpus(wt, "lessons") / "escape").symlink_to(corpus(wt, "lessons-actor"))
-    escape = "defender/lessons/escape/secret.md"          # resolves to lessons-actor/secret.md
+    (corpus(wt, "lessons") / "escape").symlink_to(corpus(wt, "lessons-questioner"))
+    escape = "defender/lessons/escape/secret.md"          # resolves to lessons-questioner/secret.md
     # every lane must DENY the escaping operand
     with pytest.raises(ModelRetry):
         write_file(deps, escape, "body\n")
     with pytest.raises(ModelRetry):
         edit_file(deps, escape, "", "body\n")
     assert not bash_decision(deps, f"rm {escape}").allow   # RED today: the rm grant deletes it
-    assert not (corpus(wt, "lessons-actor") / "secret.md").exists()  # the escape wrote nothing
+    assert not (corpus(wt, "lessons-questioner") / "secret.md").exists()  # the escape wrote nothing
     # positive control: an in-corpus operand admitted by every lane
     (corpus(wt, "lessons") / "real.md").write_text("body\n", encoding="utf-8")
     write_file(deps, rel("lessons", "real.md"), "body\n")
@@ -164,7 +163,7 @@ def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert not bash_decision(
-        deps, "rm defender/lessons/x.md defender/lessons-actor/y.md"
+        deps, "rm defender/lessons/x.md defender/lessons-questioner/y.md"
     ).allow
     assert not bash_decision(deps, "rm defender/lessons/x.md defender/lessons/y.md").allow
     assert bash_decision(deps, "rm defender/lessons/single.md").allow          # positive control

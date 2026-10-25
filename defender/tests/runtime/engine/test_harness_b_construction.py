@@ -133,10 +133,10 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
-    # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
-    # the dispatch's breaker screen reads it.
+    # MAIN's deps carry the run's one `RunState` (#1235 round 2) and the run tenant (#1108 P4),
+    # as the driver hands them: the dispatch's breaker screen and knowledge read them.
     deps = replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_fixture_run_1165(run_dir)),
-                   run_state=RunState(run_dir, "r-harness-b"))
+                   run_state=RunState(run_dir, "r-harness-b"), tenant=_tenants1106.fixture_run_tenant())
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),

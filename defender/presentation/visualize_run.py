@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.records import _provenance
+from defender.records import _knowledge_status, _provenance
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows, read_text_utf8
 from defender.records._report import ReportRead
 from defender.run_repository import RunPaths
@@ -51,7 +51,6 @@ from defender.presentation.visualize_primitives import (
 )
 from defender.presentation.visualize_runtime import (
     close_vocabulary,
-    render_footer,
     render_review_gate,
     render_runtime_investigation,
     render_runtime_leads_queries,
@@ -405,6 +404,25 @@ def render_ticket_line(run_dir: Path) -> str:
     return f'<p class="ticket-line {cls}">{" — ".join(parts)}</p>'
 
 
+def render_knowledge_banner(run_dir: Path) -> str:
+    """The banner a run whose tenant knowledge was stale carries (#1108 P4, O-WARN): its kind,
+    the commit it read and the publish's reason, escaped. Read from the HOST record beside the
+    run dir (U12), never the stamp in it, which the box can rewrite; an unreadable record where
+    one should exist reads stale/operator (OD22'). Nothing for a fresh, pinned or pre-P4 run.
+    This page is an operator surface written after the box stops (OD21), so the raw reason is
+    shown here and nowhere the box or a customer can read."""
+    paths = RunPaths(run_dir)
+    status = _knowledge_status.read_knowledge_status(paths.knowledge_source(), paths.provenance)
+    if status is None or not status.stale:
+        return ""
+    parts = [f"stale knowledge ({esc(status.stale_kind or '')})"]
+    if status.commit is not None:
+        parts.append(f"the run read commit <code>{esc(status.commit)}</code>")
+    if status.reason:
+        parts.append(esc(status.reason))
+    return f'<p class="knowledge-banner">{" — ".join(parts)}</p>'
+
+
 def _display_facts(run_dir: Path) -> list[str]:
     """The run's DISPLAY facts off its provenance stamp (#1187 O7): the alert's label and the
     moment run setup stamped, each shown escaped and only when it is text — the stamp sits in a
@@ -528,6 +546,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
 <div class="layout">
   {render_runtime_toc(phases, n_tx, n_leads, tx_phases, leads, n_reviewed)}
   <article class="content content-runtime">
+    {render_knowledge_banner(run_dir)}
     {render_runtime_headline(run_dir, report, health, leads)}
     {render_ticket_line(run_dir) if update_ticket else ""}
     {_render_policy_denials_section(run_dir)}
@@ -539,7 +558,6 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     {transcript_html}
   </article>
 </div>
-{render_footer(run_dir, case_id)}
 <script>{RUNTIME_JS}</script>
 </body></html>
 """

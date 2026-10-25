@@ -476,8 +476,9 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
     )
     assert graveyard_by_id(paths) == {}, "rows were retired for a host fault"
 
-    # The tick's own `finally` (`ClaimGit.reset`: `reset --hard` + `clean`) has
-    # already put the committed adapters directory back, so the control needs no rebuild.
+    # The control restores the committed adapters directory itself (#1108 P4 deletes the
+    # per-claim worktree reset that used to put it back), then reads the same tree.
+    _git.git(["checkout", "--", str(adapters)], cwd=repo)
     assert (adapters / "cmdb_adapter.py").is_file()
     drains._drain_pitfalls(
         paths, open_state(paths), functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))

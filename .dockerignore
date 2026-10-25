@@ -39,6 +39,10 @@ defender/run-visualizations
 
 # Playground stack data + local infra state
 playground-v2/**/data
+# The dev Forgejo's data and the dev issuer's state (#1108 P4): the seal key, CA key and the
+# AppRole secret_id must never enter a build context.
+playground-knowledge/
+playground-issuer/
 **/*.tfstate
 **/*.tfstate.*
 

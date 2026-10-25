@@ -9,7 +9,6 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
-from defender import _git
 from defender.knowledge._corpus import QueryTemplate, is_established
 from defender._paths import adapters_under
 from defender.learning.leads.declared_systems import declared_systems_over, read_adapters
@@ -27,45 +26,37 @@ from defender.runtime.verb_dispositions import (
 )
 from defender.runtime.verb_grant import GrantError
 from defender.runtime.verbs import RosterRead
+from defender.tenancy._tenants import AGENT_HALF
 
 
 class CensusUnavailable(Exception):
-    """The census could not be taken. Its message names the side that failed and what to fix:
-    this machine's git (absent from PATH, or not runnable), or the running checkout (its
-    adapters unreadable, one the cold verb read saw nothing in, or its committed system markers
-    unresolvable). A census that silently lacked a system would print "clean" over a system
+    """The census could not be taken. Its message names what failed and what to fix: the
+    running checkout's adapters are unreadable, or one of them is an adapter the cold verb read
+    saw nothing in. A census that silently lacked a system would print "clean" over a system
     nobody decided."""
 
 
 @dataclasses.dataclass(frozen=True)
 class Census:
-    """The running checkout's declared verbs, by system, and its query catalog."""
+    """The running checkout's declared verbs, by system."""
 
     systems: frozenset[str]
     walked: dict[str, frozenset[str]]
-    catalog: list[QueryTemplate]
 
 
-def take_census(defender_dir: Path, repo_root: Path) -> Census:
-    """The census of the code tree at `defender_dir` (its adapters, read cold) and `repo_root`
-    (its committed system markers), or `CensusUnavailable`. One roster read serves both the
-    system set and the verb walk, so a tree changing between two reads cannot score one
-    read's systems against the other's verbs."""
+def take_census(defender_dir: Path) -> Census:
+    """The census of the code tree at `defender_dir` (its adapters, read cold), or
+    `CensusUnavailable`. The system set is the adapters alone: the committed system markers it
+    once also read were the product tree's system skills, which #1108 P4 moved into the tenant,
+    so taking it starts no git. One roster read serves both the system set and the verb walk, so
+    a tree changing between two reads cannot score one read's systems against the other's
+    verbs."""
     adapters = adapters_under(defender_dir)
     try:
         roster = read_adapters(adapters)
     except LeadAuthorError as e:
         raise CensusUnavailable(f"the running checkout's adapters cannot be read: {e}") from e
-    try:
-        systems = declared_systems_over(roster, repo_root)
-    except LeadAuthorError as e:
-        raise CensusUnavailable(
-            f"the running checkout {repo_root} cannot resolve its declared systems: {e}") from e
-    except OSError as e:
-        # The marker half is a committed-tree read through git, and git did not start.
-        raise CensusUnavailable(
-            f"{_git.unstarted(e)} on this machine, so the running checkout's committed system markers cannot "
-            f"be read ({e})") from e
+    systems = declared_systems_over(roster)
     walked = {s: roster.declared_verbs(s) for s in sorted(systems)}
     blind = _unreadable_adapters(roster, walked)
     if blind:
@@ -77,7 +68,7 @@ def take_census(defender_dir: Path, repo_root: Path) -> Census:
             "literal — an annotated assignment (`VERBS: dict[str, Verb] = {...}`) or a table "
             "built in a loop declares nothing to the reader. Fix the adapter"
             + (f" ({detail})" if detail else ""))
-    return Census(systems=systems, walked=walked, catalog=catalog_templates(defender_dir))
+    return Census(systems=systems, walked=walked)
 
 
 def _unreadable_adapters(
@@ -140,18 +131,18 @@ class TableFindings:
 
 
 def table_findings(settings: Path, census: Census) -> TableFindings:
-    """`settings`' grant table against `census`, and its lead-zero config against the census's
-    catalog. Raises `DispositionError` naming the table when it does not load."""
-    folder = _folder_findings(settings, census.catalog)
+    """`settings`' grant table against `census`, and its lead-zero config against the catalog of
+    the agent half beside it (#1108 P4: a tenant's catalog is its own). Raises `DispositionError` naming the table when it does not load."""
+    folder = _folder_findings(settings, catalog_templates(Path(settings).parent / AGENT_HALF))
     return TableFindings(folder=folder, gaps=census_gaps(census.walked, folder.dispositions))
 
 
-def folder_findings(settings: Path, defender_dir: Path) -> FolderFindings:
+def folder_findings(settings: Path) -> FolderFindings:
     """`settings` judged by every rule that needs no census, for a caller whose census could
     not be taken: the table loads, and the lead-zero config agrees with it and with the catalog
-    of the tree at `defender_dir` (a plain walk of its files, no git). Raises
+    of the agent half beside `settings` (a plain walk of its files, no git). Raises
     `DispositionError` naming the table when it does not load."""
-    return _folder_findings(settings, catalog_templates(defender_dir))
+    return _folder_findings(settings, catalog_templates(Path(settings).parent / AGENT_HALF))
 
 
 def _folder_findings(settings: Path, catalog: list[QueryTemplate]) -> FolderFindings:

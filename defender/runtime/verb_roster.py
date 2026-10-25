@@ -13,7 +13,6 @@ from .verbs import SYSTEM_PATTERN, RegistryError, read_roster
 from defender._io import read_text_utf8
 
 _AUDIT_DEFAULT_ROLE = "gather"
-_ROSTER_FILENAME = "verb-roster.md"
 
 
 #: Name groups are spelled from `verbs.SYSTEM_PATTERN`. `_QUALIFIED_CALL_RE` is anchored on
@@ -42,12 +41,11 @@ def model_read_surfaces(defender_dir: Path) -> tuple[Path, ...]:
         return ()
     out.extend(sorted(skills.glob("*/SKILL.md")))
     out.extend(sorted(skills.glob("*/execution.md")))
-    # The catalog through its owner; the `skills/` walk above still spans general and
-    # per-system skills in one tree, which #1108 P4 splits into two roots.
-    queries = KnowledgePaths.of_defender_dir(root).catalog_dir
+    # The catalog through its owner, under the same root: the audit walks one tree whose
+    # `skills/` holds both the product's skills and an agent root's per-system ones.
+    queries = KnowledgePaths(root).catalog_dir
     if queries.is_dir():
         out.extend(sorted(p for p in queries.rglob("*.md")))
-    out.extend(sorted(skills.glob(f"*/{_ROSTER_FILENAME}")))
     return tuple(out)
 
 
@@ -61,8 +59,6 @@ def _owning_system(path: Path, skills_dir: Path) -> str | None:
     if rel[0] == "gather":
         if len(rel) >= 4 and rel[1] == "queries" and rel[2] != "_draft":
             return rel[2]
-        return None
-    if rel[-1] == _ROSTER_FILENAME:
         return None
     return rel[0]
 
@@ -103,10 +99,6 @@ def _bare_offenders(
 def _grant_for_surface(
     path: Path, grants: Mapping[str, VerbGrant],
 ) -> VerbGrant:
-    if path.name == _ROSTER_FILENAME:
-        role = path.parent.name
-        if role in grants:
-            return grants[role]
     return grants.get(_AUDIT_DEFAULT_ROLE, DENY_ALL)
 
 

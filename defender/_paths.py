@@ -6,9 +6,6 @@ from pathlib import Path
 from typing import ClassVar
 
 from defender._git import REPO_ROOT
-from defender.knowledge._knowledge import (
-    CATALOG, CHECKOUT_KNOWLEDGE, LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths,
-)
 from defender._model import model
 
 
@@ -61,18 +58,12 @@ def name_roots(text: str, named: Mapping[str, str]) -> str:
 
 @model(frozen=True)
 class DefenderPaths:
+    """The product checkout's own trees. It carries no tenant knowledge (#1108 P4, O1/O4): a
+    tenant's corpora, skills and catalog are `KnowledgePaths` over an agent root."""
 
     repo_root: Path
 
-    # The corpus spellings and folders below are pass-throughs: `defender.knowledge._knowledge` owns
-    # the knowledge layout (#1108), and the knowledge still sits inside the checkout.
-    catalog_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(CATALOG)
-    skills_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(SKILLS)
     adapters_rel: ClassVar[str] = "defender/integrations/"
-    lessons_dir_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(LESSONS)
-    #: The questioner's own corpus — findings about a world, never a lesson for the defender,
-    #: so kept separate from `lessons_dir_rel`.
-    lessons_questioner_dir_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(LESSONS_QUESTIONER)
 
     @property
     def defender_dir(self) -> Path:
@@ -83,29 +74,8 @@ class DefenderPaths:
         return self.defender_dir / "learning"
 
     @property
-    def knowledge(self) -> KnowledgePaths:
-        """The agent knowledge this checkout carries (#1108)."""
-        return KnowledgePaths.of_defender_dir(self.defender_dir)
-
-    @property
-    def catalog_dir(self) -> Path:
-        return self.knowledge.catalog_dir
-
-    @property
-    def skills_dir(self) -> Path:
-        return self.knowledge.skills_dir
-
-    @property
     def adapters_dir(self) -> Path:
         return adapters_under(self.defender_dir)
-
-    @property
-    def lessons_dir(self) -> Path:
-        return self.knowledge.lessons_dir
-
-    @property
-    def lessons_questioner_dir(self) -> Path:
-        return self.knowledge.lessons_questioner_dir
 
     @property
     def worktree_base(self) -> Path:

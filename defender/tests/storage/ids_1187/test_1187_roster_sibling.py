@@ -908,7 +908,7 @@ def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_no
 #: coverage test below pins it to the layout's, so a suffix added there cannot be missed silently.
 ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
                         ".ticket-write.json", ".session-pointer.json", ".call-join.jsonl",
-                        ".ticket-comments.jsonl")
+                        ".ticket-comments.jsonl", ".knowledge-source.json")
 
 
 def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():

@@ -30,7 +30,7 @@ from defender.presentation.visualize_run import CSS as RUN_CSS  # noqa: E402
 if TYPE_CHECKING:
     from defender.tenancy._tenant import Tenant
 
-GROUP_STAGE = {"defender": "stage-defender", "actor": "stage-actor", "environment": "stage-oracle"}
+GROUP_STAGE = {"defender": "stage-defender"}
 
 #: The header link each page carries to the other — one rule, both pages.
 NAV_CSS = "header.top nav.views { margin-left: auto; font-size: 12px; }\n"
@@ -525,10 +525,19 @@ def render(view: dict) -> str:
 def main(tenant: Tenant) -> int:
     """Both pages and their contracts, published into the accepted tenant's learning area (#1279
     O1). Refuses before building when there is nowhere to publish: outside `dev` (O4), or a
-    `dev` root that cannot be determined (A9)."""
+    `dev` deployment with no publish folder set (A11). The lessons page shows the tenant's
+    published knowledge; with nothing published it shows no lesson (and says why), and the queue
+    page is built all the same."""
+    from defender.tenancy._exports import DeliveryRefused
+
     publisher = Publisher.for_tenant(tenant)
+    agent_root = None
+    try:
+        agent_root = serialize.published_agent_root(tenant)
+    except DeliveryRefused as refused:
+        print(f"note: no published knowledge to show lessons from: {refused}", file=sys.stderr)
     queues = serialize_queues.stamped_view(LoopPaths.for_tenant(tenant))
-    view = serialize.stamped_view()
+    view = serialize.stamped_view(agent_root)
 
     pages = {
         "lessons.json": serialize.dump_contract(view),

@@ -185,7 +185,8 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     import asyncio
     from dataclasses import replace
 
-    deps = replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(run_dir)), run_state=state)
+    deps = replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(run_dir)), run_state=state,
+                   tenant=T1106.fixture_run_tenant())
     with pytest.raises(BudgetKill):
         asyncio.run(runtime_tools._run_gather(
             deps, killing_factory, 40,

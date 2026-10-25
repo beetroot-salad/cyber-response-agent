@@ -329,7 +329,7 @@ def test_1279_o5_two_runs_announce_two_minted_ids(tmp_path, data_root):
     assert announced[0][0] != announced[1][0]
     for line, folder in announced:
         assert line == f"run_id={folder}"
-    assert sorted(p.name for p in Path(location_path(t.runs)).iterdir()) == sorted(
+    assert sorted(p.name for p in Path(location_path(t.runs)).iterdir() if p.is_dir()) == sorted(
         folder for _line, folder in announced)
 
 
@@ -441,7 +441,7 @@ class Hit:
 
 
 # #1279 A3 census: no production call hands a run id to run setup or `RunsRepository.create`;
-# only run setup makes an arm, from the roster's id.
+# only run.py makes an arm, from the roster's id, and hands its handle to setup (rev 6).
 
 def run_id_handouts(root: Path, *, skip_tests: bool = True) -> list[Hit]:
     """Production calls that pass an id to setup or `create`, and every arm `create`."""
@@ -495,8 +495,8 @@ def test_1279_a3_census_no_production_call_hands_a_run_id_to_setup_or_create():
 
     handed = [h for h in hits if h.kind != "arm-create"]
     assert handed == [], f"production hands an id around:\n  {listing}"
-    assert [(h.rel, h.kind) for h in hits] == [("run_common.py", "arm-create")], (
-        f"only run setup makes an arm, from the roster's arm id:\n  {listing}")
+    assert [(h.rel, h.kind) for h in hits] == [("run.py", "arm-create")], (
+        f"only run.py makes an arm, from the roster's arm id (#1279 rev 6):\n  {listing}")
 
 
 RUN_ID_HANDOUTS = [

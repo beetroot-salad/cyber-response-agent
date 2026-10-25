@@ -7,7 +7,6 @@ import asyncio
 import contextlib
 import datetime as dt
 import functools
-import re
 import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -105,22 +104,58 @@ def script(clock: FakeClock, *steps: Step) -> Clocked:
     return Clocked(clock, steps)
 
 
-LESSONS: tuple[str, ...] = tuple(sorted(
-    p.stem for p in (DEFENDER / "lessons").glob("*.md") if not p.name.startswith("_")))[:3]
-assert len(LESSONS) == 3, "the runtime lessons corpus holds fewer than three lessons"
+#: #1108 P4 (O1, O4): the lessons corpus is the TENANT's (`agent/lessons/`, read from the run's
+#: copy of its export), never the checkout's — the checkout holds none. These scenarios need
+#: three lessons a run reads, so the clock drivers plant three made-up ones into the run
+#: tenant's knowledge folder before the launch (`plant_lessons`); the launch-time publish takes
+#: them into the export the run copies.
+LESSONS: tuple[str, ...] = ("clock-lesson-a", "clock-lesson-b", "clock-lesson-c")
 
-_DEFENDER_DIR_LINE = re.compile(r"DEFENDER_DIR: `([^`]+)`")
+
+def lesson_text(name: str) -> str:
+    """One made-up lesson (front matter in the corpus schema; content describes nothing)."""
+    return (f"---\nname: {name}\ndescription: Made-up clock fixture lesson {name} (#1255, "
+            "#1108 P4).\ntelemetry_source: [cmdb]\nattack_phase: [discovery]\n"
+            f"source_signature: [fixture-clock-{name}]\nsource_finding_ids:\n"
+            "  - fixture-run-1/1\ncreated_at: 2026-10-01T00:00:00Z\n---\n\n"
+            f"Fixture content for the run-clock tests; {name} describes no real environment.\n")
+
+
+def plant_lessons(tenant_id: str, data_root: Path | None = None, *,
+                  agent: Path | None = None) -> Path | None:
+    """Write `LESSONS` into tenant `tenant_id`'s own `knowledge/agent/lessons/` under the data
+    root (default: this test's) — or into the agent half `agent` names — unchanged bytes when
+    already there. Returns the folder, or `None` when there is no agent half to plant into."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+
+    if agent is None:
+        root = Path(data_root) if data_root is not None else current_data_root()
+        agent = root / str(tenant_id) / "knowledge" / "agent"
+    agent = Path(agent)
+    if not agent.is_dir():
+        return None
+    lessons = agent / "lessons"
+    lessons.mkdir(exist_ok=True)
+    for name in LESSONS:
+        path = lessons / f"{name}.md"
+        text = lesson_text(name)
+        if not path.is_file() or path.read_text(encoding="utf-8") != text:
+            path.write_text(text, encoding="utf-8")
+    return lessons
+
+
+def _argv_tenant(argv: Iterable[str]) -> str | None:
+    args = list(argv)
+    return args[args.index("--tenant") + 1] if "--tenant" in args[:-1] else None
 
 
 def read_lesson(name: str) -> Callable[[str], H.Turn]:
-    """Read a lesson using the checkout path shown to the model."""
+    """Read a lesson by the path the run's model view gives the agent tree (#1108 P4: the run
+    copy's `agent/` at the model root `MODEL_AGENT`; the lessons are the tenant's)."""
+    from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
-    def turn(text: str) -> H.Turn:
-        found = _DEFENDER_DIR_LINE.search(text)
-        assert found is not None, (
-            "the model was never shown where the checkout is (no `DEFENDER_DIR:` line in its "
-            "history) — the script cannot name a lesson the way a model would")
-        return H.Turn(tool_calls=[("read_file", {"path": f"{found.group(1)}/lessons/{name}.md"})])
+    def turn(_text: str) -> H.Turn:
+        return H.Turn(tool_calls=[("read_file", {"path": f"{MODEL_AGENT}/lessons/{name}.md"})])
 
     return turn
 
@@ -208,7 +243,16 @@ def drive_clocked(  # noqa: PLR0913 — one keyword per seam a clock scenario va
         run_dir: Path, *, clock: Callable[[], dt.datetime], main: Any, gather: Any = None,
         verbs: Any = None, limits: dict | None = None, tenant: Any = None,
         review_stages: Any = None) -> dict:
-    """Drive a natural replay with an injected clock and the standard harness defaults."""
+    """Drive a natural replay with an injected clock and the standard harness defaults. With
+    no `tenant` the replay runs as the fixture tenant, into whose folder `LESSONS` are planted
+    first (#1108 P4: the harness publishes the folder as it is); a named tenant (whose agent
+    half the harness reads as it stands) gets them in that agent half."""
+    if tenant is None:
+        from defender.tests.support.tenancy import _tenants1106
+
+        plant_lessons(str(_tenants1106.fixture_tenant().id))
+    elif getattr(tenant, "agent", None) is not None:
+        plant_lessons(str(tenant.id), agent=Path(location_path(tenant.agent)))
     return H.drive(run_dir, run_id=run_dir.name, main=main, gather=gather, verbs=verbs,
                    limits=limits, tenant=tenant, review_stages=review_stages, clock=clock)
 
@@ -273,11 +317,18 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
         else functools.partial(box_mod.start_box, docker=_no_daemon),
         stop_box=lambda *_a, **_k: None,
         scrub=lambda *_a, **_k: None)
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    tenant_id = _argv_tenant(argv)
+    if tenant_id is not None:
+        plant_lessons(tenant_id)
     try:
+        # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the tenant for
+        # real when run.main launches it).
         launched.exit = run_mod.main(
             argv, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
             visualize=lambda *_a, **_k: None, enqueue=lambda *_a, **_k: False,
-            oracle=oracle, verifier=verifier)
+            oracle=oracle, verifier=verifier, publish=in_process_publish())
     except SystemExit as refused:
         launched.exit = "SystemExit"
         launched.refusal = str(refused.code)

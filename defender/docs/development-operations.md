@@ -48,8 +48,14 @@ The drains, standalone author commands, frontend, trace and revert commands requ
 
 ## Tenant version control credentials (PR #1253)
 
-Production deployment and drain wiring are not defined yet; delivery remains dormant until
-P4. The host-side API is `defender.learning.author.version_control.TenantDelivery`.
+Since #1108 P4 every corpus write goes through `defender.learning.author.version_control.TenantDelivery`:
+the drains, `tenant.py update`/`propose`/`setup` and the launch-time publish child log in to the
+issuer themselves with the AppRole pair in the tenant's issuer client config file, which the
+tenant row's forge binding names (`<T>/tenant.json`
+`forge: {origin, audience, issuer_role, issuer_config}`, `issuer_config` an absolute path; in
+dev `<repo>/playground-issuer/client/<tenant-id>/issuer.json`). There is no default path and no
+flag: each tenant logs in with its own file. The run process never imports it:
+a run reads its own copy of one published export. Production deployment is not defined yet.
 `delivery.py` owns publish → draft/batch → commit → push/PR and revert. `repository.py`
 owns git semantics, `forgejo.py` the concrete Forgejo API, `auth.py` Vault identities, and
 `credentials.py` git's credential channel. `transport.py` owns the isolated transfer context. Export, batch and durable-record helpers live
@@ -102,6 +108,46 @@ for Forgejo in deployment; HTTP is for isolated local fixtures only.
 The default dev-container image is 17.0.0. Existing volumes are not migrated automatically;
 back them up and follow Forgejo's upgrade procedure before restarting an older installation.
 No production migration or deployment is implied by the image bump.
+
+### The dev issuer (#1108 P4)
+
+The devcontainer compose file runs OpenBao 2.4.1 as the `openbao` service: file storage, a
+static seal from a 32-byte key file and a TLS listener signed by a dev CA, reachable only on the
+compose network at `https://openbao:8200` (no host port). Its storage, seal key, CA, recovery
+keys and the AppRole client config live under `<repo>/playground-issuer/` (gitignored and
+excluded from docker build contexts). This is a dev posture: the seal key sits beside the data
+it seals, and any same-uid process in the dev container can read the client config. Forgejo's
+`/data` is the host folder `<repo>/playground-knowledge/`, so `docker compose down -v` keeps it;
+Forgejo allows only `openbao` as an integration issuer and trusts the dev CA through
+`SSL_CERT_DIR`.
+
+Provision from the dev container, after the stack is up, with the lab tenant's id, its bot and
+its repository:
+
+```bash
+.devcontainer/provision-dev-issuer.sh provision <tenant-id> --bot <bot login> --repo <owner/name>
+```
+
+It is idempotent. It prepares `playground-issuer/` (and restarts `openbao` on it), initialises
+OpenBao, creates the signing key, the tenant's OIDC role (TTL 600 s, `tenant_id` from entity
+metadata), an AppRole whose policy reads only that role's token and the entity binding them,
+creates the bot's Generic JWT Authorized Integration in Forgejo (the issuer, `tenant_id` equal to
+the tenant, restricted to the repository, `write:repository` and `write:issue`) and sets the
+role's `client_id` to the audience Forgejo generated, writes `client/<tenant-id>/issuer.json` and
+the tenant row's forge binding naming it, warns if the bot can push `main`, and revokes the root token it used (a
+later run regenerates one from the recovery keys inside the issuer container). Forgejo 17 has no
+API for Authorized Integrations: the script fills the web form as the bot, after resetting the
+bot's unused password. The signing role is created before the integration because Forgejo caches
+the issuer's JWKS: an integration attempted against an empty JWKS keeps failing until Forgejo
+restarts. Pass `--rotate-secret` to mint a new AppRole `secret_id`.
+
+Moving an existing Forgejo off the old `forgejo-data` named volume, once: stop `forgejo`, run
+`.devcontainer/provision-dev-issuer.sh migrate-forgejo-data` (it copies the volume into
+`playground-knowledge/` and keeps the volume), then `docker compose up -d`. A 15.x installation
+becomes 17.0.0 at the same time; back up first and follow Forgejo's upgrade notes. The old
+volume is no longer declared, so `down -v` does not remove it; delete it yourself once the lab
+repository, its bot and its history are confirmed on the new Forgejo
+(`test_live_dev_issuer.py`, run with `-m live`, checks them).
 
 Live JWT verification is separate from the fast fake-backed suite. Provision a disposable
 Forgejo 17 service and an HTTPS OIDC fixture issuer with a matching RSA key and JWKS.

@@ -9,28 +9,37 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain
 from defender.learning.core import drains
 from defender.learning.core.state import LEAD_QUEUE_LOCK, Claimed
 from defender.learning.leads import lead_author
 from defender.tests.support.sandbox._spec791 import (
-    SpecBranch,
     author_markers,
     loop_paths,
     marker_body,
-    noop_scrub,
-    noop_start_box,
-    noop_stop_box,
 )
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    LEAD_PREFIX,
+    BoxSpy,
+    drain_paths,
+    product_repo,
+    remote_branches,
+)
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.learning.core.config import LoopPaths
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 # F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
+#
+# #1108 P4 (OD12 class ii): each tick runs over a batch's git-free draft (`_curator1134.draft_lane`,
+# the REAL lessons config over it through `draft_author_cfg`); "committed" is read on the batch
+# branch (`agent/lessons/...`), "nothing committed" is no commit on it, "restored away" is the
+# draft back at the batch base.
 
 
 def _write_corpus_file(corpus_dir: Path, stem: str, field: str, cited: list[str]) -> Path:
@@ -44,21 +53,29 @@ def _write_corpus_file(corpus_dir: Path, stem: str, field: str, cited: list[str]
     return path
 
 
-def _head_files(repo: Path) -> list[str]:
-    return h.git(repo, "show", "--name-only", "--pretty=format:", "HEAD").stdout.split()
+def _f02_lane(tmp_path: Path, files: dict[str, str] | None = None) -> C.DraftLane:
+    """The draft lane, its findings queue seeded with run-G/0 and run-B/0."""
+    lane = C.draft_lane(tmp_path, files=files)
+    h.seed(lane.paths, h.channel_of("findings"),
+           [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    return lane
 
 
-def _commits(repo: Path) -> int:
-    """Commit count — how "nothing was committed" is asserted, since HEAD on a faulted tick
-    is the fixture's own init commit and carries the whole tree."""
-    return int(h.git(repo, "rev-list", "--count", "HEAD").stdout.strip())
+def _head_files(lane: C.DraftLane) -> list[str]:
+    """The paths the batch branch's last commit changed."""
+    return lane.git("show", "--name-only", "--pretty=format:", lane.tip()).stdout.split()
+
+
+def _commits(lane: C.DraftLane) -> int:
+    """The commit-maker's commits on the batch branch — how "nothing was committed" is asserted."""
+    return len(lane.commits())
 
 
 def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp_path: Path):
     """F-02."""
-    paths = h.make_paths(tmp_path)
+    lane = _f02_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -70,14 +87,14 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
             "commit_message": "defender: lesson vouched",
         }
 
-    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
+    cfg = C.draft_author_cfg(lane, invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 2, "the unattributable file did not fault the tick"
 
     assert not (cfg.corpus_dir / "forward-bad.md").exists(), \
         "the rejected lesson survived in the corpus"
     assert not (cfg.corpus_dir / "vouched.md").exists(), \
         "the tick faulted but its batch-mate's edit was not restored away with it"
-    assert _commits(paths.repo_root) == 1, "a commit landed on a faulted tick"
+    assert _commits(lane) == 0, "a commit landed on a faulted tick"
     assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"], \
         "the batch left the queue on a tick that committed nothing"
     assert h.attempts_of(paths, ch, "run-G/0") == 1
@@ -87,9 +104,9 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     tmp_path: Path,
 ):
     """F-02's control, and its second half."""
-    paths = h.make_paths(tmp_path)
+    lane = _f02_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -99,10 +116,11 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
             "commit_message": "defender: lesson vouched",
         }
 
-    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
+    cfg = C.draft_author_cfg(lane, invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 0
 
-    assert _head_files(paths.repo_root) == ["defender/lessons/vouched.md"]
+    assert _commits(lane) == 1
+    assert _head_files(lane) == ["agent/lessons/vouched.md"]
     assert list(h.pending_by_id(paths, ch)) == ["run-B/0"]
     assert "attempts" not in h.pending_by_id(paths, ch)["run-B/0"]
     assert "held_reason" not in h.pending_by_id(paths, ch)["run-B/0"], (
@@ -114,14 +132,16 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     tmp_path: Path,
 ):
     """The exemption's edge."""
-    paths = h.make_paths(tmp_path)
+    # An earlier batch's lesson, published in the export the batch starts from.
+    earlier = tmp_path / "earlier"
+    earlier.mkdir()
+    old_text = _write_corpus_file(earlier, "old-fact", "source_finding_ids",
+                                  ["run-A/0"]).read_text(encoding="utf-8")
+    lane = _f02_lane(tmp_path, files={"lessons/old-fact.md": old_text})
+    paths = lane.paths
     ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
-
-    seeded = h.cfg_for(paths, "findings")
-    old = _write_corpus_file(seeded.corpus_dir, "old-fact", "source_finding_ids", ["run-A/0"])
-    h.git(paths.repo_root, "add", "-A")
-    h.git(paths.repo_root, "commit", "-q", "-m", "an earlier batch's lesson")
+    old = lane.lessons_dir / "old-fact.md"
+    assert old.read_text(encoding="utf-8") == old_text
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -137,9 +157,9 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
             "commit_message": "defender: lesson vouched",
         }
 
-    cfg = h.cfg_for(paths, "findings", invoke_agent=curate)
+    cfg = C.draft_author_cfg(lane, invoke_agent=curate)
     assert drain.run_batch(cfg=cfg) == 2, "the rejected fold rode in on its batch-mate"
-    assert _commits(paths.repo_root) == 2
+    assert _commits(lane) == 0
     assert "run-B/0" not in old.read_text(encoding="utf-8"), "the rejected fold survived"
     assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"]
 
@@ -167,42 +187,53 @@ def _address(row: dict) -> tuple[str, str]:
     return row["tenant_id"], row["run_id"]
 
 
-def _drain(paths, tmp_path: Path, **overrides):
+@pytest.fixture
+def tenant(tmp_path: Path, data_root: Path):
+    """#1108 P4: the lane drains into the fixture tenant's repo (D9's id), published for real
+    and bound to its forge."""
+    with published_tenant(tmp_path / "forge", root=data_root) as t:
+        bind_forge(t)
+        yield t
+
+
+def _drain(t, paths, **overrides):
+    """One lead-author tick through the P4 seams (`client=`/`identity=` over the tenant's forge
+    and issuer fakes, the box via `BoxSpy`); `branch=`/`scrub=` are gone with the product-repo
+    delivery."""
+    box = BoxSpy()
+    overrides.setdefault("run_pitfalls", lambda *_a, **_kw: 0)
     return drains.lead_author_drain(
-        paths,
-        run_pitfalls=lambda *_a, **_kw: 0,
-        branch=SpecBranch(tmp_path / "worktrees"),
-        start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
-        **overrides,
+        paths, client=t.forge.client, identity=t.vault.identity(),
+        start_box=box.start, stop_box=box.stop, **overrides,
     )
 
 
-def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_path, monkeypatch):
+def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_path, monkeypatch, tenant):
     """O4: a valid foreign Run address in A's queue cannot grant access to tenant B."""
     from defender.run_repository import RunAddress
     from defender.tenancy import _tenant
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
-    tenant = set_up_tenant(current_data_root())
+    accepted = set_up_tenant(current_data_root())  # the published fixture tenant, accepted
+    assert str(accepted.id) == tenant.tenant_id
     other_id = fixture_uuid("tenant:other-1186")
     # Setup permits one tenant per fresh root, but acceptance can see two existing tenants.
     # Plant the established acceptance fixture so an absent foreign run cannot explain refusal.
     H.adopted(current_data_root(), other_id)
     other = H.accept(_tenant, current_data_root(), other_id)
-    own_run = _state1135.curation_run_dir("own-1186", tenant_id=str(tenant.id))
+    own_run = _state1135.curation_run_dir("own-1186", tenant_id=tenant.tenant_id)
     foreign_run = location_path(other.runs) / fixture_uuid("foreign-1186")
     foreign_run.mkdir(parents=True)
     foreign = other.runs_repository().resolve(RunAddress(other.id, foreign_run.name))
     assert foreign.run_dir == foreign_run.resolve()
-    repo = loop_paths(tmp_path).repo_root
-    paths = LoopPaths.for_tenant(tenant).with_repo_root(repo)
+    paths = drain_paths(tenant, product_repo(tmp_path))
     state = _state1135.state_for_paths(paths)
     _enqueue(paths, "a-foreign", foreign_run)
     _enqueue(paths, "b-own", own_run)
     # Once selected, the tenant supplies request acceptance even if ambient selection changes.
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "not-the-selected-root"))
     served = []
-    assert _drain(paths, tmp_path,
+    assert _drain(tenant, paths,
                   run_lead_author=lambda _p, _s, run, **kw: served.append(run.run_dir)) == 0
     assert served == [own_run.resolve()], "a foreign request reached the author"
     failed, unreadable = state.failed_requests()
@@ -217,9 +248,9 @@ def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_p
     assert not (location_path(other.learning) / "author-queue").exists()
 
 
-def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path):
-    """F-03."""
-    paths = loop_paths(tmp_path)
+def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path, tenant):
+    """F-03 (over the P4 tenant lane, #1108): nothing claimed, nothing delivered."""
+    paths = drain_paths(tenant, product_repo(tmp_path))
     _queued_run("case-1", "run-1", paths)
     _queued_run("case-2", "run-2", paths)
 
@@ -228,7 +259,7 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     holder = queue_lock.open("a+")
     try:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        rc = _drain(paths, tmp_path)
+        rc = _drain(tenant, paths)
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()
@@ -245,6 +276,7 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
             "a skip spent one of the request's three retries"
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, \
         "the queue went quiet on work that is still queued"
+    assert remote_branches(tenant.remote, LEAD_PREFIX) == {}, "a skipped pass delivered a batch"
 
 
 def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
@@ -270,9 +302,9 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
 # F-04 — a re-queue must not overwrite a fresher request for the same case
 
 
-def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: Path):
-    """F-04."""
-    paths = loop_paths(tmp_path)
+def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: Path, tenant):
+    """F-04 (over the P4 tenant lane, #1108)."""
+    paths = drain_paths(tenant, product_repo(tmp_path))
     first = _queued_run("case-A", "run-1", paths)
     second = _state1135.curation_run_dir("run-2")
 
@@ -286,7 +318,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
             # ...and the agent spawn then hits the transient the drain retries on.
             raise drains._LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 
-    _drain(paths, tmp_path, run_lead_author=serve)
+    _drain(tenant, paths, run_lead_author=serve)
 
     assert author_markers(paths) == ["case-A.json"]
     body = marker_body(location_path(paths.state_root) / "author-queue" / "case-A.json")
@@ -297,7 +329,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
     assert "attempts" not in body, \
         "the superseding request inherited the retried run's attempt count"
 
-    _drain(paths, tmp_path, run_lead_author=serve)
+    _drain(tenant, paths, run_lead_author=serve)
     assert served == [first.resolve(), second.resolve()], \
         "the second pass did not serve the newer investigation"
     assert author_markers(paths) == []

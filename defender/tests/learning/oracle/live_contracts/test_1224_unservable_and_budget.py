@@ -244,9 +244,13 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
     # #1105 PR 2 (declared change 6): `--tenant T --episode <episode id> --world L`.
     argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]
     try:
+        from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+        # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
         sib.rc = S.mod(S.RUN).main(argv, lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,
-                                   verifier=verifier.model, roster=est.roster())
+                                   verifier=verifier.model, roster=est.roster(),
+                                   publish=in_process_publish())
     except SystemExit as stop:
         sib.rc = 0 if stop.code is None else stop.code
     except Exception as exc:  # noqa: BLE001 — only the coined class is kept, the rest re-raise

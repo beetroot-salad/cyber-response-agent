@@ -3,23 +3,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender._paths import PATHS, DefenderPaths
+from defender._paths import PATHS
+from defender.knowledge._knowledge import AGENT_REL, CATALOG, CATALOG_SCHEMA_NAME, SKILLS
 
 REPO_ROOT = PATHS.repo_root
 LEARNING_DIR = PATHS.learning_dir
-CATALOG_DIR = PATHS.catalog_dir
-CATALOG_REL = DefenderPaths.catalog_rel
-SKILLS_DIR = PATHS.skills_dir
-SKILLS_REL = DefenderPaths.skills_rel
+#: The lead lanes' spellings, relative to the tenant repo that versions the agent root (OD6):
+#: every change, commit and handoff path the lanes judge or name is `agent/skills/...`, a path
+#: of a batch's draft (#1108 P4). Path spellings, not prompt text.
+SKILLS_PREFIX = f"{AGENT_REL}/{SKILLS}/"  # lint-stage-frame: ok — a path, not a prompt frame
+CATALOG_PREFIX = f"{AGENT_REL}/{CATALOG}/"  # lint-stage-frame: ok — a path, not a prompt frame
 #: The catalog's folder below the `skills/` mount (`gather/queries`): drain code reaches the catalog
 #: through the held `skills/` mount, never through a handle rooted at the catalog (#1134).
-CATALOG_FOLDER = CATALOG_REL[len(SKILLS_REL):].strip("/")
+CATALOG_FOLDER = CATALOG[len(SKILLS):].strip("/")
 
 
 def _under_draft(path: str) -> bool:
-    if not path.startswith(CATALOG_REL):
+    if not path.startswith(CATALOG_PREFIX):
         return False
-    rest = path[len(CATALOG_REL):]
+    rest = path[len(CATALOG_PREFIX):]
     parts = rest.split("/")
     return len(parts) >= 3 and parts[1] == "_draft"
 
@@ -30,7 +32,7 @@ def _draft_twin(catalog_template: str) -> str:
 
 
 def _is_catalog_path(path: str) -> bool:
-    return path.startswith(CATALOG_REL)
+    return path.startswith(CATALOG_PREFIX)
 
 
 def _is_catalog_template(path: str) -> bool:
@@ -41,16 +43,16 @@ def _is_catalog_template(path: str) -> bool:
     `{system}/sub/x.md` is still read and refused by the content rule rather than silently
     passed. Drafts are excluded only at `_under_draft`'s documented depth, for the same reason.
     """
-    if not path.startswith(CATALOG_REL) or not path.endswith(".md"):
+    if not path.startswith(CATALOG_PREFIX) or not path.endswith(".md"):
         return False
-    parts = path[len(CATALOG_REL):].split("/")
+    parts = path[len(CATALOG_PREFIX):].split("/")
     return len(parts) >= 2 and not _under_draft(path) and parts[-1] != "README.md"
 
 
 def _is_system_file(path: str, name: str) -> bool:
-    if not path.startswith(SKILLS_REL):
+    if not path.startswith(SKILLS_PREFIX):
         return False
-    rest = path[len(SKILLS_REL):]
+    rest = path[len(SKILLS_PREFIX):]
     parts = rest.split("/")
     return len(parts) == 2 and parts[1] == name
 
@@ -64,9 +66,9 @@ def _is_system_execution_md(path: str) -> bool:
 
 
 def _is_system_skill_draft(path: str) -> bool:
-    if not path.startswith(SKILLS_REL):
+    if not path.startswith(SKILLS_PREFIX):
         return False
-    rest = path[len(SKILLS_REL):]
+    rest = path[len(SKILLS_PREFIX):]
     parts = rest.split("/")
     return len(parts) >= 3 and parts[1] == "_draft"
 
@@ -78,7 +80,7 @@ def _is_draft_readme(path: str) -> bool:
 
 
 def _is_schema_md(path: str) -> bool:
-    return _is_catalog_path(path) and Path(path).name == "SCHEMA.md"
+    return _is_catalog_path(path) and Path(path).name == CATALOG_SCHEMA_NAME
 
 
 def _is_in_scope(path: str) -> bool:

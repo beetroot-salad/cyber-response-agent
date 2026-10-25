@@ -1,12 +1,15 @@
 """Drain retire ceiling: new queue paths live under state_root, ceiling bound at config build, and the pitfalls channel retires at the ceiling."""
 from __future__ import annotations
 
+import dataclasses
+
 from defender.tests.support.shared._locations_1210 import location_path
 
 from pathlib import Path
 
 import pytest
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
@@ -52,8 +55,8 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
             assert state in p.parents, f"{name}: {p} is not under the state root"
             assert paths.repo_root not in p.parents
 
-    cfg = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("s"))
-    assert cfg.corpus_dir.is_relative_to(paths.repo_root), "the corpus is repo-rooted"
+    # The corpus is no longer repo-rooted (#1108 P4: it is the batch draft's lane, tenant
+    # repo; covered by tenant_1108_p4/test_writers.py::test_o7_each_author_lane_writer_...).
 
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -69,7 +72,9 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
 
 
 def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path):
-    paths = h.make_paths(tmp_path)
+    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
 
     for p in (
@@ -79,10 +84,7 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
         assert p.is_relative_to((location_path(paths.state_root) / FINDINGS.queue).parent), f"{p} is outside the ignored prefix"
 
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
-    fault = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
+    fault = C.draft_author_cfg(lane, max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("writes the graveyard")),
     )
     assert drain.run_batch(cfg=fault) == 2
@@ -90,20 +92,14 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     assert (location_path(paths.state_root) / ch.drain_role.file).exists()
 
     h.seed(paths, ch, [h.row_for("findings", "a/1")])
-    clean = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("ok"))
+    clean = C.draft_author_cfg(lane, max_attempts=1, invoke_agent=h.committing("ok"))
     assert drain.run_batch(cfg=clean) == 0, "the new state files aborted the next batch"
-
-    h.seed(paths, ch, [h.row_for("findings", "a/2")])
-    stray = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=9,
-        invoke_agent=h.committing(
-            "stray",
-            also=lambda r, b, c: (c.repo_root / "defender" / "learning" / "stray.lock").write_text("x"),
-        ),
-    )
-    assert drain.run_batch(cfg=stray) == 2, "a path outside the ignored prefix must be seen"
+    assert [p.rsplit("/", 1)[0] for p in lane.landed()] == ["agent/lessons"], lane.landed()
+    # #1108 P4 OD12(i): the legacy third leg (a write under the checkout's `defender/learning/`
+    # outside the gitignored state prefix is seen as a stray) pinned only the checkout's ignore
+    # rules; the learning state is not in the draft at all, and a write outside the lanes refuses
+    # the claim whole (tests/tenancy/tenant_1108_delivery/test_changes.py::
+    # test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole).
 
 
 # When the ceiling is bound
@@ -167,20 +163,29 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
     """Decision 1 path 1, which flipped demand #0."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
-    paths = h.make_paths(tmp_path)
+    # #1108 P4 (OD12 class ii, OD16): the pitfalls lane over a batch's git-free draft (lane
+    # `skills`), the batch handed to its run; the product checkout declares `elastic` (its
+    # adapter), as the legacy scratch repo did.
+    product = tmp_path / "product"
+    C.put(product / "defender" / "integrations" / "elastic_adapter.py", "VERBS = {}\n")
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product)
+    paths = lane.paths
     h.seed(paths, PITFALLS, _pitfalls_rows(2))
 
     with pytest.raises(Exception) as raised:  # noqa: PT011 - the raised class is the subject under test, asserted below
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: 7,
-                                      trees=lead_trees(paths))
+        pitfalls_curator.run_pitfalls(paths=paths, state=_state1135.state_for_paths(paths),
+                                      invoke=lambda *a, **k: 7, trees=C.draft_trees(lane),
+                                      batch=lane.batch)
     assert type(raised.value) in tuple(drain.RETIRE_SET), (
         f"the converted rc raises {type(raised.value).__name__}, which is not in the retire set — "
         "it would fall through uncaught and the channel would stay stuck"
     )
 
     def leg(_paths, _state, box=None, **_kw):
-        return pitfalls_curator.run_pitfalls(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
-                                             trees=lead_trees(_paths))
+        with C.draft_trees(lane) as trees:
+            return pitfalls_curator.run_pitfalls(paths=_paths, state=_state,
+                                                 invoke=lambda *a, **k: 7, trees=trees,
+                                                 batch=lane.batch)
 
     drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
     assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [1, 1], (
@@ -305,7 +310,7 @@ def test_1186_tenant_state_requires_a_real_learning_directory(
     if selection != "at-open":
         selected = LoopPaths.for_tenant(tenant)
         if selection == "author-checkout":
-            selected = selected.with_repo_root(tmp_path / "other-author-checkout")
+            selected = dataclasses.replace(selected, repo_root=tmp_path / "other-author-checkout")
     if shape != "plain":
         location_path(tenant.learning).rmdir()
         location_path(tenant.learning).symlink_to(target, target_is_directory=True)
@@ -348,7 +353,7 @@ def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
     assert location_path(first.state_root) == location_path(a.learning)
     assert location_path(second.state_root) == location_path(b.learning)
     worktree = tmp_path / "different-author-checkout"
-    moved = first.with_repo_root(worktree)
+    moved = dataclasses.replace(first, repo_root=worktree)
     assert moved.repo_root == worktree
     assert location_path(moved.state_root) == location_path(a.learning)
 

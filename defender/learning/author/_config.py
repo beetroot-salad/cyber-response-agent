@@ -9,10 +9,9 @@ from defender._io import Held
 from defender.learning.core.lane_trees import TreeFor
 from defender.learning.core.state import Channel, LearningState
 
-#: How long one curator git call over the worktree may take, in seconds, before the tick treats
-#: it as a git failure (`CorpusAuthorConfig.git_timeout`). Each is a local status, lookup or
-#: compare, the slowest a status of the whole worktree: one still running after this is blocked
-#: (a FIFO the agent left where git opens a file), not slow.
+#: How long one lane git call may take, in seconds, before the tick treats it as a git failure
+#: (the lead lane's bounded reads, #1175): a local status, lookup or compare still running after
+#: this is blocked (a FIFO the agent left where git opens a file), not slow.
 GIT_TIMEOUT_SECONDS = 60.0
 
 
@@ -44,22 +43,25 @@ class CorpusAuthorConfig:
     (`cfg.repo_root`) answer for the whole set. `kw_only` so subclasses can add required
     fields after the base's defaulted ones."""
 
+    #: The root the corpus' agent root sits in, as the spawn's box sees it: a batch draft's
+    #: `stage/` (the box's `staged` mount, holding `agent/`), or a scene's checkout.
     repo_root: Path
     #: The learning state handle, opened by the entry point on the entry's own paths: the
     #: channel's queue, ledgers, locks and reports are all reached through it.
     state: LearningState
-    #: The corpus folder's spelling: git pathspecs, the readers' `where=` and the curator
-    #: engine's path checks. Never opened: every host read, write, delete and
-    #: listing of the corpus goes through `corpus` (#1134).
+    #: The corpus folder's spelling: the readers' `where=` and the curator engine's path
+    #: checks. Never opened: every host read, write, delete and listing of the corpus goes
+    #: through `corpus` (#1134).
     corpus_dir: Path
     #: The corpus mount, held by the lane's open trees (`shared.lane_corpus`): writes through it,
     #: reads through its `view()`. Lives only as long as the `DrainTrees` it came from.
     corpus: Held
-    #: The lane's `DrainTrees.tree_for`: a working-copy path (a git-status name joined to
-    #: `repo_root`) to its held mount and name, the sibling corpus included, or `None` outside
-    #: the lane's mounts.
+    #: The lane's `DrainTrees.tree_for`: a path below `repo_root` to its held mount and name,
+    #: the sibling corpus included, or `None` outside the lane's mounts.
     tree_for: TreeFor
-    corpus_dir_rel: str
+    #: The corpus' repo-relative spelling in the tenant repository (`agent/lessons/`, OD6): the
+    #: prefix of every change this channel's claim may commit.
+    corpus_rel: str
     channel: Channel
     repo_lock_wait_seconds: int
     log_prefix: str
@@ -72,16 +74,15 @@ class CorpusAuthorConfig:
     gate: Callable[..., tuple[list[dict], list[dict], list[dict]]]
     #: The AUTHOR_RESULT buckets this channel declares.
     buckets: tuple[BucketSpec, ...]
-    #: `(message, cfg) -> commit sha | None`. Per-channel because the provenance trailers are.
-    commit_fn: Callable[..., str | None]
     #: What the drain's diagnostics call a row, e.g. "findings".
     noun: str
     #: The attempt ceiling, bound once here so a malformed value fails the tick before any
     #: row is read and a mid-batch environment change can't move it.
     max_attempts: int
-    #: The bound on each git read the tick runs over the worktree, from the pre-agent capture
-    #: through the fault undo (#1134): past it the read is a git failure, never a hung tick.
-    git_timeout: float = GIT_TIMEOUT_SECONDS
+    #: The batch (P3's `version_control.Batch`) whose draft the corpus lies in: each tick of
+    #: the channel is one claim of it — its change set, the commit-maker's commit, its reset
+    #: (#1108 P4, O7). `None` only for a scene that never claims (the claim refuses).
+    batch: Any = None
     #: Optional hook run after both the corpus commit and the queue rotation (the lessons
     #: channel's held report).
     post_rotate: Callable[..., None] | None = None

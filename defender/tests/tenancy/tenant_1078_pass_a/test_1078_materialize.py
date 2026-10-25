@@ -25,8 +25,8 @@ X = fixture_uuid("case-x")
 def _materialize(alert: Path, tenant_id: str, **kw):
     """The entry's pipeline (#1120 D1): resolve the data root and accept `tenant_id` there
     (`accept_tenant` — the row check pass (A) made materialize's step 1 now runs here, at the
-    entry), then `materialize_run(tenant=...)` over the accepted `Tenant`. #1279 (A3): setup takes no id; it mints one, or an arm reads its
-    roster id from `episode_runs`."""
+    entry), then `materialize_run(tenant=...)` over the accepted `Tenant`. #1279 (A3, rev 6): setup takes no id; it mints one, or is handed
+    the arm's run (`run=`, made from its roster id by the episode view)."""
     tenant = H.accept(H.resolve_data_root(), tenant_id)
     return H.run_common().materialize_run(alert, tenant=tenant, **kw).run_dir
 
@@ -120,14 +120,25 @@ def test_o4_run_store_location(tmp_path, tenant_root):
 
 
 def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
+    from defender.tests.support.tenancy._launch_publish_p4 import forge_scratch
+    from defender.tests.tenancy.tenant_1108_p4._support import publish_once
+
     row_bytes = location_path(H.row_path)(tenant_root, T_ID).read_bytes()
+    # #1108 P4 (O11): a run reads a PUBLISHED export, and the replay harness publishes the
+    # tenant (unchanged folder: the same commit, into the same remote) before it drives. What
+    # publishing leaves in the tenant folder is the publish's (P3), not the run's: it is taken
+    # here, up front, as the baseline, so the listings below still pin that materialize and
+    # the driver add nothing beside `runs/` but `sessions/`.
+    publish_once(forge_scratch(tenant_root), root=tenant_root, tenant_id=T_ID)
+    published = set(H.entries(tenant_root / T_ID))
+    assert {H.ROW_NAME, "knowledge"} <= published, published
+    assert not published & {"runs", "sessions"}, published
     run_dir = Path(_materialize(_golden_alert(tmp_path), T_ID))
     # `knowledge/` is the operator's (#1120 DC2: placed before setup), never materialize's.
-    assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs"]), (
+    assert H.entries(tenant_root / T_ID) == sorted(published | {"runs"}), (
         "materialize wrote beside runs/")
     _replay(run_dir)
-    assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs",
-                                                     "sessions"])
+    assert H.entries(tenant_root / T_ID) == sorted(published | {"runs", "sessions"})
     assert H.entries(tenant_root) == [T_ID]
     assert location_path(H.row_path)(tenant_root, T_ID).read_bytes() == row_bytes, "the row was rewritten"
 
@@ -180,8 +191,8 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     alert = RunPaths(src).alert
     with Episode.open(ep) as episode:
         view = H.accept(tenant_root, T_ID).runs_repository().episode(ep.name, held=episode)
-        rb = Path(_materialize(alert, T_ID, world=world_b, episode_runs=view))
-        rc = Path(_materialize(alert, T_ID, world=world_c, episode_runs=view))
+        rb = Path(_materialize(alert, T_ID, world=world_b, run=view.create(view.arm_id(world_b.world_id))))
+        rc = Path(_materialize(alert, T_ID, world=world_c, run=view.create(view.arm_id(world_c.world_id))))
     assert rb == ep / "runs" / arm_b
     assert rc == ep / "runs" / arm_c
     assert _stamp(rb).get("world_id") is None
@@ -211,7 +222,7 @@ def test_1186_sibling_ignores_legacy_state_override(
         assert refused is None, H.refusal_text(refused)
         assert rc == 0, rc
         assert Path(_materialize(alert, T_ID, world=world,
-                                 episode_runs=view)).is_dir()
+                                 run=view.create(view.arm_id(world.world_id)))).is_dir()
 
 
 def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):

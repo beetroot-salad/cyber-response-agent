@@ -11,16 +11,14 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.learning.curation._claim1175 import claim_git
 from defender._io import ALIAS_READ_REFUSAL
 from defender.knowledge._scaffold_rules import check_system_skill
-from defender.learning.author import shared as _author_shared
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender._tree_listing import list_tree
 from defender.learning.core.lane_trees import DrainTrees, read_at
 from defender.learning.leads import lead_author, lead_render, pitfalls_curator
 from defender.learning.leads.lead_extraction import collect_general_failures
-from defender.learning.leads.path_validation import CATALOG_REL, SKILLS_REL
+from defender.learning.leads.path_validation import SKILLS_PREFIX as SKILLS_REL
 from defender.tests.support.learning.curation._tree_listing_1134 import SWAP_PLANTS, RealOs, SwapsOnStep, fd_path
 from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn
 from defender.tests.support.learning.curation._lead_author_1134 import (
@@ -35,7 +33,10 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
     plant_folder,
     plant_state,
     raised,
-    scene_over,
+    draft_lead_deps,
+    draft_scene_over,
+    lane_scene,
+    product_lane,
     write,
 )
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
@@ -57,7 +58,6 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
     TWIN_NAME,
     WAZUH_LEAD,
     _commit_reducer,
-    _deps,
     _lead,
     _run_dir,
     _worktree,
@@ -71,12 +71,38 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
+# #1108 P4 (O7, OD6): the held-read cases run over a tenant-shaped root (`draft_scene_over`: the
+# lane's `skills/` mount at `<root>/agent/skills`, names `agent/skills/...`, adapters in the product
+# checkout), and the reducer surface is the tenant's pitfalls add-on (`_declared870.REDUCER_REL`, the
+# test's own oracle — not the production constant, which still names the product page). These
+# shadow the handle file's product spellings (S-D's file, imported above, not edited here).
+from defender.knowledge import _scaffold_rules  # noqa: E402
+from defender import _git  # noqa: E402
+from defender.tests.support.learning.core._declared870 import REDUCER_REL as ADDON_REL  # noqa: E402
+
+REDUCER_NAME = ADDON_REL.removeprefix("agent/skills/")  # noqa: F811
+
+
+def resolver(s: Scene) -> _scaffold_rules.VerbResolver:  # noqa: F811
+    """The adapters' verbs, read from the product checkout (#1172), never the tenant root."""
+    product = getattr(s, "product", None)
+    return _scaffold_rules.VerbResolver((product if product is not None else s.repo) / "defender")
+
+
+def _commit_reducer(s: Scene) -> None:  # noqa: F811
+    """The add-on committed at the base with `REDUCER_TEXT`, so a draft holding the same bytes is
+    an unchanged document."""
+    assert s.rel(REDUCER_NAME) == ADDON_REL
+    write(s.at(REDUCER_NAME), REDUCER_TEXT)
+    _git.git(["add", "-A"], cwd=s.repo)
+    _git.git(["commit", "-q", "-m", "reducer surface"], cwd=s.repo)
+
 
 @pytest.fixture
 def scene(tmp_path: Path):
     """The handle file's scene: `seed_skills_repo`, committed, a folder outside it, the lead
     drain's trees over it, open for the test."""
-    with scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
+    with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
 
@@ -163,7 +189,7 @@ RACES = [
          refused=lambda got: got[0] == "returned" and got[1][0] is None),
     Race("readable_pair", REDUCER_NAME, REDUCER_TEXT, REDUCER_TEXT,
          lambda s, t: pitfalls_curator._readable_pair(
-             s.repo, pitfalls_curator.REDUCER_REL, tree_for=t.tree_for),
+             s.repo, ADDON_REL, tree_for=t.tree_for),
          read_plain=lambda got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
          refused=lambda got: raised(got, "LeadAuthorError", "unreadable"),
          prepare=_commit_reducer),
@@ -255,11 +281,13 @@ def _moved(moved: Path, name: str, site: str) -> Path:
 
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, caplog):
-    repo = _worktree(tmp_path)
+    # #1108 P4 (O7, OD6, OD16): one claim of a real batch over its draft (`product_lane`); the
+    # handoff names the template repo-relative, `agent/skills/...` (`DraftScene.rel`).
+    lane = product_lane(tmp_path, _worktree(tmp_path))
     run_dir = _run_dir()
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
     spawn = LeadAuthorSpawn(rc=1)
-    with scene_over(tmp_path, repo) as s:
+    with lane_scene(tmp_path, lane) as s:
         # Untracked, so only a catalog loader reaches it: the run's `git status` re-hashes a
         # TRACKED file behind a linked holding folder, which is git's read (N-a), not the lane's.
         write(s.at(TEMPLATE_NAME), marked_template("wazuh.probe"))
@@ -269,11 +297,13 @@ def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, cap
         caplog.clear()
         with kernel_watch(opens=[template]) as events:
             rc = lead_author.run(run_of(run_dir), label=LEAD, paths=s.paths,
-                                 deps=_deps(s.paths, s.trees, spawn, [lead]))
+                                 deps=draft_lead_deps(lane, invoke_agent=spawn,
+                                                      extract=lambda _run_dir: ([], [lead])))
             seen = events()
 
     if site is None:
         assert rc == 2, "the run did not reach the (failing) agent"
+        assert s.rel(TEMPLATE_NAME) == f"agent/skills/{TEMPLATE_NAME}"
         assert [h["executed_template_path"] for h in spawn.handoffs] == [s.rel(TEMPLATE_NAME)]
         assert OUT_MARK in spawn.handoffs[0]["invocations"][0]["rendered_query"]
         return
@@ -286,7 +316,7 @@ def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, cap
 
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_the_writer_loads_no_catalog_through_a_linked_folder(tmp_path: Path, site, caplog):
-    with scene_over(tmp_path, bare_skills(tmp_path)) as s:
+    with draft_scene_over(tmp_path, bare_skills(tmp_path)) as s:
         answering = "gather/queries/wazuh/hunt-creds.md"
         write(s.at(answering), query_template(WAZUH_LEAD.query_id, "established"))
         template = s.at(answering)
@@ -454,7 +484,7 @@ def test_a_planted_folder_gives_one_verdict_whatever_it_points_at(
 ):
     verdicts: dict[str, str] = {}
     for plant in PLANTS:
-        with scene_over(tmp_path / plant, seed_skills_repo(tmp_path / plant / "repo")) as s:
+        with draft_scene_over(tmp_path / plant, seed_skills_repo(tmp_path / plant / "repo")) as s:
             gate.seed(s, plant)
             moved = _plant(s, gate.site, plant)
             before = plant_state(s.at(gate.site))
@@ -507,12 +537,6 @@ def _seed_reducer_edit(s: Scene) -> None:
 
 def _rewrite_reducer_frontmatter(copy: Path) -> None:
     _put(copy, REDUCER_NAME, REDUCER_TEXT.replace("name: defender-sql", "name: rewritten"))
-
-
-def _strays(s: Scene) -> list[str]:
-    """The working copy's changes outside `skills/` as the call is made (the copy of the
-    tree among them), the baseline a verifier is handed so that only `skills/` is judged."""
-    return _author_shared.changes_outside(s.repo, SKILLS_REL)
 
 
 FOLLOWS = [
@@ -579,11 +603,16 @@ FOLLOWS = [
            _commit_reducer,
            _rewrite_reducer_frontmatter,
            lambda s, tf: pitfalls_curator._readable_pair(
-               s.repo, pitfalls_curator.REDUCER_REL, tree_for=tf),
+               s.repo, ADDON_REL, tree_for=tf),
            lane=lambda got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
-    # The four composites (the per-path gates and the whole-tree verifiers over git status):
-    # each must hand its parts the `tree_for` it was given (adversary E1).
+    # The per-path composite gates: each must hand its parts the `tree_for` it was given
+    # (adversary E1). The two whole-tree verifiers over git status (`_verify_skills_state`,
+    # `_verify_pitfalls_state` with a `ClaimGit` and a git-status stray baseline) were deleted
+    # (#1108 P4 OD12 i): after P4 the claim is the batch's ChangeSet, derived from the draft
+    # no-follow by P3 (tests/tenancy/tenant_1108_delivery/test_changes.py::
+    # test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole), and the gates'
+    # verdicts over a draft are driven end to end in test_lead_author.py / test_pitfalls_curator.py.
     Follow("_skills_rule",
            lambda s: place(s, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain"),
            lambda c: _put(c, TEMPLATE_NAME, BAD_TEMPLATE),
@@ -591,27 +620,13 @@ FOLLOWS = [
                s.repo, resolver(s), "??", s.rel(TEMPLATE_NAME), systems=DECLARED, tree_for=tf),
            lane=lambda got: got == ("returned", None),
            copy=lambda got: raised(got, "LeadAuthorError", CONTENT_CASES[1].bad_says)),
-    Follow("_verify_skills_state",
-           lambda s: place(s, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain"),
-           lambda c: _put(c, TEMPLATE_NAME, BAD_TEMPLATE),
-           lambda s, tf: lead_author._verify_skills_state(
-               s.repo, _strays(s), systems=DECLARED, tree_for=tf, git=claim_git(s.repo)),
-           lane=lambda got: got[0] == "returned" and got[1] == [f"{SKILLS_REL}{TEMPLATE_NAME}"],
-           copy=lambda got: raised(got, "LeadAuthorError", CONTENT_CASES[1].bad_says)),
     Follow("_pitfalls_rule",
            _seed_reducer_edit,
            _rewrite_reducer_frontmatter,
            lambda s, tf: pitfalls_curator._pitfalls_rule(
-               s.repo, " M", pitfalls_curator.REDUCER_REL, systems=DECLARED,
+               s.repo, " M", ADDON_REL, systems=DECLARED,
                reducer_offered=True, tree_for=tf),
            lane=lambda got: got == ("returned", None),
-           copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
-    Follow("_verify_pitfalls_state",
-           _seed_reducer_edit,
-           _rewrite_reducer_frontmatter,
-           lambda s, tf: pitfalls_curator._verify_pitfalls_state(
-               s.repo, _strays(s), systems=DECLARED, reducer_offered=True, tree_for=tf, git=claim_git(s.repo)),
-           lane=lambda got: got == ("returned", [pitfalls_curator.REDUCER_REL]),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
 ]
 
@@ -791,11 +806,16 @@ def test_discover_never_enters_or_returns_a_non_plain_entry(
     assert _warnings(caplog) == ([] if site == "ghost" else [GHOST])
 
 
+#: #1108 P4 (OD6): the lane's catalog under a tenant-shaped root, spelled by the test (the oracle),
+#: never read off the production constant: `agent/skills/gather/queries`.
+TENANT_CATALOG_REL = "agent/skills/gather/queries"
+
+
 def _catalog_repo(tmp_path: Path) -> Path:
     """A stranded draft under `elastic` whose identity was taken over this batch, and another
-    system (`wazuh`) holding a draft too."""
+    system (`wazuh`) holding a draft too, in a tenant-shaped root (`agent/skills`, OD6)."""
     repo = tmp_path / "repo"
-    catalog = repo / CATALOG_REL
+    catalog = repo / TENANT_CATALOG_REL
     write(catalog / "elastic" / "_draft" / "d1.md",
           query_template("elastic.d1", "draft", covers=["elastic.taken"]))
     write(catalog / "wazuh" / "_draft" / "d2.md",
@@ -804,7 +824,7 @@ def _catalog_repo(tmp_path: Path) -> Path:
 
 
 def _half_promote_under(repo: Path, taken: set[str], os_: Any | None = None) -> tuple:
-    skills = repo / "defender" / "skills"
+    skills = repo / "agent" / "skills"
     with DrainTrees.open((skills,), **({"os_": os_} if os_ is not None else {})) as trees:
         return outcome(lambda: lead_author._refuse_half_promote(repo, taken,
                                                                 tree_for=trees.tree_for))
@@ -814,27 +834,27 @@ def _half_promote_under(repo: Path, taken: set[str], os_: Any | None = None) -> 
 def test_half_promote_still_refuses_under_another_system_when_one_is_unlistable(
         tmp_path: Path, route: str, caplog):
     repo = _catalog_repo(tmp_path)
-    refuser = RefusesFolder(repo / CATALOG_REL / "wazuh", route, errno.EACCES)
+    refuser = RefusesFolder(repo / TENANT_CATALOG_REL / "wazuh", route, errno.EACCES)
     got = _half_promote_under(repo, {"elastic.taken"}, refuser)
     assert raised(got, "LeadAuthorError",
-                  "half-promote: draft defender/skills/gather/queries/elastic/_draft/d1.md"), got
-    assert _warnings(caplog) == [f"warn: skipping {repo / CATALOG_REL / 'wazuh'} ({DENIED})"]
+                  "half-promote: draft agent/skills/gather/queries/elastic/_draft/d1.md"), got
+    assert _warnings(caplog) == [f"warn: skipping {repo / TENANT_CATALOG_REL / 'wazuh'} ({DENIED})"]
 
 
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
 def test_half_promote_under_the_unlistable_system_is_skipped_and_said(
         tmp_path: Path, route: str, caplog):
     repo = _catalog_repo(tmp_path)
-    refuser = RefusesFolder(repo / CATALOG_REL / "wazuh", route, errno.EACCES)
+    refuser = RefusesFolder(repo / TENANT_CATALOG_REL / "wazuh", route, errno.EACCES)
     assert _half_promote_under(repo, {"wazuh.taken"}, refuser) == ("returned", None)
-    assert _warnings(caplog) == [f"warn: skipping {repo / CATALOG_REL / 'wazuh'} ({DENIED})"]
+    assert _warnings(caplog) == [f"warn: skipping {repo / TENANT_CATALOG_REL / 'wazuh'} ({DENIED})"]
 
 
 def test_half_promote_control_reads_every_system(tmp_path: Path, caplog):
     repo = _catalog_repo(tmp_path)
     got = _half_promote_under(repo, {"wazuh.taken"})
     assert raised(got, "LeadAuthorError",
-                  "half-promote: draft defender/skills/gather/queries/wazuh/_draft/d2.md"), got
+                  "half-promote: draft agent/skills/gather/queries/wazuh/_draft/d2.md"), got
     assert _warnings(caplog) == []
 
 
@@ -843,11 +863,11 @@ def test_half_promote_over_a_refused_catalog_walk_warns_once_and_refuses_nothing
     """The catalog folder itself refused (EIO reopening it): one warning naming the catalog,
     nothing refused (a refused folder reads as a missing one, O5.5)."""
     repo = _catalog_repo(tmp_path)
-    refuser = RefusesFolder(repo / CATALOG_REL, "reopen", errno.EIO)
+    refuser = RefusesFolder(repo / TENANT_CATALOG_REL, "reopen", errno.EIO)
     assert _half_promote_under(repo, {"elastic.taken"}, refuser) == ("returned", None)
     said = _warnings(caplog)
     assert len(said) == 1, said
-    assert said[0].startswith(f"warn: skipping {repo / CATALOG_REL} ("), said
+    assert said[0].startswith(f"warn: skipping {repo / TENANT_CATALOG_REL} ("), said
 
 
 def test_a_link_at_a_catalog_draft_is_passed_over_by_the_half_promote_walk(tmp_path, caplog):
@@ -857,7 +877,7 @@ def test_a_link_at_a_catalog_draft_is_passed_over_by_the_half_promote_walk(tmp_p
     outside = tmp_path / "outside"
     target = write(outside / "d3.md",
                    query_template("wazuh.d3", "draft", covers=["wazuh.outside-taken"]))
-    (repo / CATALOG_REL / "wazuh/_draft/d3.md").symlink_to(target)
+    (repo / TENANT_CATALOG_REL / "wazuh/_draft/d3.md").symlink_to(target)
     with kernel_watch(opens=[target]) as events:
         got = _half_promote_under(repo, {"wazuh.outside-taken"})
         seen = events()

@@ -36,19 +36,17 @@ from defender.learning.core import persist as _loop_persist
 from defender.learning.core.state import LEAD_QUEUE_LOCK, TRY_ONCE, LearningState
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
-from defender._claim_git import ClaimGit
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
+from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.leads import lead_render
 from defender import box as _box
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
-    CATALOG_DIR,
-    CATALOG_REL,
+    CATALOG_PREFIX,
     LEARNING_DIR,
     REPO_ROOT,
-    SKILLS_DIR,
-    SKILLS_REL,
+    SKILLS_PREFIX,
     _draft_twin,
     _is_catalog_path,
     _is_catalog_template,
@@ -160,7 +158,8 @@ DoneSink = Callable[[str | None], None]
 
 @model(frozen=True)
 class LeadAuthorDeps:
-    #: The repo trees' spelling (`repo_root`, `skills_dir`); the state tree is `state`'s.
+    #: The product checkout (`repo_root`: its adapters, #1172) and the learning state's
+    #: spelling; never the lane's corpus, which is `root`'s (#1108 P4 OD16).
     paths: _loop_config.LoopPaths
     #: The learning state handle: the queue lock and the pitfalls queue are reached through it.
     state: LearningState
@@ -176,59 +175,85 @@ class LeadAuthorDeps:
     #: and the system skills goes through it or its view (#1134). Lives only as long as the
     #: `DrainTrees` it came from.
     skills: Held
-    #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold git-status names.
+    #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold repo-relative
+    #: `agent/skills/...` names under `root`.
     tree_for: TreeFor
-    #: The bound on each git call over the worktree (the run's `ClaimGit`, #1175): one that
-    #: overruns raises `GitOverran`, a systemic `GitError`.
+    #: The tree the lane's repo-relative names are under: the batch's draft root (holding the
+    #: `agent/` its box writes), or `paths.repo_root` for deps built with no batch.
+    root: Path
+    #: The lane's `skills/` folder, spelled as the held mount `skills` is: `root/agent/skills`
+    #: for a batch, `paths.skills_dir` without one.
+    skills_dir: Path
+    #: The tick's batch (P3's `Batch`): its claim (`change_set`), its base, its commit-maker and
+    #: its per-claim reset. `None` for deps built over a bare tree, which cannot commit.
+    batch: Any = None
+    #: Kept for the drain's call shape; the lane runs no git (#1108 P4 O7).
     git_timeout: float = GIT_TIMEOUT_SECONDS
 
 
 def build_lead_author_deps(
     paths: _loop_config.LoopPaths, *, state: LearningState, trees: DrainTrees,
-    git_timeout: float = GIT_TIMEOUT_SECONDS,
+    batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> LeadAuthorDeps:
-    """The lane's seams over `paths`, reading and writing `skills/` through `trees`, the lane's
-    held mounts (`open_drain_trees`): `trees` must hold `paths.skills_dir` itself, else
-    `LeadAuthorError`. The deps must not outlive `trees`."""
+    """The lane's seams over `batch`'s draft (#1108 P4 O7, OD16), reading and writing `skills/`
+    through `trees`, the lane's held mounts (`open_drain_trees`): `trees` must hold the draft's
+    `agent/skills` itself (`paths.skills_dir` with no batch), else `LeadAuthorError`. `paths`
+    names the product checkout, whose adapters declare the systems with the markers the
+    batch's base commits. The deps must not outlive `trees`."""
     from defender.learning.leads.declared_systems import declared_systems
 
-    skills = lane_skills(trees, paths)
-    systems = declared_systems(paths.repo_root)
+    if batch is not None:
+        root = Path(batch.draft_root)
+        skills_dir = root / SKILLS_PREFIX
+        base = batch.base()
+    else:
+        root, skills_dir, base = paths.repo_root, paths.skills_dir, None
+    skills = lane_skills(trees, paths, skills_dir=skills_dir)
+    systems = declared_systems(paths.repo_root, agent=base)
     return LeadAuthorDeps(
         paths=paths,
         state=state,
         systems=systems,
-        invoke_agent=functools.partial(invoke_agent, repo_root=paths.repo_root),
+        invoke_agent=functools.partial(invoke_agent, repo_root=root),
         extract=extract,
         synthesize=synthesize_drafts,
         build_handoff=functools.partial(
-            build_handoff, repo_root=paths.repo_root, skills=skills.view(),
-            where=paths.skills_dir,
+            build_handoff, repo_root=root, skills=skills.view(), where=skills_dir,
         ),
         discover_system_drafts=functools.partial(
-            discover_system_drafts, skills=skills.view(), where=paths.skills_dir,
-            systems=systems,
+            discover_system_drafts, skills=skills.view(), where=skills_dir, systems=systems,
         ),
         skills=skills,
         tree_for=trees.tree_for,
+        root=root,
+        skills_dir=skills_dir,
+        batch=batch,
         git_timeout=git_timeout,
     )
 
 
-def run(
+def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each seam it may be handed
     run: Run,
     *,
     label: _loop_config.DrainLabel,
     paths: _loop_config.LoopPaths | None = None,
     state: LearningState | None = None,
+    batch: Any = None,
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
     on_done: DoneSink | None = None,
 ) -> int:
-    """Serve one run under the per-author queue lock."""
+    """Serve one run under the per-author queue lock, over `batch`'s draft (`deps.batch` when
+    deps are given)."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
-    writable = label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]
+    # The lane's grant is read before anything else: a non-member label never reaches the
+    # queue lock (#1179).
+    lane_batch = getattr(deps, "batch", None) if deps is not None else batch
+    writable = (
+        label.draft_trees(lane_batch) if lane_batch is not None
+        else label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]
+    )
     run_dir = Path(run.run_dir)
     sink = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
 
@@ -236,9 +261,10 @@ def run(
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
     # resolver can't read yet.
     if deps is not None:
-        if deps.paths.skills_dir not in writable:
+        skills_dir = getattr(deps, "skills_dir", None) or deps.paths.skills_dir
+        if skills_dir not in writable:
             raise LeadAuthorError(
-                f"refused: the {str(label)!r} lane does not mount {deps.paths.skills_dir}"
+                f"refused: the {str(label)!r} lane does not mount {skills_dir}"
             )
         with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
             if not locked:
@@ -252,24 +278,25 @@ def run(
         with state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
             if not locked:
                 return QUEUE_LOCK_SKIP_RC
-            with open_drain_trees(paths, label) as trees:
-                deps = build_lead_author_deps(paths, state=state, trees=trees)
+            with open_drain_trees(paths, label, batch=batch) as trees:
+                deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch)
                 return _run_locked(run_dir, deps, box=box, on_done=sink)
 
 
-def run_under_held_queue_lock(
+def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
     run: Run, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
     box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
+    batch: Any = None, deps: LeadAuthorDeps | None = None,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
-    drain's work step opens them for its label). Never skips. `run` is the run the drain
-    opened from the claim's address."""
-    return _run_locked(
-        Path(run.run_dir), build_lead_author_deps(paths, state=state, trees=trees, git_timeout=git_timeout),
-        box=box,
-        on_done=on_done,
-    )
+    drain's work step opens them over `batch`'s draft). Never skips. `run` is the run the drain
+    opened from the claim's address; `deps` given are used as built, else they are built over
+    `batch`."""
+    if deps is None:
+        deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
+                                      git_timeout=git_timeout)
+    return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 
 def _run_locked(
@@ -284,7 +311,8 @@ def _run_locked(
         # refuse loudly before spawning instead.
         raise LeadAuthorError(
             f"lead-author refused: {deps.paths.repo_root} declares no systems (empty "
-            "adapter glob and no committed execution.md); refusing to run the lane"
+            "adapter glob and no committed execution.md in the tenant's agent/skills); "
+            "refusing to run the lane"
         )
 
     try:
@@ -293,7 +321,7 @@ def _run_locked(
         _logger.critical(f"cannot extract leads: {e}")
         return 2
 
-    skills_dir = deps.paths.skills_dir
+    skills_dir = deps.skills_dir
     catalog = lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)
 
     synth = deps.synthesize(
@@ -304,8 +332,8 @@ def _run_locked(
             f"synthesized {len(synth)} draft(s) for uncatalogued verbs: "
             + ", ".join(p.name for p in synth)
         )
-    # Captured before the agent runs: these drafts are untracked, so if the agent removes one
-    # git can't recover the identities it recorded.
+    # Captured before the agent runs: these drafts are in no base, so if the agent removes one
+    # nothing else records the identities it held.
     minted = _minted_identities(deps.skills.view(), synth, where=skills_dir)
 
     collected_marker = _state_dir(run_dir) / "pitfalls_collected"
@@ -322,10 +350,6 @@ def _run_locked(
             )
         _write_state(collected_marker, _loop_config.now_iso() + "\n")
 
-    repo_root = deps.paths.repo_root
-    git = ClaimGit(repo_root, SKILLS_REL, timeout=deps.git_timeout)
-    baseline_stray = git.changed_outside_corpus()
-
     if synth:
         catalog = lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)
     handoffs, pending_drafts, rc = _prepare_handoffs(
@@ -338,22 +362,68 @@ def _run_locked(
         f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
-    # The box runs for the spawn only, and is stopped before the gate reads what it wrote
-    # (#1195).
-    with _box.box_for_run(box) as run_box:
-        rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=run_box)
+    rc, sha = _spawn_and_commit(run_dir, deps, handoffs, pending_drafts, minted, box=box)
     if rc != 0:
-        _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
-        return 2
-
-    changed = _verify_skills_state(
-        repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
-        git=git,
-    )
-    sha = git.commit(changed, _loop_commit_message(run_dir, changed))
+        return rc
     on_done(sha)
     _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0
+
+
+def _spawn_and_commit(  # noqa: PLR0913 — one claim: its run, deps, the two handoff lists, the mint, the box
+    run_dir: Path, deps: LeadAuthorDeps, handoffs: list, pending_drafts: list,
+    minted: Mapping[Path, tuple[str, ...]], *, box: Any,
+) -> tuple[int, str | None]:
+    """Spawn the agent, then commit the claim it left: `(0, commit or None)`, or `(2, None)`
+    when the spawn failed. The box runs for the spawn only, and is stopped before the gate
+    reads what it wrote (#1195). A failed claim — the spawn's non-zero exit, a gate rejection,
+    a commit-maker refusal — is reset out of the draft, which is left at the batch's base
+    (#1108 P4 O7, U10); a systemic fault propagates as it is, the drain discarding the draft."""
+    try:
+        with _box.box_for_run(box) as run_box:
+            rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=run_box)
+        if rc != 0:
+            _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
+            if deps.batch is not None:
+                deps.batch.reset()
+            return 2, None
+        return 0, _commit_claim(run_dir, deps, minted)
+    except (LeadAuthorError, DeliveryRefused) as fault:
+        if deps.batch is not None:
+            _reset_after(deps.batch, fault)
+        raise
+
+
+def _reset_after(batch: Any, fault: BaseException) -> None:
+    """Reset the claim out of the draft after `fault`, which a failed reset never displaces:
+    it is logged, and the drain's own per-claim reset is the next to try (#1108 P4 O7)."""
+    try:
+        batch.reset()
+    except Exception as unreset:  # noqa: BLE001 — never replaces the claim's own fault
+        _logger.error(f"the claim's draft was NOT reset: {unreset!r} (the claim's fault: {fault!r})")
+
+
+def _commit_claim(
+    run_dir: Path, deps: LeadAuthorDeps, minted: Mapping[Path, tuple[str, ...]],
+) -> str | None:
+    """The claim — the draft against the batch's base, derived before anything reads what the
+    box wrote (a link, FIFO or out-of-lane entry refuses it whole, `DeliveryRefused`) — judged
+    by the gate and committed by the batch's commit-maker; `None` when the spawn changed
+    nothing. Deps naming no batch have nowhere to commit, and refuse."""
+    batch = deps.batch
+    if batch is None:
+        raise LeadAuthorError(
+            "lead-author refused: these deps name no batch, and the lane commits only into a "
+            "tenant batch's draft (#1108 P4) — nothing is committed"
+        )
+    change_set = batch.change_set()
+    changed = _verify_skills_state(
+        deps.root, change_set=change_set, systems=deps.systems, minted=minted,
+        tree_for=deps.tree_for, base=batch.base(), defender_dir=deps.paths.defender_dir,
+    )
+    if not changed:
+        return None
+    return batch.commit(change_set, _loop_commit_message(run_dir, changed))
 
 
 def _prepare_handoffs(
@@ -367,7 +437,7 @@ def _prepare_handoffs(
     threshold = _lift_threshold()
     contradicting = [
         d for d in pending_drafts_raw
-        if _draft_contradicts_skill(deps.skills.view(), d, where=deps.paths.skills_dir)
+        if _draft_contradicts_skill(deps.skills.view(), d, where=deps.skills_dir)
     ]
     if len(pending_drafts_raw) < threshold and not contradicting:
         if pending_drafts_raw:
@@ -384,9 +454,7 @@ def _prepare_handoffs(
                 f"threshold={threshold}) but {len(contradicting)} draft(s) contradict "
                 "shipped SKILL.md content — bypassing threshold"
             )
-        pending_drafts = build_system_draft_handoffs(
-            pending_drafts_raw, repo_root=deps.paths.repo_root
-        )
+        pending_drafts = build_system_draft_handoffs(pending_drafts_raw, repo_root=deps.root)
 
     if executed is None:
         try:
@@ -515,8 +583,7 @@ def main(argv: list[str]) -> int:
 #: modules.
 __all__ = [
     "Any",
-    "CATALOG_DIR",
-    "CATALOG_REL",
+    "CATALOG_PREFIX",
     "Callable",
     "DoneSink",
     "ExecutedLead",
@@ -529,8 +596,7 @@ __all__ = [
     "Path",
     "QUEUE_LOCK_SKIP_RC",
     "REPO_ROOT",
-    "SKILLS_DIR",
-    "SKILLS_REL",
+    "SKILLS_PREFIX",
     "_DRAFT_README_NAMES",
     "_NO_MINTED",
     "_SAFE_ID_SEGMENT",

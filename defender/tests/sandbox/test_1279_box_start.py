@@ -2,8 +2,8 @@
 overlaps the publish root, or when a container already holds the box's name.
 
 Every lane that reaches `box.start_box` is covered: the run lane, a caller-composed request, and the
-drain, the oracle and (in tenancy/tenant_1108_delivery/test_box.py) the tenant draft, each through
-its real request builder. The refusal is `box.BoxStartConflict`, a `BoxFault` subtype (name chosen
+oracle and (in tenancy/tenant_1108_delivery/test_box.py) the tenant draft drain, each through its
+real request builder. The refusal is `box.BoxStartConflict`, a `BoxFault` subtype (name chosen
 by this contract). The docker daemon is faked through the real `docker=` seam."""
 from __future__ import annotations
 
@@ -18,9 +18,7 @@ import pytest
 from defender import box as box_mod
 from defender.tests.e2e._box665 import (
     DEFENDER,
-    RecordingBranch,
     RecordingDocker,
-    loop_paths,
 )
 from defender.tests.support.sandbox import _box1279 as X
 from defender.tests.support.sandbox._box1195 import FakeDaemon
@@ -45,6 +43,7 @@ _RUN_ROOTS = {
     "run dir": lambda lane: lane.run_dir / "published",
     "defender dir": lambda lane: lane.defender_dir / "published-1279",
     "tenant agent": lambda lane: lane.agent / "published",
+    "run copy stage": lambda lane: lane.stage / "published",
     "run clock directory": lambda lane: lane.clock,
 }
 
@@ -241,10 +240,12 @@ def test_o3_outside_dev_there_is_no_publish_root_and_nothing_is_checked(tmp_path
 # ---------------------------------------------------------------------------------------
 
 
-def _agent_at(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    (path / ".tenant-id").write_text(f"{X.TENANT}\n", encoding="utf-8")
-    return path
+def _stage_at(path: Path) -> dict[str, Path]:
+    """A run copy's stage at `path`: `agent/` and the startup token beside it (#1108 P4, U9)."""
+    (path / "agent").mkdir(parents=True, exist_ok=True)
+    token = path / ".startup-token"
+    token.write_text("run-1279-token\n", encoding="utf-8")
+    return {"agent": path / "agent", "token": token}
 
 
 def _request_in_a_worktree(tmp_path: Path, wt: Path, *, data: Path | None = None) -> box_mod.BoxRequest:
@@ -269,7 +270,7 @@ def test_a8_a_box_is_judged_against_this_processes_root_not_its_code_mounts_chec
     if lane_kind == "run":
         lane = replace(X.run_lane(tmp_path / "lane"), defender_dir=wt / "defender")
         def start(folder: Path, docker: RecordingDocker) -> None:
-            replace(lane, agent=_agent_at(folder)).start(docker)
+            replace(lane, **_stage_at(folder)).start(docker)
     else:
         def start(folder: Path, docker: RecordingDocker) -> None:
             box_mod.start_box(_request_in_a_worktree(tmp_path, wt, data=folder), docker=docker)
@@ -283,7 +284,9 @@ def test_a8_a_box_is_judged_against_this_processes_root_not_its_code_mounts_chec
         start(root / "mount", rec)
     said = str(refused.value)
     assert X.names_path(said, root), f"the refusal does not name the process's root {root}: {said}"
-    assert X.names_path(said, root / "mount"), f"it does not name the mount: {said}"
+    # A run lane's stage holds its agent folder: either of the two may be the one named.
+    assert any(X.names_path(said, m) for m in (root / "mount", root / "mount" / "agent")), (
+        f"it does not name the mount: {said}")
     assert not X.created(rec.calls)
     assert not X.removed(rec.calls)
 
@@ -549,130 +552,12 @@ def test_the_subtype_is_exported_from_box_and_is_a_box_fault():
     assert X.conflict_type() is not box_mod.BoxFault
 
 
-# ---------------------------------------------------------------------------------------
-# The drain lane, through its real request builder
-# ---------------------------------------------------------------------------------------
-
-
-def _drain(tmp_path: Path):
-    from defender.learning.core import drains
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-
-    wt = tmp_path / "wt" / "author-b1279"
-    return wt, drains._drain_box_request(wt, "b1279", AUTHOR_DRAIN_LABEL, loop_paths(tmp_path))
-
-
-def _drain_ready(wt: Path, request):
-    """The disk a real start reads back: the product check file under the worktree's `defender/`
-    (its code mount), each writable tree present, the image named outright."""
-    (wt / "defender").mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(DEFENDER / box_mod.CODE_CHECK_FILE, wt / "defender" / box_mod.CODE_CHECK_FILE)
-    for m in request.mounts:
-        if m.writable:
-            Path(m.source).mkdir(parents=True, exist_ok=True)
-    return replace(request, spec=_PINNED)
-
-
-_DRAIN_ROOTS = {
-    "inside the worktree (code)": lambda wt, req: wt / "published-1279",
-    "inside a writable tree": lambda wt, req: next(
-        Path(m.source) for m in req.mounts if m.writable) / "published",
-    "above the worktree": lambda wt, req: wt.parent,
-}
-
-
-@pytest.mark.parametrize("where", sorted(_DRAIN_ROOTS))
-def test_o3_the_drain_box_refuses_a_mount_overlapping_the_publish_root(
-        tmp_path, monkeypatch, where):
-    wt, request = _drain(tmp_path)
-    request = _drain_ready(wt, request)
-    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
-    clear = FakeDaemon(tmp_path / "clear")
-    box_mod.start_box(request, docker=clear)
-    rendered = X.bound_sources(clear.docker_calls())
-    assert rendered, "control: the clear start rendered no mounts"
-
-    root = X.dev_root(monkeypatch, _DRAIN_ROOTS[where](wt, request))
-    daemon = FakeDaemon(tmp_path / "refused")
-    with pytest.raises(X.conflict_type()) as refused:
-        box_mod.start_box(request, docker=daemon)
-    sources = [Path(m.source) for m in request.mounts]
-    X.assert_refused_for_overlap(refused.value, root=root,
-                                 mounts=X.overlapping(sources, root), rendered=rendered)
-    assert daemon.created() == []
-    assert daemon.names() == []
-
-
-def _drive_batch(tmp_path: Path, starter):
-    """The real `_run_worktree_batch` over a recording branch, with `starter` as its start_box."""
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-    from defender.learning.core.drains import _run_worktree_batch
-    from defender.learning.core.state import LearningState
-
-    events: list[str] = []
-    paths = loop_paths(tmp_path)
-    branch = RecordingBranch(tmp_path / "wt", events=events)
-    with LearningState.open(paths) as state:
-        try:
-            _run_worktree_batch(
-                paths, state, branch, label=AUTHOR_DRAIN_LABEL, has_work=lambda p: True,
-                do_work=lambda p, box: pytest.fail("the work ran beside a refused box"),
-                start_box=starter, stop_box=lambda *a, **k: None, scrub=lambda *a, **k: None)
-        except BaseException as e:  # noqa: BLE001 — judged by the caller
-            return e, events
-    return None, events
-
-
 def _chain(exc):
     out = []
     while exc is not None and exc not in out:
         out.append(exc)
         exc = exc.__cause__ or exc.__context__
     return out
-
-
-def test_o3_a_drain_batch_halts_on_the_refusal_and_unwinds_its_worktree(tmp_path, monkeypatch):
-    X.dev_root(monkeypatch, tmp_path)  # the root holds the batch's worktree
-    daemon = FakeDaemon(tmp_path / "d")
-
-    def starter(request, *_a, **_kw):
-        return box_mod.start_box(request, docker=daemon)
-
-    got, events = _drive_batch(tmp_path, starter)
-    assert isinstance(got, box_mod.BoxFault), f"the batch did not halt on a BoxFault: {got!r}"
-    assert any(isinstance(e, X.conflict_type()) for e in _chain(got)), (
-        f"the refusal is lost from the raised fault's chain: {_chain(got)}")
-    assert "cleanup" in events, "the worktree was left behind"
-    assert daemon.created() == []
-
-
-def test_o6_a_drain_batch_halts_on_a_same_name_container_and_leaves_it(tmp_path, monkeypatch):
-    X.allow_unsandboxed(monkeypatch)
-    daemon = FakeDaemon(tmp_path / "d")
-    held: list[str] = []
-
-    def starter(request, *_a, **_kw):
-        daemon.hold(request.name, "exited")
-        held.append(request.name)
-        return box_mod.start_box(request, docker=daemon)
-
-    got, events = _drive_batch(tmp_path, starter)
-    assert isinstance(got, box_mod.BoxFault), f"the batch did not halt on a BoxFault: {got!r}"
-    assert any(isinstance(e, X.conflict_type()) for e in _chain(got))
-    assert "cleanup" in events
-    assert daemon.names() == held, "the refused start removed the container that held its name"
-    assert daemon.created() == []
-
-
-def test_o6_the_drain_request_name_refuses_a_finished_container(tmp_path):
-    wt, request = _drain(tmp_path)
-    daemon = FakeDaemon(tmp_path)
-    daemon.hold(request.name, "exited")
-    with pytest.raises(X.conflict_type()) as refused:
-        box_mod.start_box(replace(request, spec=_PINNED), docker=daemon)
-    assert request.name in str(refused.value), "the refusal does not name the container"
-    assert daemon.names() == [request.name]
-    assert not X.removed(daemon.docker_calls())
 
 
 # ---------------------------------------------------------------------------------------

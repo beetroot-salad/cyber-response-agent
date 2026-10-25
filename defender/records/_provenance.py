@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import os
 import re
-import stat
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
 from defender import _git
-from defender._io import Bound, bind, load_json_artifact, read_guarded, stat_entry, write_guarded
+from defender._io import load_json_artifact, read_guarded, write_guarded
 from defender._model import model
 
 #: The dirty-path sample's ceiling (the paths are a debugging aid). The true total is always
@@ -133,8 +131,9 @@ class RunProvenance:
     #: `None` when unforked. Stamped so the run's own files answer it.
     parent_run_id: str | None = None
     fork_turn: int | None = None
-    #: The tenant knowledge revision the run started with (`capture_knowledge`); `None` means
-    #: the record does not say (a stamp written before #1204, or a malformed value read back).
+    #: The tenant knowledge revision the run started with (the export it copied, #1108 P4);
+    #: `None` means the record does not say (a stamp written before #1204, or a malformed
+    #: value read back).
     knowledge: KnowledgeRevision | None = None
     #: Display facts (#1187 O7): when run setup started the run (ISO-8601 UTC text) and the
     #: alert's label, which the opaque run id no longer spells. The file sits in the box's rw
@@ -166,29 +165,34 @@ class RunProvenance:
                 f"samples ({self.dirty_path_count}) — a negative count lands here too"
             )
 
-    def as_json(self) -> str:
+    def as_json(self, *, knowledge_source: Mapping[str, str | None] | None = None) -> str:
+        """The stamp's wire text. `knowledge_source` is how the run came by its knowledge
+        (#1108 P4, OD17): `{kind, commit, stale_kind}` of the run's host-held knowledge-source
+        record, informational and never the reason. It is not a field of the record: the host
+        record beside the run dir is authoritative for every reader, and readers of the stamp
+        ask only whether the key is there (`records._knowledge_status`). Without it the stamp
+        keeps its pre-P4 shape."""
         # Spelled out rather than `asdict(self)`: the wire shape is a contract.
         # `test_every_field_reaches_the_wire_and_comes_back` keeps it in step with the fields.
-        return json.dumps(
-            {
-                "commit": self.commit,
-                "dirty": self.dirty,
-                "dirty_paths": list(self.dirty_paths),
-                "dirty_path_count": self.dirty_path_count,
-                "unavailable": self.unavailable,
-                "scope": self.scope,
-                "model": self.model,
-                "tenant_id": self.tenant_id,
-                "world_id": self.world_id,
-                "parent_run_id": self.parent_run_id,
-                "fork_turn": self.fork_turn,
-                "knowledge": None if self.knowledge is None else self.knowledge.as_wire(),
-                "started_at": self.started_at,
-                "alert_label": self.alert_label,
-            },
-            indent=2,
-            sort_keys=True,
-        ) + "\n"
+        doc: dict[str, object] = {
+            "commit": self.commit,
+            "dirty": self.dirty,
+            "dirty_paths": list(self.dirty_paths),
+            "dirty_path_count": self.dirty_path_count,
+            "unavailable": self.unavailable,
+            "scope": self.scope,
+            "model": self.model,
+            "tenant_id": self.tenant_id,
+            "world_id": self.world_id,
+            "parent_run_id": self.parent_run_id,
+            "fork_turn": self.fork_turn,
+            "knowledge": None if self.knowledge is None else self.knowledge.as_wire(),
+            "started_at": self.started_at,
+            "alert_label": self.alert_label,
+        }
+        if knowledge_source is not None:
+            doc["knowledge_source"] = {k: knowledge_source.get(k) for k in KNOWLEDGE_SOURCE_KEYS}
+        return json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
     @classmethod
     def from_obj(cls, obj: object) -> RunProvenance | None:
@@ -247,6 +251,10 @@ class RunProvenance:
             return None
 
 
+#: The keys the stamp's `knowledge_source` may carry (OD17): never the publish's reason.
+KNOWLEDGE_SOURCE_KEYS = ("kind", "commit", "stale_kind")
+
+
 def _from_build_stamp(environ: Mapping[str, str], why: str) -> RunProvenance:
     """The record a git-less environment can still produce, or the bare failure. Always
     `dirty=None`: a workspace may be mounted over the baked code, so its state is unknown."""
@@ -301,115 +309,6 @@ def capture_tree(
         dirty_path_count=len(paths),
         scope=CODE_SCOPE,
     )
-
-
-def capture_knowledge(knowledge_dir: Path) -> KnowledgeRevision:
-    """Read which commit the tenant knowledge clone at `knowledge_dir` has checked out."""
-    try:
-        with bind(knowledge_dir) as root:
-            return _read_knowledge(root)
-    except _Unreadable as e:
-        return KnowledgeRevision.unavailable_because(str(e))
-    except (OSError, ValueError) as e:
-        return KnowledgeRevision.unavailable_because(f"the knowledge clone could not be read: {e!r}")
-
-
-class _Unreadable(Exception):
-    """A read below the knowledge folder that names no revision; its text is the reason."""
-
-
-def _entry_at(bound: Bound, name: str) -> str | None:
-    """What stands at `name`, judged without following it: `None` when absent, else
-    `directory`, `link`, `file` or `special file`. A refused judgement raises `_Unreadable`
-    with its own reason — the one rule every stat below is read by."""
-    found = stat_entry(bound, name)
-    if found.absent:
-        return None
-    if found.st is None:
-        raise _Unreadable(f"{name} could not be judged: {found.reason}")
-    mode = found.st.st_mode
-    return ("directory" if stat.S_ISDIR(mode) else "link" if stat.S_ISLNK(mode)
-            else "file" if stat.S_ISREG(mode) else "special file")
-
-
-def _file_at(bound: Bound, name: str) -> str | None:
-    """The file at `name`, or `None` when absent. A refused read (a link on the way, a
-    non-file, undecodable bytes) raises `_Unreadable` with its own reason — the one rule every
-    read below is held to, so a refusal is never mistaken for an absence."""
-    found = bound.read(name)
-    if found.text is not None:
-        return found.text
-    if found.absent:
-        return None
-    raise _Unreadable(f"{name} could not be read: {found.reason}")
-
-
-def _commit_in(text: str, where: str) -> KnowledgeRevision:
-    sha = text.strip()
-    if not _SHA.fullmatch(sha):
-        raise _Unreadable(f"{where} does not hold a commit: {sha[:80]!r}")
-    return KnowledgeRevision.at(sha)
-
-
-def _read_knowledge(root: Bound) -> KnowledgeRevision:
-    listing = root.entries()
-    if listing.absent:
-        raise _Unreadable("the knowledge folder is missing")
-    if listing.reason is not None:
-        raise _Unreadable(f"the knowledge folder cannot be read: {listing.reason}")
-    git_kind = _entry_at(root, ".git")
-    if git_kind is None:
-        return KnowledgeRevision.unversioned()
-    if git_kind != "directory":
-        raise _Unreadable(f".git is a {git_kind}, not a directory (it is not followed)")
-    git = root.under(".git")
-    reftable = _entry_at(git, "reftable")
-    if reftable == "directory":
-        raise _Unreadable("reftable refs: this reader reads files-backend refs only")
-    if reftable is not None:
-        raise _Unreadable(f".git/reftable is a {reftable}, not a reftable directory")
-    head = _file_at(git, "HEAD")
-    if head is None:
-        raise _Unreadable("HEAD is absent")
-    text = head.strip()
-    if not text.startswith("ref:"):
-        return _commit_in(text, "HEAD")
-    return _follow_ref(git, text[len("ref:"):].strip())
-
-
-def _follow_ref(git: Bound, name: str) -> KnowledgeRevision:
-    """The commit the ref HEAD names holds."""
-    if not _is_ref_name(name):
-        raise _Unreadable(f"HEAD names {name[:80]!r}, which is not a ref under refs/")
-    # The loose ref wins over packed-refs, and only its ABSENCE falls through: a refused one
-    # shadows the packed line, as in git.
-    loose = _file_at(git, name)
-    if loose is not None:
-        return _commit_in(loose, f"the ref {name}")
-    for line in (_file_at(git, "packed-refs") or "").splitlines():
-        # The `#` header and the `^` peeled lines name no ref.
-        if not line or line[0] in "#^":
-            continue
-        sha, _sep, ref = line.partition(" ")
-        if ref == name:
-            return _commit_in(sha, f"packed-refs' line for {name}")
-    raise _Unreadable(f"unborn branch: HEAD names {name}, which no ref holds yet")
-
-
-def _is_ref_name(name: str) -> bool:
-    """`refs/<component>/...`, each component a plain name: nothing that could step out of
-    `.git` (`..`, an absolute path) or name a non-ref file inside it (`ORIG_HEAD`)."""
-    parts = name.split("/")
-    return (len(parts) >= 2 and parts[0] == "refs"
-            and all(part and part not in (".", "..") and part.isprintable()
-                    and not any(ch.isspace() for ch in part) for part in parts))
-
-
-def capture_run(repo_root: Path, knowledge_dir: Path) -> RunProvenance:
-    """The code stamp of `repo_root` with the knowledge revision of `knowledge_dir` beside it —
-    what a run is stamped with and what the fork launcher compares a source against."""
-    record = capture_tree(repo_root)
-    return dataclasses.replace(record, knowledge=capture_knowledge(knowledge_dir))
 
 
 def write(path: Path, prov: RunProvenance) -> None:

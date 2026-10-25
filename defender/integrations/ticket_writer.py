@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
-from defender.records import _alert_input
+from defender.records import _alert_input, _knowledge_status
 from defender._model import model
 from defender.run_repository import Run, RunPaths
 from defender.runtime import case_ticket, run_end
@@ -207,17 +207,61 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
                        f"the record step failed unexpectedly ({type(e).__name__}); see the run log")
 
 
+#: The one sentence a stale run's every comment carries (#1108 P4, O-WARN): the kind in the
+#: customer's words and the commit used, never the publish's raw reason (no URL, error text or
+#: credential hint reaches a ticket). Fresh and pinned runs carry none.
+STALE_SENTENCE = {
+    _knowledge_status.TRANSIENT: (
+        "Knowledge notice: this investigation used the tenant's knowledge as of an earlier "
+        "version (commit {commit}) because newer approved knowledge could not be loaded due to "
+        "a temporary problem."),
+    _knowledge_status.OPERATOR: (
+        "Knowledge notice: this investigation used the tenant's knowledge as of an earlier "
+        "version (commit {commit}) because newer approved knowledge could not be loaded; this "
+        "is awaiting operator action."),
+}
+#: OD22': the run's knowledge record is unreadable, so no version can be named.
+UNREADABLE_SENTENCE = (
+    "Knowledge notice: this investigation may have used an earlier version of the tenant's "
+    "knowledge because the record of which version it used could not be read; this is awaiting "
+    "operator action.")
+
+
+def stale_sentence(run_dir: Path) -> str | None:
+    """The stale sentence for the run at `run_dir`, from its HOST-held knowledge record (U12),
+    or `None` for a fresh, pinned or pre-P4 run. The stamp in the run dir decides nothing here
+    beyond whether a record should exist (OD22')."""
+    paths = RunPaths(run_dir)
+    status = _knowledge_status.read_knowledge_status(paths.knowledge_source(), paths.provenance)
+    if status is None or not status.stale:
+        return None
+    if status.commit is None:
+        return UNREADABLE_SENTENCE
+    return STALE_SENTENCE[status.stale_kind or _knowledge_status.OPERATOR].format(
+        commit=status.commit)
+
+
+def _with_stale_sentence(run: Run, payload: dict) -> dict:
+    """`payload` with the stale sentence opening its body when the run's knowledge was stale.
+    First, so the wire bound — which cuts from the end — never takes it off a long verdict."""
+    sentence = stale_sentence(run.run_dir)
+    if sentence is None:
+        return payload
+    return {**payload, "body": f"{sentence}\n\n{payload['body']}"}
+
+
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
     run: Run, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
     payload: dict, word: str, ctx: VerbContext,
 ) -> None:
     """The one write the host makes to a case: one `POST /tickets/{key}/comments` whose body
     opens with the agent tag naming this run (`case_ticket.posted_comment`, #1221 — here, so no
-    comment kind can leave untagged), and a receipt either way. No read-back first: whether a
+    comment kind can leave untagged), then the stale sentence when the run's knowledge was
+    stale (O-WARN, every branch alike), and a receipt either way. No read-back first: whether a
     person has closed the case changes nothing, since every comment is served to later runs
     and ours are tagged (#1221 A1)."""
     quoted = urllib.parse.quote(case_id, safe="")
-    payload = case_ticket.posted_comment(payload, run_id=str(run.id))
+    payload = case_ticket.posted_comment(_with_stale_sentence(run, payload), run_id=str(run.id))
     status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload, ctx=ctx)
     ok = status is not None and status.startswith("2")
     if not ok:

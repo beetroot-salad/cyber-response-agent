@@ -182,7 +182,7 @@ def test_read_file_refuses_a_symlink_at_the_name(tmp_path):
 def test_write_file_over_a_symlink_at_the_name_is_a_retry_and_leaves_both(tmp_path):
     deps, corpus = _curator(tmp_path)
     real = corpus / "real.md"
-    real.write_text("ORIGINAL lesson\n", encoding="utf-8")
+    real.write_text("ORIGINAL lesson\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     link = corpus / "link.md"
     os.symlink(real, link)
     before = _snapshot(real)
@@ -191,8 +191,8 @@ def test_write_file_over_a_symlink_at_the_name_is_a_retry_and_leaves_both(tmp_pa
     assert _snapshot(real) == before, "the refused write reached the linked lesson"
     assert os.path.islink(link), "the refusal replaced the planted link"
 
-    _tool_write_file(deps, "defender/lessons/real.md", "REWRITTEN\n")
-    assert real.read_text(encoding="utf-8") == "REWRITTEN\n"
+    _tool_write_file(deps, "defender/lessons/real.md", "REWRITTEN\n")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
+    assert real.read_text(encoding="utf-8") == "REWRITTEN\n"  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
 
 
 # ---------------------------------------------------------------------------------------------
@@ -212,18 +212,18 @@ def test_read_file_refuses_a_symlinked_holding_folder_inside_the_run_dir(tmp_pat
 def test_a_curator_refuses_a_symlinked_holding_folder_inside_its_tree(tmp_path):
     deps, corpus = _curator(tmp_path)
     lesson = corpus / "a.md"
-    lesson.write_text("ORIGINAL lesson\n", encoding="utf-8")
+    lesson.write_text("ORIGINAL lesson\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     os.symlink(corpus, corpus.parent / "lessons-alias", target_is_directory=True)
 
-    assert "ORIGINAL lesson" in _tool_lesson_read(deps, "defender/lessons/a.md", part="full")
+    assert "ORIGINAL lesson" in _tool_lesson_read(deps, "defender/lessons/a.md", part="full")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     _refused(lambda: _tool_lesson_read(deps, "defender/lessons-alias/a.md", part="full"))
 
     before = _snapshot(lesson)
     _refused(lambda: _tool_write_file(deps, "defender/lessons-alias/a.md", "REDIRECTED\n"))
     assert _snapshot(lesson) == before, "the refused write landed through the linked folder"
 
-    _tool_write_file(deps, "defender/lessons/a.md", "REWRITTEN\n")
-    assert lesson.read_text(encoding="utf-8") == "REWRITTEN\n"
+    _tool_write_file(deps, "defender/lessons/a.md", "REWRITTEN\n")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
+    assert lesson.read_text(encoding="utf-8") == "REWRITTEN\n"  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
 
 
 # ---------------------------------------------------------------------------------------------
@@ -439,18 +439,18 @@ def test_a_folder_link_two_levels_above_the_name_is_refused_for_reads(tmp_path):
 def test_lesson_read_and_edit_file_refuse_a_symlink_at_the_name(tmp_path):
     deps, corpus = _curator(tmp_path)
     real = corpus / "a.md"
-    real.write_text("ORIGINAL lesson\n", encoding="utf-8")
+    real.write_text("ORIGINAL lesson\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     link = corpus / "b.md"
     os.symlink(real, link)
 
     message = _refused(lambda: _tool_lesson_read(deps, "defender/lessons/b.md", part="full"))
-    assert "ORIGINAL" not in message
+    assert "ORIGINAL" not in message  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     before = _snapshot(real)
-    _refused(lambda: _tool_edit_file(deps, "defender/lessons/b.md", "ORIGINAL", "REDIRECTED"))
+    _refused(lambda: _tool_edit_file(deps, "defender/lessons/b.md", "ORIGINAL", "REDIRECTED"))  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     assert _snapshot(real) == before, "edit_file wrote through the link"
     assert os.path.islink(link), "the refusal replaced the planted link"
 
-    _tool_edit_file(deps, "defender/lessons/a.md", "ORIGINAL", "EDITED")
+    _tool_edit_file(deps, "defender/lessons/a.md", "ORIGINAL", "EDITED")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     assert real.read_text(encoding="utf-8") == "EDITED lesson\n"
 
 

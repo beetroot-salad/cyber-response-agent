@@ -6,6 +6,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 from pathlib import Path
 
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.core.state import (
@@ -84,14 +85,15 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
     tmp_path: Path,
 ):
     """Design hole 2's SOLE discharge, REPLACED at §7 round 2 (F2)."""
-    paths = h.make_paths(tmp_path)
+    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
 
     h.seed(paths, ch, rows)
     blocked = h.recording(h.committing("blocked"))
-    cfg = h.cfg_for(
-        paths, "findings", invoke_agent=blocked, repo_lock_wait_seconds=1
+    cfg = C.draft_author_cfg(lane, invoke_agent=blocked, repo_lock_wait_seconds=1
     )
     with h.Holder(location_path(paths.state_root) / ch.append_lock, blocking_discipline=True):
         assert drain.run_batch(cfg=cfg) == 0
@@ -99,8 +101,7 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
     assert h.pending(paths, ch) == rows, "the queue was rewritten while an appender held the lock"
 
     free = h.recording(h.committing("free"))
-    control = h.cfg_for(
-        paths, "findings", invoke_agent=free, repo_lock_wait_seconds=1
+    control = C.draft_author_cfg(lane, invoke_agent=free, repo_lock_wait_seconds=1
     )
     assert drain.run_batch(cfg=control) == 0
     assert len(free.calls) == 1, "the control tick did not author, so the exclusion proves nothing"

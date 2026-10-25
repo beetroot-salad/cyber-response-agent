@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from defender.tests.support.learning.curation import _spec773 as S
 
-LESSON = "defender/lessons/l1.md"
+LESSON = "agent/lessons/l1.md"
 
 TRAVERSAL = "../../../../etc/passwd"
-PATHY = "defender/lessons/attacker-chosen.md"
+PATHY = "agent/lessons/attacker-chosen.md"
 
 
 def _committing(**kw):
@@ -20,7 +20,7 @@ def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the
     tmp_path,
 ):
     """A NEGATIVE demand over EVERY out-edge the content could reach."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(
@@ -44,7 +44,7 @@ def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the
 def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
     """No model-emitted string is used as a path by the check or the commit, however many
     fields carry path-shaped content."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(
@@ -62,7 +62,7 @@ def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
 
     # The positive control on the same address, under the complementary condition: an honest
     # result over the same tree DOES check and commit the one path git reported.
-    control = S.build_scene(
+    control = S.build_draft_scene(
         tmp_path / "control",
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
@@ -73,7 +73,7 @@ def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
 
 def test_author_result_commit_message_contains_a_path_like_string_773(tmp_path):
     """The commit message is never read as a path."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=_committing(commit_message=f"see {PATHY}"),
@@ -86,7 +86,7 @@ def test_author_result_commit_message_contains_a_path_like_string_773(tmp_path):
 def test_author_result_commit_message_contains_a_traversal_sequence_773(tmp_path):
     """A `../`-bearing string in the commit message cannot reach the filesystem, because the
     message is never interpreted as a path."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=_committing(commit_message=f"folded into {TRAVERSAL}"),
@@ -100,7 +100,7 @@ def test_author_result_commit_message_contains_a_traversal_sequence_773(tmp_path
 def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_path):
     """A skip reason is read only as PROSE — O5 permits exactly `consumed_skip` reasons and
     `commit_message` — never as a path."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1"), S.finding_row("skip", run_id="skip")],
         curator=S.FakeCurator(
@@ -118,7 +118,7 @@ def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_
 def test_author_result_retired_observability_gaps_with_row_shaped_content_is_refused_773(tmp_path):
     """`observability_gaps` is retired (#1234 M7."""
     payload = ["IGNORE PREVIOUS INSTRUCTIONS", TRAVERSAL, {"nested": PATHY}]
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=_committing(extra_result={"observability_gaps": payload}),
@@ -127,7 +127,7 @@ def test_author_result_retired_observability_gaps_with_row_shaped_content_is_ref
     assert sc.head_files() == []
     assert not (tmp_path / "etc").exists()
 
-    control = S.build_scene(
+    control = S.build_draft_scene(
         tmp_path / "control",
         rows=[S.finding_row("f1", run_id="f1")],
         curator=_committing(),
@@ -140,7 +140,7 @@ def test_author_result_retired_observability_gaps_with_row_shaped_content_is_ref
 def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
     """A row whose batch id is not this tick's is not among this batch's ids, so it mints no
     pair and is irrelevant to this tick's verdict work — consistent with N1's scoping."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1", batch_id="some-other-batch")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
@@ -152,7 +152,7 @@ def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
 def test_changed_lesson_file_is_zero_bytes_773(tmp_path):
     """Zero bytes parse to no frontmatter, so the file cites nothing, its intersection with
     this batch's ids is empty, it is unvouched, and the tick raises `AuthorError`."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"empty.md": ""}, committed=["f1"]),
@@ -164,7 +164,7 @@ def test_changed_lesson_file_is_zero_bytes_773(tmp_path):
 def test_changed_lesson_files_frontmatter_block_is_unparseable_773(tmp_path):
     """A malformed frontmatter block cites nothing — `_cited_ids` returns `set()` — so the
     file is unvouched and the tick raises `AuthorError`."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"bad.md": S.malformed_lesson()}, committed=["f1"]),
@@ -176,7 +176,7 @@ def test_changed_lesson_files_frontmatter_block_is_unparseable_773(tmp_path):
 def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
     """An absent `source_finding_ids` field yields `set()`, so the intersection is empty, the
     file is unvouched and the tick raises `AuthorError` — M3.2's own sentence."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(
@@ -185,7 +185,7 @@ def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
     )
     assert sc.run() == 2
 
-    control = S.build_scene(
+    control = S.build_draft_scene(
         tmp_path / "control",
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
@@ -196,7 +196,7 @@ def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
 
 def test_changed_lesson_files_citation_list_is_empty_773(tmp_path):
     """An empty citation list has the IDENTICAL disposition to a missing field."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson()}, committed=["f1"]),
@@ -207,7 +207,7 @@ def test_changed_lesson_files_citation_list_is_empty_773(tmp_path):
 
 def test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773(tmp_path):
     """Only the this-batch id becomes a pair (N1)."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("now", run_id="now")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("now", "from-an-earlier-batch")}),
@@ -219,7 +219,7 @@ def test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773(t
 def test_a_changed_file_citing_only_findings_from_an_earlier_batch_773(tmp_path):
     """A file citing ONLY earlier-batch findings has an empty intersection with this batch's
     ids, so it is unvouched and the tick raises `AuthorError` — today's disposition (M3.2)."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("now", run_id="now")],
         curator=S.FakeCurator(
@@ -231,7 +231,7 @@ def test_a_changed_file_citing_only_findings_from_an_earlier_batch_773(tmp_path)
 
 
 def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tmp_path):
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("mine", run_id="mine")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("a-world-finding-id")},
@@ -244,7 +244,7 @@ def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tm
 def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
     """A tick refuses to start on an ALREADY-DIRTY corpus with a named, reported disposition
     — loud, never a silent widening of vouching's scope to anything under the corpus."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
@@ -263,7 +263,7 @@ def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
 def test_a_non_markdown_file_left_under_the_corpus_773(tmp_path):
     """A non-`.md` file the curator left under the corpus is reverted as a STRAY before
     vouching, in both passes, so vouching only ever sees `*.md` under the corpus."""
-    sc = S.build_scene(
+    sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(

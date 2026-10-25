@@ -1,4 +1,9 @@
-"""The gather/main bash reader lane confines file operands to {run_dir, corpus} by resolved path."""
+"""The gather/main bash reader lane confines file operands to {run_dir, corpus} by resolved path.
+
+#1108 P4 (O1, O2): the corpus is the TENANT's — lessons, system skills and the query catalog
+under the run's agent root (the run copy `<T>/run-knowledge/<run_id>/agent/`, threaded as
+`RunScope(tenant_agent=...)`), never under `defender_dir`, whose corpus shapes go once P4
+lands (old design D4). `env.agent` is that run copy, built from made-up content."""
 from __future__ import annotations
 
 import os
@@ -12,7 +17,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
 
 
 # Fixtures: a per-run run dir + corpus, and the two per-run policies built off  #
@@ -23,15 +28,26 @@ def env(tmp_path):
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir()
     dfn = tmp_path / "defender"
+    # The checkout keeps its pre-P4 corpus folders here only as the place a stale reader would
+    # look: after #1108 P4 none of these is a corpus root (O1; old design D4).
     (dfn / "lessons").mkdir(parents=True)
     (dfn / "skills" / "elastic").mkdir(parents=True)
     (dfn / "skills" / "gather" / "queries" / "elastic").mkdir(parents=True)
     (dfn / "examples").mkdir()
     (dfn / "fixtures" / "held-out" / "m01").mkdir(parents=True)
-    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
+    # This run's copy of its tenant's knowledge (#1108 P4 data model: `<T>/run-knowledge/<run>/`).
+    agent = tmp_path / "tenant" / "run-knowledge" / "run-1" / "agent"
+    (agent / "lessons").mkdir(parents=True)
+    (agent / "skills" / "cmdb").mkdir(parents=True)
+    (agent / "skills" / "gather" / "queries" / "cmdb").mkdir(parents=True)
+    # Another tenant's run copy under the same data root: never a root of this run (O2).
+    other = tmp_path / "other-tenant" / "run-knowledge" / "run-2" / "agent"
+    (other / "lessons").mkdir(parents=True)
+    scope = RunScope(tenant_agent=agent)
+    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn, scope=scope)
     gather = compile_policy_for(
-        _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)
-    return SimpleNamespace(run=run, dfn=dfn, main=main, gather=gather)
+        _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn, scope=scope)
+    return SimpleNamespace(run=run, dfn=dfn, agent=agent, other=other, main=main, gather=gather)
 
 
 def _bash(env, cmd, which="gather"):
@@ -85,16 +101,16 @@ def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
     ("investigation-piped-to-grep",
      'cat {run}/investigation.md | grep -n "T resolutions"', "main"),
 
-    # a lessons-corpus read (absolute, .md under lessons/)
-    ("corpus-lesson", "cat {dfn}/lessons/auth-log-scope.md", "main"),
+    # a lessons-corpus read (absolute, .md under the run copy's lessons/)
+    ("corpus-lesson", "cat {agent}/lessons/auth-log-scope.md", "main"),
 
     # the real multi-file lesson cat: multiple in-scope operands + a benign stderr discard.
     # EVERY operand is resolved and scope-checked, not just the first.
-    ("corpus-multi-lesson", "cat {dfn}/lessons/a.md {dfn}/lessons/b.md 2>/dev/null", "main"),
+    ("corpus-multi-lesson", "cat {agent}/lessons/a.md {agent}/lessons/b.md 2>/dev/null", "main"),
 
     # the enumerated corpus .md shapes
-    ("corpus-system-skill", "cat {dfn}/skills/elastic/SKILL.md", "gather"),
-    ("corpus-query-template", "cat {dfn}/skills/gather/queries/elastic/x.md", "gather"),
+    ("corpus-system-skill", "cat {agent}/skills/cmdb/SKILL.md", "gather"),
+    ("corpus-query-template", "cat {agent}/skills/gather/queries/cmdb/x.md", "gather"),
 
     # the machine-tight payload shape (`gather_raw/l-<digits>/<seq>.json`) is in GATHER's
     # grants — and in nobody else's
@@ -103,7 +119,24 @@ def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
 def test_an_in_scope_read_is_allowed(env, case, cmd, lane):
     """The capability half of the ledger: the run-dir artifacts and corpus documents each lane
     is actually granted stay readable — absolute, piped, multi-operand and all."""
-    assert _bash(env, cmd.format(run=env.run, dfn=env.dfn), lane).allow
+    assert _bash(env, cmd.format(run=env.run, dfn=env.dfn, agent=env.agent), lane).allow
+
+
+@pytest.mark.parametrize("lane", ["main", "gather"])
+@pytest.mark.parametrize("rel", ["lessons/x.md", "skills/elastic/SKILL.md",
+                                 "skills/gather/queries/elastic/x.md"])
+def test_o2_the_checkout_corpus_shapes_are_no_corpus_root_after_p4(env, lane, rel):
+    """#1108 P4 O1/O2 (old design D4: "defender_dir's corpus shapes go once P4 lands"): a lesson,
+    system skill or query template spelled under `defender_dir` is refused on BOTH read
+    surfaces; the same shape under the run's own agent root is admitted on the same channel
+    (positive control), and another tenant's run copy is refused."""
+    stale, own, foreign = env.dfn / rel, env.agent / rel, env.other / rel
+    assert _bash(env, f"cat {own}", lane).allow, "positive control: the run copy's corpus"
+    assert _read(env, own, lane).allow, "positive control: the run copy's corpus"
+    assert not _bash(env, f"cat {stale}", lane).allow, "the checkout's corpus is still a root"
+    assert not _read(env, stale, lane).allow, "the checkout's corpus is still a root"
+    assert not _bash(env, f"cat {foreign}", lane).allow, "another tenant's run copy is readable"
+    assert not _read(env, foreign, lane).allow, "another tenant's run copy is readable"
 
 
 # C. Out-of-scope reads DENY (guarded negatives, each with a positive control)  #
@@ -128,9 +161,11 @@ def test_an_in_scope_read_is_allowed(env, case, cmd, lane):
      "cat {run}/investigation.md {run}/report.md", "gather"),
 
     ("corpus-lookalike-sibling", "cat {dfn}-evil/x.md", None, "gather"),
+    ("agent-lookalike-sibling", "cat {agent}-evil/lessons/x.md",
+     "cat {agent}/lessons/x.md", "gather"),
 ], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and "/" not in v else "")
 def test_an_out_of_scope_read_is_denied(env, case, denied, control, lane):
-    fmt = {"run": env.run, "dfn": env.dfn}
+    fmt = {"run": env.run, "dfn": env.dfn, "agent": env.agent}
     assert not _bash(env, denied.format(**fmt), lane).allow
     if control is not None:
         assert _bash(env, control.format(**fmt), lane).allow, "positive control"
@@ -233,7 +268,7 @@ def test_parity_corpus_non_listed_denied_on_both_lanes(env):
     docs = f"{env.dfn}/docs/learning-loop.md"
     assert not _read(env, docs, "gather").allow
     assert not _bash(env, f"cat {docs}", "gather").allow
-    ok = f"{env.dfn}/lessons/notes.md"
+    ok = f"{env.agent}/lessons/notes.md"
     assert _read(env, ok, "gather").allow
     assert _bash(env, f"cat {ok}", "gather").allow
 
@@ -241,12 +276,12 @@ def test_parity_corpus_non_listed_denied_on_both_lanes(env):
 def test_corpus_md_named_secret_denied(env):
     """A `.md`-named secret UNDER a corpus subdir — `{DFN}/lessons/credentials.md` — passes the corpus"""
     # rejected: drop the basename-substring axis (a `credentials.md`/`.env.md` in-corpus leaks)
-    for secret in (f"{env.dfn}/lessons/credentials.md",
-                   f"{env.dfn}/skills/elastic/ground_truth.md",
-                   f"{env.dfn}/lessons/x.env.md"):
+    for secret in (f"{env.agent}/lessons/credentials.md",
+                   f"{env.agent}/skills/cmdb/ground_truth.md",
+                   f"{env.agent}/lessons/x.env.md"):
         assert not _bash(env, f"cat {secret}", "gather").allow, secret
         assert not _read(env, secret, "gather").allow, secret
-    assert _bash(env, f"cat {env.dfn}/lessons/notes.md", "gather").allow  # positive control
+    assert _bash(env, f"cat {env.agent}/lessons/notes.md", "gather").allow  # positive control
 
 
 @pytest.mark.parametrize("axis", ["substring", "dir"])
@@ -260,7 +295,7 @@ def test_denylist_parity_bash_matches_decide_read(env, axis):
             assert not _read(env, p, "gather").allow, p
     else:
         for d in bash_policy.read_deny_dirs():
-            p = f"{env.dfn}/lessons/{d}/inner.md"         # denied dir as an in-shape path component
+            p = f"{env.agent}/lessons/{d}/inner.md"       # denied dir as an in-shape path component
             assert not _bash(env, f"cat {p}", "gather").allow, p
             assert not _read(env, p, "gather").allow, p
 

@@ -2,7 +2,7 @@
  "_meta": {
   "base": "80888efb",
   "how": "each producer in test_1080_sql_engine.PRODUCERS run at the base under SPEC1080_AT_BASE=1: the base bin/defender-sql and bin/defender-lessons shims, their engines by path, the box closure child and the permission gate, over the fixed inputs in the test module, normalised by its _norm",
-  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Six values re-observed: dir_unset.{box,host} (the shell names the shim's line 8, where DEFENDER_DIR is now read) and spellings.{defender-sql,defender-lessons}.moved-away.{box,host} (a DEFENDER_DIR naming no directory is refused by the shim, exit 2 as before, instead of python3's can't-open-file). Every other value is the base capture, unchanged. 2026-10-08 (#1206 review, human-decided): every defender-lessons --show stdout gained the salted untrusted frame around each lesson's frontmatter; nothing else moved. 2026-10-25 (human): the stdin.* values are retired. stdin.closed depended on the runner's `env` (uutils reopens a closed fd 0 onto /dev/null, GNU does not), and a closed stdin is now refused like an empty one; every stdin case is a stated rule in tests/integrations/test_sql_idioms.py and test_sql.py."
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Six values re-observed: dir_unset.{box,host} (the shell names the shim's line 8, where DEFENDER_DIR is now read) and spellings.{defender-sql,defender-lessons}.moved-away.{box,host} (a DEFENDER_DIR naming no directory is refused by the shim, exit 2 as before, instead of python3's can't-open-file). Every other value is the base capture, unchanged. 2026-10-08 (#1206 review, human-decided): every defender-lessons --show stdout gained the salted untrusted frame around each lesson's frontmatter; nothing else moved. 2026-10-22 (#1108 P4, O1/O2): the product tree carries no lesson corpus; a tree copy's corpus sits in the run-copy-shaped agent root beside it (`<CO>/agent/lessons/`, `<MOUNT>/agent/lessons/`), which the lessons engine reads through DEFENDER_AGENT_DIR. Respelled by rule (`<CO|MOUNT>/defender/lessons/` -> `<CO|MOUNT>/agent/lessons/`), not re-observed, in 25 entries; no other value moved. Those entries have no producer in test_1080_sql_engine.py today (no test reads them). 2026-10-25 (human): the stdin.* values are retired. stdin.closed depended on the runner's `env` (uutils reopens a closed fd 0 onto /dev/null, GNU does not), and a closed stdin is now refused like an empty one; every stdin case is a stated rule in tests/integrations/test_sql_idioms.py and test_sql.py."
  },
  "arg_shapes.bare-separator": {
   "dict": [
@@ -1286,7 +1286,7 @@
    ],
    [
     "stdout",
-    "<MOUNT>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<MOUNT>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -1302,7 +1302,7 @@
    ],
    [
     "stdout",
-    "--- <MOUNT>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <MOUNT>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -1710,7 +1710,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -1726,7 +1726,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -1774,7 +1774,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -1790,7 +1790,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -1838,7 +1838,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -1854,7 +1854,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -1902,7 +1902,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -1918,7 +1918,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -2174,7 +2174,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2190,7 +2190,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2206,7 +2206,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2222,7 +2222,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2238,7 +2238,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2254,7 +2254,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2270,7 +2270,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2430,7 +2430,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2446,7 +2446,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -2494,7 +2494,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2510,7 +2510,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -2830,7 +2830,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2846,7 +2846,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",
@@ -2894,7 +2894,7 @@
    ],
    [
     "stdout",
-    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+    "<CO>/agent/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
    ],
    [
     "stderr",
@@ -2910,7 +2910,7 @@
    ],
    [
     "stdout",
-    "--- <CO>/defender/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
+    "--- <CO>/agent/lessons/spec1080-alpha.md\n<run-<SALT>-untrusted>\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n</run-<SALT>-untrusted>\n"
    ],
    [
     "stderr",

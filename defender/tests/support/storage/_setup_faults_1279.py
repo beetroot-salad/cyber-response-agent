@@ -113,10 +113,16 @@ def tenant_with_runs_io(tenant: Any, io: Any) -> Any:
 
 def materialize_through(io: Any) -> Callable[..., Any]:
     """`run.main`'s `materialize` seam: the real `_materialize_run`, over a tenant whose runs
-    repository uses `io`."""
+    repository uses `io`. #1279 rev 6: run.py makes the run's handle before setup, over the real
+    I/O; the handle it passes is rebound here at the same id over `io`, so setup's run-dir make
+    goes through the seam."""
     from defender import run as run_py
+    from defender.run_repository import Run
 
     def materialize(alert: Path, *args: Any, tenant: Any, **kwargs: Any) -> Any:
+        handed = kwargs.get("run")
+        if handed is not None:
+            kwargs["run"] = Run.under(tenant.runs, handed.id, io=io, tenant_id=handed.tenant_id)
         return run_py._materialize_run(alert, *args, tenant=tenant_with_runs_io(tenant, io), **kwargs)
 
     return materialize

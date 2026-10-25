@@ -6,8 +6,11 @@ knowledge lives.
 ## Discovery on demand
 
 The runtime agent doesn't preload domain knowledge. Knowledge lives as
-on-disk skills under `defender/skills/`, loaded via `Skill` (or Read) when
-the next move needs them. The agent enumerates `defender/skills/*/SKILL.md`
+on-disk skills, loaded via `Skill` (or Read) when the next move needs them: the product's
+own skills under `defender/skills/` (`invlang`, `gather`, `handbook`, `advisory`, `connect`),
+and the tenant's per-system skills, query templates and lessons in its knowledge tree (the
+tenant repo's `agent/`, which a run reads from its own copy at `/agent/`,
+`$DEFENDER_AGENT_DIR`). The agent enumerates the per-system `/agent/skills/*/SKILL.md`
 at ORIENT, reads each frontmatter `description:`, and loads the bodies whose
 description looks relevant to the alert. Per-system SKILLs use the
 `defender-<system>` naming convention.
@@ -17,12 +20,12 @@ description looks relevant to the alert. Per-system SKILLs use the
 | Skill | Role | Loaded by |
 |---|---|---|
 | `skills/invlang/` | The invlang block surface (grammar) + the author-side CLI (`enum`, `advisory`, `hypothesis-shape`, `hypothesis-vocabulary`) | Main loop, when authoring `investigation.md` |
-| `skills/gather/` | The gather subagent body + per-system query templates under `queries/{system}/` and the raw-payload contract | The gather subagent itself, on dispatch — the main loop does **not** load it |
-| `skills/{system}/` | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its verbs are dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (handed the system's `description:` on dispatch, then Reads the body itself) |
+| `skills/gather/` | The gather subagent body and the raw-payload contract; the per-system query templates are the tenant's, under `/agent/skills/gather/queries/{system}/` | The gather subagent itself, on dispatch — the main loop does **not** load it |
+| `/agent/skills/{system}/` (tenant) | Per-system reference: what data the system holds *in this deployment*, what it cannot answer, how to read its output, how its verbs are dispatched | Main loop at ORIENT (to scope reachability) and the gather subagent (handed the system's `description:` on dispatch, then Reads the body itself) |
 | `skills/connect/` | Maintainer onboarding skill: interview → route (MCP or generated CLI adapter) → scaffold per-system knowledge → test → review branch, one system per run | A maintainer, out-of-band — **not** loaded during an alert run (see §Adding a new system) |
 
 The per-system set is environment-dependent — enumerate
-`defender/skills/*/SKILL.md` rather than assuming a fixed list. Alongside
+`/agent/skills/*/SKILL.md` rather than assuming a fixed list. Alongside
 them sits the cross-cutting `advisory` helper.
 
 ## Why per-system SKILLs are split
@@ -67,8 +70,10 @@ rather than shipping it, so the edit cannot be forgotten, only made.
 
 ## Lessons
 
-`defender/lessons/*.md` is the corpus the **learning loop authors and the
-runtime agent reads** — the two ends of the feedback loop.
+`agent/lessons/*.md` under the tenant's knowledge tree (the tenant repo's `agent/`, which a run
+reads from its own copy at `/agent/`, `$DEFENDER_AGENT_DIR`) is the corpus the **learning loop
+authors and the runtime agent reads** — the two ends of the feedback loop. The product tree
+holds no lessons.
 
 - **Shape.** Each lesson is a markdown file with `name` + `description`
   frontmatter (plus `source_finding_ids` and `created_at`) and a short
@@ -78,24 +83,20 @@ runtime agent reads** — the two ends of the feedback loop.
   Reads the bodies whose `description` looks relevant to the current alert,
   before writing its `:H`/`:L` blocks.
 - **Authored by the loop.** The lessons curator (`learning/author/lessons/run.py`) folds
-  queued findings into `lessons/` once `_pending` crosses the threshold (see
-  `content/learning-loop.md`). Hand-edits are fine if they match the schema in
-  `learning/author/lessons/prompt.md`, but the corpus is meant to be
-  loop-authored.
+  queued findings into `agent/lessons/` once `_pending` crosses the threshold (see
+  `content/learning-loop.md`), as a pull request on the tenant's repo that a human merges.
+  Hand-edits are fine if they match the schema in `learning/author/lessons/prompt.md`, but
+  the corpus is meant to be loop-authored.
 
-A second live corpus, `defender/lessons-questioner/`, is the **questioner's**,
+A second live corpus, `lessons-questioner/` beside it in the same tree, is the **questioner's**,
 not the runtime agent's: the same drain tick folds findings about the
 instrument — an invented field shape, a family that failed to discriminate —
 into it, and the questioner reads it back when it authors the next family.
 The runtime agent never loads it.
 
-Two older corpora — `defender/lessons-actor/` and
-`defender/lessons-environment/` — still sit in the tree, but they are **frozen
-archives**: their producers were the actor-side curators #922 deleted, nothing
-authors them and nothing reads them. Their index/retrieve CLIs went with the
-same change. They are shown as retired in the posture view
-(`learning/frontend/`) rather than deleted, so a lesson written there is still
-findable. Don't cite them as live knowledge, and don't add to them.
+Two older corpora, the actor-side and environment-side ones, lost their producers when #922
+deleted the actor-side curators, and were then deleted outright (#1108). There is no third
+corpus to cite or add to.
 
 Sources: `defender/CLAUDE.md`, `defender/SKILL.md` §Skills,
 `defender/docs/system-skill-shape.md`.

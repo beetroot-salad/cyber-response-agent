@@ -38,9 +38,11 @@ REQUIRED_FILES: tuple[str, ...] = (
     "systems/case-history/mapping.yaml",
 )
 
-#: The shipped lead-zero template (it exists in the real catalog, and its front matter binds
-#: `elastic.alerts`). A fixture tenant that grants the correlation lead names it, so the
-#: run-start agreement check (#1003) passes against the checkout's own catalog.
+#: The lead-zero template the committed fixture tenant names (its front matter binds
+#: `elastic.alerts`). #1108 P4: the catalog is the TENANT's (`agent/skills/gather/queries/`, in
+#: the run copy), never the checkout's, so the run-start agreement check (#1003) passes only
+#: when the fixture's own `agent/` carries this template (old design D8: "the queries its
+#: grants and lead-zero need, `elastic.correlate-alerts-by-entity` at least").
 SHIPPED_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
 
@@ -95,20 +97,36 @@ def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
 
 
 def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
-               dispatches_lead_zero: bool = False) -> Any:
+               dispatches_lead_zero: bool = False, agent_root: Path | None = None,
+               settings_root: Path | None = None) -> Any:
     """The driver's `RunTenant` for `tenant` (an accepted `Tenant`), built from the real
     pieces and nothing else (#1107): run start's readiness function (`resolve_run_tenant`: the
-    same grants, the lead-zero dispatch identity checked over `defender_dir`'s catalog, default
-    this checkout, only when `dispatches_lead_zero` — the harness says so for exactly the runs
-    the driver dispatches the lead on — and the same refusals, raised as run start raises them),
-    then `resolved_settings` (systems, Elastic view, ticket mapping). A scenario that wants
-    other grants plants a tenant whose `verb-grants.yaml` says so."""
+    same grants, the lead-zero dispatch identity checked over the run's agent root's catalog,
+    only when `dispatches_lead_zero` — the harness says so for exactly the runs the driver
+    dispatches the lead on — and the same refusals, raised as run start raises them), then
+    `resolved_settings` (systems, Elastic view, ticket mapping). A scenario that wants other
+    grants plants a tenant whose `verb-grants.yaml` says so.
+
+    #1108 P4 (O2, O4, flow 3; P-1): the run's knowledge is an agent root — for a run, the agent
+    half of an export (or a run copy of one) — and both the lead-zero catalog and the run's
+    tenant record take it; and (O-B) the settings the run reads come from the SAME export, as
+    `settings_root`. ASSUMED SEAMS (S0, review round 1): `resolve_run_tenant(settings, *,
+    agent_root=..., dispatches_lead_zero=...)` (its settings argument is `settings_root`),
+    `resolved_settings(tenant, *, settings_root=...)`, and `RunTenant(..., agent_root=...,
+    settings_root=...)` (whose `.agent` / `.settings` are then those roots). Both roots default
+    to the accepted tenant's own `agent/` / `settings/` for a caller that hands its own tenant;
+    the replay harness hands one export's `agent/` and `settings/`. Red until P4:
+    there is no pre-P4 fallback (OD13). `defender_dir` is kept only so existing callers keep
+    their call shape; the catalog no longer comes from it (O1: the checkout holds none)."""
+    del defender_dir
     rt = mod("runtime.run_tenant")
+    root = Path(agent_root) if agent_root is not None else Path(tenant.agent)
+    settings = Path(settings_root) if settings_root is not None else Path(tenant.settings)
     ready = rt.resolve_run_tenant(
-        tenant.settings, defender_dir=defender_dir if defender_dir is not None else DEFENDER,
-        dispatches_lead_zero=dispatches_lead_zero)
+        settings, agent_root=root, dispatches_lead_zero=dispatches_lead_zero)
     return rt.RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
-                        **rt.resolved_settings(tenant))
+                        agent_root=root, settings_root=settings,
+                        **rt.resolved_settings(tenant, settings_root=settings))
 
 
 def fixture_run_tenant(**kw: Any) -> Any:
@@ -331,6 +349,55 @@ def config_texts(marker: str, *, events_index: str | None = None,
     return {system: text + access_lines(marker, system) for system, text in base.items()}
 
 
+#: The made-up catalog templates a planted tenant's lead-zero config names, written into the
+#: tenant's OWN catalog (`agent/skills/gather/queries/<system>/<name>.md`). #1108 P4 (flow 3,
+#: O1, O2): run start resolves `lead-zero.yaml` against the run copy's catalog — the checkout
+#: holds none — so a tenant that grants the correlation lead carries the template it names.
+#: Front matter mirrors the template schema (id agreeing with the path, established, the verb
+#: the holder's grant binds); the bodies are made up (decision 4: no copy of lab content).
+TENANT_CATALOG: dict[str, str] = {
+    "elastic/correlate-alerts-by-entity.md": """\
+---
+id: elastic.correlate-alerts-by-entity
+status: established
+verb: alerts
+params: [end, start]
+body_substitutions: [entity_filter]
+---
+
+## Goal
+
+Fixture template (#1222 suite, #1108 P4): alerts naming one entity over a window, counted
+across every rule (correlate alerts, same host, prior alert).
+
+## Query
+
+```
+${entity_filter}
+```
+""",
+    "cmdb/list-all-hosts.md": """\
+---
+id: cmdb.list-all-hosts
+status: established
+verb: list-hosts
+params: []
+---
+
+## Goal
+
+Fixture template (#1222 suite, #1108 P4): the whole host inventory, to find the registered
+name of a host a lookup did not recognise.
+
+## Query
+
+```query
+verb: list-hosts
+```
+""",
+}
+
+
 def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each part overridable
     root: Path, tenant_id: str, *,
     table: str = TABLE_A,
@@ -341,6 +408,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     configs: dict[str, str] | None = None,
     omit: tuple[str, ...] = (),
     agent_files: dict[str, str] | None = None,
+    catalog: bool = True,
 ) -> Path:
     """Write a plain knowledge folder `root/<tenant_id>/{settings,agent}/` and return it — the
     shape of the committed template and fixture (no `.tenant-id`, no row). `place_tenant` puts
@@ -358,8 +426,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
         "systems/case-history/mapping.yaml": mapping_text(reporter, open_status),
         "alert-mapping.yaml": ALERT_MAPPING_TEXT,
     }
-    for system, text in (configs if configs is not None
-                         else config_texts(marker or tenant_id)).items():
+    system_configs = configs if configs is not None else config_texts(marker or tenant_id)
+    for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text
     for rel, text in files.items():
         if rel in omit:
@@ -372,7 +440,30 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     for name, text in (agent_files if agent_files is not None
                        else {"AGENT.md": f"agent half of {tenant_id}\n"}).items():
         (agent / name).write_text(text, encoding="utf-8")
+    # #1108 P4 (O1, O2): run start resolves `lead-zero.yaml` against the tenant's OWN catalog
+    # (the checkout holds none), so a planted tenant carries the made-up templates its default
+    # lead-zero config and the non-Elastic tables name. `catalog=False` plants none of this
+    # agent knowledge (the "names a template its catalog lacks" shape).
+    # Likewise each configured system's skill descriptor (`agent/skills/<system>/SKILL.md`,
+    # the gather dispatch's "Systems of record" line): system skills are tenant knowledge, so a
+    # planted tenant carries a made-up one per system it configures.
+    if catalog:
+        for rel, text in TENANT_CATALOG.items():
+            template = agent / "skills" / "gather" / "queries" / rel
+            template.parent.mkdir(parents=True, exist_ok=True)
+            template.write_text(text, encoding="utf-8")
+        for system in system_configs:
+            skill = agent / "skills" / system / "SKILL.md"
+            skill.parent.mkdir(parents=True, exist_ok=True)
+            skill.write_text(system_skill_text(system), encoding="utf-8")
     return tenant
+
+
+def system_skill_text(system: str) -> str:
+    """A made-up system skill descriptor for `system` (front matter `name` + `description`)."""
+    return (f"---\nname: defender-{system}\ndescription: Fixture {system} system of record for "
+            f"a planted test tenant (#1108 P4).\n---\n\nFixture content; no real "
+            f"environment.\n")
 
 
 def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
@@ -392,9 +483,9 @@ def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
 
 
 #: The lead-zero id a planted census repo's folders name, and the established catalog template
-#: that carries it (`defender/skills/gather/queries/alpha/by-entity.md`). M7's CI pass checks
-#: that each folder's `lead-zero.yaml` names a template the catalog holds, so a planted repo
-#: whose folders name one must also hold it.
+#: that carries it (`<folder>/agent/skills/gather/queries/alpha/by-entity.md`, each tenant
+#: folder's own catalog, #1108 P4). M7's CI pass checks that each folder's `lead-zero.yaml`
+#: names a template its catalog holds, so a planted folder that names one must also hold it.
 CENSUS_LEAD_ZERO_ID = "alpha.by-entity"
 CENSUS_QUERY_TEMPLATE = """\
 ---
@@ -415,9 +506,11 @@ entity
 """
 
 
-def plant_census_catalog(repo: Path) -> Path:
-    """Write the one established query template a planted census repo's lead-zero names."""
-    q = Path(repo) / "defender" / "skills" / "gather" / "queries" / "alpha" / "by-entity.md"
+def plant_census_catalog(folder: Path) -> Path:
+    """Write the one established query template a planted census folder's lead-zero names,
+    into that tenant folder's own catalog (`<folder>/agent/skills/gather/queries/`): #1108 P4
+    (O1/O2) — lead-zero resolves against the tenant's catalog; the product checkout holds none."""
+    q = Path(folder) / "agent" / "skills" / "gather" / "queries" / "alpha" / "by-entity.md"
     q.parent.mkdir(parents=True, exist_ok=True)
     q.write_text(CENSUS_QUERY_TEMPLATE, encoding="utf-8")
     return q
@@ -429,13 +522,12 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
     census gate walks (#1120 C26): `knowledge/tenant-fixture/` and
     `knowledge/tenant-template/`, each holding the table `rows` (as
     `_dispositions995.write_table` renders them — the template `template_rows` when given),
-    a `lead-zero.yaml` naming `CENSUS_LEAD_ZERO_ID`, and the mapping; plus the catalog template
-    that id resolves to. Plain folders, as committed: no `.tenant-id`, no row. Returns the
-    table paths written, fixture first, template last."""
+    a `lead-zero.yaml` naming `CENSUS_LEAD_ZERO_ID`, and the mapping; plus, in each folder's
+    own catalog, the template that id resolves to. Plain folders, as committed: no
+    `.tenant-id`, no row. Returns the table paths written, fixture first, template last."""
     from defender.tests.support.invlang.validation._dispositions995 import write_table
 
     repo = Path(repo)
-    plant_census_catalog(repo)
     written: list[Path] = []
     for name, table_rows in (("tenant-fixture", rows),
                              ("tenant-template", template_rows if template_rows is not None
@@ -449,6 +541,7 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
             (folder / "settings" / rel).write_text(text, encoding="utf-8")
         (folder / "agent").mkdir(parents=True, exist_ok=True)
         (folder / "agent" / ".gitkeep").write_text("", encoding="utf-8")
+        plant_census_catalog(folder)
         written.append(write_table(folder / "settings" / "verb-grants.yaml", table_rows))
     return written
 

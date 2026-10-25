@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
@@ -23,14 +24,13 @@ from defender.tests.support.learning.core import _state1135
 
 def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path):
     """Decision 2: the count is LIFETIME."""
-    paths = h.make_paths(tmp_path)
+    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "run-I/0")])
 
-    fault = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=2,
+    fault = C.draft_author_cfg(lane, max_attempts=2,
         invoke_agent=h.raising(author_shared.AuthorError("first failure")),
     )
     assert drain.run_batch(cfg=fault) == 2
@@ -46,7 +46,7 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
         }
 
     ok = h.recording(hold_back)
-    assert drain.run_batch(cfg=h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=ok)) == 0
+    assert drain.run_batch(cfg=C.draft_author_cfg(lane, max_attempts=2, invoke_agent=ok)) == 0
     assert len(ok.calls) == 1, "the successful tick never reached the agent"
     assert h.attempts_of(paths, ch, "run-I/0") == 1, "a clean tick reset the count"
 

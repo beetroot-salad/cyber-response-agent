@@ -48,7 +48,7 @@ class Target:
     root: Path
 
     def write(self, text: str) -> None:
-        _write(text.encode("utf-8"), self.path, self.root)
+        _write_as_folder_owner(text.encode("utf-8"), self.path, self.root)
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ class Publisher:
         return Target(self.root / self.tenant_id / "learning" / name, self.root)
 
 
-def _write(page: bytes, dest: Path, root: Path) -> None:
+def _write_as_folder_owner(page: bytes, dest: Path, root: Path) -> None:
     """Write the page as the owner of the folder holding the publish root.
 
     Only root writing into a user's folder drops privileges: the copy then runs as that user,

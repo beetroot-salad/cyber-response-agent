@@ -60,13 +60,17 @@ def _index(path: Path, *rows: tuple[str, str]) -> Path:
 
 
 def _rows(text: str | None) -> list[tuple[str, str]]:
-    """F's rows as `(slug, run_id)`, read by the TEST (plain JSON Lines)."""
+    """F's rows as `(slug, run_id)`, read by the TEST (plain JSON Lines). #1108 P4 OD10: F
+    also records the knowledge commit resolved at its creation, in a shape not designed; a
+    line that carries no `slug` is that record, not a launch row, and is skipped."""
     if not text:
         return []
     out = []
     for line in text.splitlines():
         if line.strip():
             row = json.loads(line)
+            if "slug" not in row:
+                continue
             out.append((row["slug"], row["run_id"]))
     return out
 # The CLI, driven through `held_out.main`
@@ -203,6 +207,18 @@ def test_a_row_naming_an_absent_or_recordless_run_scores_wrong_not_not_run(tmp_p
     assert "report.md" in failures.get("no-report-case", ""), res.out
     assert NO_RUN_RECORD not in failures.get("no-report-case", ""), res.out
     assert "scored-case" not in failures, res.out
+
+
+def test_an_index_from_the_old_launcher_scores_past_its_knowledge_pin_line(tmp_path, scoring):
+    """An index the #1108 P4 launcher wrote opens with a `{"knowledge_commit": …}` line; scoring
+    skips that line and scores the rows after it."""
+    runs, index, _ = scoring
+    fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious"})
+    run = _run(runs, says="malicious")
+    _index(index, (SLUG, run.name))
+    index.write_text(json.dumps({"knowledge_commit": "a" * 40}) + "\n"
+                     + index.read_text(encoding="utf-8"), encoding="utf-8")
+    _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
 
 
 def test_a_slug_with_no_row_is_not_run_whatever_folders_are_named_after_it(tmp_path, scoring):

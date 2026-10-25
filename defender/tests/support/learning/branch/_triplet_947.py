@@ -569,8 +569,14 @@ def tenant_episodes(data_root: Path) -> Path:
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
               tenant_id: str | None = None, recorded: bool | None = None,
               pre_snapshot: bool = False,
-              land_calls: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
-    """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir)."""
+              land_calls: Callable[[Path], None] | None = None,
+              published: bool = False) -> tuple[Path, Path]:
+    """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    `published=True` (#1108 P4): the tenant is set up as a real published tenant
+    (`set_up_tenant(published=True)`), so the source's default knowledge stamp
+    (`scene_knowledge`) names a commit its clone holds — what a branch launch materialises and
+    pins (flow 7). For scenes that launch a branch over this source."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
@@ -578,7 +584,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         existing = sorted(p.name for p in root.iterdir()
                           if (p / "tenant.json").is_file()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
-    tenant = set_up_tenant(root, tenant_id)
+    tenant = set_up_tenant(root, tenant_id, published=published)
     location_path(tenant.learning).mkdir(exist_ok=True)  # setup provisions the real launcher queue root
     base = location_path(tenant.runs)
     base.mkdir(parents=True, exist_ok=True)
@@ -757,6 +763,26 @@ NO_KNOWLEDGE_KEY: Any = _OmitKnowledge()
 _DEFAULT_KNOWLEDGE: Any = object()
 
 
+def scene_knowledge(tenant_id: str | None = None) -> str:
+    """The knowledge commit a DEFAULT stamp names (#1108 P4, OD5): the commit the scene's
+    published tenant's `exports/current` names — `tenant_id`'s, or the data root's one
+    PUBLISHED tenant's — so a source, its siblings and the live capture name a commit its clone
+    really holds (flow 7 materialises and pins it). A scene with no (or several) published
+    tenants and no `tenant_id` keeps the placeholder `KNOWLEDGE_SHA`."""
+    raw = os.environ.get("DEFENDER_DATA_ROOT")
+    if not raw:
+        return KNOWLEDGE_SHA
+    root = Path(raw)
+    if tenant_id is None:
+        published = sorted(p.name for p in root.iterdir()
+                           if (p / "exports" / "current").is_file()) if root.is_dir() else []
+        if len(published) != 1:
+            return KNOWLEDGE_SHA
+        tenant_id = published[0]
+    pointer = root / tenant_id / "exports" / "current"
+    return pointer.read_text(encoding="utf-8").strip() if pointer.is_file() else KNOWLEDGE_SHA
+
+
 def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = False,
                       unavailable: str | None = None, model: str | None = "m-1",
                       scope: str | None = "repo",
@@ -768,7 +794,7 @@ def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = Fa
         "unavailable": unavailable, "scope": scope, "model": model,
     }
     if knowledge is _DEFAULT_KNOWLEDGE:
-        doc["knowledge"] = {"commit": KNOWLEDGE_SHA}
+        doc["knowledge"] = {"commit": scene_knowledge(tenant_id)}
     elif knowledge is not NO_KNOWLEDGE_KEY:
         doc["knowledge"] = knowledge
     if dirty:
@@ -813,11 +839,16 @@ class FakeCapture:
     def __init__(self, record: dict) -> None:
         self.record = dict(record)
         self.calls = 0
+        #: A capture built before its scene's tenant was published carries the placeholder;
+        #: it names the scene's knowledge commit once there is one (`scene_knowledge`).
+        self._scene_knowledge = self.record.get("knowledge") == {"commit": KNOWLEDGE_SHA}
 
     def __call__(self):
         from defender.records._provenance import RunProvenance
 
         self.calls += 1
+        if self._scene_knowledge:
+            self.record["knowledge"] = {"commit": scene_knowledge(self.record.get("tenant_id"))}
         built = RunProvenance.from_obj(self.record)
         if built is None:
             raise AssertionError(f"FakeCapture was scripted with a record no capture produces: "

@@ -261,17 +261,12 @@
       "drain_worktree": {
         "writers": [
           "defender/box/_lifecycle.py::_plant",
-          "defender/learning/author/version_control/restore.py::_restore_corpus",
-          "defender/learning/author/version_control/restore.py::_revert_strays",
           "defender/runtime/tools/_files.py::_tool_write_file",
           "defender/runtime/tools/_files.py::_tool_edit_file",
-          "defender/learning/leads/draft_synthesis.py::synthesize_drafts",
-          "defender/learning/author/shared.py::commit_corpus"
+          "defender/learning/leads/draft_synthesis.py::synthesize_drafts"
         ],
         "readers": [
           "defender/box/_scrub.py::scrub",
-          "defender/learning/author/version_control/restore.py::_snapshot_corpus",
-          "defender/learning/author/branch.py::AuthorBranch",
           "defender/learning/leads/_lead_spine.py::_verify_corpus_scope",
           "defender/learning/leads/lead_author/_handoff.py::discover_system_drafts",
           "defender/learning/leads/pitfalls_curator.py::_pitfalls_path_rule",

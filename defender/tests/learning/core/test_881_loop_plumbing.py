@@ -35,17 +35,24 @@ def _ids_in(line: str, label: str) -> str:
 
 
 def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_report(tmp_path):
-    paths = h.make_paths(tmp_path)
+    """#1108 P4 (O7, OD12 class ii): the ticks run over a batch draft
+    (`_curator1134.draft_lane`, the real lessons config with `batch=`), since the lane commits
+    only into a tenant batch; the held report is learning state, unchanged."""
+    from defender.tests.support.learning.curation import _curator1134 as C
+
+    lane = C.draft_lane(tmp_path)
+    paths = lane.paths
     ch = h.channel_of("findings")
     legacy = h.row_for("findings", "a/0", direction="adversarial")
     family = h.row_for("findings", "f/0", direction="family", judge_outcome="not-a-word")
     authorable = h.row_for("findings", "z/0")
     h.seed(paths, ch, [legacy, family, authorable])
     agent = h.recording(h.committing("881-o3"))
-    cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
+    cfg = C.draft_author_cfg(lane, invoke_agent=agent)
     report = location_path(paths.state_root) / FINDINGS.report
 
     assert drain.run_batch(cfg=cfg) == 0
+    assert lane.commits(), "the authorable row's lesson never landed on the batch branch"
     assert [[r["finding_id"] for r in call["rows"]] for call in agent.calls] == [["z/0"]], (
         "the tick did not author exactly the one authorable row, so it is not the mixed "
         "batch this test is about"

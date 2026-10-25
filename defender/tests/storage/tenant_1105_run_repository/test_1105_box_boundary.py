@@ -150,8 +150,11 @@ def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> di
     script = run_dir / "_probe_s3_1105.py"
     script.write_text(_PROBE, encoding="utf-8")
     command = f"python3 /runs/current/{script.name} /runs/current {runs} {SIBLING_ID}"
+    from defender.tests.support.tenancy._run_copy_stage import staged_agent
+
+    agent, token = staged_agent(Path(t.agent), run_dir.parent.parent / "run-copies")
     box = start_box(run_dir, defender_dir, spec=BoxSpec(runtime=runtime),
-                    tenant_agent=t.agent, tenant_id=t.id)
+                    tenant_agent=agent, tenant_id=t.id, staged_token=token)
     sandboxed, name = box.sandboxed, box.name
     try:
         result = box.run_parsed(parse(command), command=command, cwd=Path("/runs/current"),

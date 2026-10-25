@@ -3,10 +3,10 @@
 ``defender/`` that bypass the shared ``defender._git`` facade.
 
 Hand-rolled copies of "run a git argv, check rc, return stdout" (plus ``git status
---porcelain`` parsing and worktree add/remove/prune) each re-derive the rc check, the error
+--porcelain`` parsing) each re-derive the rc check, the error
 message and the porcelain parsing, and non-``-z`` parsing mis-handles spaced paths. The
-single surface is ``defender/_git.py`` (``git`` / ``git_status`` / ``git_commit`` /
-``git_worktree_*`` / ``GitError``); route every git invocation through it.
+single surface is ``defender/_git.py`` (``git`` / ``git_status`` / ``git_head_sha`` /
+``git_show_file`` / ``GitError``); route every git invocation through it.
 
 What this flags: any call whose first positional argument is a **list literal
 starting with the string** ``"git"`` — e.g. ``subprocess.run(["git", "status", …])``,
@@ -144,7 +144,7 @@ def main(argv: list[str]) -> int:
         return 2
     print(
         "Route git invocations through the defender._git facade (git / git_status / "
-        "git_commit / git_worktree_* / GitError), not a hand-rolled subprocess call."
+        "git_head_sha / git_show_file / GitError), not a hand-rolled subprocess call."
     )
     print("Mark a sanctioned git subprocess with `# lint-git: ok — <reason>`.")
     return gate(

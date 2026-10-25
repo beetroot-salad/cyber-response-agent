@@ -23,7 +23,8 @@ message, after the indexes — carries:
 - `lead_id` — the `l-NNN` id; the harness uses it as the queries-table FK. You
   never pass it to the `query` tool — just run your query.
 - `system` — system of record (a `skills/` subdir). The catalog of templates is
-  at `{defender_dir}/skills/gather/queries/{system}/`.
+  at `/agent/skills/gather/queries/{system}/` (the tenant's knowledge tree,
+  `$DEFENDER_AGENT_DIR`; the index above already lists the ones you may run).
 - `goal` — the measurement contract, usually one sentence. It may also carry
   evidence the harness already resolved, delimited as §Untrusted data describes;
   pick your query's filter axes off it.
@@ -143,7 +144,8 @@ query(system="{system}", verb="{verb}", params={...}, query_id="{system}.<id>")
   Reach for it only when the aggregation genuinely could not be expressed in the query, and
   **Read `{defender_dir}/skills/gather/defender-sql.md` before you write the SQL** — the
   `data` table contract, the idiom for each payload shape, and the truncation check a count
-  needs first.
+  needs first — and, when your Dispatch names a `reducer_pitfalls` page, its
+  `## Common pitfalls` section: prior SQL mistakes on this tenant's data; don't repeat them.
 - The aggregation result — the `{columns, row_count, values}` table — **is your
   summary**: computed over the full match server-side (the `COUNT`/`SUM`/`MIN`/`MAX`
   scalars are exact), small — report those values. (A `row_count` of exactly 1000

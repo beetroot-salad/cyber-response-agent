@@ -18,7 +18,6 @@ from defender.tests.support.shared.contracts._frontend_outputs import frontend_o
 
 from defender._io import read_jsonl_rows
 from defender.learning.author import drain
-from defender.learning.author.branch import AuthorBranch
 from defender.learning.core import quarantine
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import FINDINGS, PITFALLS, QUESTIONER_FINDINGS, Channel, LearningState
@@ -554,7 +553,6 @@ def test_held_is_the_writers_count_of_archives_not_of_readable_manifests(paths):
 
 def test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root(view, paths):
     assert view["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
-    assert paths.quarantine_dir == AuthorBranch(repo_root=paths.repo_root).quarantine_dir
     assert not str(paths.quarantine_dir).startswith(str(location_path(paths.state_root)))
     assert html.escape(str(paths.quarantine_dir), quote=True) in _rendered(build.render_queues(view))
 
@@ -778,7 +776,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
         assert Path(queues["quarantine"]["tainted"]["dir"]) == LoopPaths.for_tenant(tenant).quarantine_dir
         assert _embedded_data((area / "queues.html").read_text(encoding="utf-8")) == queues
         lessons = json.loads((area / "lessons.json").read_text(encoding="utf-8"))
-        assert set(lessons["groups"]) == {"defender", "actor", "environment", "questioner"}
+        assert set(lessons["groups"]) == {"defender", "questioner"}  # U5 (#1108 P4)
         assert 'href="queues.html"' in (area / "lessons.html").read_text(encoding="utf-8")
         assert 'href="lessons.html"' in (area / "queues.html").read_text(encoding="utf-8")
         assert [p.name for p in run_visualizations_dir.iterdir()] == [tenant.id]

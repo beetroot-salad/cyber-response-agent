@@ -276,10 +276,13 @@ def _resume_sibling(ep: Path, label: str = "b") -> Path:
 
 
 def _resume_sibling_at(ep: Path, label: str, life: _Lifecycle) -> Path:
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
     rc = S.sym(RUN, "main")(
         ["--episode", ep.name, "--world", label, "--tenant", TENANT, "--no-learn"],
         lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
-        ticket_writer=S.NoTicket())
+        ticket_writer=S.NoTicket(), publish=in_process_publish())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
     return life.run_dir
 

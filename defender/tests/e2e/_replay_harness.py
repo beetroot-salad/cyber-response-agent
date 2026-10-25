@@ -471,11 +471,36 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
             "beside it is silently discarded — assert over the source run's own handle instead")
 
 
-def _default_tenant() -> Any:
-    """The tenant a replay that names none runs as: the committed fixture, set up under the
-    current data root (#1120 H2) — the test's own, or, for a module-scoped drive that runs
-    before it, the session's (conftest's `session_data_root`)."""
-    return _tenants1106.fixture_tenant()
+def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
+    """The tenant a replay that names none runs as, and the PUBLISHED export the run reads
+    (`<T>/exports/<commit>/`: its `agent/` and its `settings/`, one commit, O-B; #1108 P4,
+    P-1/O11: every reader of tenant knowledge reads an export, made by the one real helper),
+    never the clone's working tree.
+
+    Without `agent`: the committed fixture tenant, set up under the current data root (#1120
+    H2) — the test's own, or, for a module-scoped drive that runs before it, the session's
+    (conftest's `session_data_root`). With `agent` (A8: a golden carries the agent content it
+    reads): the fixture's settings with THAT tree as the agent half, under an id of its own
+    (one per golden). Either is published through `tenant_1108_p4._support.publish_once` on each
+    drive (an unchanged folder republishes the same commit), so an edit a test made to the
+    tenant's folder is what the run reads."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+    from defender.tests.tenancy.tenant_1108_p4._support import (
+        export_dir,
+        place_fixture,
+        publish_once,
+    )
+
+    root = current_data_root()
+    if agent is None:
+        tenant_id = str(_tenants1106.fixture_tenant().id)
+    else:
+        tenant_id = fixture_uuid(f"tenant:golden-agent:{Path(agent).parent.name}")
+        if not (root / tenant_id / "tenant.json").is_file():
+            place_fixture(root, tenant_id, agent=Path(agent))
+    published = publish_once(root.with_name(f"{root.name}-p4-forge"), root=root,
+                             tenant_id=tenant_id)
+    return published.tenant, export_dir(published.tenant, published.commit)
 
 
 def _no_docker_daemon(argv: list[str], **_kw: Any) -> Any:
@@ -506,9 +531,20 @@ def production_unboxed_box(run_dir: Path, defender_dir: Path, run_tenant: Any) -
     is hidden: the opt-out's "running UNSANDBOXED" warning and the startup fault's did-not-run
     scrub marker beside the run folder (`RunPaths.scrub_verdict`) are production's, and land in
     every replay that takes this default."""
+    token = getattr(run_tenant, "stage_token", None)
+    agent = Path(run_tenant.agent)
+    if token is None:
+        # A run box is started over a run copy (`start_box` refuses a bare agent folder): a
+        # replay tenant with none gets its agent half staged beside the run folder.
+        from defender.tests.support.tenancy._run_copy_stage import staged_agent
+
+        import tempfile
+
+        agent, token = staged_agent(agent, Path(tempfile.mkdtemp(prefix="replay-run-copy-")))
     with _unsandboxed_allowed():
         return box_mod.start_box(run_dir, defender_dir, docker=_no_docker_daemon,
-                                 tenant_agent=run_tenant.agent, tenant_id=run_tenant.tenant_id)
+                                 tenant_agent=agent, tenant_id=run_tenant.tenant_id,
+                                 staged_token=token)
 
 
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
@@ -516,11 +552,15 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None) -> dict:
+        clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None,
+        agent: Path | None = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
-    plumbing-free."""
+    plumbing-free.
+
+    `agent` runs the replay as a tenant whose agent half is that tree (a golden's own `agent/`,
+    #1108 P4 A8), published for real (`_default_tenant`); it cannot be combined with `tenant`."""
     # Legacy replay labels are retained in this helper's call shape. The real run identity
     # comes from its directory: materialize(run_id=<label>) names it the label's fixture UUID.
     state = run_state if run_state is not None else RunState(run_dir, run_dir.name)
@@ -529,7 +569,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
         orient_shim=orient_shim, run_state=state, clock=clock, roster=roster, systems=systems,
-        wrap_model=wrap_model,
+        wrap_model=wrap_model, agent=agent,
     )
     return {**summary, "run_state": state}
 
@@ -539,13 +579,16 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None) -> dict:
+        clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None,
+        agent: Path | None = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
     passed at all, so the run resolves its own at the boundary — production's path (`run.py`
     hands none)."""
     _refuse_conflicting_store_seams(resume, store_factory)
+    if agent is not None and tenant is not None:
+        raise ValueError("drive(agent=...) builds its own tenant; tenant= beside it would be ignored")
     tree = defender_dir if defender_dir is not None else DEFENDER
     make_model = _fake_make_model(main, gather,
                                   dispatches_correlation=resume is None and verbs is not None,
@@ -592,9 +635,12 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     # scenario that will dispatch the lead (an injected registry, no resume), exactly the runs
     # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
     # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
+    roots: dict[str, Path] = {}
+    if tenant is None:
+        tenant, export = _default_tenant(agent)
+        roots = {"agent_root": export / "agent", "settings_root": export / "settings"}
     run_tenant = _tenants1106.run_tenant(
-        tenant if tenant is not None else _default_tenant(),
-        defender_dir=tree,
+        tenant, defender_dir=tree, **roots,
         dispatches_lead_zero=resume is None and verbs is not None,
     )
     seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)

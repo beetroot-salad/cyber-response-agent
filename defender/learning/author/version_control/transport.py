@@ -11,7 +11,7 @@ from pathlib import Path
 
 from defender import _git
 
-from .auth import ForgejoIdentity
+from .auth import ForgeCredential
 from .credentials import network_git
 from .forgejo import ForgeAddress
 
@@ -66,7 +66,7 @@ def _environment(home: Path) -> dict[str, str]:
 class GitTransport:
     repository: Path
     origin: str
-    identity: ForgejoIdentity
+    identity: ForgeCredential
     timeout: float
 
     def __post_init__(self) -> None:

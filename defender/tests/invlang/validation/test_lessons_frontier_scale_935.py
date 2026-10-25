@@ -17,7 +17,12 @@ from defender.skills.invlang.parser import scan_fences  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402
 from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
 
-CORPUS = DEFENDER / "lessons"
+from defender.tests.support.shared._pre_p4_shipped import LESSONS as SHIPPED_LESSONS  # noqa: E402
+
+#: The corpus these cases rank against: the lessons this repo shipped before #1108 P4 moved
+#: lessons to each tenant (O1, O-U5), byte for byte — the retrieval engine is the subject, and
+#: its motivating lesson and the run reproductions below are pinned against that real corpus.
+CORPUS = SHIPPED_LESSONS
 
 TWO_VERTEX_DOC = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]

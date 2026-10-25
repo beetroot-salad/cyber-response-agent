@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 from collections.abc import Iterable, Mapping
@@ -17,6 +18,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.branch import _world_1007 as W
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 
 #: Lab names that are also plain English words: counted only where they read as a system name
@@ -136,9 +138,20 @@ def _launch(tmp_path: Path, monkeypatch: Any, est: S.Estate, **kw: Any) -> S.Lau
     launcher records before pre-flight (the manifest, the samples record, the question-writer's
     prompt), and a pre-flight that spends nothing keeps them fast."""
     monkeypatch.setenv(S.KNOB_RATE, "100")
+    kw.setdefault("lessons_dir", _fixture_questioner_corpus(tmp_path))
     kw.setdefault("oracle", S.oracle(then=S.text_only()))
     kw.setdefault("verifier", S.passing_verifier())
     return S.launch(tmp_path, est, **kw)
+
+
+def _fixture_questioner_corpus(tmp_path: Path) -> Path:
+    """A copy of the fixture tenant's questioner corpus (made-up content). #1108 P4 O1/O11: a
+    launch that names no corpus must not read this checkout's `lessons-questioner/`, which the
+    product tree no longer holds; flow 7's export-sourced default is S-E's to pin."""
+    corpus = tmp_path / "fixture-agent" / "lessons-questioner"
+    if not corpus.is_dir():
+        shutil.copytree(FIXTURE_AGENT / "lessons-questioner", corpus)
+    return corpus
 
 
 def _manifest(ep: Path) -> dict | None:

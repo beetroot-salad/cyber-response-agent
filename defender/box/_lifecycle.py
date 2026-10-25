@@ -5,8 +5,6 @@ box, not properties of one.
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import contextlib
 import logging
 import os
@@ -19,7 +17,7 @@ from pathlib import Path, PurePosixPath
 
 from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
 from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
-from defender.tenancy._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
+from defender.tenancy._tenant import TenantId
 from defender.configuration import publish_root
 from defender.run_repository import RUN_LAYOUT
 from defender.execution.box_codec import (
@@ -92,6 +90,7 @@ class _LaneMount:
 
 def _run_lane_mounts(
     run_dir: Path, defender_dir: Path, tenant_agent: Path | None,
+    staged_token: Path | None = None,
 ) -> list[_LaneMount]:
     """The host trees the run lane mounts, in argv order: the one list the lane's argv is
     rendered from and the publish-root check judges (#1279 O3), so the check sees exactly what
@@ -106,11 +105,15 @@ def _run_lane_mounts(
         _LaneMount("defender dir", defender_dir, "Check out the tree", MODEL_DEFENDER, readonly=True),
     ]
     if tenant_agent is not None:
-        # The agent half lives under the data root, beside the run dir: moving it means moving
-        # the data root. Never plant a sentinel here: it would dirty the tenant clone. Its
-        # existing identity marker is read back through the box before the executor is returned.
+        # The run copy's agent half (#1108 P4, U9: `stage/agent/`), under the data root, read-only;
+        # nothing is ever planted in it. Identity was checked once, when its commit was published.
         mounts.append(_LaneMount("tenant agent half", tenant_agent, data_root, MODEL_AGENT,
                                  readonly=True))
+    if staged_token is not None:
+        # The rest of the copy's `stage/` — the startup token beside `agent/` — read-only at a
+        # target of its own, outside the model view, read back once the box is up.
+        mounts.append(_LaneMount("run copy stage", staged_token.parent, data_root,
+                                 PurePosixPath(STAGE_TARGET), readonly=True))
     # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root:
     # the file the image's time-faking preload reads, outside every tree the model view shows.
     mounts.append(_LaneMount("run clock directory", clock_dir(run_dir), data_root, PurePosixPath(CLOCK_TARGET),
@@ -399,42 +402,70 @@ def _refuse_a_second_code_mount(request: BoxRequest) -> None:
         )
 
 
-def _check_tenant_identity(path: Path, expected: TenantId, docker: DockerFn, name: str) -> None:
-    """Read bounded marker bytes through the bind, then judge them with their sole parser.
+#: Where a run box sees its run copy's `stage/` (#1108 P4, U9): only the startup token is read
+#: there; the agent half is the model view's `/agent`.
+STAGE_TARGET = Path("/run-stage")
 
-    Base64 preserves raw CR and invalid UTF-8 across Docker's text-mode boundary.
-    The in-box reader shares the owner's nonblocking, no-follow, regular-file checks.
-    """
-    command = (
-        "import base64, sys; from pathlib import Path; "
-        "from defender.tenancy._tenant import read_tenant_id_bytes; "
-        "print(base64.b64encode(read_tenant_id_bytes(Path(sys.argv[1]))).decode('ascii'))"
-    )
-    proc = _call(docker, ["docker", "exec", name, "python3", "-c", command, str(path)])
-    if proc.returncode != 0:
-        raise BoxFault(f"could not read tenant identity {path}: {(proc.stderr or '').strip()}")
+
+def _check_stage(staged_token: Path) -> None:
+    """The run copy's `stage/` holds exactly a real `agent/` folder and the token file, judged
+    on the host without following any entry, before the box is created (U9)."""
+    stage = staged_token.parent
+    with bind(stage) as root:
+        listed = stat_entries(root)
+    if listed.stats is None:
+        raise BoxFault(f"could not list the run copy's stage {stage}: "
+                       f"{listed.refusal or 'it is absent'}")
+    agent, token = listed.stats.get("agent"), listed.stats.get(staged_token.name)
+    if (sorted(listed.stats) != sorted({"agent", staged_token.name}) or agent is None
+            or token is None or not stat.S_ISDIR(agent.st_mode)
+            or not stat.S_ISREG(token.st_mode)):
+        raise BoxFault(
+            f"the run copy's stage {stage} must hold exactly a real agent/ folder and the "
+            f"startup token {staged_token.name}; it holds {sorted(listed.stats)}")
+
+
+def _judge_stage(run_dir: Path, tenant_agent: Path | None, staged_token: Path,
+                 write_verdict: Callable[[dict], None] | None) -> None:
+    """The run's agent half is its run copy's `stage/agent/`, and that stage holds exactly it
+    and the startup token (`_check_stage`): judged before the box-or-host choice, so a fault
+    here is a refusal on either path and never the unsandboxed opt-out's to swallow. A refusal
+    writes the did-not-run marker, as every startup fault does."""
     try:
-        data = base64.b64decode((proc.stdout or "").removesuffix("\n"), validate=True)
-        found = parse_tenant_id_bytes(data, path)
-    except (ValueError, binascii.Error, TenantRefused) as error:
-        raise BoxFault(f"{path}: {error}") from error
-    _require_tenant_identity(path, found, expected)
+        if tenant_agent != staged_token.parent / "agent":
+            raise BoxFault(f"the run's agent folder {tenant_agent} is not its run copy's "
+                           f"{staged_token.parent / 'agent'}")
+        _check_stage(staged_token)
+    except BoxFault as e:
+        write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
+        raise
 
 
-def _require_tenant_identity(path: Path, found: str, expected: TenantId) -> None:
-    if found != expected:
-        raise BoxFault(f"{path} names tenant {found!r}; expected tenant {expected!r}")
+def _read_back_stage_token(staged_token: Path, docker: DockerFn, name: str) -> None:
+    """Startup reads the staged token back through the box, byte for byte (O-A): a box bound to
+    another copy, or to none, refuses before any workload runs."""
+    with bind(staged_token.parent) as root:
+        found = root.read(staged_token.name)
+    if found.text is None:
+        raise BoxFault(f"could not read the run copy's startup token {staged_token}: "
+                       f"{found.refusal or 'it is absent'}")
+    proc = _call(docker, ["docker", "exec", name, "cat", str(STAGE_TARGET / staged_token.name)])
+    _require_preload(proc.stderr, name)
+    if proc.returncode != 0 or (proc.stdout or "") != found.text:
+        raise BoxFault(
+            f"the box could not read back the run copy's startup token {staged_token} — the "
+            "knowledge inside the box is not this run's copy")
 
 
-def _start_boxed(
+def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path, spec: BoxSpec, docker: DockerFn,
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
-    tenant_id: TenantId | None = None,
+    staged_token: Path | None = None,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
-        lane = _run_lane_mounts(run_dir, defender_dir, tenant_agent)
+        lane = _run_lane_mounts(run_dir, defender_dir, tenant_agent, staged_token)
         _refuse_a_start_that_conflicts(docker, name, [(m.what, m.source) for m in lane])
     except BoxFault as e:
         # Every startup fault path writes the did-not-run marker, so the tree never reads as
@@ -482,10 +513,8 @@ def _start_boxed(
             clock_file.parent, CLOCK_TARGET, docker, name,
             f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
         )
-        if tenant_agent is not None:
-            assert tenant_id is not None
-            # Read through the bind, where the box sees the agent half (`/agent`).
-            _check_tenant_identity(Path(MODEL_AGENT) / ".tenant-id", tenant_id, docker, name)
+        if staged_token is not None:
+            _read_back_stage_token(staged_token, docker, name)
         _probe_alias_ban(docker, name, Path(MODEL_RUN), spec.runtime)
     except BaseException as e:
         # The box is ours (create succeeded); the reap is best-effort so it cannot skip the
@@ -636,12 +665,11 @@ def _opt_out_or_raise(fault: BoxFault) -> None:
 def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     """Env for the unboxed opt-out: the host env minus provider keys, like
     `run_common.run_env`, not the container-shaped `_render_env` (no HOME, box-only PATH)."""
-    from defender.runtime import providers
+    from defender.run_common import provider_scrubbed_environ
 
-    env = dict(os.environ)
+    # The one host-child scrub: no provider key and no issuer login variable (#1108 P4 O8).
+    env = provider_scrubbed_environ()
     env.pop("DEFENDER_AGENT_DIR", None)
-    for var in providers.api_key_vars():
-        env.pop(var, None)
     env.update({k: v for k, v in request.env.items() if k in BOX_ENV_ALLOWLIST})
     if request.view is not None and "DEFENDER_AGENT_DIR" in env:
         agent = request.view.to_host(env["DEFENDER_AGENT_DIR"])
@@ -665,12 +693,14 @@ def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
     spec: BoxSpec | None = None, docker: DockerFn = _docker, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
-    tenant_id: TenantId | None = None,
+    tenant_id: TenantId | None = None, staged_token: Path | None = None,
 ) -> BoxExecutor:
-    """Start the run's box. `tenant_agent` is the resolved tenant `agent/` half, bound
-    read-only at that same path. `tenant_id` is the accepted identity, not a reread of
-    the host marker. Direct callers without an accepted record capture it before create.
-    Both tenant arguments are illegal with a `BoxRequest`, which carries its own mounts."""
+    """Start the run's box. `tenant_agent` is the run's agent half (its run copy's
+    `stage/agent/`, #1108 P4), bound read-only at the model view's `/agent`; `staged_token` is
+    the startup token beside it in the copy's `stage/`, read back through the box before the
+    executor is returned (O-A). `tenant_id` is accepted for callers that still pass it and is
+    not read: P2's in-box `.tenant-id` check is retired (identity is checked at publish). The
+    tenant arguments are illegal with a `BoxRequest`, which carries its own mounts."""
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
         # `is not None`, not a comparison with the env-resolved DEFAULT_SPEC. The env is not
@@ -680,7 +710,7 @@ def start_box(
                 "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
                 "set it on the request (BoxRequest(..., spec=…)) instead of the call"
             )
-        if tenant_agent is not None or tenant_id is not None:
+        if tenant_agent is not None or tenant_id is not None or staged_token is not None:
             raise TypeError(
                 "start_box(request, tenant_agent=…) is ambiguous — a BoxRequest carries its "
                 "own mounts; put the tenant's agent half in them instead of the call"
@@ -699,13 +729,14 @@ def start_box(
         return BoxExecutor(spec=request.spec,
                            transport=_HostTransport(_host_fallback_env(request), request.view), name="")
 
-    return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent, tenant_id,
-                          write_verdict)
+    del tenant_id
+    return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent,
+                          staged_token, write_verdict)
 
 
-def _start_run_box(
+def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path | None, spec: BoxSpec | None, docker: DockerFn,
-    tenant_agent: Path | None, tenant_id: TenantId | None,
+    tenant_agent: Path | None, staged_token: Path | None,
     write_verdict: Callable[[dict], None] | None,
 ) -> BoxExecutor:
     if defender_dir is None:
@@ -716,20 +747,20 @@ def _start_run_box(
         # lint-default: ok — the env lever is this default's single source; `spec=` must stay
         # distinguishable from unset for the BoxRequest ambiguity check.
         spec = BoxSpec.from_env(os.environ)
-    if tenant_agent is None and tenant_id is not None:
-        raise TypeError("tenant_id needs tenant_agent")
-    if tenant_agent is not None and tenant_id is None:
-        tenant_id = read_tenant_id_file(tenant_agent / ".tenant-id")
+    if (tenant_agent is None) != (staged_token is None):
+        # A run box's agent folder is always a run copy's `stage/agent/` (#1108 P4, U9): the
+        # stage's token is what proves the bind is this run's copy, so there is no tenant
+        # agent without one (and the retired `.tenant-id` check has no case left to cover).
+        raise TypeError("a run box's tenant_agent and staged_token come together: the agent "
+                        "folder is a run copy's stage/agent/, its token beside it")
+    if staged_token is not None:
+        _judge_stage(run_dir, tenant_agent, staged_token, write_verdict)
     try:
         return _start_boxed(run_dir, defender_dir, spec, docker,
-                            tenant_agent=tenant_agent, tenant_id=tenant_id,
+                            tenant_agent=tenant_agent, staged_token=staged_token,
                             write_verdict=write_verdict)
     except BoxFault as e:
         _opt_out_or_raise(e)
-    if tenant_agent is not None:
-        assert tenant_id is not None
-        path = tenant_agent / ".tenant-id"
-        _require_tenant_identity(path, read_tenant_id_file(path), tenant_id)
     # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run
     # staging tree, never the real runs folder.
     from ._stage import staged_executor

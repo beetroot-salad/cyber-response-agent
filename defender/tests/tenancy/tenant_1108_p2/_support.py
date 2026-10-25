@@ -6,8 +6,7 @@ from pathlib import Path
 
 from defender import box as box_mod
 from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS
-from defender.tests.e2e._box665 import DockerFault, RecordingDocker
-from defender.tests.e2e._local_box_command import run_box_python_command
+from defender.tests.e2e._box665 import RecordingDocker
 
 
 def tree_bytes(root: Path) -> dict[str, bytes | None]:
@@ -34,38 +33,8 @@ class MountedReadDocker(RecordingDocker):
         return super().__call__(argv, **kw)
 
 
-class AgentReadDocker(MountedReadDocker):
-    """Docker fault seam: route only the agent identity read to another physical folder.
-
-    Everything else, including create argv, sentinel reads and alias probe, is the shared
-    fake. The independent source models a daemon bind to a wrong folder; it neither judges
-    tenant ids nor fakes permission policy. Observe the source at EVERY boundary call so
-    a transient startup plant that is later removed cannot escape the no-write assertion.
-    """
-
-    def __init__(self, agent: Path, *, inside: Path | None = None, fail_create: bool = False):
-        super().__init__(create=DockerFault(rc=1, stderr='daemon unavailable')
-                         if fail_create else None)
-        self.agent = agent
-        self.inside = inside if inside is not None else agent
-        self.identity_reads: list[list[str]] = []
-        self.snapshots: list[dict[str, bytes | None]] = []
-
-    def __call__(self, argv, **kw):
-        argv = list(argv)
-        self.snapshots.append(tree_bytes(self.agent))
-        if len(argv) > 1 and argv[1] == 'exec' and argv[-1].endswith('/.tenant-id'):
-            self.calls.append(argv)
-            self.identity_reads.append(argv)
-            # Run the actual read command. Docker's current process boundary is text=True,
-            # including universal-newline conversion and UTF-8 replacement. A plain cat of
-            # invalid bare CR therefore cannot fool this fake into preserving bytes Docker
-            # would lose; a byte-safe encoded helper is observed with its actual output.
-            name = self.create_argv[self.create_argv.index('--name') + 1]
-            command = argv[argv.index(name) + 1:]
-            command[-1] = str(self.inside / '.tenant-id')
-            return run_box_python_command(command)
-        return super().__call__(argv, **kw)
+# `AgentReadDocker` (routed the in-box `.tenant-id` read) retired with that check (#1108 P4,
+# O-A): the run box's bind is proven by the staged token instead (tenant_1108_p4/test_run_copy.py).
 
 
 def start_with(docker):

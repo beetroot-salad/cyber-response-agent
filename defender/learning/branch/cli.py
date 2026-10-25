@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import dataclasses
 import functools
 import os
 import sqlite3
@@ -57,10 +58,12 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 from defender.records import _alert_input, _provenance
 from defender.records._locations import DataRoot
 from defender.episodes._episode_handle import Episode
+from defender.episodes._knowledge_pin import pin_text
 from defender._io import (
     NotPlainEntry,
 )
 from defender._paths import PATHS
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.run_repository import (
     EpisodeRuns,
     Run,
@@ -172,19 +175,25 @@ def source_input(source: Run) -> tuple[bytes, str]:
         raise SourceInputReplaced(f"[branch] {replaced}") from replaced
 
 
-def _copy_source_input(episode: Episode, raw: bytes, record_text: str) -> None:
+def _copy_source_input(episode: Episode, raw: bytes, record_text: str,
+                       knowledge_commit: str | None = None) -> None:
     """Put the source run's alert and its record in the episode, once (A1): the judge's whole
-    input about the alert, and every sibling's own."""
+    input about the alert, and every sibling's own; and the family's knowledge pin, when the
+    launcher decided one (`episodes._knowledge_pin`)."""
     episode.source_alert.create(raw)
     episode.source_record.create(record_text)
+    if knowledge_commit is not None:
+        episode.knowledge_pin.create(pin_text(knowledge_commit))
 
 
 def prepare_episode(
     runs: RunsRepository, source: Run, *,
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
+    knowledge_commit: str | None = None,
 ) -> EpisodeRuns:
-    """Claim a fresh episode, copy the source's input into it, prime the family's base into it
-    once, and hand back its view held open: the launcher's door, whose caller closes it."""
+    """Claim a fresh episode, copy the source's input (and the family's knowledge pin,
+    `knowledge_commit`) into it, prime the family's base into it once, and hand back its view
+    held open: the launcher's door, whose caller closes it."""
     # Judged before an episode is claimed, so a refused source leaves no debris.
     raw, record_text = source_input(source)
     try:
@@ -193,7 +202,7 @@ def prepare_episode(
         raise LauncherRefused(f"[branch] a fresh episode could not be claimed: {refused}") \
             from refused
     try:
-        _copy_source_input(view.episode, raw, record_text)
+        _copy_source_input(view.episode, raw, record_text, knowledge_commit)
         _prime_once(view.episode, view.episode_id, source.run_dir, prime)
     except BaseException:
         view.close()
@@ -297,16 +306,67 @@ def _source_stamp_agrees(source: Run, tenant_id: _tenant.TenantId) -> None:
 
 def sibling_argv(
     episode_id: str, world_label: str, *, tenant_id: _tenant.TenantId, model: str | None = None,
+    knowledge_commit: str | None = None,
 ) -> list[str]:
     """One sibling's command line: its tenant, its episode and which arm of it this process is
-    — ids only, never a path (#1105 PR 2) — and the model."""
+    — ids only, never a path (#1105 PR 2) — the model, and the knowledge commit every sibling
+    is pinned to (O-PIN, #1108 P4: the source run's, so no publish moves a family's knowledge)."""
     argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
             # EVERY RUN NAMES ITS TENANT (#1078), a sibling included: the episode's, which this
             # launcher accepted once. The child looks its episode up under that tenant only.
             "--tenant", tenant_id, "--episode", episode_id, "--world", world_label]
+    if knowledge_commit is not None:
+        argv += ["--knowledge-commit", knowledge_commit]
     if model is not None:
         argv += ["--model", model]
     return argv
+
+
+def _pinned_export(tenant: RunTenant, source: Run) -> Any:
+    """The export every sibling is pinned to and the questioner's corpus is read from (flow 7,
+    O-PIN): the knowledge commit the source run's HOST-HELD knowledge record names (U12, beside
+    the run folder, where no box writes), materialised from the tenant clone when absent —
+    never its provenance stamp, which sits in the box's rw bind (the stamp is compared against
+    this pin at pre-flight, never read for it). A record that cannot be read has no commit to
+    pin to, so it refuses — `--allow-dirty` does not waive it (OD9) — as does a commit the
+    clone cannot materialise; both before anything is spent. Only a source from before records
+    were written (no record, and a stamp naming no knowledge source) is judged by its stamp, as
+    before: a commit it names, a refusal for `unversioned`/`unavailable`, or with none recorded
+    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`)."""
+    from defender.learning.author.version_control import (
+        DeliveryRefused,
+        LockBusy,
+        current_export,
+        materialise_export,
+    )
+    status = source.knowledge_status()
+    commit = None if status is None else status.commit
+    try:
+        if status is None:
+            # A source from before host records: its stamp is all there is (#1204's rules).
+            revision = _provenance.KnowledgeRevision.from_wire(
+                (_stamp_of(source) or {}).get("knowledge"))
+            if revision is None:
+                return current_export(tenant.tenant)
+            if revision.commit is None:
+                why = (f"unavailable knowledge ({revision.unavailable})"
+                       if revision.unavailable is not None else "unversioned knowledge")
+                raise LauncherRefused(
+                    f"[branch] source run {source.run_dir}'s stamp names {why}: there is no "
+                    "knowledge commit to pin its siblings to, so the family cannot be launched "
+                    "(not waived by --allow-dirty)")
+            commit = revision.commit
+        elif commit is None:
+            raise LauncherRefused(
+                f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
+                "is no knowledge commit to pin its siblings to, so the family cannot be "
+                "launched (not waived by --allow-dirty)")
+        return materialise_export(tenant.tenant, commit)
+    except (DeliveryRefused, LockBusy) as refused:
+        at = "" if commit is None else f" ran at knowledge commit {commit}, which"
+        raise LauncherRefused(
+            f"[branch] source run {source.run_dir}{at} cannot be pinned to a knowledge "
+            f"export: {refused}") from refused
 
 
 #: The exit code recorded for an arm whose process never started (spawn raised, or the
@@ -319,6 +379,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
     episode: Episode, world_ids: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
     tenant_id: _tenant.TenantId | None, rate: float | None = None, failed_before: int = 0,
+    knowledge_commit: str | None = None,
 ) -> dict[str, int]:
     """Start the selected world UUIDs together, returning exits keyed by those UUIDs."""
     from defender.tenancy import _tenant
@@ -366,7 +427,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
         ready.wait(timeout=30)
         try:
             code = start(sibling_argv(episode.dir.name, label, tenant_id=tenant_id,
-                                      model=model), env=env)
+                                      model=model, knowledge_commit=knowledge_commit), env=env)
         except Exception as never_started:  # noqa: BLE001 — one arm's failure, not the family's
             ended(world_id, SPAWN_FAILED_EXIT, f"its process never started ({never_started!r})")
             return
@@ -507,10 +568,18 @@ def _launch(  # noqa: PLR0913 — see `main`
     # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
     # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
     # `tmp_path` corpus and this frame is the only one that ever sees the production path.
-    questioner_lessons_dir = PATHS.lessons_questioner_dir if lessons_dir is None else lessons_dir
+    # #1108 P4 flow 7: the family's knowledge is the source's commit, its export materialised
+    # here (git-capable) before anything is spent; the questioner's corpus is that export's.
+    pinned = _pinned_export(tenant, source)
+    questioner_lessons_dir = (
+        KnowledgePaths(Path(pinned.path) / "agent").lessons_questioner_dir
+        if lessons_dir is None else lessons_dir)
     # Injectable so end-to-end tests aren't compared against the suite's own HEAD. The
-    # knowledge half reads the EPISODE tenant's clone, as every sibling's stamp will (#1204 D3).
-    live_capture = ((lambda: _provenance.capture_run(REPO_ROOT, tenant.tenant.knowledge))
+    # knowledge half is the export every sibling is pinned to, as every sibling's stamp will
+    # be (#1204 D3, O-B): never the clone's HEAD, which a publish moves.
+    live_capture = ((lambda: dataclasses.replace(
+        _provenance.capture_tree(REPO_ROOT),
+        knowledge=_provenance.KnowledgeRevision.at(pinned.commit)))
                     if live_tree is None else live_tree)
     source_stamp = preflight_episode(
         source=source, branch_message_id=ns.branch_message_id,
@@ -523,7 +592,7 @@ def _launch(  # noqa: PLR0913 — see `main`
 
         roster = read_roster(adapters_under(_DEFENDER_DIR))
 
-    view = prepare_episode(runs, source)
+    view = prepare_episode(runs, source, knowledge_commit=pinned.commit)
     episode = view.episode
     # Set once the first sibling is about to start: past it, the abort message below ("no
     # sibling started") would be false, so anything raised later is re-raised unchanged.
@@ -537,7 +606,8 @@ def _launch(  # noqa: PLR0913 — see `main`
                 ns, source=source, source_stamp=source_stamp, episode=episode, view=view,
                 questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
                 tenant=tenant, runs=runs, served=served, oracle=oracle,
-                verifier=verifier, roster=roster, started=started)
+                verifier=verifier, roster=roster, started=started,
+                knowledge_commit=pinned.commit)
         except SystemExit:
             raise
         except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -552,7 +622,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     ns: argparse.Namespace, *, source: Run, source_stamp: dict, episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     tenant: RunTenant, runs: RunsRepository, served: Sequence[str], oracle: Any,
-    verifier: Any, roster: Any, started: threading.Event,
+    verifier: Any, roster: Any, started: threading.Event, knowledge_commit: str | None = None,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -598,7 +668,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         view.start_runs([world.world_id for world in family.worlds])
         exits = start_family(episode, world_ids, spawn=spawn, model=ns.model,
                              tenant_id=tenant.tenant_id, rate=process_oracle_settings().rate,
-                             failed_before=len(unservable))
+                             failed_before=len(unservable), knowledge_commit=knowledge_commit)
     finished = [world_id for world_id in world_ids if exits.get(world_id) == 0]
     with clock.step(Step.VERIFY):
         report = verify_family(

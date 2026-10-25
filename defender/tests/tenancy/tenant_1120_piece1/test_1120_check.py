@@ -667,19 +667,43 @@ GIT_FAILS: list[Any] = [
 @pytest.mark.parametrize(("fault", "cause", "unverified_reason"), GIT_FAILS)
 def test_1159_check_says_this_machines_git_failed_and_exits_1(
         tmp_path: Path, fault: GitFault, cause: str, unverified_reason: str) -> None:
+    """#1159 O2 (V16): when this machine's git fails, `check` over a tenant whose knowledge is
+    a git work tree says, on its own line, that the committed `.tenant-id` cannot be verified
+    and gives git's reason, and exits 1; a plain folder is exempt from that rule.
+
+    #1108 P4 (design gap I, respelled): this case also pinned that the GRANT CENSUS goes blind
+    with git (#1159 O1's census line naming `cause`). The census read git only for the
+    checkout's committed system markers — the product tree's system skills, which P4 deletes
+    (O-U5): the census is the adapters, read cold, and no longer starts git. That half pinned a
+    mechanism P4 removes and is dropped (`cause` is kept in the parameters for the record); the
+    census's own blind line stays pinned by the adapter cases above (`ADAPTER_CAUSE`). V16's
+    half still reads git and is kept whole. What stays of the census half is its converse: the
+    census is git-free, so neither command's output carries the census-not-taken line or either
+    of the census's git causes."""
     folder = _folder(tmp_path, "tenant")
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
     H.plant_row(root)
     env, _reason, _repair = fault(tmp_path, knowledge)
 
-    text, _line = _census_blind_line(_check_folder(folder, **env), folder=folder, cause=cause)
+    def assert_census_taken(text: str) -> None:
+        assert CENSUS_NOT_TAKEN not in text, (
+            f"#1108 P4: the census is git-free, yet it went blind with git ({cause!r}):\n{text}")
+        # The census causes end "... on this machine"; V16's own reason (`unverified_reason`)
+        # is their prefix without it, so V16's line does not match these needles.
+        for git_cause in (GIT_ABSENT_CAUSE, GIT_UNRUNNABLE_CAUSE):
+            assert git_cause not in text, (
+                f"#1108 P4: the census is git-free, yet the output gives a git cause "
+                f"({git_cause!r}):\n{text}")
+
+    text = H.output(_check_folder(folder, **env))
     assert H.CANNOT_VERIFY_TENANT_ID not in text, (
         f"a plain folder (no git work tree) is exempt from the committed-.tenant-id rule:\n{text}")
+    assert_census_taken(text)
 
     for proc in (_check_folder(knowledge, **env), _check_id(root, **env)):
-        text, _line = _census_blind_line(proc, folder=knowledge, cause=cause,
-                                         also=(H.CANNOT_VERIFY_TENANT_ID,))
+        text = H.assert_refused(proc, H.CANNOT_VERIFY_TENANT_ID)
+        assert_census_taken(text)
         unverified = [ln for ln in text.splitlines() if H.CANNOT_VERIFY_TENANT_ID in ln]
         assert len(unverified) == 1, f"V16's line is not printed once (#1159 O2):\n{text}"
         assert CENSUS_NOT_TAKEN not in unverified[0], (

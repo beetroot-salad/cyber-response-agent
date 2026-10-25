@@ -275,24 +275,29 @@ def _stage_frames(text: str) -> tuple[list[str], str]:
 
 def _lesson_author_received(tmp_path: Path, rows: list[dict]) -> tuple[list[dict], str, str]:
     """What the lesson author receives for `rows`: the REAL drain tick (`lessons_run.run_batch`
-    through `_spec773.build_scene`) hands its batch to `cfg.invoke_agent` — the recording fake
+    through `_spec773.build_draft_scene`) hands its batch to `cfg.invoke_agent` — the recording fake
     — whose hook builds the user turn with production's `build_user_prompt` over exactly the
     rows handed. The instructions are the prompt file `cfg.author_prompt` names, read from this
     checkout (the drain's scratch repo carries no copy of the code tree)."""
     seen: dict[str, Any] = {}
+    product: list[Path] = []
 
     def received(handed: list[dict], batch_id: str, cfg: Any) -> None:
         lessons_run = S.mod("learning.author.lessons.run")
         seen["rows"] = [dict(r) for r in handed]
         seen["user"] = lessons_run.build_user_prompt(handed, batch_id, cfg)
-        rel = Path(cfg.author_prompt).relative_to(cfg.repo_root)
+        # The prompt file sits in the product checkout the lane's paths name (#1108 P4: the
+        # config's `repo_root` is the batch's draft, which holds no code).
+        rel = Path(cfg.author_prompt).relative_to(product[0])
         seen["instructions"] = (S.REPO_ROOT / rel).read_text(encoding="utf-8")
 
     skip = [{"finding_id": r["finding_id"], "skip_reason": "front-door suite: not authored"}
             for r in rows]
-    scene = S773.build_scene(tmp_path / "drain", rows=rows,
+    # #1108 P4 (OD12 class ii): the tick runs over a batch's git-free draft.
+    scene = S773.build_draft_scene(tmp_path / "drain", rows=rows,
                              curator=S773.FakeCurator(also=received, committed=[],
                                                       consumed_skip=skip))
+    product.append(scene.paths.repo_root)
     scene.run()
     assert seen, "the drain never handed the batch to the lesson author"
     return seen["rows"], seen["user"], seen["instructions"]

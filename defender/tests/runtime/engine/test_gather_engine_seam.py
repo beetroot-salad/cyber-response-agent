@@ -23,18 +23,22 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 
-def _deps() -> tools.AgentDeps:
+def _deps(**kw) -> tools.AgentDeps:
     return tools.AgentDeps(
         run_dir=Path("/tmp/x"), defender_dir=_DEFENDER, run_id="r",
         policy=compile_policy_for(MAIN_DEF, run_dir=Path("/tmp/x"), defender_dir=_DEFENDER),
-        cwd_anchor=Path("/tmp/x"),
+        cwd_anchor=Path("/tmp/x"), **kw,
     )
 
 
 def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
     """Section ORDER is the cache prefix (#835). The descriptor index and the template index vary
-    only with the dispatched system and the tree; the Dispatch YAML varies with every lead."""
-    deps = _deps()
+    only with the dispatched system and the tree; the Dispatch YAML varies with every lead.
+
+    #1108 P4 (O1, O2): the template index is read from the run's agent root — the tenant's
+    catalog, never the checkout's — so the deps carry the fixture tenant's run tenant, whose
+    `agent/skills/gather/queries/elastic/` holds `elastic.correlate-alerts-by-entity`."""
+    deps = _deps(tenant=T1106.fixture_run_tenant())
     cat = "- `elastic`: desc"
     a = tools._gather_prompt(deps, tools.GatherRequest("l-001", "elastic", "g1", ("d",)), cat)
     b = tools._gather_prompt(deps, tools.GatherRequest("l-002", "elastic", "g2", ("e",)), cat)
@@ -47,7 +51,8 @@ def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
     shared = a.split("## Dispatch")[0]
     assert b.startswith(shared), "two leads on one system no longer share a prompt prefix"
     assert "## Query templates" in shared
-    assert "elastic.sshd-auth-history" in shared
+    assert "elastic.correlate-alerts-by-entity" in shared, (
+        "the shared prefix does not carry the run tenant's elastic template index")
     assert not other.startswith(shared), "the prefix stopped varying with the dispatched system"
 
     assert "lead_id: l-001" in a.split("## Dispatch")[1]
@@ -60,12 +65,9 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
     import asyncio
 
     from defender.runtime import tools_gather
-    from defender.runtime.agent_definition import bind
     from pydantic_ai.exceptions import ModelRetry
 
-    run_dir = tmp_path / fixture_uuid("run")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    deps = _with_run_state(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)))
+    run_dir, deps = _seam_deps(tmp_path)
 
     def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError(f"a malformed system reached the factory: {system!r}")
@@ -118,7 +120,11 @@ def _with_run_state(deps: tools.AgentDeps) -> tools.AgentDeps:
 def _seam_deps(tmp_path: Path):
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
-    return run_dir, _with_run_state(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)))
+    # MAIN's deps carry the run tenant, as the driver hands them (#1108 P4: every dispatched
+    # lead reads the run's knowledge).
+    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
+                               run=_live_run_1165(run_dir), tenant=T1106.fixture_run_tenant())
+    return run_dir, _with_run_state(deps)
 
 
 def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_path):
