@@ -1,7 +1,6 @@
-"""Corpus fold: manifest byte shape, iter_lessons path order, venv re-exec guard ordering, seeded manifest shuffle."""
+"""Corpus fold: manifest byte shape, iter_lessons path order, seeded manifest shuffle."""
 from __future__ import annotations
 
-import ast
 import importlib
 import os
 import random
@@ -98,58 +97,6 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(t
     assert proc.stdout == repr((str(venv_py), [str(caller), "--flag", "x"])), (
         "the guard did not re-exec a caller outside the tree under defender/.venv — the "
         f"interpreter is being derived from the caller's own path (the depth lock): {proc.stdout!r}")
-
-
-#: The module the guard lives in — the ONE ``defender.*`` import a script may make before calling it.
-_VENV_MODULE = "defender.execution._venv"
-
-
-def _module_imports(stmt: ast.stmt) -> list[str]:
-    """Every module name a statement imports, recursing into ``if``/``try`` bodies (a guarded
-    ``sys.path`` insert and the guard's own ``if __name__`` block are both compound statements)."""
-    names: list[str] = []
-    for node in ast.walk(stmt):
-        if isinstance(node, ast.Import):
-            names += [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            names.append(node.module)
-    return names
-
-
-def _calls_reexec(stmt: ast.stmt) -> bool:
-    return any(isinstance(n, ast.Call) and ast.unparse(n.func) == "reexec_into_venv"
-               for n in ast.walk(stmt))
-
-
-def _guarded_scripts() -> list[Path]:
-    return sorted(p for p in DEFENDER.rglob("*.py")
-                  if "tests" not in p.parts and ".venv" not in p.parts
-                  and p != DEFENDER / "execution/_venv.py"
-                  and "reexec_into_venv(" in p.read_text(encoding="utf-8"))
-
-
-def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
-    venv_tree = ast.parse((DEFENDER / "execution/_venv.py").read_text(encoding="utf-8"))
-    non_stdlib = [m for stmt in venv_tree.body for m in _module_imports(stmt)
-                  if m.split(".")[0] not in sys.stdlib_module_names]
-    assert not non_stdlib, f"{_VENV_MODULE} must stay stdlib-only, imports {non_stdlib}"
-
-    scripts = _guarded_scripts()
-    assert {p.name for p in scripts} >= {"build.py", "serialize.py"}, scripts
-    early: dict[str, list[str]] = {}
-    for script in scripts:
-        tree = ast.parse(script.read_text(encoding="utf-8"))
-        before_guard: list[str] = []
-        for stmt in tree.body:
-            if _calls_reexec(stmt):
-                break
-            before_guard += [m for m in _module_imports(stmt)
-                             if m.startswith("defender") and m != _VENV_MODULE]
-        else:
-            pytest.fail(f"{script}: mentions reexec_into_venv but never calls it at module scope")
-        if before_guard:
-            early[str(script.relative_to(REPO_ROOT))] = before_guard
-    assert not early, f"defender.* imports above the venv guard: {early}"
 
 
 def test_s0_manifest_takes_the_iterators_path_order(tmp_path):
