@@ -902,7 +902,7 @@ jobs:
       # import shadowing an honest one each make the name read right and the object be another
       # one. Three gates went blind to that in three different ways (#602/#594) and #1008's
       # suite re-derived the same resolution three times in three review rounds, shipping a
-      # live policy hole on each. Baseline holds today's pre-existing sites, each annotated.
+      # live policy hole on each. Baseline is empty today; any new site fails the gate.
       - name: Hand-rolled AST name resolution (ask _astlib — baseline-ratcheted)
         run: defender/.venv/bin/python tooling/lint/lint_hand_rolled_name_resolution.py
 

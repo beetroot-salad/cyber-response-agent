@@ -1,7 +1,4 @@
 {
   "//": "lint_shippable_surface baseline — env-specific (vendor) tokens in the shipped defender/ surface. Fingerprint is file:token (no line number). CI fails on a file:token absent here. Regenerate: python tooling/lint/lint_shippable_surface.py --update-baseline. Annotate intentional entries (e.g. \"intentional: protocol-surface identifier\"); \"\" means un-triaged debt to fix or annotate.",
-  "entries": {
-    "defender/runtime/lead_zero/_capture.py:elastic": "intentional (#808): item 1/3's primary path is Elastic-specific by the design's own stated scope (building-block alerts keyed on kibana.alert.group.id, an Elastic/Kibana field) — the runtime's only remaining authored vendor name now that #995 moved the gather grant into knowledge/environment/verb-grants.yaml — not incidental vendor coupling. Should widen if #808 ever grows a second alert source.",
-    "defender/runtime/lead_zero/_spec.py:elastic": "intentional (#808): item 1/3's primary path is Elastic-specific by the design's own stated scope (building-block alerts keyed on kibana.alert.group.id, an Elastic/Kibana field) — the runtime's only remaining authored vendor name now that #995 moved the gather grant into knowledge/environment/verb-grants.yaml — not incidental vendor coupling. Should widen if #808 ever grows a second alert source."
-  }
+  "entries": {}
 }
