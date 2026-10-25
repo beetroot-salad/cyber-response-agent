@@ -2,9 +2,9 @@
   "//": "lint_unguarded_tree_write baseline — a shared-tree write reachable while a box is alive that bypasses #771's alias-refusing primitives (write_guarded/guarded_mkdir/open_guarded). Fingerprint is file:function, file relative to the scan scope. Modules named in the writer census (LINT_HARD_GATED_MODULES, derived from _spec771.py's CENSUS) are HARD-gated — a finding there fails regardless of the baseline. Regenerate: python tooling/lint/lint_unguarded_tree_write.py --update-baseline.",
   "entries": {
     "_flock.py:open_lock": "intentional: mkdir of a LOCK file's parent, not a shared-tree artifact. Replaces the three baselined copies in learning/author/shared.py.",
-    "learning/frontend/build.py:main": "",
-    "learning/frontend/serialize.py:main": "",
-    "learning/lead_repository.py:stage_tables": "",
+    "learning/frontend/build.py:main": "false positive: writes the generated lessons/queues pages (lessons.json/.html, queues.json/.html) into the source folder beside build.py — gitignored output in the checkout, not a run dir, episode or drain corpus, and no box mount reaches it.",
+    "learning/frontend/serialize.py:main": "false positive: same as build.py:main — writes lessons.json into the source folder beside serialize.py (gitignored checkout output), not a box-writable tree.",
+    "learning/lead_repository.py:stage_tables": "intentional: `dst_dir.mkdir(exist_ok=True)` creates nothing on the production route — its one caller, learning/branch/archive.py, has already made that world dir through the episode handle (`handle.dir.ensure()`, which judges every directory component) and screened every destination leaf (`_screen_destinations`). The copies themselves go through `refusing_copy2`. Only tests pass a fresh tmp dst.",
     "learning/leads/lead_author/__init__.py:_write_state": "intentional (#1134 N-e): the run dir's `lead_author/` state (mkdir + write), outside the drain's writable trees"
   }
 }

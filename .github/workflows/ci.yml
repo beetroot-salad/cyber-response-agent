@@ -756,7 +756,8 @@ jobs:
       # A shared-tree write (a run dir, the drain worktree's corpus) that bypasses #771 M3's
       # alias-refusing primitives (write_guarded/guarded_mkdir/open_guarded). Modules named in
       # the writer census are HARD-gated (never ratcheted, fails on any finding there); every
-      # other site is baseline-ratcheted like the gates above.
+      # other site is baseline-ratcheted like the gates above, and every baselined site must
+      # carry a reason (`require_reasons`): an empty one fails like a new finding.
       - name: Unguarded shared-tree-write gate (#771 M3 — hard-gated census modules + baseline-ratcheted)
         run: defender/.venv/bin/python tooling/lint/lint_unguarded_tree_write.py
 
