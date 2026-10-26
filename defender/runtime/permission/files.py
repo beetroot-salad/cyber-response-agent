@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 
 from defender.records import _artifact_schema
 from defender._io import bind
-from defender.run_repository import (
+from defender.records import (
     RUN_LAYOUT,
     RunPaths,
     gather_summaries_shape,  # noqa: F401 — re-export for the policy builder

@@ -14,7 +14,7 @@ TOKEN_C = T.fixture_world_id("c")
 
 def _model_text(detail: str) -> str:
     """The text a fault's detail becomes on the model's side of the tool boundary."""
-    return T.mod("learning.branch.redaction").redact_model_visible(
+    return T.mod("_redaction").redact_model_visible(
         detail, frozenset((TOKEN_A, TOKEN_C, T.EPISODE_ID)))
 
 

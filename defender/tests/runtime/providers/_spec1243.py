@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
 mod = S.mod
@@ -441,7 +441,7 @@ def session_rows(store_path: Path) -> dict[str, list[tuple[str, str | None]]]:
 
 
 def gather_agent(lead: str) -> str:
-    return f"{sym('runtime.agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
+    return f"{sym('_agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
 
 
 def sidecar(run_dir: Path) -> dict[str, Any] | None:

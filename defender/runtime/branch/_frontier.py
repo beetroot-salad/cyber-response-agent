@@ -17,7 +17,7 @@ from typing import Any
 from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart, ToolReturnPart
 
 from defender import _clock
-from defender.run_repository import Run, RUN_LAYOUT, RunPaths, artifact_dir
+from defender.records import Run, RUN_LAYOUT, RunPaths, artifact_dir
 
 from .. import session_store
 from ._spec import BranchError, BranchSpec

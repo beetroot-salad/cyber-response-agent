@@ -71,7 +71,7 @@ def test_947_compare_returns_verdict_for_each_seat():
 
 
 def test_947_comparator_model_call_runs_under_the_questioner_role_key():
-    AgentRole = T.sym("runtime.agent_role", "AgentRole")
+    AgentRole = T.sym("_agent_role", "AgentRole")
     agent = T.FakeAgent("mutation")
     _compare().compare('{"a": 1}', '{"a": 2}', "an axis", known_ids=frozenset(), invoke=agent)
     assert agent.kwargs[0]["role"] is AgentRole.QUESTIONER

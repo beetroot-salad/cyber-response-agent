@@ -58,7 +58,7 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
 
 
 def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path: Path):
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.tests.support.learning.curation._verb_authorization_632 import _Run
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, drive, materialize
 
@@ -285,7 +285,7 @@ def test_a_denied_call_is_refused_before_its_query_id_meets_the_traversal_screen
 def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Path):
     """A denial against a system this run has already given up on is still DECIDED and AUDITED: the
     grant check runs before the availability short-circuit (§7 R3)."""
-    from defender.integrations.faults import TransportFault
+    from defender.kit.faults import TransportFault
 
     rec = VerbRecorder()
     assert circuit_breaker.PER_SYSTEM_FAIL_LIMIT == 2, "the trip budget moved; the script below is stale"

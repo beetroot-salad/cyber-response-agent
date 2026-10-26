@@ -6,7 +6,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 import pytest
 

@@ -56,7 +56,7 @@ def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
 
 
 def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base):
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
     one, two = fixture_uuid("handle-case-one"), fixture_uuid("handle-case-two")
     S.seed_run_tree(S.make_run_dir(base, one))
     S.plant_stamp(base / one, commit="c0ffee", dirty=False, tenant_id=S.DEFAULT_TENANT_ID)

@@ -14,7 +14,7 @@ import pytest
 
 from defender.episodes._episode_handle import Episode
 from defender._io import bind
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
@@ -491,7 +491,7 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
 
     from defender.tests.support.storage import _session_store_705 as S
 
-    from defender.run_repository import SessionPaths
+    from defender.records import SessionPaths
 
     base, src = location_path(T.runs_base)(tmp_path)
     # #1105 fork S(b): the layout owner hands the store its paths.

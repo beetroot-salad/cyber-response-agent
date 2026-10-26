@@ -8,7 +8,7 @@ from typing import NamedTuple
 
 from defender.records._report import ReportRead
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender.learning import lead_repository
 from defender.presentation.visualize_data import (
     normalize_phase_names,
@@ -425,7 +425,7 @@ def _review_row_status(row: dict) -> tuple[str, str]:
 
 def _read_role_traces(run_dir: Path) -> list[tuple[str, list[dict]]]:
     """Every review role's trace (roster from `REVIEW_ROLES`), read once per run."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.runtime.challenge_gate import REVIEW_ROLES
 
     owner = RunPaths(run_dir)

@@ -18,7 +18,7 @@ from pydantic_ai.messages import (
 )
 from defender._io import guarded_mkdir
 from defender.records._run_id import CASE_ID_RE  # noqa: F401 — re-export; the rule lives with the id rules
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 from defender.records._store_errors import InvalidCaseId, StoreError  # noqa: F401 — re-exports
 from defender.runtime.run_end import (  # noqa: F401 — re-exports
     TRUNCATED_BY_ABORTED,

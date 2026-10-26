@@ -1,4 +1,4 @@
-"""The `defender/run_repository/` package door: lazy PEP 562 surface, layout names load without pydantic, import retry, box-bind boundary, frozen handle."""
+"""The `defender/records/` package door: lazy PEP 562 surface, layout names load without pydantic, import retry, box-bind boundary, frozen handle."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
@@ -61,12 +61,12 @@ def _type_checking_imports(tree: ast.Module, package: str) -> list[tuple[str, st
     return out
 
 
-_DOOR = "defender.run_repository"
+_DOOR = "defender.records"
 
 
 def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
     from defender.tenancy._tenant import TenantRefused
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     assert isinstance(RunRefused, type), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
     assert issubclass(RunRefused, Exception), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
@@ -92,7 +92,7 @@ def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
 def test_1105_the_doors_all_its_type_checking_names_and_its_getattr_names_are_one_set():
     import importlib
 
-    from defender import run_repository as door
+    from defender import records as door
 
     all_names = list(door.__all__)
     assert all_names, f"__all__ is empty or holds duplicates: {all_names[:5]}"
@@ -119,14 +119,14 @@ def test_1105_the_doors_all_its_type_checking_names_and_its_getattr_names_are_on
 
 
 def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_without_pydantic():
-    from defender.run_repository import RUN_LAYOUT, RunPaths
+    from defender.records import RUN_LAYOUT, RunPaths
 
     probe = (
         "import json, sys\n"
-        "from defender.run_repository import RunPaths, RUN_LAYOUT\n"
+        "from defender.records import RunPaths, RUN_LAYOUT\n"
         "mods = sorted(sys.modules)\n"
-        "print(json.dumps({'layout': 'defender.run_repository._layout' in mods,\n"
-        "  'handle': 'defender.run_repository._handle' in mods,\n"
+        "print(json.dumps({'layout': 'defender.records._layout' in mods,\n"
+        "  'handle': 'defender.records._handle' in mods,\n"
         "  'tenant': 'defender.tenancy._tenant' in mods,\n"
         "  'pydantic': [m for m in mods if m.split('.')[0].startswith('pydantic')],\n"
         "  'alert': str(RUN_LAYOUT.alert), 'paths': RunPaths.__name__}))\n")
@@ -142,11 +142,11 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
     assert seen["paths"] == RunPaths.__name__ == "RunPaths", f"the child's RunPaths: {seen}"
     # #1187 declared change 1: `RunId` admits only canonical lowercase uuid4 text.
     rid = fixture_uuid("package-pydantic-free")
-    proc = _child("from defender.run_repository import RunId, RunRefused\n"
+    proc = _child("from defender.records import RunId, RunRefused\n"
                   f"print(RunId.parse({rid!r}), RunRefused.__name__)\n", block=("pydantic*",))
     assert proc.returncode == 0, f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
     assert _out(proc).split()[:2] == [rid, "RunRefused"], f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
-    proc = _child("import defender.run_repository as rr\n"
+    proc = _child("import defender.records as rr\n"
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
@@ -157,11 +157,11 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
 
 
 def test_1105_a_failed_first_import_through_the_door_propagates_and_is_retried():
-    from defender.run_repository import Run
+    from defender.records import Run
 
     probe = (
         "import json, sys\n"
-        "import defender.run_repository as rr\n"
+        "import defender.records as rr\n"
         "first = None\n"
         "try:\n"
         "    rr.Run\n"
@@ -182,7 +182,7 @@ def test_1105_a_failed_first_import_through_the_door_propagates_and_is_retried()
 
 
 def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_path):
-    from defender.run_repository import RunId
+    from defender.records import RunId
     from defender.box import BoxSpec
     from defender.box._lifecycle import _create_argv, _run_lane_mounts
 
@@ -213,7 +213,7 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
 
 
 def test_1105_a_handles_address_is_frozen_after_init(tmp_path):
-    from defender.run_repository import Run
+    from defender.records import Run
 
     # #1187: a uuid run id (declared change 1) in a container with no record (R1); the
     # record-reading `Run.for_tenant` goes (R1), `Run.under` is its replacement.

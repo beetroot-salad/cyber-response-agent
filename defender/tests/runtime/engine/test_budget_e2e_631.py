@@ -8,7 +8,7 @@ import pytest
 from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender._io import read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.hooks.budget_enforcer import (
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,

@@ -16,7 +16,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender.runtime import observe
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.storage._session_store_705 import (
     jsonl,
     sql,

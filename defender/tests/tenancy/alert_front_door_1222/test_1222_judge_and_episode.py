@@ -6,7 +6,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
-from defender.run_repository import Run
+from defender.records import Run
 
 import json
 import os

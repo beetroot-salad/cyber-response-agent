@@ -24,10 +24,10 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.run_repository import _handle as H
+from defender.records import _handle as H
 from defender.records._artifact_schema import INVESTIGATION_FILE_MAX
 from defender.records._provenance import RunProvenance
-from defender.run_repository import RUN_LAYOUT, RunPaths, SessionPaths
+from defender.records import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.shared.contracts._create_lane import assert_single_plain, no_unnamed_files
@@ -1357,7 +1357,7 @@ def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_op
 _ALERT_CRASH_CHILD = r"""
 import os, sys, uuid
 from pathlib import Path
-from defender.run_repository import Run
+from defender.records import Run
 from defender.records._locations import RunsBase
 root = Path(sys.argv[1])
 body = b"A" * (int(sys.argv[2]) - 1) + b"\n"

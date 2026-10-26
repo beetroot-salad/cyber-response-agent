@@ -198,7 +198,7 @@ def _live():
 
 def _bare_run(tmp_path, name: str = "run"):
     """A run folder and a fresh state for it, as `run_investigation` starts one."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.runtime.run_state import RunState
 
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
@@ -217,7 +217,7 @@ def _append(rq, state, *, params, payload=_PAYLOAD, lead=LEAD):
 
 
 def _table_rows(run_dir, lead=LEAD):
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
             if r.get("lead_id") == lead]
@@ -225,7 +225,7 @@ def _table_rows(run_dir, lead=LEAD):
 
 def _write_table(run_dir, rows):
     import json
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     table = RunPaths(run_dir).executed_queries
     table.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
@@ -308,7 +308,7 @@ def _unplant(path, kind: str, saved: bytes) -> None:
 def test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent(tmp_path, kind):
     """R3, round 3 (#1235): the run's state is the record of what the run did, and `executed_queries.jsonl` is the model's view of it."""
     from defender.knowledge._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     rq = _live()
     run_dir, state = _bare_run(tmp_path)

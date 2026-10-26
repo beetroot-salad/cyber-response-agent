@@ -56,7 +56,7 @@ def test_startup_adapter_failure_hides_known_ids_in_status_views(tmp_path: Path,
     adapters = tmp_path / "adapters"
     adapters.mkdir()
     (adapters / "cmdb_adapter.py").write_text(
-        "from defender.integrations.faults import ConfigFault\n"
+        "from defender.kit.faults import ConfigFault\n"
         f"def check_settings(tenant):\n    raise ConfigFault({FAULT!r})\n"
         "def get_host(ctx, *, host):\n    return {}\n"
         "VERBS = {'get-host': get_host}\n", encoding="utf-8")

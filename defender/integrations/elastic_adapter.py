@@ -13,15 +13,15 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender import _clock
-from defender.runtime.tenant_settings import config_pointer
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.settings import config_pointer
+from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
 from defender.integrations.confinement import confine_index, guard_outbound
 from defender.integrations.esql_text import opens_with_from, split_first_command
-from defender.integrations.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.run_tenant import RunTenant
+    from defender.kit.verbs import TenantRecord
 
 SYSTEM = "elastic"
 
@@ -66,7 +66,7 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
     return _record_config(ctx.tenant)
 
 
-def _record_config(tenant: RunTenant) -> dict[str, str]:
+def _record_config(tenant: TenantRecord) -> dict[str, str]:
     """This deployment's elastic config from the run's record (#1107): the keys of
     `systems/elastic/config.env` as written, prefix included. A missing or unusable file, an
     unimplemented access method, or a blank required key is a `ConfigFault` — Elasticsearch is
@@ -84,7 +84,7 @@ def _record_config(tenant: RunTenant) -> dict[str, str]:
     return config
 
 
-def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
+def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """Elastic's settings check (#1256 O-5): every `ConfigFault` a verb here can raise, over the
     run's record — `load_config`'s (the file, the access method, the four keys), then the
     Elasticsearch container every request execs into (`_http_json` → `_es_container`), which
@@ -100,12 +100,12 @@ def _configured(ctx: VerbContext, key: str) -> str | None:
     return _record_configured(ctx.tenant, key)
 
 
-def _record_configured(tenant: RunTenant, key: str) -> str | None:
+def _record_configured(tenant: TenantRecord, key: str) -> str | None:
     value = transport.record_entry(tenant, SYSTEM).get(key)
     return None if value is None or not value.strip() else value
 
 
-def _record_container(tenant: RunTenant, key: str) -> str:
+def _record_container(tenant: TenantRecord, key: str) -> str:
     """The container named by `key` (`ELASTIC_ES_CONTAINER` / `ELASTIC_KIBANA_CONTAINER`) in the
     tenant's file — `ConfigFault` naming it when absent or blank. There is no default: a built-in
     `elasticsearch` or `kibana` would address whatever container the host happens to hold of that

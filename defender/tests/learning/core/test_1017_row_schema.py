@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from defender._io import append_jsonl, read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.learning import lead_repository
 from defender.learning.lead_repository import QueryRow, load_queries
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS

@@ -129,7 +129,7 @@ async def run_correlation_lead(  # noqa: PLR0913 — the dispatch composition: r
     """Dispatch the gather subagent for `l-00c` through `tools_gather._run_gather` with
     `pre_claimed=True` (the claim was made by the caller) and return its wrapped result."""
     from ..agent_definition import RunScope, bind
-    from ..agent_role import GATHER_AGENT_ID_PREFIX
+    from defender._agent_role import GATHER_AGENT_ID_PREFIX
     from ..driver import build_gather_agent, gather_def_for
     from ..tools import GatherDeps
     from ..tools_gather import GatherRequest, _run_gather

@@ -20,7 +20,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime import challenge_gate, circuit_breaker, driver  # noqa: E402
 from defender.tests.support.storage._session_store_705 import (
     CLOSED_LOOP_INVLANG,
@@ -58,7 +58,7 @@ def _one_hit(ctx, *, q: str = "probe") -> list[dict]:
 
 
 def _down(*systems: str) -> FakeVerbs:
-    from defender.integrations.faults import TransportFault
+    from defender.kit.faults import TransportFault
 
     def probe(ctx, *, q: str = "probe") -> list[dict]:
         raise TransportFault("connection refused")

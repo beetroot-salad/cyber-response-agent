@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 import pytest
 
@@ -28,7 +28,7 @@ from defender.tests.support.storage._session_store_705 import (
     user_request,
 )
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent

@@ -84,7 +84,7 @@ def run_of(run_dir: Path):
     """The `Run` run setup hands run end for the natural run at `run_dir` (planted by
     `curation_run_dir`): its tenant is the folder above its runs folder (#1187: `Run.under`,
     which reads no record, replaces `Run.for_tenant`)."""
-    from defender.run_repository import Run
+    from defender.records import Run
 
     run_dir = Path(run_dir)
     return Run.under(fixture_runs_base(run_dir.parent), run_dir.name, tenant_id=run_dir.parent.parent.name)

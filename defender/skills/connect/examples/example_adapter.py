@@ -13,11 +13,12 @@ import urllib.parse
 import urllib.request
 from typing import TYPE_CHECKING, Any
 
-from defender.runtime.verbs import VerbContext, verb
-from defender.integrations import _stub_transport, faults
+from defender.kit.verbs import VerbContext, verb
+from defender.integrations import _stub_transport
+from defender.kit import faults
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.run_tenant import RunTenant
+    from defender.kit.verbs import TenantRecord
 
 SYSTEM = "example"
 #: The prefix this system's `config.env` keys carry: the folder name, upper-cased
@@ -37,7 +38,7 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     return _stub_transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
-def check_settings(tenant: RunTenant) -> None:
+def check_settings(tenant: TenantRecord) -> None:
     """This system's settings check, which EVERY adapter declares (#1256): a pure function of
     the run's tenant record that raises `ConfigFault` naming what is wrong — covering every
     `ConfigFault` any verb here can raise — or returns None when the system is usable. The run

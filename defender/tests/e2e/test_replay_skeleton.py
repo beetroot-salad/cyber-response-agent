@@ -22,7 +22,7 @@ from defender.tests.e2e._replay_harness import (
     normalize,
 )
 from defender._io import read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
@@ -223,7 +223,7 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
 
     assert (run_dir / "investigation.md").read_text() == "+ probe\n"
     # #1235 F2: the run -> case link is also a host sidecar beside the run dir.
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     host_sidecars = {sidecar_path(run_dir).name, RunPaths(run_dir).session_pointer().name,
                      RunPaths(run_dir).scrub_verdict().name}
     assert {p.name for p in run_dir.parent.iterdir()} == before | host_sidecars, (

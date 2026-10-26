@@ -806,7 +806,7 @@ def test_preflight_original_call_was_itself_an_error(tmp_path, live):
         assert _key("edr", "lookup", params) in _keys(outcome["drift"], status="drifted")
         return
     assert "svc-err" not in oracle.all_seen(), "an error is not the oracle's to serve"
-    faults = S.mod("integrations.faults")
+    faults = S.mod("kit.faults")
     untouched = S.oracle()
     reg = S.world_registry(run.ep, "b", est, oracle=untouched, verifier=S.verifier())
     with pytest.raises(faults.UpstreamFault):

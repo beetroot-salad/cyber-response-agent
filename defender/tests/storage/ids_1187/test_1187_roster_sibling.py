@@ -14,7 +14,7 @@ from defender import _yaml
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
-from defender.run_repository import RunId, RunRefused
+from defender.records import RunId, RunRefused
 from defender.tenancy._tenant import TenantRefused
 
 A_ID = S.H5.T_ID
@@ -215,11 +215,11 @@ _START_RUNS_CHILD = """
 import errno, os, resource, signal, sys
 from pathlib import Path
 from defender.tenancy._tenant import TenantRefused
-from defender.run_repository import RunRefused
+from defender.records import RunRefused
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
-from defender.run_repository import RunId, RunRefused
+from defender.records import RunId, RunRefused
 from defender.tenancy._tenant import TenantRefused
 root, tenant_id, episode_id, limit = Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
 runs = S.tenant(root, tenant_id).runs_repository()
@@ -333,7 +333,7 @@ def test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written(
 # Reading the roster: `arm_id`, `arm_ids`, and `create` held to it (R2; O4).
 
 def test_the_arm_ids_are_the_rosters_and_an_unknown_label_is_absent(data_root):
-    from defender.run_repository import RunAbsent
+    from defender.records import RunAbsent
 
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()
@@ -559,7 +559,7 @@ def _open_and_close(runs, episode_id: str, *, world_id=None, **kwargs) -> None:
 
 
 def test_a_refusal_quoting_a_callers_label_stays_one_bounded_line(data_root):
-    from defender.run_repository import RunAbsent
+    from defender.records import RunAbsent
 
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()
@@ -913,7 +913,7 @@ ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_fai
 
 def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():
     """O8: the suffixes the sidecar tests run over are exactly the layout's reserved ones."""
-    from defender.run_repository._layout import _SIDECAR_SUFFIXES
+    from defender.records._layout import _SIDECAR_SUFFIXES
 
     assert sorted(ALL_SIDECAR_SUFFIXES) == sorted(_SIDECAR_SUFFIXES), (
         "the layout reserves a different set of sidecar suffixes: update ALL_SIDECAR_SUFFIXES")

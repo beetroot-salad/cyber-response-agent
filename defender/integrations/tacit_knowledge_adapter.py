@@ -19,10 +19,10 @@ import yaml
 from defender import _yaml
 from defender._io import TEXT_READ_ERRORS, read_text_utf8
 from defender.knowledge._knowledge import KnowledgePaths
-from defender.runtime.verbs import VerbContext
+from defender.kit.verbs import VerbContext
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.run_tenant import RunTenant
+    from defender.kit.verbs import TenantRecord
 
 SYSTEM = "tacit-knowledge"
 
@@ -277,7 +277,7 @@ def _as_of_date(ctx: VerbContext) -> dt.date:
     return (dt.datetime.now(dt.UTC) if at is None else at).date()
 
 
-def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
+def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): it needs none. The registry is the run's agent
     knowledge (its run copy's `skills/tacit-knowledge/`), never a tenant setting, so no settings — not even a broken
     `systems/tacit-knowledge/config.env` — make a verb here raise `ConfigFault`, and this check

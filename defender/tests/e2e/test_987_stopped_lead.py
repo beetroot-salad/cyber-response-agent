@@ -31,7 +31,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime import driver, observe, tools_gather  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
@@ -64,7 +64,7 @@ from defender.tests.integrations.test_987_query_door import (  # noqa: E402
     frame_body,
     split,
 )
-from defender.run_repository import SessionPaths  # noqa: E402
+from defender.records import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

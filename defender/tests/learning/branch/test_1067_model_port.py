@@ -134,7 +134,8 @@ def test_grant_pattern_refuses_a_bare_string():
 
 
 def test_validate_params_names_every_problem_once_in_one_refusal():
-    from defender.runtime.verbs import validate_params, verb
+    from defender.runtime.verbs import validate_params
+    from defender.kit.verbs import verb
 
     @verb(wrapper_only=("require_closed",))
     def read(ctx, *, host: str, size: int = 10, require_closed: bool = False):  # noqa: ARG001

@@ -14,13 +14,13 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender import _clock
-from defender.runtime.verbs import VerbContext
+from defender.kit.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.integrations.confinement import ConfinementFault
-from defender.integrations.faults import TransportFault, UpstreamFault
+from defender.kit.faults import TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.run_tenant import RunTenant
+    from defender.kit.verbs import TenantRecord
 
 SYSTEM = "host-state"
 KNOWN_HOSTS = (
@@ -95,7 +95,7 @@ def _captured_at(ctx: VerbContext) -> str:
     return _clock.z_seconds(at)
 
 
-def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
+def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5). Host-state holds no keys of its own: every verb
     reaches its hosts through the docker transport, so the one `ConfigFault` any of them can
     raise is the access method's (`access_context`), raised here over the run's record. None

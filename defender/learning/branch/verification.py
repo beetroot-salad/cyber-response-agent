@@ -26,7 +26,7 @@ from defender._io import (
 )
 
 
-from defender.run_repository import (
+from defender.records import (
     Run,
     RunAbsent,
     RunRefused,

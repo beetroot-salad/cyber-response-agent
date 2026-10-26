@@ -19,7 +19,7 @@ import pytest
 
 from defender import run as run_py
 from defender import run_common
-from defender.run_repository import case_ref
+from defender.records import case_ref
 from defender.learning.branch import cli as branch_cli
 from defender.learning.core import config
 from defender.learning.core.config import FatalConfigError, LoopPaths
@@ -38,7 +38,7 @@ from defender.tests.support.sandbox._spec791 import (
     plant_alert,
     satisfy_entrypoint_keys,
 )
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.learning.state_contracts import _spec1135 as S
 from defender.learning.core.state import FINDINGS, LEAD_QUEUE_LOCK, PITFALLS, QUESTIONER_FINDINGS
 

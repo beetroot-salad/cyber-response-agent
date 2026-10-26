@@ -13,7 +13,7 @@ import pytest
 
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.storage.ids_1187 import _spec1187 as S
-from defender.runtime.model_view import MODEL_RUN
+from defender._model_view import MODEL_RUN
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
 pytestmark = pytest.mark.box

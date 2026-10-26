@@ -129,7 +129,7 @@ def _opened_tenant(root: Path, tenant_id: str, run_id: str) -> str:
     """The tenant the run `run_id` is addressed to, opened through `tenant_id`'s runs repository
     under `root` once its operator-placed knowledge is there (#1120 DC2) — the replacement for
     `tenant_of_run_dir` (#1105 PR 2, F-13)."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     H.place_knowledge_for_rows()
     return H.accept(root, tenant_id).runs_repository().open(RunId.parse(run_id)).tenant_id

@@ -6,7 +6,7 @@
 > different owner, so the row below is stale in the more dangerous direction: the
 > NAME is live and the grants beside it are the deleted pipeline judge's. Today's
 > role is the family judge (`learning/judge/`), which holds no tool at all.
-> Today's nine are in `runtime/agent_role.py`; the tool-free-predictor case now
+> Today's nine are in `_agent_role.py`; the tool-free-predictor case now
 > applies to `verifier`, `questioner` and `judge`.
 
 **Status:** design — implemented (step two: #545 / PR #546; step three: #551 / PR #555,

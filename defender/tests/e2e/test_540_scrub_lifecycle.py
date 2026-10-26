@@ -39,7 +39,7 @@ from defender.box import (  # noqa: E402
     stop_and_scrub,
     stop_box,
 )
-from defender.presentation import workspace_map as workspace_map_mod  # noqa: E402
+from defender.runtime import workspace_map as workspace_map_mod  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.support.storage._alert_plant import plant_alert  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
@@ -852,7 +852,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     """d_hostile_run_id_fails_loudly — a hostile run id fails LOUDLY rather than splitting the
     container-name grammar or the colon-separated bind spec."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
-    from defender.runtime.model_view import MODEL_RUN
+    from defender._model_view import MODEL_RUN
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
 
     data_root = tmp_path / "data"

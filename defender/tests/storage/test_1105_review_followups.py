@@ -11,7 +11,7 @@ import textwrap
 import pytest
 
 from defender import _io
-from defender import run_repository as R
+from defender import records as R
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
@@ -39,7 +39,7 @@ def test_the_repository_reads_and_writes_episode_records_without_the_model_stack
         sys.meta_path.insert(0, _Block())
         from defender.tenancy import _tenant
         from pathlib import Path
-        from defender import run_repository as R
+        from defender import records as R
         root = _tenant.data_root_from_path(Path({str(tmp_path / "data")!r}))
         t = _tenant.accept_tenant(root, {t.id!r},
                                   defender_dir={str(H.DEFENDER)!r})

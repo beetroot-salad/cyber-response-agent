@@ -40,7 +40,7 @@ def _fixtures(root: Path, truths: dict[str, str]) -> Path:
 def _run(runs: Path, run_id: str | None = None, *, says: str | None,
          record: bool = True) -> Path:
     """Create a run with an alert record and an optional disposition report."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     run_dir = S.make_run(runs, run_id)
     paths = RunPaths(run_dir)

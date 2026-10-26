@@ -20,7 +20,7 @@ from defender._io import (
     read_text_soft,
     write_guarded,
 )
-from defender.run_repository import Run, RunPaths, artifact_dir, artifact_file
+from defender.records import Run, RunPaths, artifact_dir, artifact_file
 from defender.knowledge._query_rules import is_reserved_query_id
 
 from .. import session_store

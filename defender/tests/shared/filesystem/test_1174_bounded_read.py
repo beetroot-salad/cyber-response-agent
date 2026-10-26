@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 ITEM1_SYSTEM = "elastic"  # the breaker file's system key; the lead_zero constant went with item 1 (#1222)
 MiB = 1024 * 1024

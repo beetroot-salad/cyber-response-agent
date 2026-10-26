@@ -12,7 +12,7 @@ import pytest
 
 from defender.integrations import _stub_transport as transport
 from defender.integrations import elastic_adapter
-from defender.integrations.faults import ConfigFault
+from defender.kit.faults import ConfigFault
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 _ES_HEALTH = S.answer(json.dumps({"status": "green", "number_of_nodes": 1}))
@@ -152,7 +152,7 @@ def test_an_opened_file_renamed_over_still_reads(tmp_path):
 
 
 def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_path):
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
     from defender.presentation import visualize_run
 
     # #1187 (declared change 1): a run folder's name is its canonical UUID run id.

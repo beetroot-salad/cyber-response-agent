@@ -92,7 +92,7 @@ def _command_guard(source: bytes | str) -> ast.If | None:
 
 def test_1080_the_moved_lessons_frontier_keeps_its_main_block():
     assert _command_guard(S.IMAGE_CLI.read_bytes())
-    assert not _command_guard((S.DEFENDER / "integrations" / "faults.py").read_bytes())
+    assert not _command_guard((S.DEFENDER / "kit" / "faults.py").read_bytes())
     for anchor, home in UNCALLED:
         where = S.home_of(anchor, home=home)
         source = (S.REPO_ROOT / where).read_text(encoding="utf-8")

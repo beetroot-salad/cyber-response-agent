@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.runtime import orient
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.tooling.layout_contracts import _spec1080 as S

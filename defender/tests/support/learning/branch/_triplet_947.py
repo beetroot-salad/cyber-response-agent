@@ -189,12 +189,12 @@ CLEAN = Fault()
 
 def _transport_fault(detail: str) -> Exception:
     """The real `TransportFault` — what the transport raises when the docker exec itself fails."""
-    return sym("integrations.faults", "TransportFault")(detail)
+    return sym("kit.faults", "TransportFault")(detail)
 
 
 def _upstream_fault(detail: str) -> Exception:
     """The real `UpstreamFault` — what an adapter raises when the far side refuses."""
-    return sym("integrations.faults", "UpstreamFault")(detail)
+    return sym("kit.faults", "UpstreamFault")(detail)
 
 
 class FakeTransport:
@@ -502,11 +502,11 @@ def _plant_source_input(ep: Path, source_run_dir: str | None, source_run_id: str
     """The source run's alert and record, as a launch copies them into the episode (#1222 A1):
     the source run's own when it holds them, else a plain one."""
     from defender.episodes._episode_paths import EpisodePaths
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.tests.support.storage._alert_plant import plant_alert
 
     if source_run_id:
-        from defender.run_repository import RunId, RunRefused
+        from defender.records import RunId, RunRefused
         from contextlib import suppress
         with suppress(RunRefused):
             source_run_dir = str(current_tenant().runs_repository().open(RunId.parse(source_run_id)).run_dir)
@@ -645,7 +645,7 @@ def _source_handle(src: Path) -> Any:
     anything is spent, #1187 declared change 1) is a folder production can no longer name, so
     its handle is built at that folder directly — the fixture still seeds the session such a
     run had, and the refusal under test is the launcher's, not this fixture's."""
-    from defender.run_repository import Run
+    from defender.records import Run
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -657,7 +657,7 @@ def _source_handle(src: Path) -> Any:
 
 def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) -> None:
     """Give the source run the session store a branch is actually taken from."""
-    from defender.run_repository import RunPaths, SessionPaths
+    from defender.records import RunPaths, SessionPaths
 
     ss = mod("runtime.session_store")
     # #1235: the case pointer is a host-only sidecar beside the run dir, not a file in it.
@@ -1039,7 +1039,7 @@ def corpus_document(run_dir: Path) -> Path:
     path = run_dir / "investigation.md"
     path.write_text(GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
     # A run's record is what makes a folder a run to the corpus reader (#1222 A8).
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.tests.support.storage._alert_plant import plant_alert
 
     if PLANT_RECORDS and not RunPaths(run_dir).alert_record.exists():
@@ -1053,7 +1053,7 @@ def open_source(src: Path) -> Any:
     under that data root. What `preflight_episode(source=)` / `preflight_replay(source=)` take
     where a test once handed the folder."""
     from defender.tenancy import _tenant
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     src = Path(src)
     tenant = _tenant.accept_tenant(fixture_data_root(src.parent.parent.parent), src.parent.parent.name,
@@ -1082,7 +1082,7 @@ def family_arms(episode: Any, labels: Any, *, tenant: Any = None) -> dict[str, A
     before `view.arm_id(world_uuid)`, opened by id through the episode's view (`episode_view`), as
     the launcher's `_finished_arms` does — the `RunRefused` an open raises (`RunAbsent` for a
     roster id with no folder: "not started") kept as that world UUID's value."""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     view = episode_view(episode, tenant=tenant)
     arms: dict[str, Any] = {}
@@ -1197,7 +1197,7 @@ def refusals() -> tuple[type[BaseException], ...]:
     from defender.learning.branch.ledger import LedgerError
     from defender.runtime.branch import BranchError
     from defender.integrations.confinement import ConfinementFault
-    from defender.integrations.faults import AdapterFault
+    from defender.kit.faults import AdapterFault
     out: list[type[BaseException]] = [
         SystemExit, EstateError, LedgerError, BranchError, ConfinementFault,
         AdapterFault, ValueError,

@@ -29,7 +29,7 @@ from defender.execution.box_codec import (
 )
 from ._clock import write_clock
 from ._output import BoxOutputLimitExceeded, capture_bounded
-from defender.runtime.model_view import ModelView
+from defender._model_view import ModelView
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
     Finding,
     RunTainted,

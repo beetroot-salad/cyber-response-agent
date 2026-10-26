@@ -15,7 +15,7 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 T_ID = H.VALID_ID
 

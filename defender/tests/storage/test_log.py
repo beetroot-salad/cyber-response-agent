@@ -14,7 +14,7 @@ import pytest
 from defender import _log
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 
 @pytest.fixture

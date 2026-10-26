@@ -20,7 +20,7 @@ import pytest
 
 from defender import _yaml
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
-from defender.integrations import faults
+from defender.kit import faults
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as T1107
@@ -62,7 +62,7 @@ import json
 import time
 from pathlib import Path
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 from defender.integrations.confinement import confine_index
 
 _STATE = Path({state!r})

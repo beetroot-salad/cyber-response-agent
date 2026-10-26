@@ -13,7 +13,7 @@ from defender.records import _alert_input
 from defender._shown import quoted
 from defender._io import read_text_soft
 from defender._model import model
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 from .parser import ParseWarning, parse_dense_companion
 from .schema import (

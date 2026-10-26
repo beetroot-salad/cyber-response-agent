@@ -155,7 +155,7 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     dfn.mkdir(parents=True)
     # Carrying a run's state, as every MAIN the driver builds does: the enforced budget hooks
     # raise on deps that carry none (#1235 round 3).
-    from defender.run_repository import Run
+    from defender.records import Run
 
     return replace(bind(MAIN_DEF, run, defender_dir=dfn),
                    run=Run.under(fixture_runs_base(run.parent), run.name), run_state=RunState(run, "r-836")), run

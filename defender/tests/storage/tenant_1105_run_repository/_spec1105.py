@@ -17,7 +17,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
 #: The package this spec pins (D1.1), by path.
-PACKAGE = DEFENDER / "run_repository"
+PACKAGE = DEFENDER / "records"
 #: The committed fixture tenant (#1120 H2): the knowledge every test tenant is set up from.
 FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
 

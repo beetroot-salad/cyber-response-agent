@@ -179,7 +179,7 @@ def test_1224_oracle_model_knob_is_preflighted_only_where_branching_runs(
 
 def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_name_rule():
     """with the staged-name rule gone, the redaction filter still masks run and world tokens and leaves a wv- string alone."""
-    redaction = S.mod("learning.branch.redaction")
+    redaction = S.mod("_redaction")
     def redact(text):
         return redaction.redact_model_visible(
             text, frozenset({S.EPISODE_ID, S.fixture_world_id("b")}))
@@ -191,14 +191,14 @@ def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_nam
     view_text = "index 'wv-b-logs-' not found; tried [logs-*,-wv-b-logs-]"
     assert redact(view_text) == view_text
     assert not hasattr(redaction, "_STAGED_NAME")
-    assert "VIEW_NAMESPACE" not in S.source_text("learning/branch/redaction.py")
+    assert "VIEW_NAMESPACE" not in S.source_text("_redaction.py")
 
 
 def _confinement_gate(elastic: Any, ctx: Any, index: str) -> str:
     """Did elastic's index confinement refuse `index` for `ctx`, or let the call through to
     the (deliberately unreachable) transport?"""
     ConfinementFault = S.sym("integrations.confinement", "ConfinementFault")
-    TransportFault = S.sym("integrations.faults", "TransportFault")
+    TransportFault = S.sym("kit.faults", "TransportFault")
     try:
         elastic.VERBS["query"](ctx, native_query="FROM x", index=index)
     except ConfinementFault:

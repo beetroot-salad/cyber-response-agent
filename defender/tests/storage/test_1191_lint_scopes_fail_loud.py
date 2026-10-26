@@ -14,7 +14,7 @@ from types import ModuleType
 import pytest
 
 from defender import _git
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender.tests.support.shared.contracts._by_path import DEFENDER, LINT_DIR, WORKTREE, import_lint_lib, load_lint_gate
 from defender.tests.support.shared.contracts._repo import seed_repo
 

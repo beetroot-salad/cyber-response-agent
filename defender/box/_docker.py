@@ -124,7 +124,7 @@ def infra_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     """The infra env every box needs: the shims and package location. `DEFENDER_RUNS_BASE` is
     the run folder's own hand-out from the layout owner (`RunPaths.runs_base_export`), never read
     from the environment and never composed here (#1105 PR 2, #1210)."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     env: dict[str, str] = {}
     env["DEFENDER_DIR"] = str(defender_dir)

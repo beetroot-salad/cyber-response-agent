@@ -57,7 +57,7 @@ from defender._model import model
 from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
 from defender.records._report import read_report
 from defender.records._run_id import run_id_fault
-from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.records import RUN_LAYOUT, RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 from defender._io import read_text_utf8
 

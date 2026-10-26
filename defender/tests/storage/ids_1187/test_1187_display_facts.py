@@ -46,7 +46,7 @@ def _setup(tmp_path: Path, data_root: Path, alert_name: str, folder: str) -> tup
 
 
 def _stamp_path(run: Any) -> Path:
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     return RunPaths(run.run_dir).provenance
 

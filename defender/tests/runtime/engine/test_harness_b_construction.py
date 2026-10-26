@@ -25,10 +25,10 @@ from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
     ToolSet,
 )
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.tools import AgentDeps  # noqa: E402
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 
 _DEFENDER = Path(__file__).resolve().parents[3]
 

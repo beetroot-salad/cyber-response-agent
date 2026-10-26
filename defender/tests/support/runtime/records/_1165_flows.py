@@ -12,7 +12,7 @@ from pydantic_ai.models import override_allow_model_requests
 from pydantic_ai.models.function import FunctionModel
 
 from defender import _io
-from defender.run_repository import Run
+from defender.records import Run
 from defender import box
 from defender.runtime import driver
 from defender.runtime.providers import BuiltModel

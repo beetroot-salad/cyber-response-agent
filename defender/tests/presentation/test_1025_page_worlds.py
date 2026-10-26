@@ -501,7 +501,7 @@ def test_1025_alert_fields_reach_the_header_frame(tmp_path):
 def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
     """Lead `goal`, `params`, `raw_command`, payload digest fields and resolution rows render
     through the untrusted escape (O9, c14/x09)."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     ep = E.sample_episode(tmp_path)
     world = ep.world(E.GRADED_WORLD)

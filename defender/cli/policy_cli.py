@@ -37,7 +37,7 @@ from defender.runtime.agent_definition import (
     compile_policy_for,
     effective_tools_for,
 )
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 from defender.runtime.permission import AgentPolicy
 from defender.runtime.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
 

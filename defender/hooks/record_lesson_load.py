@@ -7,7 +7,7 @@ from pathlib import Path
 
 from defender._clock import parse_iso_utc
 from defender.knowledge._knowledge import LESSON_CORPORA, KnowledgePaths
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 
 
 
