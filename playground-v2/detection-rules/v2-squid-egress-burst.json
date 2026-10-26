@@ -1,0 +1,20 @@
+{
+  "rule_id": "v2-squid-egress-burst",
+  "name": "v2 Squid egress burst",
+  "description": "Five or more distinct external destinations requested through the Squid forward proxy by one authenticated identity from one source address within 10 minutes — the shape of staged exfiltration or tool download over the sanctioned egress path. Routine host activity routes no egress through the proxy. user.name is the proxy basic-auth identity; url.original is the destination (host:port for CONNECT).",
+  "type": "threshold",
+  "language": "lucene",
+  "index": ["logs-squid.access-*"],
+  "query": "_exists_:url.original",
+  "threshold": {
+    "field": ["user.name", "source.ip"],
+    "value": 5,
+    "cardinality": [{"field": "url.original", "value": 5}]
+  },
+  "from": "now-10m",
+  "interval": "5m",
+  "risk_score": 47,
+  "severity": "medium",
+  "tags": ["v2", "squid", "proxy", "exfiltration"],
+  "enabled": true
+}
