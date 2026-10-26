@@ -6,7 +6,7 @@ from defender.tests.support.shared._locations_1210 import fixture_runs_base
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender import _io
-from defender.run_repository import Run
+from defender.records import Run
 
 import errno
 import json

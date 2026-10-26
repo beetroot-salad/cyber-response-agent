@@ -1191,7 +1191,7 @@ def load_world(ep: Path, label: str) -> Any:
     the roster, never composed (O4, S-red). A hand-built episode with no roster yet takes the
     fixture's explicit RUNS step here (`_triplet_947.plant_roster`: `runs/`, then a roster
     naming every manifest world); the roster reader itself never writes one (review-3 F33)."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     fam = mod(FAMILY)
     ep = Path(ep)
@@ -1546,7 +1546,7 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
     from defender.tests.support.storage import _session_store_705 as SS
     from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
-    from defender.run_repository import SessionPaths
+    from defender.records import SessionPaths
 
     store = ss.open_store(case_id=T.source_case_id(src), sessions=SessionPaths(fixture_runs_base(base)))
     try:

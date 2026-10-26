@@ -11,7 +11,7 @@ from defender.tests.support.shared._pre_p4_shipped import CATALOG, SHIPPED_AGENT
 from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender._io import read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.learning import lead_repository
 from defender.learning.leads import draft_synthesis, lead_extraction, lead_neighbors
 from defender.learning.leads.lead_author import build_handoff

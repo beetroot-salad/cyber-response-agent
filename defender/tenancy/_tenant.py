@@ -33,7 +33,7 @@ from defender.tenancy._tenants import (
 
 if TYPE_CHECKING:
     from defender.learning.core.config import LoopPaths
-    from defender.run_repository._lookup import RunsRepository
+    from defender.records._lookup import RunsRepository
 
 _R = TypeVar("_R")
 
@@ -409,7 +409,7 @@ class Tenant:
         """This tenant's runs repository (#1105 PR 2, decision C): bound to this tenant, and
         below it everything is ids. Only an accepted `Tenant` exists, so this is the one way a
         repository is built. The package is imported here, lazily: it imports this module."""
-        from defender.run_repository._lookup import RunsRepository
+        from defender.records._lookup import RunsRepository
 
         return RunsRepository(self)
 

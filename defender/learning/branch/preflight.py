@@ -30,7 +30,7 @@ from defender.episodes._episode_handle import Episode
 
 
 
-from defender.run_repository import (
+from defender.records import (
     Run,
 )
 

@@ -39,7 +39,7 @@ def _family(episode_id: str):
 
 def _arm_ids() -> dict:
     """The roster's ids, as `family_identities` takes them (#1187: `{label: RunId}`)."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return {T.fixture_world_id(label): RunId.parse(text) for label, text in ROSTER.items()}
 

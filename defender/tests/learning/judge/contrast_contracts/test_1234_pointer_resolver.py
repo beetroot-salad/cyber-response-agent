@@ -423,7 +423,7 @@ def _draw_file_replies(framed: Any) -> dict:
 
 def test_1234_contrast_pointer_naming_a_reference_worlds_judge_draw(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    framed = S.sym("run_repository._layout", "WIRE_LOG_NAMES").agent_framed_trace
+    framed = S.sym("records._layout", "WIRE_LOG_NAMES").agent_framed_trace
     natural = S.family(tmp_path)
     judged_before = S.family(tmp_path, root=tmp_path / "judged-before")
     (judged_before.ep / "wire_logs").mkdir(exist_ok=True)

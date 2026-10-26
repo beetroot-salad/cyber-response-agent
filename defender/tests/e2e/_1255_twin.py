@@ -204,7 +204,7 @@ _RAW_PAYLOAD = re.compile(r"gather_raw/l-[A-Za-z0-9]{1,64}/[0-9]+\.json")
 
 
 def _alert_input_dir() -> str:
-    from defender.run_repository import RUN_LAYOUT
+    from defender.records import RUN_LAYOUT
 
     return str(RUN_LAYOUT.alert_input_dir)
 
@@ -456,7 +456,7 @@ _ENV_KEYS = ("DEFENDER_DATA_ROOT", "DEFENDER_EPISODES_BASE", "DEFENDER_LEARNING_
 def _source_run(tenant_id: str, run_id: str) -> Any:
     """The natural run, opened by id through its tenant's runs repository (as the launcher and the arm open a source)."""
     from defender.tenancy import _tenant
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     root = _tenant.resolve_data_root()
     tenant = _tenant.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)

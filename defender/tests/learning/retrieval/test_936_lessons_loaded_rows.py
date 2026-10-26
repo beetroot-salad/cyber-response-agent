@@ -94,7 +94,7 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
     (corpus / "curated-936.md").write_text(
         "---\nname: curated-936\n---\nlesson body\n", encoding="utf-8")
     # This telemetry case explicitly supplies a record owner; ordinary curators need none.
-    from defender.run_repository import Run
+    from defender.records import Run
 
     deps = curator_deps(scene, corpus=corpus)
     deps = _with_live_run_1165(deps, run=Run.at(deps.run_dir))

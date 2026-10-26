@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from defender import run_repository as R
+from defender import records as R
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -60,7 +60,7 @@ def _lint():
 
 def test_the_layout_lint_reports_a_module_too_deep_to_parse(tmp_path):
     root = tmp_path / "defender"
-    shutil.copytree(H.PACKAGE, root / "run_repository",
+    shutil.copytree(H.PACKAGE, root / "records",
                     ignore=shutil.ignore_patterns("__pycache__"))
     deep = root / "hooks" / "deep.py"
     deep.parent.mkdir(parents=True)
@@ -72,7 +72,7 @@ def test_the_layout_lint_reports_a_module_too_deep_to_parse(tmp_path):
 
 def _package_copy(tmp_path):
     root = tmp_path / "defender"
-    shutil.copytree(H.PACKAGE, root / "run_repository",
+    shutil.copytree(H.PACKAGE, root / "records",
                     ignore=shutil.ignore_patterns("__pycache__"))
     return root
 
@@ -92,7 +92,7 @@ def test_the_layout_lint_with_no_layout_universe_is_a_finding(tmp_path, state):
     """No `_layout.py`, or one binding nothing, gates no name: the sweep reports it rather than
     passing everything."""
     root = _package_copy(tmp_path)
-    layout = root / "run_repository" / "_layout.py"
+    layout = root / "records" / "_layout.py"
     if state == "missing":
         layout.unlink()
     else:
@@ -111,7 +111,7 @@ def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
     """A layout name read off a module that re-binds it (`relay.ALERT`) is the door's name: the
     xhigh review's bypass, where only a read off the door itself was flagged."""
     root = _package_copy(tmp_path)
-    _plant(root, "learning/relay.py", "from defender.run_repository import ALERT, RUN_LAYOUT\n")
+    _plant(root, "learning/relay.py", "from defender.records import ALERT, RUN_LAYOUT\n")
     _plant(root, "learning/probe_relay.py",
            "from defender.learning import relay as ep\n\n\n"
            "def f(d):\n    return d / ep.ALERT, ep.RUN_LAYOUT.report\n")
@@ -122,10 +122,10 @@ def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
 
 
 @pytest.mark.parametrize(("rel", "text"), [
-    ("runtime/rel2.py", "from .. import run_repository as rr\n\n\ndef f(d):\n    return rr.RunPaths(d)\n"),
+    ("runtime/rel2.py", "from .. import records as rr\n\n\ndef f(d):\n    return rr.RunPaths(d)\n"),
     ("learning/branch/rel1.py",
-     "from ... import run_repository\n\n\ndef f(d):\n    return run_repository.RunPaths(d)\n"),
-    ("runtime/rel3.py", "from ..run_repository import ALERT\n"),
+     "from ... import records\n\n\ndef f(d):\n    return records.RunPaths(d)\n"),
+    ("runtime/rel3.py", "from ..records import ALERT\n"),
 ])
 def test_the_layout_lint_resolves_a_relative_import_as_the_absolute_one(tmp_path, rel, text):
     """The xhigh review's case: a layout name reached through a relative import is the same

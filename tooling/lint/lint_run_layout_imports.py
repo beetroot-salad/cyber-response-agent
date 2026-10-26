@@ -10,8 +10,8 @@ has no hatch but an owner hand-out.
 
 What is gated:
 
-* every layout name the door (`defender.run_repository`) serves, read from the swept tree's
-  `run_repository/_layout.py` (its public module-level bindings, of every form), minus the
+* every layout name the door (`defender.records`) serves, read from the swept tree's
+  `records/_layout.py` (its public module-level bindings, of every form), minus the
   eight `HELPERS`. A new export is gated until it is listed. Exempt in the layout-exempt
   categories below;
 * the episode-runs names: `EpisodePaths.runs`, `EpisodeLayout.runs` / `.run` / `.run_page`,
@@ -66,7 +66,7 @@ import _astlib
 #: The checkout's own `defender/`, so a run from any directory or worktree sweeps itself.
 DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
-_DOOR = "defender.run_repository"
+_DOOR = "defender.records"
 
 #: The eight layout names that are not gated: predicates and shape constants (D7).
 HELPERS: frozenset[str] = frozenset({
@@ -82,10 +82,10 @@ _VE = "presentation/visualize_episode.py"
 #: module in no row gets no exemption.
 CATEGORIES: Mapping[str, Sequence[str]] = {
     "owners": (
-        "run_repository/__init__.py", "run_repository/_layout.py", "run_repository/_handle.py",
-        "run_repository/_lookup.py", "run_repository/_held.py",
-        "run_repository/_id.py",
-        "run_repository/_errors.py", "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py",
+        "records/__init__.py", "records/_layout.py", "records/_handle.py",
+        "records/_lookup.py", "records/_held.py",
+        "records/_id.py",
+        "records/_errors.py", "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py",
     ),
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
@@ -193,7 +193,7 @@ class Finding:
 
 def canonical(origin: str) -> str:
     """A run-repository origin in its door spelling (`_astlib.door_spelling`):
-    `defender.run_repository._layout.X` and `defender.run_repository.X` are one name."""
+    `defender.records._layout.X` and `defender.records.X` are one name."""
     return _astlib.door_spelling(origin)
 
 
@@ -700,12 +700,12 @@ def _own_nodes(body: list[ast.stmt]) -> Iterator[ast.AST]:
 # ==========================================================================================
 
 def layout_names(root: Path) -> frozenset[str]:
-    """The swept tree's layout universe: every public name `run_repository/_layout.py` binds at
+    """The swept tree's layout universe: every public name `records/_layout.py` binds at
     module level, in any form (assignment, tuple unpack, annotated, a `for` target, inside an
     `if`, a def or a class). ScanBlind when there is none to read — the file is missing,
     unreadable or binds nothing: an empty universe gates no name, so a lint that ran on it
     would pass everything (fail closed, as #1134's census does)."""
-    rel = "run_repository/_layout.py"
+    rel = "records/_layout.py"
     path = root / rel
     try:
         tree = _astlib.parse_source(path.read_text(encoding="utf-8"), rel)
@@ -759,8 +759,6 @@ def sweep_files(root: Path) -> list[Path]:
 
 
 def _row_of(rel: str) -> str | None:
-    if rel.startswith("run_repository/"):
-        return "owners"
     for row, mods in CATEGORIES.items():
         if rel in mods:
             return row
@@ -848,7 +846,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f.display)
     print(f"[lint_run_layout_imports] {len(found)} finding(s).")
     if found:
-        print("\nOutside defender/run_repository/ and its owner modules, take no run-layout "
+        print("\nOutside defender/records/ and its owner modules, take no run-layout "
               "name, episode-runs name, Tenant.runs or handle constructor (#1105 D7). The "
               "allow-list in this file is the only hatch; there is no inline suppression.")
     return 1 if found else 0

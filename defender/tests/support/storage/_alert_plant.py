@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.records import _alert_input
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 #: The mapping a hand-built folder's record is derived with: the committed tenants' mapping.
 COMMITTED_MAPPING: Mapping[str, str] = {

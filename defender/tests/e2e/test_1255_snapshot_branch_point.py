@@ -15,7 +15,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.storage._session_head_754 import message_ids  # noqa: E402
 from defender.tests.support.storage._session_store_705 import store_mod  # noqa: E402

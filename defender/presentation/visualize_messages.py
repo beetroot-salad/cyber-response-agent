@@ -7,7 +7,7 @@ from pathlib import Path
 
 from defender._io import iter_plain_jsonl_rows
 from defender.records._report import ReportRead
-from defender.run_repository import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
+from defender.records import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
 # From `agent_role`, not `review_roles`: the latter pulls in the whole runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package just for the page CSS.
 from defender._agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
@@ -419,7 +419,7 @@ def _gate_original_json(part: dict) -> str | None:
     """The tool's own JSON, carried beside a TOON-gate-substituted view under
     `GATE_METADATA_KEY` in the part's `metadata`.
 
-    The key comes from `defender.run_repository._layout`, not `defender.runtime.toon_gate`, which imports
+    The key comes from `defender.records._layout`, not `defender.runtime.toon_gate`, which imports
     pydantic-ai (a runtime-only extra) and would fail on a learning-loop/CI install."""
     meta = part.get("metadata")
     if not isinstance(meta, dict) or GATE_METADATA_KEY not in meta:

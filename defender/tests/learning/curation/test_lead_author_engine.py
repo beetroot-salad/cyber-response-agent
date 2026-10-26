@@ -39,7 +39,7 @@ from defender.runtime.permission import AgentPolicy  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
-from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
+from defender.records import WIRE_LOG_DIR  # noqa: E402
 
 
 #: #1108 P4 (O7, option (a) of the S-H report): the lane writes a batch draft's `agent/skills`;

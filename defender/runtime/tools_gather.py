@@ -13,7 +13,7 @@ from pydantic_ai.usage import UsageLimits
 
 from defender._model import model
 from defender.hooks.budget_enforcer import BudgetKill
-from defender.run_repository import Run
+from defender.records import Run
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.hooks.inject_system_skill_description import SystemIndex

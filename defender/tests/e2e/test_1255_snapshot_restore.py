@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime import challenge_gate  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.close_tool import (  # noqa: E402

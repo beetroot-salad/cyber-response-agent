@@ -199,7 +199,7 @@ def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
         tmp_path, data_root, consumer):
     from defender.learning.branch import cli
     from defender.learning.judge import JudgeRefused, grade_episode
-    from defender.run_repository import Run
+    from defender.records import Run
     from defender.tests.support.learning.core import _state1135
 
     ep, episode_id, roster = _episode(data_root)
@@ -386,7 +386,7 @@ def test_the_page_for_one_tenant_never_renders_another_tenants_episode(data_root
 
 def test_verify_opens_each_finished_arm_by_its_roster_id(data_root):
     from defender.learning.branch import cli
-    from defender.run_repository import Run, RunAbsent
+    from defender.records import Run, RunAbsent
 
     ep, episode_id, roster = _episode(data_root)
     _arm(ep, roster[T.world_id(ep, "a")])
@@ -404,7 +404,7 @@ def test_verify_opens_each_finished_arm_by_its_roster_id(data_root):
 
 def test_verify_refuses_outright_on_a_refused_roster(data_root):
     from defender.learning.branch import cli
-    from defender.run_repository import Run
+    from defender.records import Run
 
     ep, episode_id, good = _episode(data_root)
     _arm(ep, good[T.world_id(ep, "a")])
@@ -773,7 +773,7 @@ def _family(episode_id: str) -> Any:
 
 
 def _arm_ids(roster: dict[str, str]) -> dict[str, Any]:
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return {label: RunId.parse(text) for label, text in roster.items()}
 
@@ -873,7 +873,7 @@ class RegistryProbe:
 
     def __call__(self, **kw: Any) -> dict[str, Any]:
         from defender import run as run_py
-        from defender.run_repository import RunPaths
+        from defender.records import RunPaths
 
         seen: dict[str, Any] = {}
         inner = dict(kw)

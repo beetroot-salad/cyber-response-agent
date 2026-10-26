@@ -34,7 +34,7 @@ from defender.tests.support.storage._session_store_705 import (  # noqa: E402
     tool_call_response,
     user_request,
 )
-from defender.run_repository import SessionPaths  # noqa: E402
+from defender.records import SessionPaths  # noqa: E402
 
 
 # the two tables' declared shape

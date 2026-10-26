@@ -17,9 +17,9 @@ from defender import _io
 from defender.records._run_id import run_id_fault
 from defender._shown import quoted, shown
 from defender.tenancy._tenant import Tenant, TenantRefused
-from defender.run_repository._errors import RunRefused
-from defender.run_repository._id import RunId
-from defender.run_repository._layout import _SIDECAR_SUFFIXES, _STAGED_TAIL
+from defender.records._errors import RunRefused
+from defender.records._id import RunId
+from defender.records._layout import _SIDECAR_SUFFIXES, _STAGED_TAIL
 
 #: The one-time command every refusal of a pre-#1187 entry sends the operator to (#1187 O6,
 #: Flow 7), as the operator runs it from the checkout's root.

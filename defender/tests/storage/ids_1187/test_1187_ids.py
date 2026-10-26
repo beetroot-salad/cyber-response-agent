@@ -24,7 +24,7 @@ NON_CANONICAL = [pytest.param(text, id=repr(text)) for text in S.NON_CANONICAL_I
 def test_1187_o1_mint_contract():
     import uuid
 
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     minted = [RunId.mint() for _ in range(1000)]
     assert all(type(run_id) is RunId for run_id in minted)
@@ -67,7 +67,7 @@ def test_1187_o2_canonical_ids_pass_the_rules():
 @pytest.mark.parametrize("boundary", ["parse", "run_fault", "episode_fault", "run_id", "episode_id"])
 def test_1187_o2_noncanonical_ids_are_refused_at_every_boundary(text, boundary):
     from defender.records._run_id import episode_id_fault, run_id_fault
-    from defender.run_repository import RunAddress, RunId, RunRefused
+    from defender.records import RunAddress, RunId, RunRefused
 
     if boundary.endswith("_fault"):
         rule = run_id_fault if boundary == "run_fault" else episode_id_fault
@@ -92,13 +92,13 @@ def test_1187_o2_episode_id_rule_asks_for_no_room_for_a_label():
 
 def _address_fields() -> dict[str, object]:
     from defender.tenancy import _tenant
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(S.SAMPLE_UUID)}
 
 
 def test_1187_o2_run_address_admits_canonical_uuid_run_and_episode_ids():
-    from defender.run_repository import RunAddress
+    from defender.records import RunAddress
 
     ep = S.new_id()
     arm = RunAddress(tenant_id=_address_fields()["tenant_id"], run_id=S.new_id(), episode_id=ep)
@@ -110,7 +110,7 @@ def test_1187_o2_run_address_admits_canonical_uuid_run_and_episode_ids():
 
 
 def test_1187_o2_run_name_fault_still_tells_a_sidecar_from_a_run():
-    from defender.run_repository import run_name_fault
+    from defender.records import run_name_fault
 
     run_id = S.new_id()
     assert run_name_fault(run_id) is None, "a plain canonical UUID is a run"
@@ -162,7 +162,7 @@ def _attribute(obj: object, name: str) -> tuple[str, object]:
 
 
 def test_1187_o1_a_resumed_world_never_composes_its_arm_id(tmp_path):
-    from defender.run_repository import RunId
+    from defender.records import RunId
     from defender.runtime.branch import _family
 
     episode_id = S.new_id()
@@ -376,7 +376,7 @@ def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
 
     from defender import run as run_py
     from defender import run_common
-    from defender.run_repository import EpisodeRuns, RunsRepository
+    from defender.records import EpisodeRuns, RunsRepository
 
     seam = inspect.signature(run_py.main).parameters["materialize"].default
     for func in (run_common.materialize_run, run_py._materialize_run, RunsRepository.create, seam):

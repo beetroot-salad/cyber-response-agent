@@ -13,7 +13,7 @@ import pytest
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.shared.contracts._by_path import DEFENDER
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 
 
 @pytest.fixture
@@ -150,7 +150,7 @@ def test_lead_id_containing_path_traversal_segment(run_dir):
 def test_run_paths_plain_name_screens_non_plain_files(run_dir):
     """`RunPaths.access[plain_name]`'s plain-file-screen constraint refuses a non-plain-file
     target (a symlink, a directory, a device) the way its declared constraint promises."""
-    from defender.run_repository import plain_file
+    from defender.records import plain_file
     real = run_dir / "report.md"
     real.write_text("# real\n", encoding="utf-8")
     assert plain_file(real), "positive control: an ordinary regular file passes the screen"
@@ -172,7 +172,7 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
 
     body = (
         "import sys\n"
-        "from defender.run_repository import plain_file\n"
+        "from defender.records import plain_file\n"
         "import pathlib\n"
         "assert plain_file(pathlib.Path(sys.argv[1])) is True\n"
         "assert plain_file(pathlib.Path('/dev/null')) is False\n"

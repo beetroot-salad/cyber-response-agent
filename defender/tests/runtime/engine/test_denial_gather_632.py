@@ -58,7 +58,7 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
 
 
 def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path: Path):
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.tests.support.learning.curation._verb_authorization_632 import _Run
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, drive, materialize
 

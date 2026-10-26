@@ -18,7 +18,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.hooks import budget_enforcer as be  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime import record_query as rq  # noqa: E402

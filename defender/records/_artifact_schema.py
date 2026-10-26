@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._yaml import duplicate_top_level_key
 # Not the normalizer: the write gate tests the value exactly (see `validate_report`).

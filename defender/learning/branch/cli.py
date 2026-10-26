@@ -64,7 +64,7 @@ from defender._io import (
 )
 from defender._paths import PATHS
 from defender.knowledge._knowledge import KnowledgePaths
-from defender.run_repository import (
+from defender.records import (
     EpisodeRuns,
     Run,
     RunId,

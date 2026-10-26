@@ -16,7 +16,7 @@ import string
 import sys
 from collections.abc import Callable, Mapping
 from defender._model import model
-from defender.run_repository import Run, RunPaths
+from defender.records import Run, RunPaths
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any

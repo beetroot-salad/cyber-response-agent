@@ -153,7 +153,7 @@ def _judge_prompts(ep: Path) -> dict[str, str]:
 
 def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch):
     from defender.records import _alert_input
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.tests.support.storage._alert_plant import plant_alert
 
     P.roots(tmp_path, monkeypatch)

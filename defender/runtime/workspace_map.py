@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from defender.knowledge._corpus import iter_query_templates
 from defender.knowledge._knowledge import KnowledgePaths
 from defender._paths import PATHS, adapters_under
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender.runtime.system_status import NONE_DOWN
 
 if TYPE_CHECKING:  # pragma: no cover — typing only

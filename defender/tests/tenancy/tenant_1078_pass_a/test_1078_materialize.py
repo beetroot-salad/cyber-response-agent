@@ -10,7 +10,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from typing import Any
 
 import pytest
@@ -103,7 +103,7 @@ def test_o4_materialize_layout(tmp_path, tenant_root):
     expected = Path(run_dir)
     # #1279 (A3, conflict updated): the run id is the mint's, so the layout is judged by its parent.
     assert expected.parent == tenant_root / T_ID / "runs"
-    assert H.mod("run_repository").RunId.parse(expected.name)
+    assert H.mod("records").RunId.parse(expected.name)
     assert expected.is_dir()
     assert not (tenant_root / T_ID / "runs" / H.RECORD_NAME).exists(), (
         "run setup wrote the retired runs-base record")
@@ -237,7 +237,7 @@ def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):
     # #1279 (A3): the id is minted, so it cannot be the old run's id; the old run is still untouched.
     assert run_dir.parent == tenant_root / T_ID / "runs"
     assert run_dir.name != X
-    paths = H.mod("run_repository._layout").RunPaths(run_dir)
+    paths = H.mod("records._layout").RunPaths(run_dir)
     assert set(os.listdir(run_dir)) == {paths.alert_input_dir.name, paths.gather_raw.name,
                                         paths.provenance.name}, "not a fresh setup"
     assert H.census(old) == before, "the old run X was touched"

@@ -21,7 +21,7 @@ from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender.episodes._episode_handle import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
-from defender.run_repository import WIRE_LOG_NAMES  # noqa: E402
+from defender.records import WIRE_LOG_NAMES  # noqa: E402
 from defender.episodes._episode_paths import LAYOUT  # noqa: E402
 from defender.learning.branch import outcome as outcome_mod  # noqa: E402
 from defender.learning.judge import calls as calls_mod  # noqa: E402
@@ -35,7 +35,7 @@ from defender.runtime.branch._family import ManifestPredatesOracle  # noqa: E402
 from defender import _yaml
 
 if TYPE_CHECKING:
-    from defender.run_repository import RunsRepository
+    from defender.records import RunsRepository
 
 _logger = logging.getLogger(__name__)
 

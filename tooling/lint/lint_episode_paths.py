@@ -454,7 +454,7 @@ _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 
 DOORS: frozenset[tuple[str, str]] = frozenset()
 DOORS_TOLERATED: frozenset[tuple[str, str]] = frozenset()
-WALK_OWNER_DIR = "run_repository"
+WALK_OWNER_DIR = "records"
 WALK_DOORS_REQUIRED = ("create", "open")
 WALK_CALLS_REQUIRED = (
     ("learning.branch.cli", "create_episode", None),
@@ -672,12 +672,12 @@ def _walk_calls_missing(found: set[tuple[str, str, frozenset[str]]],
                        for m, name, kws in found)]
 
 
-#: The repository's walk owner is `_episode_scope.WALK_OWNER`: the whole `run_repository/` folder and `_episode_handle.py`. A door inside the
+#: The repository's walk owner is `_episode_scope.WALK_OWNER`: the whole `records/` folder and `_episode_handle.py`. A door inside the
 #: owner is the walk's own; what the census polices is the owner's PATH-TAKING doors reached
 #: from outside (`laundered`), however deep the wrappers nest (adversary F2).
 #: The owner's dotted packages: imported BY A STRING (`__import__`, `importlib.import_module`)
 #: outside the owner, a door no resolver can follow (adversary F2's `run.py` laundering).
-OWNER_PACKAGES = ("defender.run_repository", "defender.episodes._episode_handle")
+OWNER_PACKAGES = ("defender.records", "defender.episodes._episode_handle")
 #: Exempt from the `rebind` rule only: the one-time command holds the operator-named OLD
 #: episodes root "following its spelling, as configuration" (design Flow 6, S-move) — a path
 #: bind the design asks for, of a folder outside every tenant. It may not open an `Episode`.

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from defender.configuration import publish_root
 from defender.presentation import _mirror_write
-from defender.run_repository import RunId
+from defender.records import RunId
 
 if TYPE_CHECKING:
     from defender.tenancy._tenant import Tenant

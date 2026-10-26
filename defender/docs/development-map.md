@@ -30,9 +30,10 @@ Measurement harnesses, golden cases, and judge-alignment research data live in r
 `evaluations/`; they consume product code through a one-way dependency.
 Sample playground alert inputs live in `playground-v2/examples/alerts/`; production accepts
 an explicit alert path and does not discover samples from the source tree.
-`runtime/` executes investigations and enforces permissions; `run_repository/` owns shared
-run identities and persistence for runtime, learning, and presentation. `records/` defines
-investigation inputs, artifact schemas, provenance, and report values; `episodes/` owns
+`runtime/` executes investigations and enforces permissions; `records/` owns shared
+run identities and persistence for runtime, learning, and presentation, and defines
+investigation inputs, artifact schemas, provenance, and report values; `kit/` holds what
+crosses the adapter boundary (faults, the verb decorator, the call context adapters see); `episodes/` owns
 episode storage and addresses.
 The `_io` API delegates low-level JSON, guarded writes, and descriptor views to `_filesystem/`.
 
@@ -52,16 +53,16 @@ defender/
                     #   close_tool.py + challenge_gate.py + review/ — the write-time review gate on every confident close
   hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
   skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)
-  integrations/     # typed system adapters, transport, confinement, and ticket publication
-  presentation/     # workspace-map views, run and episode HTML rendering, and assets
+  integrations/     # typed system adapters, transport, and confinement
+  presentation/     # run and episode HTML rendering, and assets
   cli/              # tenant, policy, tacit-knowledge, and workspace-map operator commands
                     #   learning/ — lesson tracing and revert commands
   bin/              # stable command wrappers used by permission checks
   tenancy/          # tenant identity, registration, acceptance, and census
   knowledge/        # tenant knowledge layout, corpora, query rules, and scaffolding
   episodes/         # episode identities, layout, and storage handles
-  run_repository/   # shared run identities, layout, lookup, and records
-  records/          # investigation inputs, schemas, provenance, and report records
+  records/          # run identities, layout, lookup, inputs, schemas, provenance, and reports
+  kit/              # the adapter contract: faults, @verb, the adapter-facing call context
   configuration/    # environment parsing and model pricing
   learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),
                     #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),

@@ -180,7 +180,7 @@ class World:
 
     @property
     def arm_ids(self):
-        from defender.run_repository import RunId
+        from defender.records import RunId
         from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
         return {self.label: RunId.parse(fixture_uuid(f"estate920:{self.label}"))}

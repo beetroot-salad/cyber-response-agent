@@ -36,24 +36,24 @@ NOT_ROOT = pytest.mark.skipif(
 # The coined module names. ONE place, so a rename is one edit.
 # ======================================================================================
 
-#: The handle module. D6(a)'s exempt owner set is `run_repository/_layout.py`, `episodes/_episode_paths.py`,
+#: The handle module. D6(a)'s exempt owner set is `records/_layout.py`, `episodes/_episode_paths.py`,
 #: `tenancy/_tenant.py` and "the handle"; the other three are underscore-prefixed private modules
 #: beside `_io.py` and `records/_provenance.py`, so the handle follows the same convention.
-HANDLE_MODULE = "run_repository._handle"
+HANDLE_MODULE = "records._handle"
 TENANT_MODULE = "tenancy._tenant"
 EPISODE_MODULE = "episodes._episode_paths"
 #: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
 #: repository package — which absorbed the layout (`_layout.py`, formerly the flat-tier
 #: run-path module) and the handle (`_handle.py`, formerly the flat-tier run-handle module) —
-#: plus the two owners that stay outside it. The package's files are read off disk, so a
-#: module it gains is an owner without a list edit.
+#: plus the two owners that stay outside it. Since #1080 merged the repository into `records/`,
+#: its files are the door and its submodules, not the record-format modules beside them.
 RUN_REPOSITORY_FILES = tuple(sorted(
-    f"run_repository/{p.name}" for p in (DEFENDER / "run_repository").glob("*.py")))
+    f"records/{m}.py" for m in ("__init__", "_errors", "_handle", "_held", "_id", "_layout", "_lookup")))
 OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py")
 
 
 def handle() -> Any:
-    """`defender/run_repository/_handle.py` — `Run`, `RunRecord`, `RecordHandle`, `ArchivedWorld`."""
+    """`defender/records/_handle.py` — `Run`, `RunRecord`, `RecordHandle`, `ArchivedWorld`."""
     return mod(HANDLE_MODULE)
 
 
@@ -68,7 +68,7 @@ def episode_paths() -> Any:
 
 
 def run_paths_mod() -> Any:
-    return mod("run_repository._layout")
+    return mod("records._layout")
 
 
 def RunPaths(run_dir: Path) -> Any:  # noqa: N802 — it is the class's own name
@@ -172,7 +172,7 @@ MEMBER_ACCESSOR: dict[str, str] = {
 #: a whole document or a write-once fact, `update` for a `flock`ed JSON state (none remains
 #: since #1235 moved the budget and breaker into the run process's memory), `open` for the
 #: session store, `None` for a record nothing in the host writes through the
-#: handle. Mirrors `defender.run_repository._handle.MEMBER_VERB`; that module is the shipped shape, this
+#: handle. Mirrors `defender.records._handle.MEMBER_VERB`; that module is the shipped shape, this
 #: is the spec.
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",

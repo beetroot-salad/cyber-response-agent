@@ -45,7 +45,7 @@ from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
 from defender._frontmatter import strip_frontmatter
-from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.records import RUN_LAYOUT, RunPaths
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS
 from ._prompts import DEFAULT_GATHER_MODEL, DEFAULT_MODEL, DEFAULT_TOOL_RETRIES, GATHER_REQUEST_LIMIT, _main_instructions, enforcement_enabled
 from ._budget import _make_hooks

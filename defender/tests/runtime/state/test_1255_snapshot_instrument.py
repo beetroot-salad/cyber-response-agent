@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from defender.records import _provenance
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 

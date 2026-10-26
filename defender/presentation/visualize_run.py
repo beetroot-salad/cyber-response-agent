@@ -14,7 +14,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender.records import _knowledge_status, _provenance
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows, read_text_utf8
 from defender.records._report import ReportRead
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.learning import lead_repository
 from defender.presentation.publisher import NoPublishRoot, Publisher
 from defender.presentation._page_failed import VisualizeFailed
@@ -64,7 +64,7 @@ _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from defender.run_repository import Run
+    from defender.records import Run
     from defender.tenancy._tenant import Tenant
 
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.

@@ -85,10 +85,10 @@ def test_a_budget_enforcer_read_of_the_environment_or_a_file_is_found(tmp_path, 
 
 
 @pytest.mark.parametrize("rel, body", [
-    ("integrations__ticket_writer.py", "process_defender_dir()"),
-    ("integrations__ticket_writer.py", "Path.cwd()"),
-    ("integrations__ticket_writer.py", "run_env(x)"),
-    ("integrations__ticket_writer.py", "os.environ['X']"),
+    ("runtime__ticket_writer.py", "process_defender_dir()"),
+    ("runtime__ticket_writer.py", "Path.cwd()"),
+    ("runtime__ticket_writer.py", "run_env(x)"),
+    ("runtime__ticket_writer.py", "os.environ['X']"),
     ("runtime__lead_zero__run.py", "os.getenv('X')"),
     ("runtime__lead_zero__run.py", "run_env(x)"),
 ])

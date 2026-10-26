@@ -19,7 +19,7 @@ from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_s
 from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.tenancy._tenant import TenantId
 from defender.configuration import publish_root
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
     _BOX_MARK_ENV,

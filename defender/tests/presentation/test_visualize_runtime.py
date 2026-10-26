@@ -9,10 +9,10 @@ import json
 from pathlib import Path
 
 from defender._io import read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.presentation import visualize_data as d
 from defender.presentation.visualize_run import render_runtime_page
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}

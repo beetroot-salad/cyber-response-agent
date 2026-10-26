@@ -10,7 +10,7 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
-from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
+from defender.records import WIRE_LOG_DIR  # noqa: E402
 from defender.tests.support.learning.core._stage_args import as_curator_stage_args  # noqa: E402
 from defender.learning.author import shared as _shared  # noqa: E402
 from defender.learning.core import config  # noqa: E402

@@ -1,7 +1,7 @@
 """#632 — shared machinery for the verb-authorization spec suite. NOT a test module."""
 from __future__ import annotations
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path

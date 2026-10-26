@@ -30,7 +30,7 @@ from defender.tests.e2e._box665 import (  # noqa: F401
     requires_live_box,
 )
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, is_dood
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[2]

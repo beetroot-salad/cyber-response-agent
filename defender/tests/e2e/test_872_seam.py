@@ -72,7 +72,7 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     tmp_path: Path,
 ) -> None:
     from defender._io import read_jsonl_rows
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     def _run(root: Path, toolset):
         run_dir = materialize(root, GOLDEN_AB3, run_id=RUN_ID)

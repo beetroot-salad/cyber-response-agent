@@ -12,7 +12,7 @@ import pytest
 from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender import _io, run_common
-from defender.run_repository import Run
+from defender.records import Run
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
 

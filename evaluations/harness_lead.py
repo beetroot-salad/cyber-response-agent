@@ -95,7 +95,7 @@ def run_lead_author(tmp: Path, run_dir: Path) -> LeadRun:
     the claim is kept as `tmp/after/` (the root `expect.json`'s `agent/...` paths name)."""
     from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
     from defender.learning.leads.lead_author import run
-    from defender.run_repository import Run
+    from defender.records import Run
 
     tenant = LocalTenant(tmp, _agent_source(tmp))
     paths = LoopPaths(repo_root=REAL_REPO_ROOT, state_dir=tmp / "_state")

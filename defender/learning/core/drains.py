@@ -38,7 +38,7 @@ from defender.learning.core.persist import (
 )
 from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 # A runtime import, not a `TYPE_CHECKING` one: `ServedMarker` (a model) names it as a field.
-from defender.run_repository import Run
+from defender.records import Run
 from defender.learning.core.state import (
     AUTHOR_DRAIN_LOCK,
     FINDINGS,
@@ -442,7 +442,7 @@ def _drain_lead_author_markers(
     its draft is reset, it counts its attempt and its row is re-queued until the ceiling
     quarantines it; the other claims go ahead."""
     from defender.learning.author.version_control import DeliveryRefused
-    from defender.run_repository import RunAbsent
+    from defender.records import RunAbsent
 
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
     accepted: dict[str, Tenant | Exception] = {}
@@ -518,7 +518,7 @@ def _rehydrate(
     repository, which never follows a link at its name. Else the refusal, logged: the
     tenant's `TenantRefused`, or the open's `RunRefused` (`RunAbsent` when the run is gone)."""
     from defender.tenancy import _tenant
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     address = claim.address
     key = str(address.tenant_id)

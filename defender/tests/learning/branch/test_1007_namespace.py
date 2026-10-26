@@ -109,16 +109,16 @@ def _capacity_family(count):
 @pytest.mark.parametrize(("count", "expected_bytes"), [(799, 65_521), (800, 65_603)])
 def test_arm_roster_capacity_matches_the_readable_wire_budget(count, expected_bytes):
     import json
-    from defender import run_repository
+    from defender import records
 
     doc = _capacity_family(count)
     mapping = {world["world_id"]: T.SOURCE_RUN_ID for world in doc["worlds"]}
     assert len((json.dumps(mapping, indent=2, sort_keys=True) + "\n").encode()) == expected_bytes
     if count == 799:
-        run_repository.check_arm_roster_capacity(count)
+        records.check_arm_roster_capacity(count)
     else:
-        with pytest.raises(run_repository.RunRefused, match="roster"):
-            run_repository.check_arm_roster_capacity(count)
+        with pytest.raises(records.RunRefused, match="roster"):
+            records.check_arm_roster_capacity(count)
 
 
 @pytest.mark.parametrize("count", [799, 800])

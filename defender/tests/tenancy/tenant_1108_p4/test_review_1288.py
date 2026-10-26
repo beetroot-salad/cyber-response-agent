@@ -437,7 +437,7 @@ _B = "b" * 40
 def _run_with_record(tmp_path: Path, *, record: str, stamp: str):
     import json
 
-    from defender.run_repository import Run
+    from defender.records import Run
 
     import dataclasses
 

@@ -72,7 +72,7 @@ def scoped_nodes(tree: ast.AST) -> list[tuple[ast.AST, dict[str, list[ast.expr]]
 
 #: The walk's owner: the run repository and the episode handle. Cover the whole owner package as
 #: it gains modules.
-WALK_OWNER = ("run_repository/", "episodes/_episode_handle.py")
+WALK_OWNER = ("records/", "episodes/_episode_handle.py")
 
 
 def owned(rel: str) -> bool:

@@ -9,7 +9,7 @@ import pytest
 
 from _box665 import requires_live_box  # noqa: E402
 
-from defender.run_repository import RUN_LAYOUT, RunPaths  # noqa: E402
+from defender.records import RUN_LAYOUT, RunPaths  # noqa: E402
 from defender.execution import bash_exec  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.tests.support.runtime.state import _1255_view as V

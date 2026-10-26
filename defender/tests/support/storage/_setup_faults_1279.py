@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import _io
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 
 
 class PlantAfterRunDirIo:
@@ -102,7 +102,7 @@ class TenantWithRunsIo:
         return getattr(self._tenant, name)
 
     def runs_repository(self) -> Any:
-        from defender.run_repository import RunsRepository
+        from defender.records import RunsRepository
 
         return RunsRepository(self._tenant, io=self._io)
 
@@ -117,7 +117,7 @@ def materialize_through(io: Any) -> Callable[..., Any]:
     I/O; the handle it passes is rebound here at the same id over `io`, so setup's run-dir make
     goes through the seam."""
     from defender import run as run_py
-    from defender.run_repository import Run
+    from defender.records import Run
 
     def materialize(alert: Path, *args: Any, tenant: Any, **kwargs: Any) -> Any:
         handed = kwargs.get("run")

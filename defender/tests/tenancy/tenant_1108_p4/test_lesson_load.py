@@ -26,7 +26,7 @@ def tenant(tmp_path, data_root):
 
 
 def _rows(run_dir) -> list[dict]:
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     path = RunPaths(run_dir).lessons_loaded
     if not path.is_file():

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from defender.records import _alert_input, _knowledge_status
 from defender._model import model
-from defender.run_repository import Run, RunPaths
+from defender.records import Run, RunPaths
 from defender.runtime import case_ticket, run_end
 from defender.runtime.run_tenant import RunTenant
 from defender.kit.settings import SETTINGS_POINTER

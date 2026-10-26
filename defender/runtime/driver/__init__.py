@@ -80,7 +80,7 @@ from defender.hooks.inject_system_skill_description import SystemIndex, descript
 from defender import _clock
 from defender.configuration._env import env_bool
 from defender._frontmatter import strip_frontmatter
-from defender.run_repository import Run, RunPaths
+from defender.records import Run, RunPaths
 from ..run_tenant import RunTenant
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,

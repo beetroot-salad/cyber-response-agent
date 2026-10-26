@@ -451,7 +451,7 @@ def test_terminal_report_reflects_final_attempt_only(tmp_path):
 
 def test_trace_rows_accumulate_across_multiple_close_attempts(tmp_path):
     """Across a challenged attempt and a standing re-close on one run, each role's..."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     deps, run_dir = _fresh(tmp_path, "accumulate")
     assert close_with(deps, GAP, recording(gap("l-004"))).outcome == CHALLENGED

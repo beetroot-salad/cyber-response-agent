@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.records import RUN_LAYOUT, RunPaths
 from defender import box as box_mod
 from defender.tests.support.runtime.state import _1255_clock as C
 from defender.tests.support.runtime.state import _1255_view as V

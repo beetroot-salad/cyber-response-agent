@@ -15,7 +15,7 @@ from defender import _yaml
 from defender.configuration._env import env_str
 from defender._io import read_guarded, read_text_utf8
 from defender.records._report import read_report
-from defender.run_repository import RunPaths, artifact_file
+from defender.records import RunPaths, artifact_file
 from defender._untrusted import message_salt
 from defender.learning._prompt import section_text, stage_user_message, titled_section
 from defender.learning.core.validate import MalformedReply, reply_document_text

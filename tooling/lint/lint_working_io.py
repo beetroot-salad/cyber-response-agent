@@ -79,8 +79,8 @@ def _typed(node: ast.expr, scan, wanted: str, seen: frozenset[str] = frozenset()
         if arg.arg == node.id and arg.annotation is not None:
             annotation = scan._annotation(arg.annotation)
             origin = scan.origin(annotation) if annotation is not None else None
-            if origin in {f"defender.run_repository.{wanted}",
-                          f"defender.run_repository._handle.{wanted}"}:
+            if origin in {f"defender.records.{wanted}",
+                          f"defender.records._handle.{wanted}"}:
                 return True
     bindings = scan.bindings(fn).get(node.id, [])
     return bool(bindings) and all(binding.value is not None and

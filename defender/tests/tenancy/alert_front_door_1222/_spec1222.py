@@ -35,7 +35,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.shared.contracts import _data_root_1078 as D
 from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
@@ -1324,7 +1324,7 @@ def store_factory(tmp_path: Path, *, fault: SS.StoreFault | None = None,
     base = SS.runs_base(tmp_path)
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("run_repository", "SessionPaths")(fixture_runs_base(base)))
+        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("records", "SessionPaths")(fixture_runs_base(base)))
         handle = LeadSessionFault(real, fault or default, once=once)
         if sink is not None:
             sink.append(handle)

@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
 mod = S.mod
