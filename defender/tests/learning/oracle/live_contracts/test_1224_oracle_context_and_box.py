@@ -422,7 +422,7 @@ def _start_oracle_box_recorded(where: Path, run_dir: Path,
                                monkeypatch: Any) -> tuple[Any, list[list[str]]]:
     """Drive the PRODUCTION oracle box factory through `_RECORDING_DOCKER` first on PATH, with
     the sibling's `run_dir` planted in every channel the oracle code could read it from: the
-    env `run_common.run_env` builds for the sibling (handed to the factory), the process
+    env `run_env` builds for the sibling (handed to the factory), the process
     environment, and the cwd. The start must fail closed (it raises: `OracleSandboxError`, or
     the runtime's own `BoxFault`). First the recorder is checked against the runtime's own
     `start_box(BoxRequest)`: its create is recorded with its writable bind, so the recorder
@@ -447,7 +447,7 @@ def _start_oracle_box_recorded(where: Path, run_dir: Path,
         assert (probe, False) in _binds(runtime_creates[-1]), runtime_creates[-1]
         argv_log.unlink()
 
-        env = S.sym("run_common", "run_env")(S.DEFENDER, run_dir)
+        env = S.sym("box", "run_env")(S.DEFENDER, run_dir)
         env["PATH"] = f"{shim_bin}{os.pathsep}{env.get('PATH', '')}"
         for key in ("DEFENDER_DIR", "DEFENDER_RUN_DIR", "DEFENDER_RUNS_BASE"):
             mp.setenv(key, env[key])

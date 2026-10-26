@@ -166,7 +166,7 @@ def test_pricing_module_lands_in_a_package_whose_initialiser_must_not_load_the_a
              if i.module.split(".")[0] not in sys.stdlib_module_names and i.module != "__future__"]
     assert third == [], f"{home} imports outside the standard library: {third}"
     env = {"PYTHONPATH": str(S.REPO_ROOT), "PATH": "/usr/bin:/bin"}
-    for module, ok in ((S.dotted(home), True), ("defender.runtime.providers", False)):
+    for module, ok in ((S.dotted(home), True), ("defender.providers", False)):
         done = run_blocked(f"import {module}\n", allow_only=("defender", "__main__"),
                            no_site=True, env=env)
         assert (done.returncode == 0) is ok, (module, done.stderr.decode()[-400:])

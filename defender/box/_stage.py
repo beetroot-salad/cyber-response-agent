@@ -15,6 +15,7 @@ from defender.execution import bash_exec
 from defender.execution.box_codec import BoxResult, RawExec, decode_request, encode_response
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 
+from ._host_env import run_env
 from ._spec import BoxExecutor, BoxSpec
 
 _STAGE_PREFIX = "defender-view-"
@@ -163,12 +164,10 @@ def staged_executor(
     *, unmirrored: frozenset[str],
 ) -> BoxExecutor:
     """The unboxed fallback's executor: the model view over a fresh staging tree, its programs
-    run under the run's environment pointing into that tree (`run_common.run_env` over the
+    run under the run's environment pointing into that tree (`run_env` over the
     staged trees), so no variable names the real runs folder or the run folder."""
-    from defender import run_common
-
     tree = make_staging_tree(run_dir, defender_dir, tenant_agent, unmirrored=unmirrored)
-    env = run_common.run_env(
+    env = run_env(
         tree.root / MODEL_DEFENDER.relative_to("/"), tree.run_view,
         tenant_agent=(tree.root / MODEL_AGENT.relative_to("/")) if tenant_agent is not None else None,
     )

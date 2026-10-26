@@ -635,7 +635,7 @@ def test_empty_verb_return_is_payload_status_empty(tmp_path, empty):
 
 
 def _provider_key_vars() -> set[str]:
-    from defender.runtime import providers
+    from defender import providers
     return providers.api_key_vars()
 
 

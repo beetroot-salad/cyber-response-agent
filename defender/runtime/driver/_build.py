@@ -24,7 +24,7 @@ from .. import compaction
 from .. import lessons_push
 from .. import observe
 from .. import permission
-from .. import providers
+from defender import providers
 from .. import selection
 from ..request_ceiling import RequestCeiling, requests_so_far
 from .. import toon_gate as toon_gate_mod
@@ -34,7 +34,7 @@ from .. import challenge_gate
 from .. import review_roles
 from ..close_tool import register_close_tool
 from ..permission.policies import _common
-from ..providers import BuiltModel
+from defender.providers import BuiltModel
 from ..tools import (
     AgentDeps,
     GatherDeps,

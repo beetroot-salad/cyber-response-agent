@@ -92,7 +92,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "runtime/permission/files.py", "runtime/permission/policies/_common.py",
         "runtime/run_end.py", "box/_scrub.py", "runtime/session_store/_write.py",
         "runtime/tools/_document.py", "runtime/tools/_files.py",
-        "runtime/toon_gate.py", "box/_lifecycle.py",
+        "runtime/toon_gate.py", "box/_lifecycle.py", "box/_host_env.py",
         "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
         "runtime/branch/_spec.py",
         "runtime/record_query.py", "skills/invlang/corpus.py",

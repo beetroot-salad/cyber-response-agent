@@ -40,6 +40,7 @@ from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
 from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
+from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -664,9 +665,7 @@ def _opt_out_or_raise(fault: BoxFault) -> None:
 
 def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     """Env for the unboxed opt-out: the host env minus provider keys, like
-    `run_common.run_env`, not the container-shaped `_render_env` (no HOME, box-only PATH)."""
-    from defender.run_common import provider_scrubbed_environ
-
+    `run_env`, not the container-shaped `_render_env` (no HOME, box-only PATH)."""
     # The one host-child scrub: no provider key and no issuer login variable (#1108 P4 O8).
     env = provider_scrubbed_environ()
     env.pop("DEFENDER_AGENT_DIR", None)

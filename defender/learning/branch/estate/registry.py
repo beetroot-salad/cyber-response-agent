@@ -564,7 +564,7 @@ class _LazyModel:
 
     def _resolve(self) -> Any:
         if self._built is None:
-            from defender.runtime.providers import build_for_effort
+            from defender.providers import build_for_effort
 
             self._built = build_for_effort(self.name, self.effort)
         return self._built

@@ -4,7 +4,7 @@ from __future__ import annotations
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
-from defender.runtime.providers import BuiltModel
+from defender.providers import BuiltModel
 
 
 def fake_model(fn):

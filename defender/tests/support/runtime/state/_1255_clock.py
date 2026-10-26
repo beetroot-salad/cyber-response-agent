@@ -26,7 +26,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
 

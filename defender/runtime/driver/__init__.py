@@ -48,7 +48,7 @@ from .. import compaction
 from .. import observe
 from .. import orient
 from .. import permission
-from .. import providers
+from defender import providers
 from .. import run_end
 from .. import selection
 from .. import session_store
@@ -62,7 +62,7 @@ from .. import review_roles
 from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
-from ..providers import BuiltModel
+from defender.providers import BuiltModel
 from ..run_clock import ClockSource
 from ..run_state import RunState, run_state_of
 from ..tools import (

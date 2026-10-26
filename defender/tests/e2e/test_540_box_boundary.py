@@ -18,8 +18,8 @@ from defender.tests.support.sandbox._docker import daemon_reachable, docker_runt
 
 pytest.importorskip("pydantic_ai")
 
-from defender.run_common import run_env  # noqa: E402
-from defender.runtime import providers  # noqa: E402
+from defender.box import run_env  # noqa: E402
+from defender import providers  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.execution.bash_exec import parse  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402

@@ -443,10 +443,10 @@ def writer_deps(store: FakeStore):
 
 def _handed(run_dir: Path, config: dict[str, str] | None | object) -> dict[str, Any]:
     """What run.py hands both legs: the record, the code tree and the run's env."""
-    from defender import run_common
+    from defender import box as box_mod
 
     return {"tenant": current_record(config=config), "defender_dir": T1106.DEFENDER,
-            "env": run_common.run_env(T1106.DEFENDER, Path(run_dir))}
+            "env": box_mod.run_env(T1106.DEFENDER, Path(run_dir))}
 
 
 def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,

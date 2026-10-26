@@ -24,7 +24,7 @@ from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import challenge_gate, driver, observe  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import ReplayFn, Turn  # noqa: E402

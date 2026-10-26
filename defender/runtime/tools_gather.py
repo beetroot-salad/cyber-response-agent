@@ -23,7 +23,7 @@ from . import system_status
 from .exception_groups import carried_unless_overridden
 from .run_state import run_state_of
 from . import permission
-from . import providers
+from defender import providers
 from . import run_end
 from . import session_store
 from . import tools

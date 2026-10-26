@@ -28,7 +28,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import Run, RunPaths  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import RosterRead, VerbRegistry  # noqa: E402

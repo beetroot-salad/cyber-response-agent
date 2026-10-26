@@ -71,7 +71,7 @@ def test_1008_the_real_selection_step_builds_the_judges_agent_with_no_tool_at_al
     from defender.runtime import observe
     from defender.runtime.agent_definition import ToolSet
     from defender.runtime.driver import build_agent_core
-    from defender.runtime.providers import BuiltModel
+    from defender.providers import BuiltModel
 
     AgentRole = _role()
     JUDGE_DEF = _judge_def()
