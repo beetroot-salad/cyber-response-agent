@@ -43,5 +43,5 @@ PATH_ARG="$1"; shift
 # Build the curl command for the remote shell. Path is single-quoted to
 # survive globs (?, *) intact; extra args are appended verbatim via "$@".
 exec docker --context "${CONTEXT}" exec -i "${CONTAINER}" \
-    sh -c 'exec curl -sS -k -u "elastic:${ELASTIC_PASSWORD}" "$@"' \
+    bash -c 'exec curl -sS -k -K /dev/fd/3 "$@" 3< <(printf "user = \"elastic:%s\"\n" "$ELASTIC_PASSWORD")' \
     -- "https://localhost:9200${PATH_ARG}" "$@"
