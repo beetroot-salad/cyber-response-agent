@@ -124,6 +124,48 @@ def test_removing_a_member_ends_only_that_membership() -> None:
     assert ann.delete(f"/tenants/{T1}/members/{bob_id}").status_code == 404  # already ended
 
 
+def test_the_member_list_shows_active_members_only_never_an_invitee() -> None:
+    """`GET /members` lists active rows; an invitee, existing or new, shows nowhere in it until acceptance (endpoints, P-E)."""
+    world, ann, bob = two_tenants()
+    revoked = world.invite(ann, T1, NINA).json()["id"]
+    world.invite(ann, T1, BOB)
+    world.invite(ann, T1, NEW)
+    assert ann.delete(f"/tenants/{T1}/invitations/{revoked}").status_code == 204
+    world.send_pending()
+    listed = ann.get(f"/tenants/{T1}/members")
+    assert [m["email"] for m in items(listed)] == [ANN]
+    assert "Bob" not in listed.text
+    assert BOB not in listed.text
+    world.clock.advance(SEVEN_DAYS + SECOND)  # the invitations expire, still not members
+    ann = world.sign_in(ANN)
+    assert [m["email"] for m in items(ann.get(f"/tenants/{T1}/members"))] == [ANN]
+    bob = world.sign_in(BOB)
+    world.invite(ann, T1, BOB)
+    world.send_pending()
+    [row] = [r for r in me(bob)["invitations"] if r["tenant_id"] == T1]
+    assert bob.post(f"/invitations/{row['id']}/accept").status_code == 200
+    assert {m["email"] for m in items(ann.get(f"/tenants/{T1}/members"))} == {ANN, BOB}  # control
+
+
+def test_a_membership_records_who_invited_it_and_who_ended_it() -> None:
+    """`invited_by` is the inviting member (`system` for the bootstrap); `ended_by` is whoever removed it (data model, O4)."""
+    world, ann, bob = two_tenants()
+    ann_id, bob_id = user_id(ann), user_id(bob)
+    [ann_row] = world.repo.memberships_of_user(ann_id)
+    assert ann_row.invited_by == "system"
+    nina_row = world.invite(ann, T1, NINA).json()["id"]
+    assert world.repo.membership(nina_row).invited_by == ann_id
+    world.send_pending()
+    nina = world.sign_in(NINA)
+    assert ann.delete(f"/tenants/{T1}/members/{user_id(nina)}").status_code == 204
+    assert world.repo.membership(nina_row).ended_by == ann_id
+    bob_row = _open_invitation(world, ann, T1, bob)
+    assert world.repo.membership(bob_row).invited_by == ann_id
+    assert bob.post(f"/invitations/{bob_row}/accept").status_code == 200
+    assert bob.delete(f"/tenants/{T1}/members/{bob_id}").status_code == 204
+    assert world.repo.membership(bob_row).ended_by == bob_id
+
+
 def test_a_member_can_remove_themselves_and_then_be_invited_again() -> None:
     """Self-removal is allowed; inviting again adds a fresh invitation that works (flow 5, O4)."""
     world, ann, bob = two_tenants()

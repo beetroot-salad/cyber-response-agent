@@ -54,6 +54,24 @@ def test_idle_expiry_is_twelve_hours_from_a_last_seen_written_only_when_over_fiv
     assert [x.get("/me").status_code for x in (a, c, b, d, e)] == [401, 401, 200, 200, 200]
 
 
+@pytest.mark.parametrize("limit", ["idle", "absolute"])
+def test_an_expired_session_stays_expired_however_often_it_is_sent(limit: str) -> None:
+    """A refused request does not revive the session it refused (O6: 12 hours idle, 7 days at most)."""
+    world = World(tenants={T1: [ANN]})
+    ann = world.sign_in(ANN)
+    if limit == "idle":
+        world.clock.now = T0 + 12 * HOUR + SECOND
+    else:
+        for _ in range(28):
+            world.clock.advance(6 * HOUR)
+            ann.get("/me")
+        world.clock.now = T0 + SEVEN_DAYS + SECOND
+    assert ann.get("/me").status_code == 401
+    world.clock.advance(MINUTE)
+    assert ann.get("/me").status_code == 401
+    assert ann.get(f"/tenants/{T1}/alerts").status_code == 401
+
+
 def test_a_session_ends_seven_days_after_sign_in_however_busy() -> None:
     """Absolute 7-day limit (O6)."""
     world = World(tenants={T1: [ANN]})
@@ -80,6 +98,10 @@ def test_the_session_value_is_random_and_only_a_hash_of_it_is_stored() -> None:
             assert uid not in value
             assert email not in value
     assert len({v[:8] for v in values}) == len(values)
+    for i, v in enumerate(values):  # random: two values agree in few positions, not a shared clock or host part
+        for w in values[i + 1:]:
+            same = sum(1 for x, y in zip(v, w, strict=False) if x == y)
+            assert same < min(len(v), len(w)) // 2, (v, w)
     assert repo_holds(world.repo, ANN)  # control: the walk reaches what the repository holds
     assert repo_holds(world.service, ANN)  # control: and what the service holds
     assert not any(repo_holds(world.repo, v) or repo_holds(world.service, v) for v in values)

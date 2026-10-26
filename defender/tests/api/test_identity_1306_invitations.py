@@ -23,6 +23,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     same_invite_answer,
     tenants_of,
     two_tenants,
+    me,
 )
 
 
@@ -115,6 +116,18 @@ def test_an_invitation_is_open_until_exactly_seven_days_after_its_send() -> None
     assert tenants_of(world.sign_in(NEW)) == {T1}
     world.clock.now = sent_at + SEVEN_DAYS
     assert tenants_of(world.sign_in(NINA)) == set()
+
+
+def test_me_offers_an_invitation_until_exactly_seven_days_after_its_send() -> None:
+    """`/me` lists open (unexpired) invitations, open while `expires_at > now`: shown a second before 7 days, not at 7 days."""
+    world, ann, _ = two_tenants()
+    world.invite(ann, T1, BOB)
+    world.send_pending()
+    sent_at = world.clock.now
+    world.clock.now = sent_at + SEVEN_DAYS - SECOND
+    assert [r["tenant_id"] for r in me(world.sign_in(BOB))["invitations"]] == [T1]
+    world.clock.now = sent_at + SEVEN_DAYS
+    assert me(world.sign_in(BOB))["invitations"] == []
 
 
 def test_a_row_whose_send_is_still_pending_does_not_expire() -> None:
