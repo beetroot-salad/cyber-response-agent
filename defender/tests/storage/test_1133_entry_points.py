@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 import yaml
 
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.records import WIRE_LOG_NAMES
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S

@@ -19,7 +19,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
@@ -27,7 +27,7 @@ from defender.learning.branch.estate.registry import (  # noqa: E402
     EstateError,
     WorldRegistry,
 )
-from defender.episodes._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
+from defender.records._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     BASE,
     CAPTURED,

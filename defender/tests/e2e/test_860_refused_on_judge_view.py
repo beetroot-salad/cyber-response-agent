@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 from defender.learning.lead_repository import joined  # noqa: E402
 from defender.runtime.circuit_breaker import (  # noqa: E402
     AGENT_FIXABLE_ERROR_CLASS,

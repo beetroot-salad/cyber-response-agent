@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from defender import _io
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender._io import read_jsonl_rows
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
@@ -751,7 +751,7 @@ def _sibling_episode(tmp_path: Path, src: Path) -> Path:
     default), with no container record and no episodes variable; the launcher's RUNS step
     (`T.episode_view`) has made `runs/` and the arm roster the sibling reads world b's arm id
     from (O4b)."""
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
 
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     with Episode.open(ep) as held:

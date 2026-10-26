@@ -15,9 +15,9 @@ if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[2])
     sys.path.insert(0, _root)
 
 from defender.tenancy._tenant import TenantRefused, requested_tenant, resolve_data_root
-from defender.episodes._episode_handle import Episode, EpisodeRefused
+from defender.records._episode_handle import Episode, EpisodeRefused
 from defender._io import Bound
-from defender.episodes._episode_paths import LAYOUT, EpisodePaths
+from defender.records._episode_paths import LAYOUT, EpisodePaths
 from defender.records import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
 from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod

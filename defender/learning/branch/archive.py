@@ -8,9 +8,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender._io import Bound, entry_present, read_text_utf8
-from defender.episodes._episode_paths import LAYOUT, WorldPaths
+from defender.records._episode_paths import LAYOUT, WorldPaths
 from defender.runtime.branch._family import load_family
 from defender.records import (
     RunPaths,

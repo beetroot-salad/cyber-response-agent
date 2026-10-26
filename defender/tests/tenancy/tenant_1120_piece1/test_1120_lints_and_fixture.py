@@ -82,7 +82,7 @@ def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_se
         f"    return tenant.{prop} / name\n\n" for prop in KNOWLEDGE_JOINS)
     source = (
         "from pathlib import Path\n\n"
-        "from defender.episodes._episode_paths import EpisodePaths\n"
+        "from defender.records._episode_paths import EpisodePaths\n"
         "from defender.tenancy._tenant import Tenant\n\n\n"
         f"{joins}{clean}"
         f"def row_only(tenant: Tenant) -> Path:\n    return tenant.{H.ROW_PATH_PROPERTY}\n\n"
@@ -114,7 +114,7 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
     source = textwrap.dedent(f"""\
         from pathlib import Path
 
-        from defender.episodes._episode_paths import EpisodePaths
+        from defender.records._episode_paths import EpisodePaths
         from defender.tenancy._tenant import accept_tenant
         from defender.runtime.run_tenant import RunTenant
 

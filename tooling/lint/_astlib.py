@@ -451,14 +451,14 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # An owner the runs repository defines is spelled as its door serves it (#1105): every
     # origin is compared through `door_spelling`, so the submodule spelling needs no line.
     "defender.records.RunPaths",
-    "defender.episodes._episode_paths.EpisodePaths",
+    "defender.records._episode_paths.EpisodePaths",
     # The file-backed handle: a value reached through `run.facts.<record>` /
     # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
     "defender.records.Run",
     # The episode handle (#1133): `episode.served_base` / `episode.world(label).draw(n)` are
     # owner-derived like `EpisodePaths(ep).<record>`.
-    "defender.episodes._episode_handle.Episode",
-    "defender.episodes._episode_paths.WorldPaths",
+    "defender.records._episode_handle.Episode",
+    "defender.records._episode_paths.WorldPaths",
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.
     "defender.records.SessionPaths",
@@ -470,8 +470,8 @@ _OWNER_CLASS_ORIGINS = frozenset({
 _OWNER_VALUE_ORIGINS = frozenset({
     "defender.records.RUN_LAYOUT",
     "defender.records.WIRE_LOG_NAMES",
-    "defender.episodes._episode_paths.LAYOUT",
-    "defender.episodes._episode_paths.WORLD_LEAVES",
+    "defender.records._episode_paths.LAYOUT",
+    "defender.records._episode_paths.WORLD_LEAVES",
 })
 
 

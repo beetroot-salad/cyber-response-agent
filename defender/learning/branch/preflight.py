@@ -25,7 +25,7 @@ from typing import Any, NamedTuple
 
 from defender.records import _provenance
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 
 

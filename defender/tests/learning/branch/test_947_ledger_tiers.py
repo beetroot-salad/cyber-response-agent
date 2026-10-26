@@ -10,8 +10,8 @@ import pytest
 from pydantic import ValidationError
 
 from defender._io import append_jsonl, read_jsonl_rows
-from defender.episodes._episode_handle import Episode
-from defender.episodes._episode_paths import BASE_FILENAME, SERVED_DIRNAME
+from defender.records._episode_handle import Episode
+from defender.records._episode_paths import BASE_FILENAME, SERVED_DIRNAME
 from defender.learning.branch.ledger import (
     BASE,
     CAPTURED,

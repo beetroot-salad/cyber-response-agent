@@ -127,7 +127,7 @@ def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None) -> _
     except OSError as e:
         sys.exit(f"[run.py] the alert {alert} could not be read: {e}")
     if world is not None:
-        from defender.episodes._episode_paths import EpisodePaths
+        from defender.records._episode_paths import EpisodePaths
 
         record_path = EpisodePaths(world.episode_dir).source_record
         text, reason = _io.read_guarded(record_path)

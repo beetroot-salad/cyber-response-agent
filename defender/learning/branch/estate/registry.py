@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.records._run_id import uuid_id_fault
 from defender.runtime.branch import source_alert
 from defender.runtime.branch._family import family_identities

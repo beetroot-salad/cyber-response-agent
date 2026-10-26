@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 
-from defender.episodes._episode_paths import OracleStorePaths
+from defender.records._episode_paths import OracleStorePaths
 
 from defender._io import guarded_mkdir, read_bytes_capped, read_jsonl_rows, write_guarded
 

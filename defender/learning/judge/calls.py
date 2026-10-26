@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender._io import Bound
 from defender.knowledge._query_rules import DENIED_QUERY_ID
 from defender.learning.branch.ledger import FAULT, REFUSED

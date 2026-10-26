@@ -46,7 +46,7 @@ LABEL = "lint_import_order"
 #: Bottom to top. A pair with no imports either way is ordered arbitrarily; swap it when an import
 #: first needs the other direction.
 ORDER = (
-    "kit", "configuration", "execution", "_filesystem", "_flat", "records", "episodes",
+    "kit", "configuration", "execution", "_filesystem", "_flat", "records",
     "tenancy", "knowledge", "box", "integrations", "hooks", "skills",
     "runtime", "learning", "presentation", "run_common", "agents", "run", "cli", "api",
 )

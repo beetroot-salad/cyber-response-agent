@@ -140,7 +140,7 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
         w.source_run = src
         w.episode = T.episode(w.tmp, root=w.planted.root / w.planted.tenant_id / "episodes",
                               doc=T.family_doc(source_run_dir=str(src)))
-        with S.sym("episodes._episode_handle", "Episode").open(w.episode) as episode:
+        with S.sym("records._episode_handle", "Episode").open(w.episode) as episode:
             T.episode_view(episode, tenant=w.planted.accept())
     return w
 

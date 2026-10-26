@@ -1341,7 +1341,7 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
 
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)))
     seen: dict = {}
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
     run._drive_investigation(
         alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / fixture_uuid("sib")),  # #1187 (declared change 1)
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,

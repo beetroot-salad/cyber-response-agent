@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 
 from defender._io import Bound, load_json_artifact
-from defender.episodes._episode_paths import LAYOUT
-from defender.tenancy._exports import OID
+from defender.records._episode_paths import LAYOUT
+from defender.records._run_id import OID
 
 #: The pin's one key: the knowledge stamp's own wire spelling (`{"commit": <sha>}`).
 _KEY = "commit"

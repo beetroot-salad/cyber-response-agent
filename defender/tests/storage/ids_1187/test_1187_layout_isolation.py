@@ -760,7 +760,7 @@ def _kinds_rows() -> list[dict[str, str]]:
 
 
 def test_the_arm_rosters_name_is_owned_by_the_episode_layout(tmp_path):
-    from defender.episodes import _episode_paths as P
+    from defender.records import _episode_paths as P
 
     episode_dir = tmp_path / "episodes" / S.new_id()
     assert P.FAMILY_NAME == S.MANIFEST_NAME, "control: not the episode layout's owner"

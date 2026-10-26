@@ -501,7 +501,7 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
 def _plant_source_input(ep: Path, source_run_dir: str | None, source_run_id: str | None = None) -> None:
     """The source run's alert and record, as a launch copies them into the episode (#1222 A1):
     the source run's own when it holds them, else a plain one."""
-    from defender.episodes._episode_paths import EpisodePaths
+    from defender.records._episode_paths import EpisodePaths
     from defender.records import RunPaths
     from defender.tests.support.storage._alert_plant import plant_alert
 

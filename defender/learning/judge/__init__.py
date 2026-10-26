@@ -19,10 +19,10 @@ from defender.learning.core.state import (  # noqa: E402
 )
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
 from defender.records import WIRE_LOG_NAMES  # noqa: E402
-from defender.episodes._episode_paths import LAYOUT  # noqa: E402
+from defender.records._episode_paths import LAYOUT  # noqa: E402
 from defender.learning.branch import outcome as outcome_mod  # noqa: E402
 from defender.learning.judge import calls as calls_mod  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
@@ -827,11 +827,11 @@ def _pass_lessons_commit(bound: Bound, world_ids: list[str]) -> str | None:
 def _pass_knowledge(bound: Bound, world_ids: list[str]) -> object:
     """The knowledge (stamp wire) every post-move lesson body in this pass is read at: the
     family's knowledge pin, which its launcher created in the episode, where no box writes
-    (`episodes._knowledge_pin`) — never a sibling's provenance stamp, which sits in its box's rw
+    (`records._knowledge_pin`) — never a sibling's provenance stamp, which sits in its box's rw
     bind. A pin that cannot be read gives none (bodies shown as unreadable). Only an episode
     launched before the pin was recorded falls back to the first graded world's stamp that
     records one, as before."""
-    from defender.episodes._knowledge_pin import PinUnreadable, read_pin
+    from defender.records._knowledge_pin import PinUnreadable, read_pin
     from defender.records._provenance import KnowledgeRevision
 
     try:

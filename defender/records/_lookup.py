@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from defender import _io
-from defender.episodes._episode_handle import Episode, EpisodeRefused, refuse_bad_episode_id
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_handle import Episode, EpisodeRefused, refuse_bad_episode_id
+from defender.records._episode_paths import LAYOUT
 from defender.records._run_id import mint_uuid, uuid_id_fault
 from defender._shown import escaped, quoted
 from defender.tenancy._tenant import Tenant, TenantId, TenantRefused
