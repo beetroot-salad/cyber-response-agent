@@ -727,7 +727,8 @@ def start_box(
                 raise
             _opt_out_or_raise(e)
         return BoxExecutor(spec=request.spec,
-                           transport=_HostTransport(_host_fallback_env(request), request.view), name="")
+                           transport=_HostTransport(_host_fallback_env(request), request.view,
+                                                    request.path_operands), name="")
 
     del tenant_id
     return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent,

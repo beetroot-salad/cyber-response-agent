@@ -36,6 +36,7 @@ from defender._io import (
 from defender.learning.core.config import DrainLabel
 
 if TYPE_CHECKING:
+    from defender.tenancy._tenant import TenantId
     from defender.records import RunAddress
     from defender.learning.core.config import LoopPaths
 
@@ -1135,3 +1136,15 @@ class LearningAdoption:
         if remaining:
             raise TenantRefused(f"learning adoption completed but source records were recreated: "
                                 f"{', '.join(map(str, remaining))}; preserve and move them by hand")
+
+
+def provision_learning(
+    data_root: DataRoot, tenant_id: TenantId, source: Path | None, *, repo_root: Path,
+    create_row: bool,
+) -> None:
+    """Execute setup's learning plan, publishing a missing row only after plan validation."""
+    from defender.tenancy._tenant import create_tenant, learning_root_for_setup
+
+    adoption = LearningAdoption(learning_root_for_setup(data_root, tenant_id), source,
+                                tenant_id=tenant_id, data_root=data_root, repo_root=repo_root)
+    adoption.run(before_move=(lambda: create_tenant(data_root, tenant_id)) if create_row else None)
