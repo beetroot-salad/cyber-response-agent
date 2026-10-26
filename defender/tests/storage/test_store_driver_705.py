@@ -58,7 +58,7 @@ def _one_hit(ctx, *, q: str = "probe") -> list[dict]:
 
 
 def _down(*systems: str) -> FakeVerbs:
-    from defender.integrations.faults import TransportFault
+    from defender.kit.faults import TransportFault
 
     def probe(ctx, *, q: str = "probe") -> list[dict]:
         raise TransportFault("connection refused")

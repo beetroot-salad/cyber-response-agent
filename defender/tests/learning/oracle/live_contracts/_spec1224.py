@@ -264,8 +264,8 @@ import json
 import time
 from pathlib import Path
 
-from defender.runtime.verbs import VerbContext, verb
-from defender.integrations import faults
+from defender.kit.verbs import VerbContext, verb
+from defender.kit import faults
 
 _STATE = Path({state!r})
 SYSTEM = {system!r}

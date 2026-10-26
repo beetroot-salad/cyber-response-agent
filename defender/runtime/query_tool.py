@@ -18,7 +18,7 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
-from defender.integrations.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
+from defender.kit.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
 from defender.runtime.payload_view import payload_text_of, render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd

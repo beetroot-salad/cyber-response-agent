@@ -189,12 +189,12 @@ CLEAN = Fault()
 
 def _transport_fault(detail: str) -> Exception:
     """The real `TransportFault` — what the transport raises when the docker exec itself fails."""
-    return sym("integrations.faults", "TransportFault")(detail)
+    return sym("kit.faults", "TransportFault")(detail)
 
 
 def _upstream_fault(detail: str) -> Exception:
     """The real `UpstreamFault` — what an adapter raises when the far side refuses."""
-    return sym("integrations.faults", "UpstreamFault")(detail)
+    return sym("kit.faults", "UpstreamFault")(detail)
 
 
 class FakeTransport:
@@ -1197,7 +1197,7 @@ def refusals() -> tuple[type[BaseException], ...]:
     from defender.learning.branch.ledger import LedgerError
     from defender.runtime.branch import BranchError
     from defender.integrations.confinement import ConfinementFault
-    from defender.integrations.faults import AdapterFault
+    from defender.kit.faults import AdapterFault
     out: list[type[BaseException]] = [
         SystemExit, EstateError, LedgerError, BranchError, ConfinementFault,
         AdapterFault, ValueError,

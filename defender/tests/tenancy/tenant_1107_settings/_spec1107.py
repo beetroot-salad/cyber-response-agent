@@ -84,7 +84,7 @@ def record_type(name: str) -> type:
 
 def config_fault() -> type:
     """`ConfigFault` — the adapters' own class, exit 2 (CX5)."""
-    return mod("integrations.faults").ConfigFault
+    return mod("kit.faults").ConfigFault
 
 
 def case_ticket_error() -> type:

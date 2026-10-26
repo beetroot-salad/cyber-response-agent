@@ -12,7 +12,8 @@ from defender.records._alert_input import AlertFacts
 from defender._model import model
 from defender.records._report import ReportUnreadable, require_report
 from defender.run_repository import Run
-from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
+from defender.kit.settings import pointer_to
+from defender.runtime.tenant_settings import read_regular_bytes
 
 _logger = logging.getLogger(__name__)
 

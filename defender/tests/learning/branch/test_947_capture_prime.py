@@ -42,7 +42,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 import json
 from pathlib import Path
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 
 CALLS = "adapter-calls.jsonl"
 

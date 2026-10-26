@@ -1172,12 +1172,12 @@ def envelope(docs: Sequence[Mapping[str, Any]], *, total: int | None = None,
 
 def transport_fault(detail: str = "docker exec curl timed out after 40s") -> BaseException:
     """RJ-04 (executed): the transport's own `TransportFault`."""
-    return sym("integrations.faults", "TransportFault")(detail)
+    return sym("kit.faults", "TransportFault")(detail)
 
 
 def upstream_fault(detail: str = "index_not_found_exception") -> BaseException:
     """RJ-06 (executed): a missing index answers `UpstreamFault`."""
-    return sym("integrations.faults", "UpstreamFault")(detail)
+    return sym("kit.faults", "UpstreamFault")(detail)
 
 
 def confinement_fault(index: str = ".ds-logs-system.auth-default-2026.05.24-000002") -> BaseException:

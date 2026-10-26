@@ -49,10 +49,9 @@ from defender.runtime.verbs import (  # noqa: E402
     GRANTED,
     ModuleVerbRegistry,
     VerbContext,
-    declared_params,
-    model_facing_params,
     validate_params,
 )
+from defender.kit.verbs import declared_params, model_facing_params
 from defender.tests.support.runtime.engine._engine_helpers import fake_model  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24  # noqa: E402
@@ -87,7 +86,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 import json
 from pathlib import Path
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 
 CALLS = "adapter-calls.jsonl"
 

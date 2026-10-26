@@ -10,7 +10,7 @@ import re
 import threading
 import types
 import typing
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from defender._model import model
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +22,8 @@ from .run_state import RunState
 from .verb_grant import GrantError, VerbGrant
 from defender._io import read_bytes_capped
 from defender._paths import name_roots, root_spellings
+from defender.kit.settings import SETTINGS_POINTER
+from defender.kit.verbs import Verb, model_facing_params, verb_class_of, wrapper_only_params
 
 if TYPE_CHECKING:
     from defender.runtime.run_tenant import RunTenant as _RunTenant
@@ -93,10 +95,6 @@ def is_system_name(name: str) -> bool:
 
 ADAPTER_SUFFIX = "_adapter.py"
 
-#: How model-facing text names a tenant's host-only `settings/` folder: by what it is, never by
-#: its host path. The table pointers and the query tool's fault redaction build on it.
-SETTINGS_POINTER = "the tenant's settings/"
-
 #: A refusal's pointer at the verb-disposition table when no run supplied its tenant's pointer.
 TABLE_POINTER = f"{SETTINGS_POINTER}verb-grants.yaml"
 
@@ -155,85 +153,18 @@ class VerbContext:
         return value
 
 
-Verb = Callable[..., Any]
+if TYPE_CHECKING:
+    from defender.kit import verbs as _kit
 
+    #: The static proof that this context is what the kit tells adapters they receive.
+    _: type[_kit.VerbContext] = VerbContext
 
-
-_ENGINE_ATTR = "__verb_engine__"
-_BODY_PARAM_ATTR = "__verb_body_param__"
-_VERB_CLASS_ATTR = "__verb_class__"
-_WRAPPER_ONLY_ATTR = "__verb_wrapper_only__"
 
 _ENGINE_DECL: dict[tuple[str, str], tuple[str, str]] = {
     ("elastic", "esql"): ("esql", "query"),          # lint-shippable: ok — real queries-table `system` value
     ("elastic", "query"): ("lucene", "native_query"),   # lint-shippable: ok — real queries-table `system` value
     ("elastic", "alerts"): ("lucene", "native_query"),  # lint-shippable: ok — real queries-table `system` value
 }
-
-
-def verb(
-    *, engine: str = "none", body_param: str | None = None, verb_class: str = "r",
-    wrapper_only: tuple[str, ...] = (),
-) -> Callable[[Verb], Verb]:
-    """`wrapper_only` names params a first-party wrapper binds and no model may.
-
-    E.g. `ticket`'s `require_closed`: the closed-ticket tool pins it, while a gather lead that
-    set it would silently drop the open siblings it was dispatched to correlate. A marked param
-    is refused by `validate_params` and omitted from `model_facing_params`; the wrapper calls
-    `fn(ctx, **params)` directly and never crosses that check.
-    """
-    # Checked at decoration because both mistakes are silent: a bare string reserves its
-    # characters, and a misspelt name reserves nothing, leaving the param model-settable.
-    if isinstance(wrapper_only, str):
-        raise TypeError(
-            f"@verb(wrapper_only={wrapper_only!r}) is a bare string — it would iterate into "
-            "characters and reserve no param. Pass a tuple: (\"<param>\",)"
-        )
-    reserved = frozenset(wrapper_only)
-
-    def decorate(fn: Verb) -> Verb:
-        declared = declared_params(fn)
-        undeclared = sorted(reserved - set(declared))
-        if undeclared:
-            raise ValueError(
-                f"@verb(wrapper_only=…) on {getattr(fn, '__name__', fn)!r} reserves "
-                f"{undeclared}, which the signature does not declare as keyword-only param(s) "
-                f"— a reserved name that matches nothing is silently no reservation at all"
-            )
-        # A reserved param needs a default: it is outside the required set `validate_params`
-        # checks, so without one every model call would raise TypeError inside the verb body
-        # and be filed as an infra fault.
-        undefaulted = sorted(
-            n for n in reserved if declared[n].default is inspect.Parameter.empty
-        )
-        if undefaulted:
-            raise ValueError(
-                f"@verb(wrapper_only=…) on {getattr(fn, '__name__', fn)!r} reserves "
-                f"{undefaulted}, which the signature declares WITHOUT a default — a reserved "
-                f"param is dropped from the required set the boundary checks, so no model call "
-                f"can ever supply it and every one of them would fault inside the verb body. "
-                f"Give it the default the wrapper overrides"
-            )
-        setattr(fn, _ENGINE_ATTR, engine)
-        setattr(fn, _BODY_PARAM_ATTR, body_param)
-        setattr(fn, _VERB_CLASS_ATTR, verb_class)
-        setattr(fn, _WRAPPER_ONLY_ATTR, reserved)
-        return fn
-
-    return decorate
-
-
-def engine_of(fn: Verb) -> str:
-    return getattr(fn, _ENGINE_ATTR, "none")
-
-
-def body_param_of(fn: Verb) -> str | None:
-    return getattr(fn, _BODY_PARAM_ATTR, None)
-
-
-def verb_class_of(fn: Verb) -> str:
-    """The verb_class a verb body declares via `@verb(verb_class=…)`; `r` when undecorated."""
-    return getattr(fn, _VERB_CLASS_ATTR, "r")
 
 
 def engine_for(system: str, verb_name: str) -> str:
@@ -244,28 +175,6 @@ def engine_for(system: str, verb_name: str) -> str:
 def body_param_for(system: str, verb_name: str) -> str | None:
     decl = _ENGINE_DECL.get((system, verb_name))
     return decl[1] if decl else None
-
-
-def declared_params(fn: Verb) -> dict[str, inspect.Parameter]:
-    return {
-        p.name: p
-        for p in inspect.signature(fn).parameters.values()
-        if p.kind is inspect.Parameter.KEYWORD_ONLY
-    }
-
-
-def wrapper_only_params(fn: Verb) -> frozenset[str]:
-    """The params `@verb(wrapper_only=…)` reserves to a first-party wrapper."""
-    return getattr(fn, _WRAPPER_ONLY_ATTR, frozenset())
-
-
-def model_facing_params(fn: Verb) -> dict[str, inspect.Parameter]:
-    """The declared params a model may bind: `declared_params` minus the wrapper-only set.
-
-    Both `validate_params` and `list_verbs` use this, so what is accepted and what is published
-    cannot disagree."""
-    hidden = wrapper_only_params(fn)
-    return {n: p for n, p in declared_params(fn).items() if n not in hidden}
 
 
 _NONE_TYPE = type(None)
@@ -710,20 +619,12 @@ __all__ = [
     "CallDelivery",
     "RosterRead",
     "ServingAbort",
-    "Verb",
     "VerbContext",
     "VerbDecision",
     "VerbRegistry",
     "body_param_for",
-    "body_param_of",
-    "declared_params",
     "engine_for",
-    "engine_of",
     "is_system_name",
-    "model_facing_params",
     "read_roster",
     "validate_params",
-    "verb",
-    "verb_class_of",
-    "wrapper_only_params",
 ]

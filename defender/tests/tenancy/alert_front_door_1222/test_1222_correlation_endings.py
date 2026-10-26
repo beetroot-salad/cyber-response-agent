@@ -274,7 +274,7 @@ def _pre_trip(system: str = "elastic") -> Callable[[Path], None]:
 
 def _config_fault() -> BaseException:
     """A missing elastic config faults before reaching the backend."""
-    return S.sym("integrations.faults", "ConfigFault")(
+    return S.sym("kit.faults", "ConfigFault")(
         "config file not found: the tenant's settings/systems/elastic/config.env - this "
         "tenant's settings do not configure this system")
 

@@ -28,7 +28,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
-from defender.integrations.faults import UpstreamFault
+from defender.kit.faults import UpstreamFault
 from defender.tests.e2e.test_query_tool_611 import (
     DONE,
     ROW_KEYS,

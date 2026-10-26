@@ -81,7 +81,7 @@ OWNER_MODULES: frozenset[str] = frozenset({
 
 #: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
-                               "run_repository", "api", "tenancy", "knowledge", "episodes", "configuration", "records")
+                               "run_repository", "api", "tenancy", "knowledge", "episodes", "configuration", "records", "kit")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 

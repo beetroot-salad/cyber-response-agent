@@ -44,7 +44,15 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender.runtime import circuit_breaker
 from defender.runtime import system_status
 from defender.runtime.run_end import CallRecordWriteFailed
-from defender.runtime.verbs import GRANTED, ServingAbort, _ann_name, _resolved_hints, SYSTEM_MAX_LEN, is_system_name, model_facing_params
+from defender.runtime.verbs import (
+    GRANTED,
+    ServingAbort,
+    _ann_name,
+    _resolved_hints,
+    SYSTEM_MAX_LEN,
+    is_system_name,
+)
+from defender.kit.verbs import model_facing_params
 
 
 _logger = logging.getLogger(__name__)

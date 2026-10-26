@@ -20,7 +20,7 @@ from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.knowledge._query_rules import _json_safe_params  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry  # noqa: E402
-from defender.integrations.faults import TransportFault, UpstreamFault  # noqa: E402
+from defender.kit.faults import TransportFault, UpstreamFault  # noqa: E402
 from defender.knowledge import _query_rules  # noqa: E402
 from defender.runtime import record_query  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402

@@ -54,7 +54,7 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
 
 
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
-    faults = T.mod("integrations.faults")
+    faults = T.mod("kit.faults")
     transport = T.mod("integrations._stub_transport")
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})

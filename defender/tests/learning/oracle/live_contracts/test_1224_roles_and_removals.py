@@ -198,7 +198,7 @@ def _confinement_gate(elastic: Any, ctx: Any, index: str) -> str:
     """Did elastic's index confinement refuse `index` for `ctx`, or let the call through to
     the (deliberately unreachable) transport?"""
     ConfinementFault = S.sym("integrations.confinement", "ConfinementFault")
-    TransportFault = S.sym("integrations.faults", "TransportFault")
+    TransportFault = S.sym("kit.faults", "TransportFault")
     try:
         elastic.VERBS["query"](ctx, native_query="FROM x", index=index)
     except ConfinementFault:

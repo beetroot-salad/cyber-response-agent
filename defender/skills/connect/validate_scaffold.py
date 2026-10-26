@@ -22,10 +22,8 @@ from defender.knowledge._scaffold_rules import (  # noqa: E402
     check_system_skill,
     check_template,
 )
-from defender.runtime.tenant_settings import (  # noqa: E402
-    assignments,
-    is_blank,
-)
+from defender.runtime.tenant_settings import assignments  # noqa: E402
+from defender.kit.settings import is_blank  # noqa: E402
 from defender.runtime.system_status import (  # noqa: E402
     ReasonScope,
     cause_text,
@@ -34,10 +32,11 @@ from defender.runtime.system_status import (  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     VerbContext,
-    engine_of,
     fresh_adapter_module,
     read_roster,
 )
+from defender.kit import verbs as kit_verbs  # noqa: E402
+from defender.kit.verbs import engine_of  # noqa: E402
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
@@ -52,7 +51,7 @@ def _is_ctx(param: inspect.Parameter) -> bool:
     `def get_host(host: str)` the tool would bind the ctx object into `host`. Accepts the
     class, the string annotation, and qualified spellings."""
     ann = param.annotation
-    if ann is VerbContext:
+    if ann is kit_verbs.VerbContext or ann is VerbContext:
         return True
     return isinstance(ann, str) and ann.rpartition(".")[2] == "VerbContext"
 

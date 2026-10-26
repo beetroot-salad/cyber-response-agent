@@ -360,7 +360,7 @@ class FakeStore:
                  body: Any = None, *, ctx: Any) -> tuple[str | None, str]:
         self.calls.append(OutboundCall(method=method, path=path, body=body))
         if self.transport_fault_on and path.endswith(self.transport_fault_on):
-            from defender.integrations.faults import TransportFault
+            from defender.kit.faults import TransportFault
 
             fault = TransportFault("injected: the bastion is unreachable")
             return None, f"transport error: {fault.detail}"

@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from defender.runtime.tenant_settings import SystemConfig
-from defender.integrations.faults import ConfigFault
+from defender.kit.settings import SystemConfig
+from defender.kit.faults import ConfigFault
 from defender.tests.tenancy.startup_usability.test_1256_adapter_checks import (
     FAULTS,
     Family,
