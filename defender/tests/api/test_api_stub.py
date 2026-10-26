@@ -361,7 +361,8 @@ def test_a_member_of_one_tenant_gets_404_and_no_port_call_for_another_tenants_pa
     assert api.ports.calls == []
     assert api.ports.transactions == []
     # control: the same session on A's own path is served
-    assert api.client.request(route[0], path, headers=AUTH, json=body).status_code < 400
+    assert api.client.request(route[0], path, headers=AUTH, json=body,
+                              follow_redirects=False).status_code < 400
 
 
 @pytest.mark.parametrize(("route", "path", "body", "answers"), HAPPY, ids=lambda v: str(v))

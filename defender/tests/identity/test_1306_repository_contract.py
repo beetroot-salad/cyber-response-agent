@@ -153,6 +153,9 @@ def test_ensure_user_reuses_the_user_of_an_existing_email_in_any_case(seeded):
     again = seeded.ensure_user("ANN@x.ORG", now=NOW + dt.timedelta(hours=1))
     assert again.id == first.id
     assert again.created_at == first.created_at
+    other = seeded.ensure_user("bob@x.org", now=NOW)  # positive control: a new email is a new user
+    assert other.id != first.id
+    assert seeded.user_by_email("ANN@X.ORG").id == first.id
 
 
 def test_the_seeder_refuses_a_duplicate_email_in_any_case(seeded):

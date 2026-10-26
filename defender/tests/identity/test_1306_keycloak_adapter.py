@@ -391,4 +391,6 @@ def test_reads_change_nothing_at_keycloak(kc):
     """has_otp and sign-in are read-only on the admin API (control for the write assertions)."""
     adapter(kc).has_otp(USER_ID)
     sign_in(kc, kc.signer.sign(claims()))
+    # Positive control: both calls did reach Keycloak, the credential read on the admin API.
+    assert any(s.method == "GET" and s.path.endswith(f"/users/{USER_ID}/credentials") for s in kc.seen)
     assert kc.admin_writes() == []
