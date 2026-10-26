@@ -427,7 +427,7 @@ PLANTS: dict[str, Plant] = {
         "import json\n\n\ndef parse_1191(text: str) -> dict[str, int]:\n"
         "    return json.loads(text)\n",
         support=lambda: {"evaluations/inert_1191.py": ""}),
-    "lint_monkeypatch": Plant(MONKEYPATCH_PLANT),
+    "lint_monkeypatch": Plant(MONKEYPATCH_PLANT, support=lambda: {"evaluations/inert_1191.py": ""}),
     "lint_ungated_artifact_write": Plant(
         'def write_1191(d):\n    (d / "report.md").write_text("x", encoding="utf-8")\n'),
     "lint_unsafe_jsonl_io": Plant(JSONL_PLANT),

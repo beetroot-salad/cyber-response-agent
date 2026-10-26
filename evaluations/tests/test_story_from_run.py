@@ -7,7 +7,7 @@ import pytest
 
 from evaluations.oracle_golden import story_from_run as STORY
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_RUNS_DIR = Path(__file__).resolve().parent / "_run_records"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
 

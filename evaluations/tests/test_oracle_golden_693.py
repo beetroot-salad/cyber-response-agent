@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-DEFENDER_DIR = Path(__file__).resolve().parents[2]
-GOLDEN_DIR = DEFENDER_DIR.parent / "evaluations" / "oracle_golden"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+GOLDEN_DIR = REPO_ROOT / "evaluations" / "oracle_golden"
 CASES_DIR = GOLDEN_DIR / "cases"
 
-sys.path.insert(0, str(DEFENDER_DIR.parent))
+sys.path.insert(0, str(REPO_ROOT))
 
 from evaluations.oracle_golden import judge, score  # noqa: E402
 

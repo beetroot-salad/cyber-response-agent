@@ -30,6 +30,8 @@ from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
+#: Every tree whose tests this lint holds: the defender suite and the eval tooling's own tests.
+SCAN_ROOTS = (DEFENDER, REPO_ROOT / "evaluations")
 BASELINE_PATH = Path(__file__).with_name("lint_monkeypatch_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
@@ -76,8 +78,15 @@ def _suppressed(node: ast.Call, lines: list[str]) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for name in source_files(DEFENDER, EXCLUDED_DIRS):
-        path = DEFENDER / name
+    for root in SCAN_ROOTS:
+        findings.extend(_scan_root(root))
+    return findings
+
+
+def _scan_root(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for name in source_files(root, EXCLUDED_DIRS):
+        path = root / name
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         lines = text.splitlines()
         rel = path.relative_to(REPO_ROOT).as_posix()
@@ -97,7 +106,7 @@ def _scan() -> list[Finding]:
 
 
 HEADER = (
-    "lint_monkeypatch baseline — monkeypatch.setattr sites in defender/ tests "
+    "lint_monkeypatch baseline — monkeypatch.setattr sites in defender/ and evaluations/ tests "
     "(the DI-avoidance smell; inject a config/deps seam instead). Fingerprint is "
     "file:target (no line number). CI fails on a file:target absent here. "
     "Regenerate: python tooling/lint/lint_monkeypatch.py --update-baseline. "

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 #: Vocabulary only an eval author writes: the scoring frame, never the operation. Also read
-#: by `validate_cases.check_case` via `eval_tells_in`. (`tests/evals/test_oracle_golden_693.py`
+#: by `validate_cases.check_case` via `eval_tells_in`. (`evaluations/tests/test_oracle_golden_693.py`
 #: keeps an independent copy to sweep the committed corpus for hand-edited leaks.)
 EVAL_TELLS = (
     "oracle", "negative control", "golden", "projection", "every lead",
