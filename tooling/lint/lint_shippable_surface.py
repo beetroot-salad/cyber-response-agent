@@ -37,7 +37,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_shippable_surface_baseline.json")
 EXCLUDED_PREFIXES = (
     # No settings or knowledge carve-out (#1108 P4): per-tenant settings, system skills, query
     # templates and lessons live in each tenant's own repo, outside this tree.
-    "playground-v2/examples/alerts/",
     # Vendored golden runs replayed by the e2e harness: env-specific test data by design.
     "defender/tests/fixtures/e2e/",
     "defender/tests/",

@@ -54,7 +54,8 @@ out of scope until this loop is shipped and instrumented.
 ### Primary — defender disposition correctness on held-out
 
 Defender runs against a held-out alert set with human-applied
-ground-truth labels (`benign | malicious | inconclusive`). Correctness
+ground-truth labels (`benign | false-positive | malicious | inconclusive` — every
+disposition but the host-only `unresolved`). Correctness
 is the fraction of runs whose `report.md` frontmatter `disposition`
 matches the label. **Judge-independent at eval time.** No held-out
 case's judge findings or `actor_observations` ever feed back into
@@ -716,14 +717,14 @@ baseline is measured):
   must clear an aggregate floor *and* a per-class floor before
   plateau counts as ship-ready. Initial floors:
   - Aggregate: 80% exact-match.
-  - Per-class recall: ≥70% on `benign`, ≥70% on `inconclusive`,
+  - Per-class recall: ≥70% on `benign`, ≥70% on `false-positive`, ≥70% on `inconclusive`,
     **≥90% on `malicious`**. The asymmetric malicious floor reflects
     the project's stated zero-false-negative goal — predicting
     `inconclusive` or `benign` on a malicious alert is the failure
     mode that matters most.
 - **Class balance in held-out.** At least 8 alerts per
-  `disposition` class (`benign | malicious | inconclusive`), 24–30
-  alerts total. *The committed set is currently EMPTY — the Wazuh-format
+  `disposition` class (`benign | false-positive | malicious | inconclusive`),
+  32–40 alerts total. *The committed set is currently EMPTY — the Wazuh-format
   bootstrap set was retired and no v2 Elastic-shaped replacement has been
   authored, so the primary metric reports no denominator until one is (see
   `evaluations/fixtures/held_out/README.md`). The floors below are the contract

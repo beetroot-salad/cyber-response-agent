@@ -8,6 +8,8 @@ import uuid
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+import pytest
+
 from evaluations.held_out import (
     load_held_out_fixtures,
     score,
@@ -218,3 +220,48 @@ def test_divergent_fixture_set_warns_that_it_was_never_netted(tmp_path: Path, ca
     assert "NOT held out of learning" in capsys.readouterr().err
     assert warn_if_outside_the_net(HELD_OUT_FIXTURES) is False
     assert capsys.readouterr().err == ""
+
+
+def test_every_authorable_disposition_is_a_label_and_scores_as_its_own_class(tmp_path: Path):
+    """A fixture may be labelled with any disposition the agent can author — `false-positive`
+    included — and a run that says exactly that label is scored right."""
+    from evaluations.held_out import LABELS
+
+    assert set(LABELS) == {"benign", "false-positive", "inconclusive", "malicious"}
+    runs = tmp_path / "runs"
+    fixtures = _fixture_set(tmp_path / "fixtures", {f"case-{d}": d for d in LABELS})
+    rows = [(f"case-{d}", _run(runs, says=d).name) for d in LABELS]
+    verdicts, _, stdout = _scored(tmp_path, runs, fixtures, *rows)
+    assert verdicts == {f"case-{d}": "OK" for d in LABELS}
+    assert "class=false-positive" in stdout
+
+
+def test_a_benign_label_is_not_met_by_a_false_positive_answer(tmp_path: Path):
+    """The classes are distinct: the scorer does not fold `false-positive` into `benign`."""
+    runs = tmp_path / "runs"
+    fixtures = _fixture_set(tmp_path / "fixtures", {SLUG: "benign"})
+    verdicts, _, _ = _scored(tmp_path, runs, fixtures,
+                             (SLUG, _run(runs, says="false-positive").name))
+    assert verdicts == {SLUG: "WRONG"}
+
+
+def test_a_label_outside_the_authorable_dispositions_refuses_the_whole_set(tmp_path: Path):
+    """`unresolved` (host-only) and a typo are both refused, naming the fixtures, and nothing is
+    scored — a stray label must not become a class of its own or shrink the denominator."""
+    from evaluations import held_out
+
+    fixtures = _fixture_set(tmp_path / "fixtures", {
+        "a-good-one": "malicious", "host-only": "unresolved", "typo": "begnin"})
+    with pytest.raises(held_out.FixturesRefused, match="host-only.*typo"):
+        load_held_out_fixtures(fixtures)
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    index = tmp_path / "ops" / "index.jsonl"
+    index.parent.mkdir()
+    index.write_text("", encoding="utf-8")
+    err = io.StringIO()
+    with redirect_stderr(err), redirect_stdout(io.StringIO()):
+        rc = held_out.main([str(runs), "--index", str(index), "--fixtures-dir", str(fixtures)])
+    assert rc == 2
+    assert "refused" in err.getvalue() and "begnin" in err.getvalue()
