@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import hashlib
 import os
 import threading
 import uuid
@@ -568,6 +569,10 @@ def test_a_session_is_found_by_its_value_and_only_the_hash_is_kept(seeded):
     _, other = _session(seeded, "another-value", user=user)
     assert other.token_hash != found.token_hash
     assert seeded.session_by_value("another-value").token_hash == other.token_hash
+    # F-9: the hash is the lowercase hex SHA-256 of the value, whatever its length
+    for raw, row in ((value, found), ("another-value", other)):
+        assert row.token_hash == hashlib.sha256(raw.encode()).hexdigest()
+    assert len(value) != len("another-value")
 
 
 def test_a_session_needs_an_existing_user(seeded):

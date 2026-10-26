@@ -9,6 +9,7 @@ import datetime as _dt
 import hashlib
 import itertools
 import logging
+import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -26,6 +27,7 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     BootstrapRefused,
     IdentityService,
     InMemoryIdentityRepository,
+    SignInUnavailable,
     VerifiedSignIn,
     register_tenant,
 )
@@ -77,7 +79,26 @@ class Clock:
 
 
 class InjectedFailure(Exception):
-    """What the fakes raise when a test scripted a failure."""
+    """What the mail fake raises when a test scripted a failure (any exception fails one send)."""
+
+
+class FailingRepository:
+    """The in-memory identity repository with scripted write failures: every method named in
+    `failing` raises `InjectedFailure` instead of running; everything else is delegated."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.failing: set[str] = set()
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self._inner, name)
+        if name not in self.failing:
+            return attribute
+
+        def refuse(*args: Any, **kwargs: Any) -> Any:
+            raise InjectedFailure(f"{name} failed")
+
+        return refuse
 
 
 @dataclasses.dataclass(frozen=True)
@@ -118,9 +139,11 @@ class FakeSignIn:
         self.has_otp_answers: dict[str, bool] = {}
         #: code -> what the callback's token verification returns.
         self.answers: dict[str, VerifiedSignIn] = {}
-        #: Scripted failures: the next N set-password sends raise; the next N creations record
-        #: the account and then raise (a crash before the caller recorded the id).
+        #: Scripted failures, all `SignInUnavailable`: the next N set-password sends raise; every
+        #: send to an email in `fail_sends_to` raises until the test removes it; the next N
+        #: creations record the account and then raise (a crash before the caller recorded the id).
         self.fail_sends = 0
+        self.fail_sends_to: set[str] = set()
         self.crash_after_create = 0
         #: Runs once inside the next set-password send, after it is recorded.
         self.during_send: Callable[[], None] | None = None
@@ -133,13 +156,16 @@ class FakeSignIn:
                 username, email, frozenset(required_actions), f"kc-{next(self._ids):04d}")
             if self.crash_after_create:
                 self.crash_after_create -= 1
-                raise InjectedFailure("crash after the account was created")
+                raise SignInUnavailable("crash after the account was created")
         return self.accounts[username].account_id
 
     def send_set_password_email(self, account_id: str, lifespan: _dt.timedelta) -> None:
         if self.fail_sends:
             self.fail_sends -= 1
-            raise InjectedFailure("the set-password send failed")
+            raise SignInUnavailable("the set-password send failed")
+        if any(a.account_id == account_id and a.email in self.fail_sends_to
+               for a in self.accounts.values()):
+            raise SignInUnavailable("the set-password send to this account failed")
         self.set_password_sent.append((account_id, lifespan))
         hook, self.during_send = self.during_send, None
         if hook:
@@ -191,6 +217,8 @@ class FakeMail:
     def __init__(self) -> None:
         self.sent: list[Notice] = []
         self.fail_notices = 0
+        #: Every notification to a recipient in this set raises until the test removes it.
+        self.fail_notices_to: set[str] = set()
         #: Runs once inside the next notification, after it is recorded.
         self.during_notice: Callable[[], None] | None = None
 
@@ -198,6 +226,8 @@ class FakeMail:
         if self.fail_notices:
             self.fail_notices -= 1
             raise InjectedFailure("the notification failed")
+        if to in self.fail_notices_to:
+            raise InjectedFailure("the notification to this recipient failed")
         self.sent.append(Notice(to, str(tenant_id), str(invitation_id)))
         hook, self.during_notice = self.during_notice, None
         if hook:
@@ -359,27 +389,32 @@ class World:
 
     def __init__(self, *, administrators: Sequence[str] = (),
                  tenants: Mapping[str, Sequence[str]] | None = None, start: bool = True,
-                 failing_sends: int = 0) -> None:
+                 failing_sends: int = 0, send_interval: _dt.timedelta | None = None,
+                 failing_writes: bool = False) -> None:
         self.clock = Clock()
         self.store = InMemoryStore(self.clock)
-        self.repo = InMemoryIdentityRepository()
+        self.repo: Any = InMemoryIdentityRepository()
+        if failing_writes:
+            self.repo = FailingRepository(self.repo)
         self.signin = FakeSignIn()
         self.signin.fail_sends = failing_sends
         self.mail = FakeMail()
-        self.sender_errors: list[InjectedFailure] = []
         self._codes = itertools.count(1)
         self.app: Any = None
         self.service: Any = None
+        self.send_interval = send_interval
         self.build(administrators=administrators, tenants=tenants or {})
         if start:
             self.service.start()
             self.send_pending()
 
     def build(self, *, administrators: Sequence[str], tenants: Mapping[str, Sequence[str]]) -> None:
+        extra = {} if self.send_interval is None else {"send_interval": self.send_interval}
         self.service = IdentityService(
             self.repo, signin=self.signin, mail=self.mail, clock=self.clock,
             bootstrap=Bootstrap(administrators=tuple(administrators),
                                 tenants={t: tuple(e) for t, e in tenants.items()}),
+            **extra,
         )
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
@@ -397,12 +432,8 @@ class World:
         self.send_pending()
 
     def send_pending(self) -> None:
-        """One run of the sender. A failure a test scripted may surface or be swallowed by the
-        service; either way it is recorded here and the send stays pending."""
-        try:
-            self.service.send_pending()
-        except InjectedFailure as failure:
-            self.sender_errors.append(failure)
+        """One run of the sender. It must not raise: a port failure only leaves that send pending."""
+        self.service.send_pending()
 
     def register(self, tenant: str) -> None:
         register_tenant(self.repo, TenantId(tenant))
@@ -410,16 +441,17 @@ class World:
     async def _asgi(self, scope: Any, receive: Any, send: Any) -> None:
         await self.app(scope, receive, send)
 
-    def client(self, *, origin: str | None = FRONTEND_ORIGIN) -> TestClient:
+    def client(self, *, origin: str | None = FRONTEND_ORIGIN, raise_errors: bool = True) -> TestClient:
         """A browser: its own cookie jar and, unless `origin` is None, the Origin header on every
         request. Never entered as a context manager, so no lifespan (no background sender)."""
         headers = {} if origin is None else {"Origin": origin}
-        return TestClient(self._asgi, base_url=BASE_URL, follow_redirects=False, headers=headers)
+        return TestClient(self._asgi, base_url=BASE_URL, follow_redirects=False, headers=headers,
+                          raise_server_exceptions=raise_errors)
 
     def client_with_cookie(self, value: str, *, name: str = SESSION_COOKIE,
-                           origin: str | None = FRONTEND_ORIGIN) -> TestClient:
+                           origin: str | None = FRONTEND_ORIGIN, raise_errors: bool = True) -> TestClient:
         """A browser that already holds a cookie (a replayed or invented session value)."""
-        browser = self.client(origin=origin)
+        browser = self.client(origin=origin, raise_errors=raise_errors)
         browser.cookies.set(name, value)
         return browser
 
@@ -462,6 +494,16 @@ class World:
         assert self.invite(inviter, tenant, email).status_code == 202
         self.send_pending()
         return self.sign_in(email)
+
+
+def wait_until(condition: Callable[[], bool], *, seconds: float = 5.0) -> bool:
+    """Poll `condition` in real time for at most `seconds` (the lifespan's sender runs on its own thread)."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.01)
+    return condition()
 
 
 def two_tenants() -> tuple[World, TestClient, TestClient]:

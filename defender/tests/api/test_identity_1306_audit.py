@@ -22,6 +22,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     SESSION_COOKIE,
     T2,
     UNKNOWN,
+    World,
     AuditLog,
     Event,
     lab,
@@ -112,7 +113,7 @@ def test_administrator_actions_log_platform_events_and_an_invite_also_logs_the_t
 
 
 def test_a_refused_action_logs_nothing_while_the_same_action_done_properly_does(audit: AuditLog) -> None:
-    """Events follow a commit, so a refusal (409/404/403/401) leaves no trace (K11)."""
+    """A refusal (409/404/403/401) leaves no trace; a write that fails is the next test (K11)."""
     world = lab()
     me_session, ops = world.sign_in(ME), world.sign_in_admin()
     mark = audit.mark()
@@ -140,3 +141,32 @@ def test_a_refused_action_logs_nothing_while_the_same_action_done_properly_does(
     mark = audit.mark()
     assert me_session.delete(f"/tenants/{LAB}/invitations/{row}").status_code == 404  # repeat
     assert audit.since(mark) == []
+
+
+@pytest.mark.parametrize(("write", "expected"), [
+    ("ensure_invitation", "member.invite"),
+    ("end_membership", "member.remove"),
+    ("revoke_invitation", "invitation.revoke"),
+])
+def test_an_action_whose_write_fails_logs_no_event_and_the_retry_logs_one(
+        audit: AuditLog, write: str, expected: str) -> None:
+    """The event is written only after the change is in (K11): a failing repository write leaves no event."""
+    world = World(tenants={LAB: [ME]}, failing_writes=True)
+    member = world.sign_in(ME)
+    nina = world.member(member, LAB, "nina@n.example")
+    pending = world.invite(member, LAB, NEW).json()["id"]
+    cookie = member.cookies[SESSION_COOKIE]
+    acts = {
+        "ensure_invitation": lambda c: c.post(f"/tenants/{LAB}/invitations", json={"email": BOB}),
+        "end_membership": lambda c: c.delete(f"/tenants/{LAB}/members/{user_id(nina)}"),
+        "revoke_invitation": lambda c: c.delete(f"/tenants/{LAB}/invitations/{pending}"),
+    }
+    act = acts[write]
+    world.repo.failing.add(write)
+    failing_browser = world.client_with_cookie(cookie, raise_errors=False)
+    mark = audit.mark()
+    assert act(failing_browser).status_code >= 400
+    assert audit.since(mark) == []
+    world.repo.failing.clear()  # control: the same action on the same channel succeeds and logs
+    assert act(failing_browser).status_code in (202, 204)
+    assert audit.actions(mark) == [expected]

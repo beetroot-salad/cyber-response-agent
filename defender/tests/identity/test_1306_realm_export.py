@@ -101,40 +101,40 @@ CHECKS = [
 
 # --- the committed export ------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def realm() -> dict:
+def _committed_realm() -> dict:
+    """Read inside each test, so a missing file fails the test with this message rather than erroring in setup."""
     assert REALM_EXPORT.is_file(), f"no realm export at {REALM_EXPORT.relative_to(REPO_ROOT)} (A1)"
     return json.loads(REALM_EXPORT.read_text(encoding="utf-8"))
 
 
-def test_the_realm_refuses_self_registration_duplicate_emails_and_username_edits_and_throttles_guesses(realm):
+def test_the_realm_refuses_self_registration_duplicate_emails_and_username_edits_and_throttles_guesses():
     """registrationAllowed, duplicateEmailsAllowed, editUsernameAllowed off; brute-force protection on (A1, C11)."""
-    check_realm_switches(realm)
+    check_realm_switches(_committed_realm())
 
 
-def test_a_person_cannot_edit_their_own_email(realm):
+def test_a_person_cannot_edit_their_own_email():
     """The user profile makes email admin-editable only, so email never re-points an account (P-B, C11)."""
-    check_email_not_editable_by_the_user(realm)
+    check_email_not_editable_by_the_user(_committed_realm())
 
 
-def test_the_login_client_adds_amr_to_the_id_token(realm):
+def test_the_login_client_adds_amr_to_the_id_token():
     """An amr protocol mapper on the API's client puts the sign-in methods in the ID token (A1, C13)."""
-    check_amr_mapper_on_the_login_client(realm)
+    check_amr_mapper_on_the_login_client(_committed_realm())
 
 
-def test_the_browser_flow_labels_the_password_step_pwd_and_the_code_step_otp(realm):
+def test_the_browser_flow_labels_the_password_step_pwd_and_the_code_step_otp():
     """Execution references pwd and otp are what make amr say otp exactly when a code was entered (A1, C13)."""
-    check_browser_flow_labels_password_and_otp(realm)
+    check_browser_flow_labels_password_and_otp(_committed_realm())
 
 
-def test_the_api_service_account_may_only_manage_users(realm):
+def test_the_api_service_account_may_only_manage_users():
     """Its roles are exactly realm-management: manage-users, as C13 showed sufficient (A1)."""
-    check_service_account_is_limited_to_manage_users(realm)
+    check_service_account_is_limited_to_manage_users(_committed_realm())
 
 
-def test_keycloaks_own_email_is_sent_through_mailpit(realm):
+def test_keycloaks_own_email_is_sent_through_mailpit():
     """The realm's SMTP host is the dev mail catcher (A2)."""
-    check_keycloak_mail_goes_to_mailpit(realm)
+    check_keycloak_mail_goes_to_mailpit(_committed_realm())
 
 
 # --- the checks themselves can fail --------------------------------------------------------------

@@ -1,22 +1,30 @@
 """#1306: the sender — the only code that sends — and its re-checks (flow 1, O2, DC-3)."""
 from __future__ import annotations
 
+import datetime as _dt
+
 import pytest
 
 pytest.importorskip("fastapi")
 
+from fastapi.testclient import TestClient  # noqa: E402
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
+    ANN,
     BOB,
+    HOUR,
     NEW,
     NINA,
+    SECOND,
     SEVEN_DAYS,
     T1,
     T2,
-    InjectedFailure,
     Notice,
+    World,
     invitation_id,
     tenants_of,
     two_tenants,
+    wait_until,
 )
 
 
@@ -132,7 +140,7 @@ def test_a_revoked_invitation_sends_no_notification_to_an_active_person() -> Non
 
 @pytest.mark.parametrize("kind", ["set_password", "notice"])
 def test_a_failed_send_stays_pending_and_is_retried_until_it_goes_out(kind: str) -> None:
-    """Failure leaves the request pending; the next run sends once and then stops (flow 1)."""
+    """A port failure does not raise out of the pass; the retry within an hour sends once and then stops (flow 1)."""
     world, ann, _ = two_tenants()
     person = NEW if kind == "set_password" else BOB
     world.invite(ann, T1, person)
@@ -143,11 +151,43 @@ def test_a_failed_send_stays_pending_and_is_retried_until_it_goes_out(kind: str)
     got = lambda: world.signin.sends_to(NEW) if kind == "set_password" else len(world.mail.sent)  # noqa: E731
     world.send_pending()
     assert got() == 0
+    world.clock.advance(HOUR + SECOND)
     world.send_pending()
     assert got() == 1
+    world.clock.advance(HOUR + SECOND)
     world.send_pending()
     assert got() == 1
-    assert all(isinstance(e, InjectedFailure) for e in world.sender_errors)
+
+
+@pytest.mark.parametrize("failing", [NEW, NINA])
+def test_a_set_password_send_that_fails_does_not_stop_the_next_persons_in_the_same_pass(failing: str) -> None:
+    """Containment per person, whichever is first; the failed one is retried within the hour (flow 1)."""
+    world, ann, _ = two_tenants()
+    other = NINA if failing == NEW else NEW
+    world.invite(ann, T1, NEW)
+    world.invite(ann, T1, NINA)
+    world.signin.fail_sends_to.add(failing)
+    world.send_pending()
+    assert (world.signin.sends_to(failing), world.signin.sends_to(other)) == (0, 1)
+    world.signin.fail_sends_to.clear()
+    world.clock.advance(HOUR + SECOND)
+    world.send_pending()
+    assert (world.signin.sends_to(failing), world.signin.sends_to(other)) == (1, 1)
+
+
+@pytest.mark.parametrize("failing", [ANN, BOB])
+def test_a_notification_that_fails_does_not_stop_the_next_ones_in_the_same_pass(failing: str) -> None:
+    """Containment per row: two active people are notified, one fails, the other still goes out (flow 1)."""
+    world, ann, bob = two_tenants()
+    world.invite(ann, T1, BOB)
+    world.invite(bob, T2, ANN)
+    world.mail.fail_notices_to.add(failing)
+    world.send_pending()
+    assert {n.to for n in world.mail.sent} == {BOB, ANN} - {failing}
+    world.mail.fail_notices_to.clear()
+    world.clock.advance(HOUR + SECOND)
+    world.send_pending()
+    assert sorted(n.to for n in world.mail.sent) == [ANN, BOB]
 
 
 def test_a_crash_between_creating_the_account_and_recording_it_is_retried_without_a_second_account() -> None:
@@ -157,6 +197,7 @@ def test_a_crash_between_creating_the_account_and_recording_it_is_retried_withou
     world.signin.crash_after_create = 1
     world.send_pending()
     assert world.signin.sends_to(NEW) == 0
+    world.clock.advance(HOUR + SECOND)
     world.send_pending()
     assert world.signin.sends_to(NEW) == 1
     assert [a.email for a in world.signin.accounts.values()].count(NEW) == 1
@@ -171,4 +212,27 @@ def test_an_unrelated_person_is_not_sent_anything_by_a_pass() -> None:
     calls, mails = world.signin.calls(), len(world.mail.sent)
     world.send_pending()
     assert (world.signin.calls(), len(world.mail.sent)) == (calls, mails)
-    assert world.sender_errors == []
+
+
+def test_the_apps_lifespan_keeps_sending_what_is_invited_after_it_started() -> None:
+    """The periodic sender (every send_interval) sends a set-password email for an invite made after start (F-7, flow 1)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=_dt.timedelta(milliseconds=50))
+    with TestClient(world.app):
+        assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
+        ann = world.sign_in(ANN)
+        assert world.invite(ann, T1, NEW).status_code == 202
+        assert wait_until(lambda: world.signin.sends_to(NEW) == 1)
+        assert world.signin.sends_to(NEW) == 1  # control: once recorded, nothing stays pending
+
+
+def test_a_periodic_pass_whose_port_call_fails_does_not_stop_the_loop() -> None:
+    """A failing pass is survived: a person invited afterwards is still sent (F-7, flow 1)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=_dt.timedelta(milliseconds=50))
+    with TestClient(world.app):
+        assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
+        ann = world.sign_in(ANN)
+        world.signin.fail_sends = 1
+        assert world.invite(ann, T1, NEW).status_code == 202
+        assert wait_until(lambda: world.signin.fail_sends == 0)  # the failing pass happened
+        assert world.invite(ann, T1, NINA).status_code == 202
+        assert wait_until(lambda: world.signin.sends_to(NINA) == 1)

@@ -330,6 +330,19 @@ def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
     assert json.loads(out.stdout) == []
 
 
+def test_the_tenancy_package_loads_no_identity_module() -> None:
+    """DC-4: `identity` sits right after `tenancy`, so importing `defender.tenancy` pulls nothing from it."""
+    probe = (
+        "import json, sys; import defender.tenancy; "
+        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('defender.identity'))))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
+        encoding="utf-8", check=True,
+    )
+    assert json.loads(out.stdout) == []
+
+
 # --- session and tenant --------------------------------------------------------------------
 
 
@@ -383,6 +396,25 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
     assert "Bearer" not in response.headers.get("WWW-Authenticate", "")
     assert api.ports.calls == []
     assert api.ports.transactions == []
+
+
+@pytest.mark.parametrize(("route", "path", "body", "answers"),
+                         [row for row in HAPPY if row[0][0] != "GET"], ids=lambda v: str(v))
+@pytest.mark.parametrize("origin", [None, "https://evil.example"], ids=["missing-origin", "foreign-origin"])
+def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend_origin(
+    route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
+    origin: str | None,
+) -> None:
+    """O6: a valid cookie with a missing or foreign Origin is 403 before any port; the same call with Origin is served."""
+    api = Api(**answers)
+    headers = {"Cookie": f"{SESSION_COOKIE}={SESSION_A}"} | ({} if origin is None else {"Origin": origin})
+    response = api.client.request(route[0], path, headers=headers, json=body, follow_redirects=False)
+    assert response.status_code == 403, response.text
+    assert api.ports.calls == []
+    assert api.ports.transactions == []
+    # control: the same session with the configured Origin is served
+    assert api.client.request(route[0], path, headers=AUTH, json=body,
+                              follow_redirects=False).status_code < 400
 
 
 @pytest.mark.parametrize("claim", ["Acme_Corp", "org_2NxAbCdEf", ""])
@@ -721,6 +753,14 @@ def test_the_published_contract_declares_each_routes_problems() -> None:
     # P-D: every tenant route answers 404 to a non-member, so every one declares it.
     assert all(404 in errors for (_, path), errors in declared.items()
                if path.startswith("/tenants/{tenant_id}"))
+    # F-4: every identity route but the two redirecting ones declares its 401 as a problem.
+    signed_out = {("GET", "/auth/login"), ("GET", "/auth/callback")}
+    for route in IDENTITY_ROUTES - signed_out:
+        assert 401 in declared[route], route
+        for status in declared[route]:
+            content = doc["paths"][route[1]][route[0].lower()]["responses"][str(status)]["content"]
+            assert content == {
+                "application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}, (route, status)
 
 
 # --- the boundary: malformed input never reaches a port ------------------------------------

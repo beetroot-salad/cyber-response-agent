@@ -14,6 +14,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     BOB,
     DAY,
     EMPTY,
+    HOUR,
     LAB,
     ME,
     NINA,
@@ -97,11 +98,15 @@ def test_one_person_gets_at_most_one_email_per_start() -> None:
 
 
 def test_a_send_that_never_went_out_is_made_at_the_next_start() -> None:
-    """'Never went out' counts as older than 7 days (O8)."""
+    """Sends that failed before a restart go out once the failure backoff has passed (O8, flow 1)."""
     world = World(administrators=[OPS], tenants={LAB: [ME]}, failing_sends=2)
+    assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (0, 0)
+    world.clock.advance(HOUR + SECOND)
     world.restart(**FILE)
-    world.send_pending()
     assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)
+    world.clock.advance(HOUR + SECOND)
+    world.send_pending()
+    assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)  # sent once, not again
 
 
 def test_first_members_are_invited_only_into_a_tenant_that_never_had_a_membership() -> None:
@@ -150,8 +155,13 @@ def test_start_flags_someone_whose_membership_ended_and_keeps_an_invited_adminis
     assert me(world.sign_in_admin())["administrator"] is True
     assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
     world.restart(administrators=[OPS, ME], tenants={LAB: []})  # ended row: allowed
+    # K10/O5: the flag alone is not power; ME's earlier password-only session has none
+    assert me_session.get("/admin/tenants").status_code == 403
+    assert me(me_session)["administrator"] is False
     world.signin.has_otp_answers[world.signin.account_for(ME)] = True
-    assert me(world.sign_in(ME, amr=("pwd", "otp")))["administrator"] is True
+    fresh = world.sign_in(ME, amr=("pwd", "otp"))  # control: the code-backed session has them
+    assert me(fresh)["administrator"] is True
+    assert fresh.get("/admin/tenants").status_code == 200
 
 
 def test_a_malformed_tenant_id_in_the_file_refuses_the_start() -> None:

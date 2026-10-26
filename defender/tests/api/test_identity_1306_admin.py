@@ -1,6 +1,8 @@
 """#1306: platform administrators — separate accounts, one-time code, narrow powers (O5, K10, DC-1, DC-5)."""
 from __future__ import annotations
 
+from http import HTTPStatus
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -82,6 +84,29 @@ def test_a_non_administrator_is_403_on_platform_routes_and_an_administrator_is_n
     assert [r["email"] for r in invitation_rows(world.sign_in(ME), LAB)] == []  # nothing leaked into the lab
 
 
+def test_the_identity_refusals_are_rfc_9457_problems() -> None:
+    """401 without a cookie, 403 for a bad Origin, 403 for a member on a platform route, 409 on a tenant with members (F-4)."""
+    world = lab()
+    world.register(EMPTY)
+    me_session = world.sign_in(ME)
+    ops = world.sign_in_admin()
+    refusals = [
+        (401, world.client().get("/me")),
+        (403, world.client_with_cookie(me_session.cookies[SESSION_COOKIE], origin="https://evil.example")
+         .post(f"/tenants/{LAB}/invitations", json={"email": NEW})),
+        (403, me_session.get("/admin/tenants")),
+        (409, ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NINA})),
+    ]
+    for code, response in refusals:
+        assert response.status_code == code, response.text
+        assert response.headers["content-type"] == "application/problem+json"
+        problem = response.json()
+        assert {"type", "title", "status", "detail"} <= set(problem)
+        assert (problem["status"], problem["title"]) == (code, HTTPStatus(code).phrase)
+    assert "www-authenticate" not in refusals[0][1].headers
+    assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202  # control
+
+
 def test_an_administrator_invites_only_into_a_tenant_with_no_active_members() -> None:
     """Empty tenant 202, tenant with members 409, unknown or malformed 404; the invitee joins (O2, O5)."""
     world = lab()
@@ -145,6 +170,7 @@ def test_an_administrator_cannot_accept_an_invitation() -> None:
     world.invite(me_session, LAB, OPS)
     row = invitation_id(me_session, LAB, OPS)
     ops = world.sign_in_admin()
+    assert me(ops)["invitations"] == []  # an open row addressed to the administrator is not offered (K10)
     assert ops.post(f"/invitations/{row}/accept").status_code == 404
     assert tenants_of(ops) == set()
     assert [r["id"] for r in invitation_rows(me_session, LAB)] == [row]
