@@ -90,7 +90,9 @@ class FailingRepository:
     """The in-memory identity repository with scripted write failures: every method named in
     `failing` raises `InjectedFailure` instead of running; everything else is delegated.
     `missing_tenants` scripts the answer of `tenant_exists` (False) for a tenant whose row is
-    gone or no longer active (#1214's lifecycle); nothing else about the tenant changes."""
+    gone or no longer active (#1214's lifecycle); nothing else about the tenant changes.
+    `after` maps a method name to a hook run once right after that method returns (an
+    interleaving point: the hook is the test's own action, e.g. a sign-in; it decides nothing)."""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
@@ -98,6 +100,7 @@ class FailingRepository:
         self.missing_tenants: set[str] = set()
         #: method name -> how many calls were refused (the sender thread may be the caller).
         self.refusals: dict[str, int] = {}
+        self.after: dict[str, Callable[[], None]] = {}
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._inner, name)
@@ -111,7 +114,11 @@ class FailingRepository:
                 raise InjectedFailure(f"{name} failed")
             if name == "tenant_exists" and args and str(args[0]) in self.missing_tenants:
                 return False
-            return attribute(*args, **kwargs)
+            result = attribute(*args, **kwargs)
+            hook = self.after.pop(name, None)
+            if hook is not None:
+                hook()
+            return result
 
         return call
 
@@ -156,6 +163,10 @@ class FakeSignIn:
         self.answers: dict[str, VerifiedSignIn] = {}
         #: The next N token verifications fail (`finish_signin` records the call, then raises `SignInRefused`).
         self.refuse_signins = 0
+        #: The next N `finish_signin` calls record the call, then raise `SignInUnavailable`.
+        self.unavailable_signins = 0
+        #: When set, every `has_otp` call records the call, then raises this exception.
+        self.raise_on_has_otp: Exception | None = None
         #: The name of every port method called, in order (all of them, round trips included).
         self.every_call: list[str] = []
         #: The account id of every set-password send attempted, failed ones included.
@@ -210,6 +221,8 @@ class FakeSignIn:
     def has_otp(self, account_id: str) -> bool:
         with self._lock:
             self.every_call.append("has_otp")
+        if self.raise_on_has_otp is not None:
+            raise self.raise_on_has_otp
         return self.has_otp_answers.get(account_id, False)
 
     def require_otp_setup(self, account_id: str) -> None:
@@ -230,6 +243,9 @@ class FakeSignIn:
         if self.refuse_signins:
             self.refuse_signins -= 1
             raise SignInRefused("the ID token failed verification")
+        if self.unavailable_signins:
+            self.unavailable_signins -= 1
+            raise SignInUnavailable("the sign-in provider is unavailable")
         return self.answers[code]
 
     # --- test-side views --------------------------------------------------------------

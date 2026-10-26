@@ -1,6 +1,8 @@
 """#1306: signing in — login, callback, the pre-login cookie, first sign-in (flow 2, O6, DC-6)."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -29,8 +31,12 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     tenants_of,
     two_tenants,
     user_id,
+    SignInUnavailable,
     World,
 )
+
+#: RFC 7636 §4.1: a PKCE code verifier is 43 to 128 unreserved characters.
+PKCE_VERIFIER = re.compile(r"[A-Za-z0-9\-._~]{43,128}")
 
 
 def test_login_redirects_to_the_port_and_sets_a_host_prelogin_cookie() -> None:
@@ -168,6 +174,33 @@ def test_a_token_that_fails_verification_is_a_403_that_opens_no_session_and_clea
     assert SESSION_COOKIE not in browser.cookies
     assert is_cleared(set_cookie(refused, PRELOGIN_COOKIE) or "")
     assert world.sign_in_response(world.client(), ANN).status_code == 303  # control
+
+
+def test_the_pkce_verifier_is_a_verifier_rfc_7636_accepts() -> None:
+    """PKCE S256 per RFC 7636: the verifier is 43 to 128 unreserved characters, and its challenge is the S256 of it (DC-8)."""
+    world = World(tenants={T1: [ANN]})
+    world.sign_in(ANN)
+    started, finished = world.signin.started[-1], world.signin.finished[-1]
+    assert PKCE_VERIFIER.fullmatch(finished.code_verifier), len(finished.code_verifier)
+    assert started.code_challenge == pkce_challenge(finished.code_verifier)  # control
+
+
+@pytest.mark.parametrize("where", ["finish_signin", "has_otp"])
+def test_a_callback_the_provider_cannot_serve_opens_no_session_and_still_clears_the_prelogin_cookie(where: str) -> None:
+    """Whatever the outcome, the callback clears the pre-login cookie (DC-6); an unavailable provider opens no session."""
+    world = lab()
+    browser = world.client(raise_errors=False)
+    if where == "finish_signin":
+        world.signin.unavailable_signins = 1
+        failed = world.sign_in_response(browser, ME)
+    else:
+        world.signin.raise_on_has_otp = SignInUnavailable("keycloak is down")
+        failed = world.sign_in_response(browser, OPS, amr=("pwd",))
+    assert world.signin.every_call[-1] == where  # control: the failure was the one scripted
+    assert failed.status_code >= 400
+    assert set_cookie(failed, SESSION_COOKIE) is None
+    assert SESSION_COOKIE not in browser.cookies
+    assert is_cleared(set_cookie(failed, PRELOGIN_COOKIE) or ""), failed.headers.get_list("set-cookie")
 
 
 def test_the_prelogin_cookie_is_gone_after_the_callback_and_a_second_callback_is_refused() -> None:

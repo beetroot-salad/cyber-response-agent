@@ -46,6 +46,29 @@ def test_an_administrator_without_a_code_is_refused_and_setup_is_required_when_t
     assert me(world.sign_in(OPS, amr=("pwd", "otp")))["administrator"] is True  # control
 
 
+def test_a_refused_administrator_sign_in_does_not_activate_the_account() -> None:
+    """Refused means refused: only the code-backed sign-in makes the administrator `active` (flow 2, O5)."""
+    world = lab()
+    world.signin.has_otp_answers[world.signin.account_for(OPS)] = True
+    assert world.sign_in_response(world.client(), OPS, amr=("pwd",), name="Refused").status_code == 403
+    refused = world.repo.user_by_email(OPS)
+    assert (refused.status, refused.activated_at) == ("invited", None)
+    assert refused.display_name != "Refused"
+    world.sign_in_admin()
+    assert world.repo.user_by_email(OPS).status == "active"  # control
+
+
+def test_an_administrators_invitation_records_the_administrator_as_inviter() -> None:
+    """`memberships.invited_by` is the user who invited: here the administrator (data model, O5)."""
+    world = lab()
+    me_session = world.sign_in(ME)
+    assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
+    ops = world.sign_in_admin()
+    invited = ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NEW})
+    assert invited.status_code == 202
+    assert world.repo.membership(invited.json()["id"]).invited_by == user_id(ops)
+
+
 def test_an_administrator_session_reads_platform_routes_and_holds_no_tenants() -> None:
     """An administrator lists all tenants and is in none (O5, K10)."""
     world = lab()

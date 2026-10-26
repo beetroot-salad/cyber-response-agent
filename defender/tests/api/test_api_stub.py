@@ -69,9 +69,12 @@ TB = f"/tenants/{B}"
 SESSION_COOKIE = "__Host-defender_session"
 SESSION_A = "session-value-of-ann"
 SESSION_B = "session-value-of-bob"
+#: Cy is a member of both A and B (O3): one session for two tenants.
+SESSION_AB = "session-value-of-cy"
 ORIGIN = "https://app.defender.test"
 AUTH = {"Cookie": f"{SESSION_COOKIE}={SESSION_A}", "Origin": ORIGIN}
 AUTH_B = {"Cookie": f"{SESSION_COOKIE}={SESSION_B}", "Origin": ORIGIN}
+AUTH_AB = {"Cookie": f"{SESSION_COOKIE}={SESSION_AB}", "Origin": ORIGIN}
 BASE = "https://testserver"
 
 ALERT = Alert(
@@ -238,8 +241,8 @@ class _Unused:
 
 
 def _identity() -> tuple[IdentityService, dict[str, str]]:
-    """Ann is a member of A and Bob of B, each with a seeded session (O7). Returns the service
-    and the seeded user ids by session value."""
+    """Ann is a member of A, Bob of B and Cy of both, each with a seeded session (O7). Returns the
+    service and the seeded user ids by session value."""
     repo = InMemoryIdentityRepository()
     register_tenant(repo, TenantId(A))
     register_tenant(repo, TenantId(B))
@@ -250,6 +253,12 @@ def _identity() -> tuple[IdentityService, dict[str, str]]:
                             created_at=NOW, accepted_at=NOW)
         repo.add_session(session, user.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
         users[session] = user.id
+    cy = repo.add_user("cy@c.example", created_at=NOW, status="active", display_name="cy")
+    for tenant in (A, B):
+        repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by="system",
+                            created_at=NOW, accepted_at=NOW)
+    repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
+    users[SESSION_AB] = cy.id
     service = IdentityService(repo, signin=_Unused(), mail=_Unused(), clock=lambda: NOW,
                               bootstrap=Bootstrap(administrators=(), tenants={}))
     return service, users
@@ -1045,6 +1054,21 @@ def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
     ]
     assert [r.status_code for r in refusals] == [422, 422, 422, 422]
     assert api.ports.calls == []
+
+
+@pytest.mark.parametrize(("path", "port", "rows", "_after"), LISTS, ids=[p.rsplit("/", 1)[1] for p, *_ in LISTS])
+def test_a_cursor_from_one_tenant_is_refused_in_another_by_the_same_person(
+        path: str, port: str, rows: list[Any], _after: Any) -> None:
+    """P-D, O3: a cursor is bound to the path's tenant, not to the caller; a member of both tenants cannot carry it across."""
+    api = Api(**{port: _rows_after(rows), "has_credentials": False})
+    page = api.client.get(path, headers=AUTH_AB, params={"limit": 1}).json()
+    cursor = page["next_cursor"]
+    assert cursor
+    assert api.client.get(path, headers=AUTH_AB, params={"limit": 1, "cursor": cursor}).status_code == 200  # control
+    calls = len(api.ports.calls)
+    other = path.replace(T, TB, 1)
+    assert api.client.get(other, headers=AUTH_AB, params={"cursor": cursor}).status_code == 422
+    assert len(api.ports.calls) == calls
 
 
 def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() -> None:

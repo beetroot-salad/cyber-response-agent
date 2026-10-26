@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import datetime as _dt
+import threading
 import time
+from typing import Any
 
 import pytest
 
@@ -24,6 +26,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     T2,
     Notice,
     World,
+    me,
     invitation_id,
     tenants_of,
     two_tenants,
@@ -86,6 +89,34 @@ def test_a_re_invite_arriving_during_a_send_stays_pending(kind: str) -> None:
     assert sent() == 2
     world.send_pending()
     assert sent() == 2  # control: once the second is recorded nothing stays pending
+
+
+@pytest.mark.parametrize("kind", ["set_password", "notice"])
+def test_the_sender_does_not_hold_its_claim_while_it_calls_the_port(kind: str) -> None:
+    """While a send is at Keycloak or the mail server, the re-requested person or row can be claimed again (flow 1)."""
+    world, ann, _ = two_tenants()
+    person = NEW if kind == "set_password" else BOB
+    world.invite(ann, T1, person)
+    claimed: list[Any] = []
+
+    def inside_the_send() -> None:
+        world.invite(ann, T1, person)  # re-requested: pending again
+        claim = (world.repo.claim_pending_set_password if kind == "set_password"
+                 else world.repo.claim_pending_notification)
+        with claim() as row:
+            claimed.append(row)
+
+    if kind == "set_password":
+        world.signin.during_send = inside_the_send
+    else:
+        world.mail.during_notice = inside_the_send
+    world.send_pending()
+    assert len(claimed) == 1
+    assert claimed[0] is not None, "the sender still held its claim during the port call"
+    if kind == "set_password":
+        assert claimed[0].email == NEW
+    else:
+        assert claimed[0].tenant_id == T1
 
 
 @pytest.mark.parametrize("kind", ["set_password", "notice"])
@@ -189,6 +220,82 @@ def test_a_send_that_keeps_failing_is_retried_at_most_an_hour_after_each_failure
     world.send_pending()
     sent = world.signin.sends_to(NEW) if kind == "set_password" else len(world.mail.sent)
     assert sent == 1
+
+
+@pytest.mark.parametrize("kind", ["set_password", "notice"])
+def test_a_failed_send_is_retried_with_backoff_not_by_a_pass_at_the_same_instant(kind: str) -> None:
+    """Retried with backoff: a second pass at the very instant of the failure does not try again (flow 1, F-3)."""
+    world, ann, _ = two_tenants()
+    person = NEW if kind == "set_password" else BOB
+    world.invite(ann, T1, person)
+    if kind == "set_password":
+        world.signin.fail_sends_to.add(NEW)
+        tried = lambda: world.signin.attempts_to(NEW)  # noqa: E731
+    else:
+        world.mail.fail_notices_to.add(BOB)
+        tried = lambda: world.mail.attempts.count(BOB)  # noqa: E731
+    world.send_pending()
+    assert tried() == 1
+    world.send_pending()
+    world.send_pending()
+    assert tried() == 1, "retried at once, without any backoff"
+    world.clock.advance(HOUR)
+    world.send_pending()
+    assert tried() == 2  # control: the retry comes within the hour
+
+
+@pytest.mark.parametrize("kind", ["set_password", "notice"])
+def test_a_send_in_backoff_does_not_hold_back_one_requested_after_it_failed(kind: str) -> None:
+    """A failure fails only that person's (or row's) send: a later invitation still goes out at the next pass (F-3)."""
+    world, ann, bob = two_tenants()
+    if kind == "set_password":
+        world.signin.fail_sends_to.add(NEW)
+        world.invite(ann, T1, NEW)
+    else:
+        world.mail.fail_notices_to.add(BOB)
+        world.invite(ann, T1, BOB)
+    world.send_pending()  # fails; that send is now backing off
+    world.clock.advance(SECOND)
+    if kind == "set_password":
+        world.invite(ann, T1, NINA)
+    else:
+        world.invite(bob, T2, ANN)
+    world.send_pending()
+    if kind == "set_password":
+        assert (world.signin.sends_to(NEW), world.signin.sends_to(NINA)) == (0, 1)
+    else:
+        assert [n.to for n in world.mail.sent] == [ANN]
+
+
+def test_an_invite_racing_the_invitees_first_sign_in_still_reaches_them() -> None:
+    """The kind of send follows the user's status under the user-row lock: an invitee who signs in while
+    the invite runs is either joined by that sign-in or sent our notification (flow 1, O2)."""
+    world = World(tenants={T1: [ANN], T2: [BOB]}, failing_writes=True)
+    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+    world.invite(ann, T1, NEW)
+    world.send_pending()  # NEW has an account and is still invited
+    browser = world.client()
+    state = world.begin_signin(browser)
+    signed_in: list[Any] = []
+
+    def sign_in() -> None:
+        signed_in.append(world.sign_in_response(browser, NEW, state=state, begin=False))
+
+    def between_the_read_and_the_request() -> None:
+        racer = threading.Thread(target=sign_in)
+        racer.start()
+        racer.join(timeout=2)  # an implementation that holds the user-row lock makes it wait
+
+    world.repo.after["ensure_user"] = between_the_read_and_the_request
+    assert world.invite(bob, T2, NEW).status_code == 202
+    assert "ensure_user" not in world.repo.after  # control: the race was run inside the invite
+    assert wait_until(lambda: bool(signed_in)), "the racing sign-in never finished"
+    assert signed_in[0].status_code == 303, signed_in[0].text
+    world.send_pending()
+    joined = {t["tenant_id"] for t in me(browser)["tenants"]}
+    notified = [n for n in world.mail.sent if n.to == NEW and n.tenant_id == T2]
+    assert T1 in joined
+    assert T2 in joined or len(notified) == 1, "the T2 invitation was never sent nor joined"
 
 
 @pytest.mark.parametrize("error", ["sign-in-unavailable", "any-exception", "any-exception-on-create"])

@@ -219,6 +219,19 @@ def test_start_flags_someone_whose_membership_ended_and_keeps_an_invited_adminis
     assert fresh.get("/admin/tenants").status_code == 200
 
 
+def test_a_session_that_used_a_code_before_its_user_was_flagged_has_powers_once_flagged() -> None:
+    """The session records whether a code was used, flagged or not; powers = flagged now and a code-backed session (O5, DC-5)."""
+    world = lab()
+    with_code = world.sign_in(ME, amr=("pwd", "otp"))
+    password_only = world.sign_in(ME)
+    assert me(with_code)["administrator"] is False  # not flagged yet
+    assert with_code.delete(f"/tenants/{LAB}/members/{user_id(with_code)}").status_code == 204
+    world.restart(administrators=[OPS, ME], tenants={LAB: []})
+    assert me(with_code)["administrator"] is True
+    assert with_code.get("/admin/tenants").status_code == 200
+    assert me(password_only)["administrator"] is False  # control
+
+
 def test_a_malformed_tenant_id_in_the_file_refuses_the_start() -> None:
     """The error names the tenant id (O8)."""
     with pytest.raises(BootstrapRefused, match="not-a-tenant-id"):
