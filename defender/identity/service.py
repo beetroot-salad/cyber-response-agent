@@ -373,7 +373,7 @@ class IdentityService:
     # --- tenant people -----------------------------------------------------------------------
     def members(self, tenant_id: str) -> list[MemberView]:
         views = []
-        for row in self._repo.memberships_of_accept_tenant(tenant_id):
+        for row in self._repo.memberships_of_tenant(tenant_id):
             user = self._repo.user(row.user_id)
             if row.status == "active" and user is not None:
                 views.append(MemberView(user_id=user.id, email=user.email, display_name=user.display_name))
@@ -381,7 +381,7 @@ class IdentityService:
 
     def invitations(self, tenant_id: str) -> list[InvitationView]:
         views = []
-        for row in self._repo.memberships_of_accept_tenant(tenant_id):
+        for row in self._repo.memberships_of_tenant(tenant_id):
             user = self._repo.user(row.user_id)
             if row.status == "invited" and user is not None:
                 views.append(InvitationView(

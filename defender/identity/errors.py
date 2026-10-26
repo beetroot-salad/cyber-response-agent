@@ -41,10 +41,11 @@ class Conflict(IdentityError):
     """The record's state refuses the request: a 409."""
 
 
-#: A sign-in callback that opens no session. `reason` names its problem type: `prelogin-missing`
-#: (a missing and a replayed pre-login cookie are one reason, since the server keeps no record of
-#: used states), `login-attempt-invalid`, `unknown-account` or `otp-required`.
 class CallbackRefused(IdentityError):
+    """A sign-in callback that opens no session. `reason` names its problem type:
+    `prelogin-missing` (a missing and a replayed pre-login cookie are one reason, since the
+    server keeps no record of used states), `login-attempt-invalid`, `unknown-account` or
+    `otp-required`."""
 
     def __init__(self, reason: str, detail: str) -> None:
         super().__init__(detail)
