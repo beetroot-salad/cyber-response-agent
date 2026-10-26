@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 import datetime as _dt
+import time
 
 import pytest
 
 pytest.importorskip("fastapi")
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
     HOUR,
+    LAB,
+    ME,
+    OPS,
+    InjectedFailure,
     NEW,
     NINA,
     SECOND,
@@ -159,16 +162,22 @@ def test_a_failed_send_stays_pending_and_is_retried_until_it_goes_out(kind: str)
     assert got() == 1
 
 
+@pytest.mark.parametrize("error", ["sign-in-unavailable", "any-exception"])
 @pytest.mark.parametrize("failing", [NEW, NINA])
-def test_a_set_password_send_that_fails_does_not_stop_the_next_persons_in_the_same_pass(failing: str) -> None:
-    """Containment per person, whichever is first; the failed one is retried within the hour (flow 1)."""
+def test_a_set_password_send_that_fails_does_not_stop_the_next_persons_in_the_same_pass(
+        failing: str, error: str) -> None:
+    """Containment per person, whichever is first and whatever the exception; retried within the hour (flow 1)."""
     world, ann, _ = two_tenants()
     other = NINA if failing == NEW else NEW
     world.invite(ann, T1, NEW)
     world.invite(ann, T1, NINA)
-    world.signin.fail_sends_to.add(failing)
+    if error == "any-exception":
+        world.signin.raise_on_send_to[failing] = InjectedFailure("not a SignInUnavailable")
+    else:
+        world.signin.fail_sends_to.add(failing)
     world.send_pending()
     assert (world.signin.sends_to(failing), world.signin.sends_to(other)) == (0, 1)
+    world.signin.raise_on_send_to.clear()
     world.signin.fail_sends_to.clear()
     world.clock.advance(HOUR + SECOND)
     world.send_pending()
@@ -214,25 +223,49 @@ def test_an_unrelated_person_is_not_sent_anything_by_a_pass() -> None:
     assert (world.signin.calls(), len(world.mail.sent)) == (calls, mails)
 
 
+INTERVAL = _dt.timedelta(milliseconds=50)
+
+
 def test_the_apps_lifespan_keeps_sending_what_is_invited_after_it_started() -> None:
     """The periodic sender (every send_interval) sends a set-password email for an invite made after start (F-7, flow 1)."""
-    world = World(tenants={T1: [ANN]}, start=False, send_interval=_dt.timedelta(milliseconds=50))
-    with TestClient(world.app):
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL)
+    with world.lifespan_client() as browser:
         assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
-        ann = world.sign_in(ANN)
-        assert world.invite(ann, T1, NEW).status_code == 202
+        world.sign_in(ANN, browser=browser)
+        assert world.invite(browser, T1, NEW).status_code == 202
         assert wait_until(lambda: world.signin.sends_to(NEW) == 1)
+        time.sleep(3 * INTERVAL.total_seconds())
         assert world.signin.sends_to(NEW) == 1  # control: once recorded, nothing stays pending
 
 
-def test_a_periodic_pass_whose_port_call_fails_does_not_stop_the_loop() -> None:
-    """A failing pass is survived: a person invited afterwards is still sent (F-7, flow 1)."""
-    world = World(tenants={T1: [ANN]}, start=False, send_interval=_dt.timedelta(milliseconds=50))
-    with TestClient(world.app):
+def test_the_lifespan_makes_its_first_pass_at_once_not_after_one_interval() -> None:
+    """With an hour between passes the start-up pass still sends what is pending (F-7, DC-4)."""
+    world = World(administrators=[OPS], tenants={LAB: [ME]}, start=False, send_interval=HOUR)
+    with world.lifespan_client():
+        assert wait_until(lambda: world.signin.sends_to(OPS) == 1 and world.signin.sends_to(ME) == 1)
+
+
+def test_a_periodic_pass_that_raises_does_not_stop_the_loop() -> None:
+    """A pass that raises (repository failure) is survived: later passes run and a later invite is sent (F-7, flow 1)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL, failing_writes=True)
+    with world.lifespan_client() as browser:
         assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
-        ann = world.sign_in(ANN)
-        world.signin.fail_sends = 1
-        assert world.invite(ann, T1, NEW).status_code == 202
-        assert wait_until(lambda: world.signin.fail_sends == 0)  # the failing pass happened
-        assert world.invite(ann, T1, NINA).status_code == 202
-        assert wait_until(lambda: world.signin.sends_to(NINA) == 1)
+        world.sign_in(ANN, browser=browser)
+        world.repo.failing.add("claim_pending_set_password")
+        assert wait_until(lambda: world.repo.refusals.get("claim_pending_set_password", 0) >= 2)  # raised, again
+        world.repo.failing.clear()
+        assert world.invite(browser, T1, NEW).status_code == 202
+        assert wait_until(lambda: world.signin.sends_to(NEW) == 1)
+
+
+def test_after_the_lifespan_exits_nothing_more_is_sent() -> None:
+    """Shutdown stops the sender: an invite made afterwards stays pending until a pass is run by hand (F-7)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL)
+    with world.lifespan_client():
+        assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
+    ann = world.sign_in(ANN)
+    assert world.invite(ann, T1, NEW).status_code == 202
+    time.sleep(5 * INTERVAL.total_seconds())
+    assert world.signin.sends_to(NEW) == 0
+    world.send_pending()  # control: it was pending and sendable all along
+    assert world.signin.sends_to(NEW) == 1

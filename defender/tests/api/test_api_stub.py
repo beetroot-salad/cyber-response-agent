@@ -400,7 +400,8 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
 
 @pytest.mark.parametrize(("route", "path", "body", "answers"),
                          [row for row in HAPPY if row[0][0] != "GET"], ids=lambda v: str(v))
-@pytest.mark.parametrize("origin", [None, "https://evil.example"], ids=["missing-origin", "foreign-origin"])
+@pytest.mark.parametrize("origin", [None, "https://evil.example", ORIGIN + ".evil.example", "null"],
+                         ids=["missing-origin", "foreign-origin", "suffixed-origin", "null-origin"])
 def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend_origin(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
     origin: str | None,

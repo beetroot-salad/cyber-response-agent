@@ -24,6 +24,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     T2,
     BootstrapRefused,
     World,
+    invitation_id,
     items,
     lab,
     me,
@@ -31,6 +32,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     user_id,
 )
 
+X = "x@x.example"
 FILE = {"administrators": [OPS], "tenants": {LAB: [ME]}}
 
 
@@ -97,7 +99,7 @@ def test_one_person_gets_at_most_one_email_per_start() -> None:
     assert tenants_of(world.sign_in(ME)) == {LAB, T2}
 
 
-def test_a_send_that_never_went_out_is_made_at_the_next_start() -> None:
+def test_sends_that_failed_are_made_after_a_restart_and_only_once() -> None:
     """Sends that failed before a restart go out once the failure backoff has passed (O8, flow 1)."""
     world = World(administrators=[OPS], tenants={LAB: [ME]}, failing_sends=2)
     assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (0, 0)
@@ -107,6 +109,22 @@ def test_a_send_that_never_went_out_is_made_at_the_next_start() -> None:
     world.clock.advance(HOUR + SECOND)
     world.send_pending()
     assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)  # sent once, not again
+
+
+def test_a_dropped_send_is_re_requested_when_the_person_is_later_listed_as_administrator() -> None:
+    """A revoked, never-sent invite is dropped; listing the person later gets exactly one email (O8, flow 1)."""
+    world = lab()
+    me_session = world.sign_in(ME)
+    assert world.invite(me_session, LAB, X).status_code == 202
+    me_session.delete(f"/tenants/{LAB}/invitations/{invitation_id(me_session, LAB, X)}")
+    world.send_pending()
+    world.clock.advance(HOUR + SECOND)
+    world.send_pending()
+    assert (world.signin.sends_to(X), world.mail.sent) == (0, [])  # dropped, nothing pending
+    world.restart(administrators=[OPS, X], tenants={LAB: [ME]})
+    assert world.signin.sends_to(X) == 1
+    world.restart(administrators=[OPS, X], tenants={LAB: [ME]})
+    assert world.signin.sends_to(X) == 1  # control: not again at the next start
 
 
 def test_first_members_are_invited_only_into_a_tenant_that_never_had_a_membership() -> None:

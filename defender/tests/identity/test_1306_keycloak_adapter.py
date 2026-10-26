@@ -105,12 +105,15 @@ class Keycloak:
         self.credentials: list[dict] = []
         self.required_actions: list[str] = []
         self.new_id = USER_ID
+        #: Raised by the transport (not answered) on the admin API / on the admin token request.
+        self.admin_error: Exception | None = None
+        self.token_error: Exception | None = None
 
     # --- the transport ---------------------------------------------------------------------
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
 
-    def _handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901
+    def _handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0912
         url = request.url
         self.seen.append(Seen(request.method, url.path, urllib.parse.parse_qs(url.query.decode()),
                               request.headers, request.content))
@@ -126,6 +129,8 @@ class Keycloak:
         if path == f"/realms/{REALM}/protocol/openid-connect/token":
             form = urllib.parse.parse_qs(request.content.decode())
             if form.get("grant_type") == ["client_credentials"]:
+                if self.token_error:
+                    raise self.token_error
                 return httpx.Response(200, json={"access_token": ADMIN_TOKEN, "token_type": "Bearer"})
             if self.token_status != 200:
                 return httpx.Response(self.token_status, json={"error": "invalid_grant"})
@@ -136,6 +141,8 @@ class Keycloak:
             return httpx.Response(404)
         if request.headers.get("authorization") != f"Bearer {ADMIN_TOKEN}":
             return httpx.Response(401)
+        if self.admin_error:
+            raise self.admin_error
         rest = path[len(admin):]
         if rest == "" and method == "POST":
             body = json.loads(request.content)
@@ -363,6 +370,31 @@ def test_a_failed_email_send_is_reported_so_the_sender_keeps_it_pending(kc):
     kc.email_status = 500
     with pytest.raises(SignInUnavailable):
         adapter(kc).send_set_password_email(USER_ID, lifespan=SEVEN_DAYS)
+
+
+_TRANSPORT_ERRORS = [
+    pytest.param(httpx.ConnectError("connection refused"), id="connect-error"),
+    pytest.param(httpx.ReadTimeout("timed out"), id="read-timeout"),
+]
+_ADMIN_CALLS = {
+    "send_set_password_email": lambda port: port.send_set_password_email(USER_ID, lifespan=SEVEN_DAYS),
+    "create_account": lambda port: port.create_account(
+        username=USER_ID, email="a@example.test", required_actions=frozenset({"set_password"})),
+    "has_otp": lambda port: port.has_otp(USER_ID),
+}
+
+
+@pytest.mark.parametrize("where", ["admin-api", "admin-token"])
+@pytest.mark.parametrize("call", sorted(_ADMIN_CALLS))
+@pytest.mark.parametrize("error", _TRANSPORT_ERRORS)
+def test_a_transport_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc, error, call, where):
+    """A refused connection or a timeout raises SignInUnavailable, so the sender keeps the send pending (R-4)."""
+    port = adapter(kc)
+    setattr(kc, "admin_error" if where == "admin-api" else "token_error", error)
+    with pytest.raises(SignInUnavailable):
+        _ADMIN_CALLS[call](port)
+    kc.admin_error = kc.token_error = None
+    _ADMIN_CALLS[call](adapter(kc))  # control: the same call on the same fake succeeds
 
 
 @pytest.mark.parametrize(("credentials", "expected"), [

@@ -9,6 +9,7 @@ import datetime as _dt
 import hashlib
 import itertools
 import logging
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -89,6 +90,8 @@ class FailingRepository:
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.failing: set[str] = set()
+        #: method name -> how many calls were refused (the sender thread may be the caller).
+        self.refusals: dict[str, int] = {}
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._inner, name)
@@ -96,6 +99,7 @@ class FailingRepository:
             return attribute
 
         def refuse(*args: Any, **kwargs: Any) -> Any:
+            self.refusals[name] = self.refusals.get(name, 0) + 1
             raise InjectedFailure(f"{name} failed")
 
         return refuse
@@ -147,27 +151,35 @@ class FakeSignIn:
         self.crash_after_create = 0
         #: Runs once inside the next set-password send, after it is recorded.
         self.during_send: Callable[[], None] | None = None
+        #: email -> the exception (any type) every send to that account raises until removed.
+        self.raise_on_send_to: dict[str, Exception] = {}
+        #: The lifespan's sender runs on its own thread; views read snapshots taken under this lock.
+        self._lock = threading.RLock()
 
     # --- the port ---------------------------------------------------------------------
     def create_account(self, username: str, email: str, required_actions: frozenset[str]) -> str:
-        self.create_calls.append(username)
-        if username not in self.accounts:
-            self.accounts[username] = Account(
-                username, email, frozenset(required_actions), f"kc-{next(self._ids):04d}")
-            if self.crash_after_create:
-                self.crash_after_create -= 1
-                raise SignInUnavailable("crash after the account was created")
-        return self.accounts[username].account_id
+        with self._lock:
+            self.create_calls.append(username)
+            if username not in self.accounts:
+                self.accounts[username] = Account(
+                    username, email, frozenset(required_actions), f"kc-{next(self._ids):04d}")
+                if self.crash_after_create:
+                    self.crash_after_create -= 1
+                    raise SignInUnavailable("crash after the account was created")
+            return self.accounts[username].account_id
 
     def send_set_password_email(self, account_id: str, lifespan: _dt.timedelta) -> None:
-        if self.fail_sends:
-            self.fail_sends -= 1
-            raise SignInUnavailable("the set-password send failed")
-        if any(a.account_id == account_id and a.email in self.fail_sends_to
-               for a in self.accounts.values()):
-            raise SignInUnavailable("the set-password send to this account failed")
-        self.set_password_sent.append((account_id, lifespan))
-        hook, self.during_send = self.during_send, None
+        with self._lock:
+            if self.fail_sends:
+                self.fail_sends -= 1
+                raise SignInUnavailable("the set-password send failed")
+            for a in list(self.accounts.values()):
+                if a.account_id == account_id and a.email in self.raise_on_send_to:
+                    raise self.raise_on_send_to[a.email]
+                if a.account_id == account_id and a.email in self.fail_sends_to:
+                    raise SignInUnavailable("the set-password send to this account failed")
+            self.set_password_sent.append((account_id, lifespan))
+            hook, self.during_send = self.during_send, None
         if hook:
             hook()
 
@@ -188,20 +200,21 @@ class FakeSignIn:
     # --- test-side views --------------------------------------------------------------
     def calls(self) -> int:
         """Every account-side call so far (sign-in round trips excluded)."""
-        return len(self.create_calls) + len(self.set_password_sent) + len(self.otp_required)
+        with self._lock:
+            return len(self.create_calls) + len(self.set_password_sent) + len(self.otp_required)
 
     def account_for(self, email: str) -> str:
         """The one Keycloak account for `email` (a retried create finds it, never adds one)."""
-        [account] = [a for a in self.accounts.values() if a.email == email]
-        return account.account_id
+        return self.account_of(email).account_id
 
     def account_of(self, email: str) -> Account:
-        [account] = [a for a in self.accounts.values() if a.email == email]
+        [account] = [a for a in list(self.accounts.values()) if a.email == email]
         return account
 
     def sends_to(self, email: str) -> int:
-        ids = {a.account_id for a in self.accounts.values() if a.email == email}
-        return sum(1 for a, _ in self.set_password_sent if a in ids)
+        with self._lock:
+            ids = {a.account_id for a in list(self.accounts.values()) if a.email == email}
+            return sum(1 for a, _ in list(self.set_password_sent) if a in ids)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -216,6 +229,7 @@ class FakeMail:
 
     def __init__(self) -> None:
         self.sent: list[Notice] = []
+        self._lock = threading.RLock()
         self.fail_notices = 0
         #: Every notification to a recipient in this set raises until the test removes it.
         self.fail_notices_to: set[str] = set()
@@ -223,13 +237,14 @@ class FakeMail:
         self.during_notice: Callable[[], None] | None = None
 
     def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
-        if self.fail_notices:
-            self.fail_notices -= 1
-            raise InjectedFailure("the notification failed")
-        if to in self.fail_notices_to:
-            raise InjectedFailure("the notification to this recipient failed")
-        self.sent.append(Notice(to, str(tenant_id), str(invitation_id)))
-        hook, self.during_notice = self.during_notice, None
+        with self._lock:
+            if self.fail_notices:
+                self.fail_notices -= 1
+                raise InjectedFailure("the notification failed")
+            if to in list(self.fail_notices_to):
+                raise InjectedFailure("the notification to this recipient failed")
+            self.sent.append(Notice(to, str(tenant_id), str(invitation_id)))
+            hook, self.during_notice = self.during_notice, None
         if hook:
             hook()
 
@@ -455,6 +470,12 @@ class World:
         browser.cookies.set(name, value)
         return browser
 
+    def lifespan_client(self) -> TestClient:
+        """A browser over the app itself: used as a context manager it runs the app's lifespan (the
+        start-up and the periodic sender). Send every request of a lifespan test through it."""
+        return TestClient(self.app, base_url=BASE_URL, follow_redirects=False,
+                          headers={"Origin": FRONTEND_ORIGIN})
+
     def begin_signin(self, browser: TestClient) -> str:
         """GET /auth/login; the state the person is sent to Keycloak with."""
         login = browser.get("/auth/login")
@@ -473,9 +494,10 @@ class World:
             name=name or email.split("@")[0].title(), amr=tuple(amr))
         return browser.get("/auth/callback", params={"code": code, "state": state or sent_state})
 
-    def sign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None) -> TestClient:
-        """A new browser signed in as `email` (needs an account: the sender has run)."""
-        browser = self.client()
+    def sign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None,
+                browser: TestClient | None = None) -> TestClient:
+        """A new browser (or the given one) signed in as `email` (needs an account: the sender has run)."""
+        browser = browser or self.client()
         response = self.sign_in_response(browser, email, amr=amr, name=name)
         assert response.status_code == 303, response.text
         assert browser.cookies.get(SESSION_COOKIE), "session cookie did not round-trip"
