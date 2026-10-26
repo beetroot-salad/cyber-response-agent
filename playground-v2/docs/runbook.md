@@ -739,7 +739,7 @@ The rules are the `*.json` files in `detection-rules/` — read the directory, n
 | `v2-nginx-path-enumeration` | `web-path-scan` | 8+ distinct 4xx paths per (`host.name`, `source.address`) |
 | `v2-keycloak-credential-stuffing` | `keycloak-cred-stuffing` | ES\|QL: `keycloak.events` is unparsed, so `ipAddress`/`username` are extracted from `message` at query time; 5+ failures over 3+ usernames per client |
 | `v2-squid-egress-burst` | `proxy-egress-burst` | 5+ distinct destinations per (`user.name`, `source.ip`) |
-| `v2-falco-decoded-payload` | `living-off-the-land` | Falco `Decoding Payload in Container`; fires twice per decode (the shell line and the `base64` child both match) |
+| `v2-falco-decoded-payload` | `living-off-the-land` | Falco `Decoding Payload in Container` on the `base64` process only. Falco's own test is a command-line substring match (`base64` and `-d` anywhere), so the parent shell line matches too, and so does the rule installer's `curl --data` while it uploads a body that mentions the decoder |
 
 Falco often reports `container.name` as `<NA>` (about half of all events, and every `docker exec`-dispatched attack event checked); `falco.output_fields.container.id` still identifies the host. `v2-internal-port-scan` groups by `container.name`, so unnamed events pool into one `<NA>` bucket.
 
