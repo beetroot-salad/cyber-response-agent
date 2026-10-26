@@ -28,8 +28,9 @@ Repository maintenance commands live in root `tooling/`; product operator comman
 The shared sandbox is `defender/box/`, with its stdlib-only transport in `defender/execution/`.
 Measurement harnesses, golden cases, and judge-alignment research data live in root
 `evaluations/`; they consume product code through a one-way dependency.
-Sample playground alert inputs live in `playground-v2/examples/alerts/`; production accepts
-an explicit alert path and does not discover samples from the source tree.
+Labelled playground alert inputs live in `evaluations/fixtures/held_out/`; Kibana-shaped test
+alerts live in `defender/tests/fixtures/kibana_alerts/`. Production accepts an explicit alert
+path and does not discover samples from the source tree.
 `runtime/` executes investigations and enforces permissions; `records/` owns shared
 run identities and persistence for runtime, learning, and presentation, and defines
 investigation inputs, artifact schemas, provenance, and report values; `kit/` holds what

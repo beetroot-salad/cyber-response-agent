@@ -11,7 +11,7 @@ The idea is to give the agent a structured way to identify its runtime mistakes 
 - `defender/`: the runtime triage agent, its skills/adapters, and the offline learning loop
 - `defender/learning/`: the branched-episode loop (questioner / staged estate / review by replay / family judge), the curators and their forward-check, and the read-only frontend
 - `defender/lessons/`: checked-in pitfall lessons authored by the loop, read by the agent at plan time
-- `playground-v2/examples/alerts/`: alert inputs used to drive runs
+- `evaluations/fixtures/held_out/`: labelled playground alerts that drive scored runs
 - `playground-v2/`: the SOC lab the defender runs against — a Docker Compose stack (Elastic/Fleet, Keycloak, Zeek, Falco, role hosts with baseline-activity generators, attack runner) on a Hetzner VPS
 - `playground-v2/infra/`: Terraform for that VPS, with snapshot lever-up/lever-down scripts for cost control
 - the v1 lab (Wazuh-era) has been retired and deleted; its `ticket-server/` lives on at `playground-v2/ticket-server/`

@@ -113,7 +113,6 @@ NON_SOURCE_DIRS = ("seam-harness", "experiments")
 
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
-    "playground-v2/examples/alerts",
     ".claude/worktrees", "experiments",
     # Task files and design docs reference removed symbols historically;
     # they are not code that should be kept consistent with current names.
@@ -602,7 +601,7 @@ def _path_named(repo_root: Path, ident: str) -> bool:
 
     Only tracked paths count, so an untracked copy cannot mask a real deletion. Not filtered
     through `_is_excluded_path`: that list means "not a reference source", and includes live
-    dirs like `playground-v2/examples/alerts`. Only `_ARCHIVAL_DIRS` are excluded, since their frozen
+    dirs like `defender/docs`. Only `_ARCHIVAL_DIRS` are excluded, since their frozen
     copies cannot vouch for survival.
 
     Gives up the ambiguous case where a name survives only in an unrelated file, the same

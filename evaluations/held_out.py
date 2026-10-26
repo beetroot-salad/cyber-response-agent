@@ -54,6 +54,7 @@ from defender import _io
 from defender.records import _alert_input
 from defender._yaml import safe_load
 from defender._model import model
+from defender._vocab import DISPOSITION_VALUES, HOST_ONLY_DISPOSITION
 from defender.records._report import read_report
 from defender.records._run_id import run_id_fault
 from defender.records import RUN_LAYOUT, RunPaths
@@ -64,6 +65,15 @@ from defender._io import read_text_utf8
 #: record (#1187 recheck X2): counted wrong, so a crash before run setup cannot leave the
 #: denominator.
 NO_RUN_RECORD = "launched, no run record"
+
+#: The dispositions a fixture may be labelled with: every one the agent can author. The host-only
+#: `unresolved` is never a right answer, so a label naming it is refused like any other stray one.
+LABELS: tuple[str, ...] = tuple(d for d in DISPOSITION_VALUES if d != HOST_ONLY_DISPOSITION)
+
+
+class FixturesRefused(Exception):  # noqa: N818 — named for its refusal, as `IndexRefused` is
+    """A held-out fixture carries a label outside `LABELS`. Scoring refuses the whole set rather
+    than let a typo become a class of its own; the message names every such fixture."""
 
 
 class IndexRefused(Exception):  # noqa: N818 — named for its refusal, as `TenantRefused` is
@@ -108,6 +118,10 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
         if not isinstance(gt_doc, dict) or gt_doc.get("held_out") is not True:
             continue
         out.append(HeldOutAlert(child.name, alert, gt_doc))
+    stray = [f"{fx.slug} ({fx.ground_truth.get('disposition')!r})" for fx in out
+             if fx.ground_truth.get("disposition") not in LABELS]
+    if stray:
+        raise FixturesRefused(f"labels outside {list(LABELS)}: {', '.join(stray)}")
     return out
 
 
@@ -270,7 +284,11 @@ def main(argv: list[str]) -> int:
     except IndexRefused as refused:
         print(f"held_out: the index {ns.index} is refused: {refused}", file=sys.stderr)
         return 2
-    return report(runs_dir, newest, ns.fixtures_dir)
+    try:
+        return report(runs_dir, newest, ns.fixtures_dir)
+    except FixturesRefused as refused:
+        print(f"held_out: the fixtures in {ns.fixtures_dir} are refused: {refused}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -302,7 +302,7 @@ def record_rel() -> str:
 # 3. Alerts
 # =================================================================================================
 
-FIXTURES = REPO_ROOT / "playground-v2" / "examples" / "alerts"
+FIXTURES = REPO_ROOT / "defender" / "tests" / "fixtures" / "kibana_alerts"
 #: The committed Kibana-projected fixture alerts (read off the tree, never restated).
 FIXTURE_SLUGS = (
     "v2-sshd-success-after-failures",

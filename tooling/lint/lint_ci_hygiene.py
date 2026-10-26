@@ -53,7 +53,6 @@ PATH_ALLOWLIST = {
 EXCLUDED_PREFIXES = (
     "defender/.venv/",
     "defender/__pycache__/",
-    "playground-v2/examples/alerts/",
     "defender/tests/",
     # No tenant-knowledge carve-out (#1108 P4): lessons, system skills and query templates live
     # in each tenant's own repo, outside this tree.
