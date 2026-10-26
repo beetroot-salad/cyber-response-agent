@@ -263,7 +263,7 @@ class EpisodeRuns:
     def __init__(self, tenant, episode_id):
         self.episode = Episode.open(tenant.dir / episode_id)
 """,
-    "records/_compat.py": """from pathlib import Path
+    "records/_held.py": """from pathlib import Path
 from defender.episodes._episode_handle import Episode
 from defender.records._lookup import open_at
 def create_at(path):
@@ -282,7 +282,7 @@ from defender.episodes import _episode_handle as EH
 from defender import _io
 from defender._io import bind, hold
 from defender.records._lookup import EpisodeRuns, Opener, helper, open_at
-from defender.records._compat import chained, derived
+from defender.records._held import chained, derived
 """
 OPENER_CASES = [
     ("pkg/dirty.py", """def direct(episode_dir, view):

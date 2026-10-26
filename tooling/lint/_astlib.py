@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import functools
 import os
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -261,12 +262,38 @@ def import_source(node: ast.ImportFrom, package: str | None) -> str:
 
 #: The runs repository's door (#1105): its private submodules define what the door serves.
 _RUN_REPOSITORY = "defender.records"
-#: The door's own submodules. #1080 merged the runs repository into `records/`, whose record-format
-#: modules beside them the door does not serve.
-_DOOR_MODULES = frozenset({"_errors", "_handle", "_held", "_id", "_layout", "_lookup"})
-#: The runs repository's files under `defender/`: the door and its submodules.
-RUN_REPOSITORY_FILES: tuple[str, ...] = tuple(
-    f"records/{m}.py" for m in ("__init__", *sorted(_DOOR_MODULES)))
+#: The door's own file in this checkout. #1080 merged the runs repository into `records/`, whose
+#: record-format modules the door does not serve; the door's `_HOMES` map is the one list of the
+#: submodules it does.
+_DOOR_FILE = Path(__file__).resolve().parents[2] / "defender" / "records" / "__init__.py"
+
+
+@functools.cache
+def door_modules() -> frozenset[str]:
+    """The runs repository's submodules: every module the door's `_HOMES` map serves a name from,
+    read from the door's source. ScanBlind when the map cannot be found — a gate that cannot tell
+    the repository's files from the record formats beside them cannot clear either."""
+    tree = parse_source(read_source(_DOOR_FILE, "records/__init__.py"), "records/__init__.py")
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else (
+            node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else None)
+        if isinstance(target, ast.Name) and target.id == "_HOMES" and isinstance(node.value, ast.Dict):
+            homes = set()
+            for key, value in zip(node.value.keys, node.value.values):
+                if key is None and isinstance(value, ast.Call) and len(value.args) == 2:
+                    value = value.args[1]  # `**dict.fromkeys((names...), "_module")`
+                if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                    raise ScanBlind(f"records/__init__.py: `_HOMES` holds {ast.unparse(value)!r}, "
+                                    "not a submodule name")
+                homes.add(value.value)
+            if homes:
+                return frozenset(homes)
+    raise ScanBlind("records/__init__.py: no `_HOMES` map naming the runs repository's submodules")
+
+
+def run_repository_files() -> tuple[str, ...]:
+    """The runs repository's files under `defender/`: the door and the submodules it serves."""
+    return tuple(f"records/{m}.py" for m in ("__init__", *sorted(door_modules())))
 
 
 def door_spelling(origin: str) -> str:
@@ -275,7 +302,7 @@ def door_spelling(origin: str) -> str:
     RunPaths`), since the door serves it; anything else is unchanged."""
     parts = origin.split(".")
     if origin.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3 \
-            and parts[2] in _DOOR_MODULES:
+            and parts[2] in door_modules():
         del parts[2]
     return ".".join(parts)
 

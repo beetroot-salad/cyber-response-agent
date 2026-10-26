@@ -49,8 +49,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _astlib import (
-    RUN_REPOSITORY_FILES, ScanBlind, callee, origin, reexport_origin, import_source, module_and_package,
-    module_env, owner_derived,
+    ScanBlind, callee, origin, reexport_origin, import_source, module_and_package,
+    module_env, owner_derived, run_repository_files,
     read_and_parse, require_claimed, require_selected, scan_guard, selects, source_files,
 )
 
@@ -63,9 +63,16 @@ BEGIN_MARK = "<!-- generated: run-records kinds table — edit run-records-kinds
 END_MARK = "<!-- end generated -->"
 
 #: The runs repository's files under `defender/` (#1105 D1.5, which absorbed the layout and the
-#: handle). Since #1080 merged the repository into `records/`, these are the door and its
-#: submodules, not the record-format modules beside them (`_astlib.RUN_REPOSITORY_FILES`).
-OWNER_PACKAGE_FILES = RUN_REPOSITORY_FILES
+#: handle). Since #1080 merged the repository into `records/`, these are the door and the
+#: submodules its `_HOMES` map serves, not the record-format modules beside them
+#: (`_astlib.run_repository_files`). A door that cannot be read is the scan's blind report, not a
+#: crash on import: `scan` raises it.
+try:
+    OWNER_PACKAGE_FILES = run_repository_files()
+    _DOOR_BLIND: ScanBlind | None = None
+except ScanBlind as exc:
+    OWNER_PACKAGE_FILES = ()
+    _DOOR_BLIND = exc
 #: The folder that holds them.
 OWNER_PACKAGE = "records"
 #: The owners outside the package. `episodes/_episode_handle.py` owns the episode folder with
@@ -76,7 +83,7 @@ _OWNER_FLAT_MODULES = ("episodes/_episode_paths.py", "episodes/_episode_handle.p
 #: The owner modules by their path under `defender/`, the exempt set everything below is
 #: defined relative to. Matched by path, never by basename — a package submodule's basename
 #: (`__init__.py`, `_handle.py`) would otherwise exempt every same-named file in the sweep.
-#: Equals `defender.tests.support.shared.contracts._spec1077.OWNER_MODULE_FILES`, which reads the same folder.
+#: Equals `defender.tests.support.shared.contracts._spec1077.OWNER_MODULE_FILES`, which reads the same door map.
 OWNER_MODULES: frozenset[str] = frozenset({
     *OWNER_PACKAGE_FILES,
     *_OWNER_FLAT_MODULES,
@@ -600,6 +607,8 @@ def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> 
     A file the sweep cannot parse is a finding: the scan continues, but that file is
     reported, not certified clean.
     """
+    if _DOOR_BLIND is not None:
+        raise _DOOR_BLIND
     allow_list = allow_list if allow_list is not None else ALLOW_LIST
     whole, parts = _owner_constants()
     accessor_names = _accessor_names()

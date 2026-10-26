@@ -701,8 +701,9 @@ jobs:
 
       # Import order (#1080): defender/'s top-level packages form one declared order, and no
       # import points up it unless the baseline lists it with an owner issue; adapters import
-      # only the kit, the flat tier and knowledge; only named files import adapter code; the
-      # API loads no runtime or learning module. The baseline only shrinks: a stale entry fails.
+      # only the kit, the flat tier and knowledge, and nothing else imports adapter code. The
+      # baseline only shrinks: a stale entry fails. (That the API loads no runtime or learning
+      # module is checked by importing it: defender/tests/api/test_1080_api_loads.py.)
       - name: Import-order fence (shrinking baseline)
         run: defender/.venv/bin/python tooling/lint/lint_import_order.py
 

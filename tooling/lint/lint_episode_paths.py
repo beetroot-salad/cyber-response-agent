@@ -35,7 +35,7 @@ from typing import Any
 
 import _astlib
 import _census1134 as C
-from _episode_scope import bound_values, owned, scoped_nodes, spells
+from _episode_scope import bound_values, owned, scoped_nodes, spells, walk_owner
 
 #: The checkout's own `defender/`, so a run from any directory or worktree sweeps itself.
 DEFENDER = Path(__file__).resolve().parents[2] / "defender"
@@ -454,7 +454,6 @@ _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 
 DOORS: frozenset[tuple[str, str]] = frozenset()
 DOORS_TOLERATED: frozenset[tuple[str, str]] = frozenset()
-WALK_OWNER_DIR = "records"
 WALK_DOORS_REQUIRED = ("create", "open")
 WALK_CALLS_REQUIRED = (
     ("learning.branch.cli", "create_episode", None),
@@ -672,12 +671,17 @@ def _walk_calls_missing(found: set[tuple[str, str, frozenset[str]]],
                        for m, name, kws in found)]
 
 
-#: The repository's walk owner is `_episode_scope.WALK_OWNER`: the whole `records/` folder and `_episode_handle.py`. A door inside the
-#: owner is the walk's own; what the census polices is the owner's PATH-TAKING doors reached
-#: from outside (`laundered`), however deep the wrappers nest (adversary F2).
-#: The owner's dotted packages: imported BY A STRING (`__import__`, `importlib.import_module`)
-#: outside the owner, a door no resolver can follow (adversary F2's `run.py` laundering).
-OWNER_PACKAGES = ("defender.records", "defender.episodes._episode_handle")
+# The repository's walk owner is `_episode_scope.walk_owner()`: the runs repository's files in
+# `records/` and `_episode_handle.py`. A door inside the owner is the walk's own; what the census
+# polices is the owner's PATH-TAKING doors reached from outside (`laundered`), however deep the
+# wrappers nest (adversary F2).
+def owner_packages() -> frozenset[str]:
+    """The owner's dotted modules: one imported BY A STRING (`__import__`,
+    `importlib.import_module`) outside the owner is a door no resolver can follow (adversary F2's
+    `run.py` laundering)."""
+    return frozenset(_astlib.module_and_package(rel)[0] for rel in walk_owner())
+
+
 #: Exempt from the `rebind` rule only: the one-time command holds the operator-named OLD
 #: episodes root "following its spelling, as configuration" (design Flow 6, S-move) — a path
 #: bind the design asks for, of a folder outside every tenant. It may not open an `Episode`.
@@ -795,7 +799,7 @@ def _kind(node: ast.Call, rel: str, env, values: dict,
     if called in names:
         return "laundered", ast.unparse(node.func)
     if called in IMPORTERS and node.args and isinstance(node.args[0], ast.Constant) and str(
-            node.args[0].value).startswith(OWNER_PACKAGES):
+            node.args[0].value) in owner_packages():
         return "dynamic", ast.unparse(node)
     if called in PATH_OPENERS and rel not in REBIND_EXEMPT and (
             rel in REBIND_MODULES or (node.args and spells(node.args[0], "episode", values))):
@@ -901,7 +905,7 @@ def path_calls(root: Path, modules: Iterable[str] = O5_MODULES,
 
 def doors(root: Path, modules: Iterable[str] = O5_MODULES,
           allowed: frozenset[tuple[str, str]] = DOORS | DOORS_TOLERATED,
-          owner_dir: str = WALK_OWNER_DIR,
+          owner_files: Iterable[str] | None = None,
           required_verbs: Iterable[str] = WALK_DOORS_REQUIRED,
           required_calls: Iterable[tuple[str, str, Any]] = WALK_CALLS_REQUIRED) -> list[str]:
     """O5: only the doors open or create an Episode, and the walk still reaches them."""
@@ -911,10 +915,9 @@ def doors(root: Path, modules: Iterable[str] = O5_MODULES,
            f"walked view's episode instead): {hit}"
            for hit in sorted(h for h in found if not _allowed(h, allowed))]
     owner: set[tuple[str, str, str]] = set()
-    for path in sorted((root / owner_dir).glob("*.py")):
-        rel = f"{owner_dir}/{path.name}"
+    for rel in (owner_files if owner_files is not None else _astlib.run_repository_files()):
         owner |= o5_doors(_module_name(rel), _read(root, rel))
-    out += [f"doors: the walk owner ({owner_dir}/) does not call Episode.{verb} - the episode is "
+    out += [f"doors: the walk owner (the runs repository) does not call Episode.{verb} - the episode is "
             "opened or created somewhere the door scans do not look"
             for verb in required_verbs if not any(h[2] == verb for h in owner)]
     calls: set[tuple[str, str, frozenset[str]]] = set()

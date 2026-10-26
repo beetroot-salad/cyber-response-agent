@@ -2,12 +2,17 @@
 
 A census that matches a spelling is defeated by binding the value to another name first
 (`ep = episode_id; f"{ep}-{label}"`), so `spells` follows a name through the assignments visible in
-its scope. `WALK_OWNER` is the ONE definition of the repository's walk owner (relative to
+its scope. `walk_owner` is the ONE definition of the repository's walk owner (relative to
 `defender/`; a folder prefix ends in `/`)."""
 from __future__ import annotations
 
 import ast
 from collections.abc import Mapping
+
+try:  # bare-name import, as every gate reaches its siblings
+    from _astlib import run_repository_files
+except ImportError:  # imported as part of a package (a test loading `tooling.lint`)
+    from ._astlib import run_repository_files  # type: ignore[no-redef]
 
 def bound_values(scope: ast.AST) -> dict[str, list[ast.expr]]:
     """`{name: [values]}`: every value `scope`'s OWN statements bind a plain name to — `x = v`."""
@@ -70,12 +75,15 @@ def scoped_nodes(tree: ast.AST) -> list[tuple[ast.AST, dict[str, list[ast.expr]]
     return out
 
 
-#: The walk's owner: the run repository and the episode handle. Cover the whole owner package as
-#: it gains modules.
-WALK_OWNER = ("records/", "episodes/_episode_handle.py")
+def walk_owner() -> tuple[str, ...]:
+    """The walk's owner: the run repository's files (`_astlib.run_repository_files`, read from the
+    door's own map, so a module the door gains is an owner the day it serves a name) and the
+    episode handle. Read when a scan asks, so a door that cannot be read is that scan's
+    ScanBlind."""
+    return (*run_repository_files(), "episodes/_episode_handle.py")
 
 
 def owned(rel: str) -> bool:
     """Is `rel` (relative to `defender/`) in the walk's owner?"""
-    return any(rel == own or (own.endswith("/") and rel.startswith(own)) for own in WALK_OWNER)
+    return rel in walk_owner()
 # Observe process opens directly so calls outside an injected seam remain visible.

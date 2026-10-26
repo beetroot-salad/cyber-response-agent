@@ -1,5 +1,5 @@
 """Tests for the lint_import_order gate (#1080): one declared order over `defender/`'s top-level
-packages, three per-package rules, and a baseline that only shrinks and names an owner."""
+packages, the two adapter rules, and a baseline that only shrinks and names an owner."""
 from __future__ import annotations
 
 import json
@@ -40,6 +40,7 @@ def test_downward_imports_are_clean(tmp_path):
     "from defender.runtime import engine\n",
     "def f():\n    from defender.runtime import engine\n",
     "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from defender.runtime import engine\n",
+    "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    from defender.runtime import engine\n",
     "import defender.runtime.engine\n",
     "from ..runtime import engine\n",
 ])
@@ -92,34 +93,22 @@ def test_an_adapter_imports_only_the_kit_flat_tier_and_knowledge(tmp_path):
         "adapter-imports:integrations/a_adapter.py:defender.records.store"]
 
 
-def test_only_listed_files_import_adapter_code(tmp_path):
+def test_any_import_of_adapter_code_from_outside_is_found(tmp_path):
     root = _tree(tmp_path, {
         "integrations/_transport.py": "",
-        "cli/tacit_cli.py": "from defender.integrations import _transport\n",
-        "cli/other.py": "from defender.integrations import _transport\n",
+        "integrations/a_adapter.py": "from defender.integrations import _transport\n",
+        "cli/tacit_cli.py": "def f():\n    from defender.integrations import _transport\n",
     })
     assert _prints(_GATE.scan(root)) == [
-        "imports-adapters:cli/other.py:defender.integrations._transport"]
+        "imports-adapters:cli/tacit_cli.py:defender.integrations._transport"]
 
 
-def test_api_must_not_load_runtime_even_indirectly(tmp_path):
-    root = _tree(tmp_path, {
-        "api/app.py": "from defender.cli import helper\n",
-        "cli/helper.py": "from defender.runtime import engine\n",
-        "runtime/engine.py": "",
-    })
-    found = _GATE.scan(root)
-    assert _prints(found) == ["api-loads:defender.runtime", "api-loads:defender.runtime.engine"]
-    assert any("defender.cli.helper" in f.display for f in found)
-
-
-def test_api_may_import_runtime_lazily_or_for_types(tmp_path):
-    root = _tree(tmp_path, {
-        "api/app.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n"
-                      "    from defender.runtime import engine\n"
-                      "def f():\n    from defender.runtime import engine\n",
-        "runtime/engine.py": "",
-    })
+@pytest.mark.parametrize("src", [
+    "def f():\n    from defender.tests.support import helper\n",
+    "try:\n    from defender.optional_thing import x\nexcept ImportError:\n    x = None\n",
+])
+def test_an_import_of_anything_not_scanned_is_outside_the_order(tmp_path, src):
+    root = _tree(tmp_path, {"records/store.py": src, "tests/support/helper.py": ""})
     assert _GATE.scan(root) == []
 
 

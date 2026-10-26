@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender import records as _records_door
 
 mod = T.mod
 sym = T.sym
@@ -46,9 +47,10 @@ EPISODE_MODULE = "episodes._episode_paths"
 #: repository package — which absorbed the layout (`_layout.py`, formerly the flat-tier
 #: run-path module) and the handle (`_handle.py`, formerly the flat-tier run-handle module) —
 #: plus the two owners that stay outside it. Since #1080 merged the repository into `records/`,
-#: its files are the door and its submodules, not the record-format modules beside them.
+#: its files are the door and the submodules the door's `_HOMES` map serves, so a module the door
+#: gains is an owner without a list edit; the record-format modules beside them are not.
 RUN_REPOSITORY_FILES = tuple(sorted(
-    f"records/{m}.py" for m in ("__init__", "_errors", "_handle", "_held", "_id", "_layout", "_lookup")))
+    f"records/{m}.py" for m in {"__init__", *_records_door._HOMES.values()}))
 OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py")
 
 
