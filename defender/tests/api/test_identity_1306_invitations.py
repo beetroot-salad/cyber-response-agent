@@ -31,10 +31,10 @@ def _when(row: dict[str, object]) -> _dt.datetime:
 
 
 def test_an_invitation_answers_alike_for_new_existing_and_invited_people_before_any_send() -> None:
-    """Same response for a new, an active and an already-invited person; no port call first (O2/P-E)."""
+    """Same response for a new, an active and an already-invited person; no port call of any kind first (O2/P-E, DC-8)."""
     world, ann, bob = two_tenants()
     assert world.invite(bob, T2, NINA).status_code == 202  # nina: invited elsewhere, nothing sent yet
-    calls, mails, accounts = world.signin.calls(), len(world.mail.sent), len(world.signin.create_calls)
+    calls, mails, accounts = list(world.signin.every_call), list(world.mail.attempts), len(world.signin.create_calls)
     new = world.invite(ann, T1, "New@N.example")
     active = world.invite(ann, T1, BOB)
     invited_elsewhere = world.invite(ann, T1, NINA)
@@ -42,7 +42,7 @@ def test_an_invitation_answers_alike_for_new_existing_and_invited_people_before_
     same_invite_answer(new, invited_elsewhere)
     assert new.json()["email"] == NEW
     assert new.json()["status"] == "invited"
-    assert (world.signin.calls(), len(world.mail.sent), len(world.signin.create_calls)) == (calls, mails, accounts)
+    assert (world.signin.every_call, world.mail.attempts, len(world.signin.create_calls)) == (calls, mails, accounts)
 
 
 def test_the_listing_shows_id_email_status_and_created_at_and_sends_change_nothing() -> None:

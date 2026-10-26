@@ -11,6 +11,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     FRONTEND_ORIGIN,
     ME,
     NEW,
+    NO_STATE,
     OPS,
     PRELOGIN_COOKIE,
     SESSION_COOKIE,
@@ -45,15 +46,16 @@ def test_login_redirects_to_the_port_and_sets_a_host_prelogin_cookie() -> None:
 
 
 def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
-    """login -> callback -> 303 to the frontend, HttpOnly Secure Lax cookie, /me (flow 2, O6, DC-6)."""
+    """login -> callback -> 303 to exactly the frontend (whatever the query asks), HttpOnly Secure Lax cookie, /me (flow 2, O6, DC-6)."""
     world = World(tenants={T1: [ANN]})
     browser = world.client()
-    callback = world.sign_in_response(browser, ANN, name="Ann Example")
+    callback = world.sign_in_response(browser, ANN, name="Ann Example", extra={
+        "next": "https://evil.example/", "return_to": "https://evil.example/", "redirect": "https://evil.example/"})
     started, finished = world.signin.started[-1], world.signin.finished[-1]
     assert finished.nonce == started.nonce
     assert pkce_challenge(finished.code_verifier) == started.code_challenge
     assert callback.status_code == 303
-    assert callback.headers["location"].startswith(FRONTEND_ORIGIN)
+    assert callback.headers["location"] in (FRONTEND_ORIGIN, FRONTEND_ORIGIN + "/")  # no open redirect
     attrs = cookie_attributes(set_cookie(callback, SESSION_COOKIE) or "")
     assert {"httponly", "secure"} <= set(attrs)
     assert (attrs["samesite"].lower(), attrs["path"]) == ("lax", "/")
@@ -67,10 +69,25 @@ def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
 
 
 def test_the_display_name_follows_the_name_in_the_token_at_each_sign_in() -> None:
-    """display_name is taken from `name` at every sign-in (flow 2)."""
+    """display_name is taken from `name` at every sign-in, and every session reads the user afresh (flow 2, P-A)."""
     world = World(tenants={T1: [ANN]})
-    assert me(world.sign_in(ANN, name="Ann One"))["user"]["display_name"] == "Ann One"
+    laptop = world.sign_in(ANN, name="Ann One")
+    assert me(laptop)["user"]["display_name"] == "Ann One"
     assert me(world.sign_in(ANN, name="Ann Two"))["user"]["display_name"] == "Ann Two"
+    assert me(laptop)["user"]["display_name"] == "Ann Two"  # the older session, already used, too
+
+
+def test_each_login_starts_with_its_own_pkce_verifier_state_and_nonce() -> None:
+    """The pre-login values are per sign-in: two logins never share a verifier, and the verifier is not the state or nonce (flow 2, DC-8 PKCE S256)."""
+    world = World(tenants={T1: [ANN]})
+    world.sign_in(ANN)
+    world.sign_in(ANN)
+    (s1, s2), (f1, f2) = world.signin.started[-2:], world.signin.finished[-2:]
+    assert f1.code_verifier != f2.code_verifier
+    assert s1.state != s2.state
+    assert s1.nonce != s2.nonce
+    for started, finished in ((s1, f1), (s2, f2)):
+        assert finished.code_verifier not in (started.state, started.nonce)
 
 
 def test_first_sign_in_accepts_every_open_invitation_at_once() -> None:
@@ -126,12 +143,31 @@ def test_the_four_callback_refusals_are_403_problems_of_distinct_types_and_open_
     assert is_cleared(set_cookie(r_ok, PRELOGIN_COOKIE) or "")
 
 
-def test_a_state_mismatch_does_not_exchange_the_code() -> None:
-    """The state must match before the code is exchanged (flow 2)."""
+@pytest.mark.parametrize("state", ["not-the-state", "", None], ids=["other", "empty", "missing"])
+def test_a_state_mismatch_does_not_exchange_the_code(state: str | None) -> None:
+    """The state must match before the code is exchanged; an empty or missing state matches nothing (flow 2)."""
     world = World(tenants={T1: [ANN]})
     before = len(world.signin.finished)
-    assert world.sign_in_response(world.client(), ANN, state="not-the-state").status_code == 403
+    browser = world.client()
+    refused = world.sign_in_response(browser, ANN, state=NO_STATE if state is None else state)
+    assert refused.status_code == 403
     assert len(world.signin.finished) == before
+    assert SESSION_COOKIE not in browser.cookies
+    assert world.sign_in_response(world.client(), ANN).status_code == 303  # control
+
+
+def test_a_token_that_fails_verification_is_a_403_that_opens_no_session_and_clears_the_prelogin_cookie() -> None:
+    """A SignInRefused from the port is a refusal, not a crash: 403 problem, no session, pre-login cleared (flow 2, DC-6)."""
+    world = World(tenants={T1: [ANN]})
+    browser = world.client(raise_errors=False)
+    world.signin.refuse_signins = 1
+    refused = world.sign_in_response(browser, ANN)
+    assert refused.status_code == 403
+    assert refused.headers["content-type"] == "application/problem+json"
+    assert set_cookie(refused, SESSION_COOKIE) is None
+    assert SESSION_COOKIE not in browser.cookies
+    assert is_cleared(set_cookie(refused, PRELOGIN_COOKIE) or "")
+    assert world.sign_in_response(world.client(), ANN).status_code == 303  # control
 
 
 def test_the_prelogin_cookie_is_gone_after_the_callback_and_a_second_callback_is_refused() -> None:

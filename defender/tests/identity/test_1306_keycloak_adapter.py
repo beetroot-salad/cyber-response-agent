@@ -108,6 +108,9 @@ class Keycloak:
         #: Raised by the transport (not answered) on the admin API / on the admin token request.
         self.admin_error: Exception | None = None
         self.token_error: Exception | None = None
+        #: When set, the HTTP status every admin API call / the admin token request answers with.
+        self.admin_status: int | None = None
+        self.admin_token_status: int | None = None
 
     # --- the transport ---------------------------------------------------------------------
     def transport(self) -> httpx.MockTransport:
@@ -131,6 +134,8 @@ class Keycloak:
             if form.get("grant_type") == ["client_credentials"]:
                 if self.token_error:
                     raise self.token_error
+                if self.admin_token_status is not None:
+                    return httpx.Response(self.admin_token_status, json={"error": "unauthorized_client"})
                 return httpx.Response(200, json={"access_token": ADMIN_TOKEN, "token_type": "Bearer"})
             if self.token_status != 200:
                 return httpx.Response(self.token_status, json={"error": "invalid_grant"})
@@ -143,6 +148,8 @@ class Keycloak:
             return httpx.Response(401)
         if self.admin_error:
             raise self.admin_error
+        if self.admin_status is not None:
+            return httpx.Response(self.admin_status, json={"error": "scripted"})
         rest = path[len(admin):]
         if rest == "" and method == "POST":
             body = json.loads(request.content)
@@ -227,13 +234,40 @@ def test_finish_signin_exchanges_the_code_with_its_verifier_and_returns_the_veri
         form.get("client_id"), form.get("client_secret")) == (CLIENT_ID, CLIENT_SECRET)
 
 
+def _holds(obj: object, needle: str) -> bool:
+    """Does `needle` occur in what `obj` keeps: its attributes, walked through containers and
+    defender objects (not into third-party objects such as the HTTP client)."""
+    seen: set[int] = set()
+    todo: list[object] = [obj]
+    while todo:
+        o = todo.pop()
+        if id(o) in seen:
+            continue
+        seen.add(id(o))
+        if isinstance(o, str) and needle in o or isinstance(o, bytes | bytearray) and needle.encode() in o:
+            return True
+        if isinstance(o, dict):
+            todo += [*o.keys(), *o.values()]
+        elif isinstance(o, list | tuple | set | frozenset):
+            todo += list(o)
+        elif type(o).__module__.startswith("defender."):
+            todo += list(getattr(o, "__dict__", {}).values())
+            todo += [getattr(o, n, None) for k in type(o).__mro__ for n in getattr(k, "__slots__", ())]
+    return False
+
+
 def test_keycloaks_tokens_never_leave_the_adapter(kc):
-    """The result carries only account_id, name and amr (K7/H5)."""
-    result = sign_in(kc, kc.signer.sign(claims()))
+    """The result carries only account_id, name and amr, and the adapter keeps none of Keycloak's tokens (O6, K7/H5)."""
+    kc.id_token = kc.signer.sign(claims())
+    port = adapter(kc)
+    port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
+    result = port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")
     assert {f.name for f in dataclasses.fields(result)} == {"account_id", "name", "amr"}
     leaked = repr(result) + json.dumps(dataclasses.asdict(result))
+    assert _holds(port, CLIENT_SECRET)  # control: the walk reaches what the adapter holds
     for secret in ("kc-access-secret", "kc-refresh-secret", kc.id_token):
         assert secret not in leaked
+        assert not _holds(port, secret)
 
 
 def test_a_token_without_amr_reports_no_methods_and_so_no_otp(kc):
@@ -268,8 +302,13 @@ def _unsigned(kc: Keycloak) -> str:
     pytest.param(_foreign_key_token, id="bad-signature"),
     pytest.param(lambda kc: kc.signer.sign(claims(), kid="unknown-kid"), id="unknown-kid"),
     pytest.param(lambda kc: kc.signer.sign(claims(iss="https://evil.test/realms/defender")), id="wrong-issuer"),
+    pytest.param(lambda kc: kc.signer.sign(claims(iss=f"{BASE}/realms/other-realm")), id="same-host-other-realm"),
+    pytest.param(lambda kc: kc.signer.sign(claims(iss=f"{ISSUER}-other")), id="issuer-sharing-our-prefix"),
     pytest.param(lambda kc: kc.signer.sign(claims(aud="some-other-client")), id="wrong-audience"),
     pytest.param(lambda kc: kc.signer.sign(claims(aud=["account", "other"])), id="audience-list-without-us"),
+    pytest.param(lambda kc: kc.signer.sign(claims(aud=ADMIN_CLIENT_ID)), id="audience-containing-our-id"),
+    pytest.param(lambda kc: kc.signer.sign(claims(aud=["account", "x" + CLIENT_ID])), id="audience-list-lookalike"),
+    pytest.param(lambda kc: kc.signer.sign(claims(exp=None)), id="missing-exp"),
     pytest.param(lambda kc: kc.signer.sign(claims(nonce="n-other")), id="wrong-nonce"),
     pytest.param(lambda kc: kc.signer.sign(claims(nonce=None)), id="missing-nonce"),
     pytest.param(lambda kc: kc.signer.sign(claims(exp=int(NOW.timestamp()) - 1)), id="expired"),
@@ -319,7 +358,13 @@ def test_create_account_sends_our_user_id_as_username_verified_with_mapped_requi
     assert sorted(body["requiredActions"]) == ["CONFIGURE_TOTP", "UPDATE_PASSWORD"]
     assert sent.headers["authorization"] == f"Bearer {ADMIN_TOKEN}"
     [grant] = [s for s in kc.calls("POST", "/openid-connect/token") if s.form()["grant_type"] == "client_credentials"]
-    assert grant.form().get("client_id", ADMIN_CLIENT_ID) == ADMIN_CLIENT_ID
+    basic = "Basic " + base64.b64encode(f"{ADMIN_CLIENT_ID}:{ADMIN_CLIENT_SECRET}".encode()).decode()
+    form = grant.form()
+    if "client_id" in form:  # A1: the service account authenticates as itself, never as the sign-in client
+        assert (form["client_id"], form.get("client_secret")) == (ADMIN_CLIENT_ID, ADMIN_CLIENT_SECRET)
+        assert "authorization" not in grant.headers
+    else:
+        assert grant.headers.get("authorization") == basic
 
 
 def test_create_account_with_only_set_password_requires_no_otp_setup(kc):
@@ -395,6 +440,18 @@ def test_a_transport_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc,
     with pytest.raises(SignInUnavailable):
         _ADMIN_CALLS[call](port)
     kc.admin_error = kc.token_error = None
+    _ADMIN_CALLS[call](adapter(kc))  # control: the same call on the same fake succeeds
+
+
+@pytest.mark.parametrize("where", ["admin-api", "admin-token"])
+@pytest.mark.parametrize("call", sorted(_ADMIN_CALLS))
+@pytest.mark.parametrize("status", [403, 500, 503])
+def test_an_http_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc, status, call, where):
+    """Keycloak answering an admin call (or the service-account token) with an error is unavailable, never an answer (SignInUnavailable)."""
+    setattr(kc, "admin_status" if where == "admin-api" else "admin_token_status", status)
+    with pytest.raises(SignInUnavailable):
+        _ADMIN_CALLS[call](adapter(kc))
+    kc.admin_status = kc.admin_token_status = None
     _ADMIN_CALLS[call](adapter(kc))  # control: the same call on the same fake succeeds
 
 

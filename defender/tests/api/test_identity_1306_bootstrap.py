@@ -74,12 +74,14 @@ def test_restarts_send_nothing_to_active_people_even_after_the_member_leaves_the
 
 
 def test_a_person_still_invited_gets_a_fresh_email_only_when_the_last_is_over_seven_days_old() -> None:
-    """Under 7 days nothing; over 7 days a fresh set-password email for each still-invited person (O8)."""
+    """Under 7 days and at exactly 7 days nothing; over 7 days a fresh set-password email for each still-invited person (O8, DC-3)."""
     world = lab()
-    world.clock.advance(6 * DAY)
-    world.restart(**FILE)
-    assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)
-    world.clock.advance(DAY + SECOND)
+    sent_at = world.clock.now
+    for at in (6 * DAY, SEVEN_DAYS - SECOND, SEVEN_DAYS):  # "older than 7 days": not yet at exactly 7
+        world.clock.now = sent_at + at
+        world.restart(**FILE)
+        assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1), at
+    world.clock.advance(SECOND)
     world.restart(**FILE)
     assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (2, 2)
     me_session = world.sign_in(ME)  # a fresh link lets a late person join
@@ -97,6 +99,40 @@ def test_one_person_gets_at_most_one_email_per_start() -> None:
     assert world.signin.sends_to(ME) == 2  # the first start's, plus exactly one
     assert world.signin.sends_to(OPS) == 2
     assert tenants_of(world.sign_in(ME)) == {LAB, T2}
+
+
+def test_a_listed_first_member_whose_invitation_was_revoked_still_gets_a_fresh_email() -> None:
+    """Any listed person still `invited` is kept reachable, first members as well as administrators (O8, flow 1)."""
+    world = World(administrators=[OPS], tenants={LAB: [ME, NINA]})
+    me_session = world.sign_in(ME)
+    assert me_session.delete(f"/tenants/{LAB}/invitations/{invitation_id(me_session, LAB, NINA)}").status_code == 204
+    assert world.signin.sends_to(NINA) == 1
+    world.clock.advance(8 * DAY)
+    world.restart(administrators=[OPS], tenants={LAB: [ME, NINA]})
+    assert world.signin.sends_to(NINA) == 2
+    world.restart(administrators=[OPS], tenants={LAB: [ME, NINA]})
+    assert world.signin.sends_to(NINA) == 2  # control: once per 7 days, not every start
+
+
+def test_an_active_person_listed_as_a_new_tenants_first_member_gets_our_notification() -> None:
+    """The bootstrap invites first members whoever they are; an active one is notified and accepts from /me (O8, O2)."""
+    world = lab()
+    me_session = world.sign_in(ME)
+    world.restart(administrators=[OPS], tenants={LAB: [ME], T2: [ME]})
+    [invitation] = me(me_session)["invitations"]
+    assert invitation["tenant_id"] == T2
+    assert [(n.to, n.tenant_id, n.invitation_id) for n in world.mail.sent] == [(ME, T2, invitation["id"])]
+    assert world.signin.sends_to(ME) == 1  # an active person gets no set-password email
+    assert me_session.post(f"/invitations/{invitation['id']}/accept").status_code == 200
+
+
+def test_start_only_marks_sends_pending_and_calls_no_port() -> None:
+    """The bootstrap marks sends as pending; only the sender sends (O8, flow 1)."""
+    world = World(administrators=[OPS], tenants={LAB: [ME]}, start=False)
+    world.service.start()
+    assert (world.signin.every_call, world.mail.attempts) == ([], [])
+    world.send_pending()  # control: both are pending
+    assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)
 
 
 def test_sends_that_failed_are_made_after_a_restart_and_only_once() -> None:
@@ -193,6 +229,14 @@ def test_emails_in_the_file_are_compared_lower_cased() -> None:
     """Mixed-case file entries name the same lower-cased people (O8)."""
     world = World(administrators=["OPS@X.example"], tenants={LAB: ["Me@X.example"]})
     assert {a.email for a in world.signin.accounts.values()} == {OPS, ME}
+
+
+def test_the_app_does_not_start_when_the_bootstrap_refuses() -> None:
+    """A refused file stops start-up: entering the lifespan raises BootstrapRefused and nothing is sent (O8, DC-4)."""
+    world = World(administrators=[ME], tenants={LAB: [ME]}, start=False)
+    with pytest.raises(BootstrapRefused, match=re.escape(ME)), TestClient(world.app):
+        pass
+    assert (world.signin.every_call, world.mail.attempts) == ([], [])
 
 
 def test_entering_the_apps_lifespan_runs_start_and_the_senders_first_pass() -> None:

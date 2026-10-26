@@ -28,6 +28,7 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     BootstrapRefused,
     IdentityService,
     InMemoryIdentityRepository,
+    SignInRefused,
     SignInUnavailable,
     VerifiedSignIn,
     register_tenant,
@@ -48,6 +49,8 @@ PRELOGIN_COOKIE = "__Host-defender_prelogin"
 #: Secure cookies only round-trip over https; TestClient defaults to http.
 BASE_URL = "https://testserver"
 SIGNIN_URL = "https://signin.test/realms/defender/auth"
+#: `sign_in_response(state=NO_STATE)` sends a callback without a `state` parameter.
+NO_STATE = "<no state parameter>"
 AUDIT_LOGGER = "defender.identity.audit"
 
 T1 = fixture_uuid("tenant:1306-t1")
@@ -85,11 +88,14 @@ class InjectedFailure(Exception):
 
 class FailingRepository:
     """The in-memory identity repository with scripted write failures: every method named in
-    `failing` raises `InjectedFailure` instead of running; everything else is delegated."""
+    `failing` raises `InjectedFailure` instead of running; everything else is delegated.
+    `missing_tenants` scripts the answer of `tenant_exists` (False) for a tenant whose row is
+    gone or no longer active (#1214's lifecycle); nothing else about the tenant changes."""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.failing: set[str] = set()
+        self.missing_tenants: set[str] = set()
         #: method name -> how many calls were refused (the sender thread may be the caller).
         self.refusals: dict[str, int] = {}
 
@@ -103,6 +109,8 @@ class FailingRepository:
             if name in self.failing:
                 self.refusals[name] = self.refusals.get(name, 0) + 1
                 raise InjectedFailure(f"{name} failed")
+            if name == "tenant_exists" and args and str(args[0]) in self.missing_tenants:
+                return False
             return attribute(*args, **kwargs)
 
         return call
@@ -146,6 +154,12 @@ class FakeSignIn:
         self.has_otp_answers: dict[str, bool] = {}
         #: code -> what the callback's token verification returns.
         self.answers: dict[str, VerifiedSignIn] = {}
+        #: The next N token verifications fail (`finish_signin` records the call, then raises `SignInRefused`).
+        self.refuse_signins = 0
+        #: The name of every port method called, in order (all of them, round trips included).
+        self.every_call: list[str] = []
+        #: The account id of every set-password send attempted, failed ones included.
+        self.send_attempts: list[str] = []
         #: Scripted failures, all `SignInUnavailable`: the next N set-password sends raise; every
         #: send to an email in `fail_sends_to` raises until the test removes it; the next N
         #: creations record the account and then raise (a crash before the caller recorded the id).
@@ -164,6 +178,7 @@ class FakeSignIn:
     # --- the port ---------------------------------------------------------------------
     def create_account(self, username: str, email: str, required_actions: frozenset[str]) -> str:
         with self._lock:
+            self.every_call.append("create_account")
             self.create_calls.append(username)
             if email in self.raise_on_create_to:
                 raise self.raise_on_create_to[email]
@@ -177,6 +192,8 @@ class FakeSignIn:
 
     def send_set_password_email(self, account_id: str, lifespan: _dt.timedelta) -> None:
         with self._lock:
+            self.every_call.append("send_set_password_email")
+            self.send_attempts.append(account_id)
             if self.fail_sends:
                 self.fail_sends -= 1
                 raise SignInUnavailable("the set-password send failed")
@@ -191,17 +208,28 @@ class FakeSignIn:
             hook()
 
     def has_otp(self, account_id: str) -> bool:
+        with self._lock:
+            self.every_call.append("has_otp")
         return self.has_otp_answers.get(account_id, False)
 
     def require_otp_setup(self, account_id: str) -> None:
+        with self._lock:
+            self.every_call.append("require_otp_setup")
         self.otp_required.append(account_id)
 
     def begin_signin(self, state: str, nonce: str, code_challenge: str) -> str:
+        with self._lock:
+            self.every_call.append("begin_signin")
         self.started.append(SignInStart(state, nonce, code_challenge))
         return f"{SIGNIN_URL}?state={state}"
 
     def finish_signin(self, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
+        with self._lock:
+            self.every_call.append("finish_signin")
         self.finished.append(SignInFinish(code, code_verifier, nonce))
+        if self.refuse_signins:
+            self.refuse_signins -= 1
+            raise SignInRefused("the ID token failed verification")
         return self.answers[code]
 
     # --- test-side views --------------------------------------------------------------
@@ -223,6 +251,12 @@ class FakeSignIn:
             ids = {a.account_id for a in list(self.accounts.values()) if a.email == email}
             return sum(1 for a, _ in list(self.set_password_sent) if a in ids)
 
+    def attempts_to(self, email: str) -> int:
+        """Set-password sends attempted to `email`'s account, failed ones included."""
+        with self._lock:
+            ids = {a.account_id for a in list(self.accounts.values()) if a.email == email}
+            return sum(1 for a in list(self.send_attempts) if a in ids)
+
 
 @dataclasses.dataclass(frozen=True)
 class Notice:
@@ -236,6 +270,8 @@ class FakeMail:
 
     def __init__(self) -> None:
         self.sent: list[Notice] = []
+        #: The recipient of every notification attempted, failed ones included.
+        self.attempts: list[str] = []
         self._lock = threading.RLock()
         self.fail_notices = 0
         #: Every notification to a recipient in this set raises until the test removes it.
@@ -245,6 +281,7 @@ class FakeMail:
 
     def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
         with self._lock:
+            self.attempts.append(to)
             if self.fail_notices:
                 self.fail_notices -= 1
                 raise InjectedFailure("the notification failed")
@@ -328,8 +365,12 @@ def cookie_attributes(header: str) -> dict[str, str]:
 
 
 def is_cleared(header: str) -> bool:
+    """A clearing Set-Cookie a browser obeys for a `__Host-` name: expired now, and with the same
+    Secure, Path=/, HttpOnly and SameSite=Lax the cookie was set with (DC-6)."""
     attrs = cookie_attributes(header)
-    return attrs.get("max-age") == "0" or "1970" in attrs.get("expires", "")
+    expired = attrs.get("max-age") == "0" or "1970" in attrs.get("expires", "")
+    return (expired and {"secure", "httponly"} <= set(attrs) and attrs.get("path") == "/"
+            and attrs.get("samesite", "").lower() == "lax" and "domain" not in attrs)
 
 
 def _children(obj: Any) -> list[Any]:
@@ -491,15 +532,20 @@ class World:
 
     def sign_in_response(self, browser: TestClient, email: str, *, amr: Sequence[str] = ("pwd",),
                          name: str | None = None, account_id: str | None = None,
-                         state: str | None = None, begin: bool = True) -> Any:
+                         state: str | None = None, begin: bool = True,
+                         extra: Mapping[str, str] | None = None) -> Any:
         """login -> (the person at Keycloak) -> callback; the callback's response. `state`
-        overrides the state the callback carries; `begin=False` skips the login step."""
+        overrides the state the callback carries (`""` sends it empty, `NO_STATE` leaves it
+        out); `begin=False` skips the login step; `extra` adds query parameters to the callback."""
         sent_state = self.begin_signin(browser) if begin else (state or "no-login")
         code = f"code-{next(self._codes)}"
         self.signin.answers[code] = VerifiedSignIn(
             account_id=account_id or self.signin.account_for(email),
             name=name or email.split("@")[0].title(), amr=tuple(amr))
-        return browser.get("/auth/callback", params={"code": code, "state": state or sent_state})
+        params = {"code": code, "state": sent_state if state is None else state, **(extra or {})}
+        if state == NO_STATE:
+            del params["state"]
+        return browser.get("/auth/callback", params=params)
 
     def sign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None,
                 browser: TestClient | None = None) -> TestClient:

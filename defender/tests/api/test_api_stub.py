@@ -400,8 +400,11 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
 
 @pytest.mark.parametrize(("route", "path", "body", "answers"),
                          [row for row in HAPPY if row[0][0] != "GET"], ids=lambda v: str(v))
-@pytest.mark.parametrize("origin", [None, "https://evil.example", ORIGIN + ".evil.example", "null"],
-                         ids=["missing-origin", "foreign-origin", "suffixed-origin", "null-origin"])
+@pytest.mark.parametrize("origin", [None, "https://evil.example", ORIGIN + ".evil.example", "null",
+                                    ORIGIN.replace("https://", "http://"), "https://evil.example/" + ORIGIN,
+                                    ORIGIN + ":8443"],
+                         ids=["missing-origin", "foreign-origin", "suffixed-origin", "null-origin",
+                              "http-origin", "origin-ending-with-ours", "other-port-origin"])
 def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend_origin(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
     origin: str | None,
@@ -1090,7 +1093,11 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
                                   headers=auth).status_code == 200
             other = DEMO_TWO if tenant == DEMO_ONE else DEMO_ONE
             assert client.get(f"/tenants/{other}/alerts", headers=auth).status_code == 404
-            assert [t["tenant_id"] for t in client.get("/me", headers=auth).json()["tenants"]] == [tenant]
+            body = client.get("/me", headers=auth).json()
+            assert [t["tenant_id"] for t in body["tenants"]] == [tenant]
+            # O5/K10: a member is never an administrator; the demo seeds members only.
+            assert body["administrator"] is False
+            assert client.get("/admin/tenants", headers=auth).status_code == 403
             seen.setdefault(tenant, set()).update(a["alert_id"] for a in alerts)
     assert set(seen) == set(tenants)
     assert not seen[DEMO_ONE] & seen[DEMO_TWO]

@@ -101,7 +101,7 @@ def test_a_re_invite_at_the_same_instant_as_the_last_send_is_still_sent(kind: st
 
 
 def test_a_revoked_invitation_is_dropped_by_the_sender_but_the_account_is_still_created() -> None:
-    """Re-check before the send: revoked -> no email; an unlisted invitee, so not kept alive by the file (flow 1)."""
+    """Re-check before the send: revoked -> no email, the sent counter advanced; an unlisted invitee, so not kept alive by the file (flow 1)."""
     world, ann, _ = two_tenants()
     world.invite(ann, T1, NEW)
     world.invite(ann, T1, NINA)
@@ -110,6 +110,9 @@ def test_a_revoked_invitation_is_dropped_by_the_sender_but_the_account_is_still_
     assert world.signin.sends_to(NINA) == 1  # positive control, same pass
     assert world.signin.sends_to(NEW) == 0
     assert world.signin.account_for(NEW)  # r6 order: the account precedes the re-check
+    dropped = world.repo.user_by_email(NEW)  # fixed details: a dropped send advances its sent counter
+    assert dropped.set_password_sent_seq == dropped.set_password_requested_seq > 0
+    assert dropped.set_password_sent_at is None
     world.send_pending()
     assert world.signin.sends_to(NEW) == 0  # dropped for good, not retried
     world.invite(ann, T1, NEW)  # a later invitation reuses the person and the account
@@ -160,6 +163,32 @@ def test_a_failed_send_stays_pending_and_is_retried_until_it_goes_out(kind: str)
     world.clock.advance(HOUR + SECOND)
     world.send_pending()
     assert got() == 1
+
+
+@pytest.mark.parametrize("kind", ["set_password", "notice"])
+def test_a_send_that_keeps_failing_is_retried_at_most_an_hour_after_each_failure(kind: str) -> None:
+    """The backoff is capped: ten failures in a row, each retried by the pass an hour later; then it goes out (F-3)."""
+    world, ann, _ = two_tenants()
+    person = NEW if kind == "set_password" else BOB
+    world.invite(ann, T1, person)
+    if kind == "set_password":
+        world.signin.fail_sends_to.add(NEW)
+        tried = lambda: world.signin.attempts_to(NEW)  # noqa: E731
+    else:
+        world.mail.fail_notices_to.add(BOB)
+        tried = lambda: world.mail.attempts.count(BOB)  # noqa: E731
+    world.send_pending()
+    assert tried() == 1
+    for failures in range(1, 11):
+        world.clock.advance(HOUR)
+        world.send_pending()
+        assert tried() == failures + 1, f"not retried within an hour of failure {failures}"
+    world.signin.fail_sends_to.clear()
+    world.mail.fail_notices_to.clear()
+    world.clock.advance(HOUR)
+    world.send_pending()
+    sent = world.signin.sends_to(NEW) if kind == "set_password" else len(world.mail.sent)
+    assert sent == 1
 
 
 @pytest.mark.parametrize("error", ["sign-in-unavailable", "any-exception", "any-exception-on-create"])
@@ -249,6 +278,19 @@ def test_the_lifespan_makes_its_first_pass_at_once_not_after_one_interval() -> N
         leaving = time.monotonic()
     # Prompt shutdown (S-2): leaving the lifespan stops the loop even partway through the hour.
     assert time.monotonic() - leaving < 2
+
+
+def test_between_passes_the_loop_waits_its_interval() -> None:
+    """After the start-up pass, nothing is sent until send_interval has passed (F-7)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=HOUR)
+    with world.lifespan_client() as browser:
+        assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
+        world.sign_in(ANN, browser=browser)
+        assert world.invite(browser, T1, NEW).status_code == 202
+        time.sleep(0.5)
+        assert world.signin.sends_to(NEW) == 0
+    world.send_pending()  # control: it was pending and sendable all along
+    assert world.signin.sends_to(NEW) == 1
 
 
 def test_a_periodic_pass_that_raises_does_not_stop_the_loop() -> None:
