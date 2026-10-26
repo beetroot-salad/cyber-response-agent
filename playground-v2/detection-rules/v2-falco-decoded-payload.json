@@ -1,0 +1,15 @@
+{
+  "rule_id": "v2-falco-decoded-payload",
+  "name": "v2 Falco: decoded payload in container",
+  "description": "Falco rule 'Decoding Payload in Container' fired — a base64 (or similar) decode inside a container, the staging step of a decode-and-run chain. Routine host activity does not decode payloads; triage answers what was decoded, whether it was then executed, and how the process reached the host. Falco's container.name is often <NA>; container.id identifies the host.",
+  "type": "query",
+  "language": "kuery",
+  "index": ["logs-falco.alerts-*"],
+  "query": "falco.rule: \"Decoding Payload in Container\"",
+  "from": "now-10m",
+  "interval": "5m",
+  "risk_score": 73,
+  "severity": "high",
+  "tags": ["v2", "falco", "execution", "defense-evasion"],
+  "enabled": true
+}

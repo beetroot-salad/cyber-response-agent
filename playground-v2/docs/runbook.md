@@ -731,7 +731,19 @@ python3 playground-v2/scripts/install_detection_rules.py
 
 The script reads `V2_ELASTIC_PASSWORD` from env or `playground-v2/.env`, then for each `*.json` shells `docker --context soc-playground exec kibana curl` against Kibana's detection-engine API (DELETE-by-rule_id then POST). Idempotent; safe to re-run. Use `--dry-run` to enumerate without calling Kibana.
 
-Current rules (5): `v2-sshd-failed-auth-burst`, `v2-sshd-success-after-failures`, `v2-falco-suspicious-network-tool`, `v2-falco-authorized-keys-modification`, `v2-cross-tier-ssh-pivot`. The two EQL sequence rules (`success-after-failures`, `cross-tier-ssh-pivot`) key on `host.name` rather than user identity because the system.auth integration does not extract `user.name` reliably from sshd's `Failed password for X` message across openssh/PAM variants.
+The rules are the `*.json` files in `detection-rules/` — read the directory, not a list here. Every attack scenario in `attacks/catalog.yaml` has a rule aimed at it. One fires only with help: `cross-tier-ssh-probe` completes `v2-cross-tier-ssh-pivot` only when a login INTO a workstation (baseline `config-mgmt-fleet-push`) precedes it within 15 minutes, so with baseline off it raises nothing. The five added for the scenarios that had none:
+
+| rule | fires on | keyed on |
+|---|---|---|
+| `v2-postgres-password-guessing` | `postgres-cred-probe` | 3+ distinct `user.name` failing auth on one host — the elastic-agent PostgreSQL metrics collector fails as `root` over `::1` every few seconds, so a count alone always trips |
+| `v2-nginx-path-enumeration` | `web-path-scan` | 8+ distinct 4xx paths per (`host.name`, `source.address`) |
+| `v2-keycloak-credential-stuffing` | `keycloak-cred-stuffing` | ES\|QL: `keycloak.events` is unparsed, so `ipAddress`/`username` are extracted from `message` at query time; 5+ failures over 3+ usernames per client |
+| `v2-squid-egress-burst` | `proxy-egress-burst` | 5+ distinct destinations per (`user.name`, `source.ip`) |
+| `v2-falco-decoded-payload` | `living-off-the-land` | Falco `Decoding Payload in Container`; fires twice per decode (the shell line and the `base64` child both match) |
+
+Falco often reports `container.name` as `<NA>` (about half of all events, and every `docker exec`-dispatched attack event checked); `falco.output_fields.container.id` still identifies the host. `v2-internal-port-scan` groups by `container.name`, so unnamed events pool into one `<NA>` bucket.
+
+The two EQL sequence rules (`success-after-failures`, `cross-tier-ssh-pivot`) key on `host.name` rather than user identity because the system.auth integration does not extract `user.name` reliably from sshd's `Failed password for X` message across openssh/PAM variants.
 
 Rules fire into `.internal.alerts-security.alerts-default-*`. The defender consumes individual hits from that index as `alert.json` input.
 
