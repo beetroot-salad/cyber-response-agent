@@ -264,4 +264,5 @@ def test_a_label_outside_the_authorable_dispositions_refuses_the_whole_set(tmp_p
     with redirect_stderr(err), redirect_stdout(io.StringIO()):
         rc = held_out.main([str(runs), "--index", str(index), "--fixtures-dir", str(fixtures)])
     assert rc == 2
-    assert "refused" in err.getvalue() and "begnin" in err.getvalue()
+    assert "refused" in err.getvalue()
+    assert "begnin" in err.getvalue()
