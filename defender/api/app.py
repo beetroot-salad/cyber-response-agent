@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
-from contextlib import AbstractContextManager
-from typing import Annotated
+import logging
+import threading
+from collections.abc import AsyncIterator
+from contextlib import AbstractContextManager, asynccontextmanager
+from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import ValidationError
 
-from defender.tenancy._tenant import TenantRefused
+from defender import identity as _identity
+from defender.identity import Authenticated, IdentityService
+from defender.identity.service import SESSION_LIFETIME
+from defender.tenancy._tenant import TenantId
 
 from .models import (
     RECORD_ID_PATTERN,
@@ -19,19 +24,26 @@ from .models import (
     AlertSummary,
     CredentialsPut,
     Instant,
+    Invitation,
+    InvitationRef,
+    InviteCreate,
     Investigation,
     InvestigationCreate,
     LearningJob,
     LearningJobCreate,
     Lesson,
+    Me,
+    Member,
+    MeUser,
     System,
     SystemCheck,
     SystemPut,
     SystemSettings,
+    TenantRef,
 )
 from .pages import Order, Page, newest_first, ordered_by_id, paginate
 from .problems import install as install_problems
-from .problems import refusal, responses
+from .problems import problem, refusal, responses
 from .ports import (
     ApiDeps,
     Conflict,
@@ -39,7 +51,6 @@ from .ports import (
     Principal,
     StoreBrokePromise,
     TimePosition,
-    Unauthenticated,
     UnknownReference,
     WriteTransaction,
 )
@@ -50,7 +61,15 @@ API_VERSION = "0.1.0-stub"
 MAX_PAGE = 200
 DEFAULT_PAGE = 50
 
-_bearer = HTTPBearer(auto_error=False, description="A token from the login provider.")
+#: DC-6: `__Host-` cookies are Secure, Path=/ and carry no Domain.
+SESSION_COOKIE = "__Host-defender_session"
+PRELOGIN_COOKIE = "__Host-defender_prelogin"
+_PRELOGIN_MAX_AGE = 600
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+#: How long the sender loop may take to stop when the app shuts down.
+_SENDER_STOP_WAIT = 2.0
+
+_logger = logging.getLogger(__name__)
 
 
 def _deps(request: Request) -> ApiDeps:
@@ -58,22 +77,48 @@ def _deps(request: Request) -> ApiDeps:
     return deps
 
 
-def _principal(
-    deps: Annotated[ApiDeps, Depends(_deps)],
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-) -> Principal:
-    token = None if credentials is None else credentials.credentials
-    try:
-        return deps.authenticator.authenticate(token)
-    # A login answer that cannot become a caller — a tenant outside its grammar, a malformed
-    # user — is no login at all: a 401, like a missing token, never a 500.
-    except (Unauthenticated, TenantRefused, ValidationError) as e:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, str(e), headers={"WWW-Authenticate": "Bearer"}
-        ) from e
+def _check_origin(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> None:
+    """A request that changes state must come from the configured frontend (O6). Checked first,
+    before the session and before the body is read, so a forged request learns nothing."""
+    if request.method not in _SAFE_METHODS and request.headers.get("origin") != deps.frontend_origin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "this request does not come from the frontend")
+
+
+def _authenticated(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
+    return deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
+
+
+Authed = Annotated[Authenticated, Depends(_authenticated)]
+
+
+class _Membered(NamedTuple):
+    auth: Authenticated
+    tenant_id: TenantId
+
+
+def _membered(
+    tenant_id: Annotated[str, Path(description="The tenant the request acts in.")],
+    auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)],
+) -> _Membered:
+    """The tenant is the path's and is checked against the caller's membership on every request;
+    a non-member, an unknown tenant and a malformed id are all the same 404 (P-D)."""
+    return _Membered(auth, TenantId(deps.identity.member_of(auth, tenant_id)))
+
+
+Membered = Annotated[_Membered, Depends(_membered)]
+
+
+def _principal(member: Membered) -> Principal:
+    return Principal(tenant_id=member.tenant_id, user_id=member.auth.user.id)
+
+
+def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
+    deps.identity.require_administrator(auth)
+    return auth
 
 
 Deps = Annotated[ApiDeps, Depends(_deps)]
+Admin = Annotated[Authenticated, Depends(_administrator)]
 Caller = Annotated[Principal, Depends(_principal)]
 Limit = Annotated[int, Query(ge=1, le=MAX_PAGE)]
 Cursor = Annotated[str | None, Query(max_length=2048, description="`next_cursor` from the previous page.")]
@@ -113,12 +158,12 @@ def _not_found(what: str, record_id: str) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, f"no {what} {record_id!r}")
 
 
-def _created_at(request: Request, response: Response, route: str, **path: str) -> None:
+def _created_at(request: Request, response: Response, route: str, tenant_id: str, **path: str) -> None:
     """201 and a `Location` the router builds from `route`'s path. Only a creation calls it: a
     replay answers the default 200 and needs no URL. Every path value is a `RecordId`, whose
     grammar is URL-safe, so the router never has to encode or refuse one."""
     response.status_code = status.HTTP_201_CREATED
-    response.headers["Location"] = str(request.url_for(route, **path))
+    response.headers["Location"] = str(request.url_for(route, tenant_id=tenant_id, **path))
 
 
 alerts = APIRouter(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
@@ -173,7 +218,7 @@ def start_investigation(
             tx.audit("investigation.start", investigation.investigation_id,
                      detail=f"alert {body.alert_id}")
     if created:
-        _created_at(request, response, "get_investigation",
+        _created_at(request, response, "get_investigation", caller.tenant_id,
                     investigation_id=investigation.investigation_id)
     return investigation
 
@@ -256,7 +301,7 @@ def start_learning_job(
             tx.audit("learning_job.start", job.learning_job_id,
                      detail=f"investigation {body.investigation_id}")
     if created:
-        _created_at(request, response, "get_learning_job", learning_job_id=job.learning_job_id)
+        _created_at(request, response, "get_learning_job", caller.tenant_id, learning_job_id=job.learning_job_id)
     return job
 
 
@@ -339,7 +384,7 @@ def put_system(
         tx.audit("system.update", system_id)
     if created:
         # A PUT creates the resource at its own URL; built by the router, so no query rides along.
-        _created_at(request, response, "put_system", system_id=system_id)
+        _created_at(request, response, "put_system", caller.tenant_id, system_id=system_id)
     return _served(deps, caller, settings)
 
 
@@ -363,18 +408,179 @@ def check_system(deps: Deps, caller: Caller, system_id: Id) -> SystemCheck:
     return deps.checker.check(caller.tenant_id, _served(deps, caller, _settings(deps, caller, system_id)))
 
 
+# --- people, memberships and sign-in (#1306) ---------------------------------------------------
+
+#: What every identity route can answer: no session, a refused request, a malformed one.
+_IDENTITY = responses(401, 403, 422, 500)
+
+
+def _cookie_options() -> dict[str, object]:
+    return {"path": "/", "secure": True, "httponly": True, "samesite": "lax"}
+
+
+auth = APIRouter(tags=["auth"])
+
+
+@auth.get("/auth/login", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse,
+          responses=responses(503, 500))
+def login(deps: Deps) -> RedirectResponse:
+    """Send the person to the sign-in page. The state, nonce and PKCE verifier travel back in a
+    short-lived cookie."""
+    start = deps.identity.begin_signin()
+    response = RedirectResponse(start.url, status_code=status.HTTP_302_FOUND)
+    response.set_cookie(PRELOGIN_COOKIE, start.prelogin, max_age=_PRELOGIN_MAX_AGE, **_cookie_options())  # type: ignore[arg-type]
+    return response
+
+
+@auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
+          responses=responses(403, 503, 422, 500))
+def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
+    """Finish a sign-in: a session cookie and a redirect to the frontend, or a 403 problem of one
+    of four types. The pre-login cookie is cleared whatever the outcome."""
+    try:
+        value = deps.identity.complete_signin(
+            code=code, state=state, prelogin=request.cookies.get(PRELOGIN_COOKIE))
+    except _identity.CallbackRefused as e:
+        response: Response = problem(403, str(e), type_=f"urn:defender:problem:{e.reason}")
+    except _identity.SignInUnavailable:
+        response = problem(503, "sign-in is unavailable")
+    else:
+        response = RedirectResponse(deps.frontend_origin, status_code=status.HTTP_303_SEE_OTHER)
+        response.set_cookie(SESSION_COOKIE, value, max_age=int(SESSION_LIFETIME.total_seconds()),
+                            **_cookie_options())  # type: ignore[arg-type]
+    response.delete_cookie(PRELOGIN_COOKIE, **_cookie_options())  # type: ignore[arg-type]
+    return response
+
+
+@auth.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, responses=_IDENTITY)
+def logout(request: Request, deps: Deps, caller: Authed) -> Response:
+    """End this session only; other devices stay signed in."""
+    deps.identity.logout(caller, request.cookies.get(SESSION_COOKIE, ""))
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(SESSION_COOKIE, **_cookie_options())  # type: ignore[arg-type]
+    return response
+
+
+@auth.get("/me", responses=_IDENTITY)
+def read_me(deps: Deps, caller: Authed) -> Me:
+    view = deps.identity.me(caller)
+    return Me(
+        user=MeUser(id=view.user.id, email=view.user.email, display_name=view.user.display_name),
+        tenants=[TenantRef(tenant_id=t) for t in view.tenants],
+        administrator=view.administrator,
+        invitations=[InvitationRef(id=i.id, tenant_id=i.tenant_id) for i in view.invitations])
+
+
+@auth.post("/invitations/{invitation_id}/accept", responses={**_IDENTITY, **responses(404)})
+def accept_invitation(deps: Deps, caller: Authed, invitation_id: str = Path(max_length=64)) -> TenantRef:
+    """Accept an invitation addressed to you, while signed in."""
+    return TenantRef(tenant_id=deps.identity.accept(caller, invitation_id))
+
+
+people = APIRouter(tags=["people"], responses=_EVERY_ROUTE)
+
+
+def _invitation(view: _identity.InvitationView) -> Invitation:
+    return Invitation(id=view.id, email=view.email, status=view.status, created_at=view.created_at)
+
+
+@people.get("/members")
+def list_members(deps: Deps, member: Membered) -> Page[Member]:
+    rows = deps.identity.members(member.tenant_id)
+    return Page(items=[Member(user_id=m.user_id, email=m.email, display_name=m.display_name) for m in rows],
+                next_cursor=None)
+
+
+@people.delete("/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_member(deps: Deps, member: Membered, user_id: str = Path(max_length=64)) -> None:
+    """End a membership: yours, or another member's. Nothing else of that person changes."""
+    deps.identity.remove(member.auth, member.tenant_id, user_id)
+
+
+@people.get("/invitations")
+def list_invitations(deps: Deps, member: Membered) -> Page[Invitation]:
+    return Page(items=[_invitation(v) for v in deps.identity.invitations(member.tenant_id)],
+                next_cursor=None)
+
+
+@people.post("/invitations", status_code=status.HTTP_202_ACCEPTED, responses=responses(409))
+def invite(deps: Deps, member: Membered, body: InviteCreate) -> Invitation:
+    """Invite a person by email. The answer is the same whoever the email belongs to; the
+    email itself goes out afterwards."""
+    return _invitation(deps.identity.invite(member.auth, member.tenant_id, body.email))
+
+
+@people.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_invitation(deps: Deps, member: Membered, invitation_id: str = Path(max_length=64)) -> None:
+    deps.identity.revoke(member.auth, member.tenant_id, invitation_id)
+
+
+admin = APIRouter(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
+
+
+@admin.get("/tenants")
+def list_all_tenants(deps: Deps, caller: Admin) -> Page[TenantRef]:
+    return Page(items=[TenantRef(tenant_id=t) for t in deps.identity.all_tenants(caller)], next_cursor=None)
+
+
+@admin.post("/tenants/{tenant_id}/invitations", status_code=status.HTTP_202_ACCEPTED,
+            responses=responses(409))
+def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
+                 tenant_id: str = Path(max_length=64)) -> Invitation:
+    """Invite the first member into a tenant that has no active members."""
+    return _invitation(deps.identity.admin_invite(caller, tenant_id, body.email))
+
+
+def _send_loop(identity: IdentityService, stop: threading.Event) -> None:
+    """Run the sender now and then every `send_interval` until told to stop. A failing pass
+    never stops the loop."""
+    while True:
+        try:
+            identity.send_pending()
+        except Exception:
+            _logger.exception("a sender pass failed; the next pass tries again")
+        if stop.wait(identity.send_interval.total_seconds()):
+            return
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    identity: IdentityService = app.state.deps.identity
+    await asyncio.to_thread(identity.start)
+    stop = threading.Event()
+    sender = threading.Thread(target=_send_loop, args=(identity, stop), name="identity-sender", daemon=True)
+    sender.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        await asyncio.to_thread(sender.join, _SENDER_STOP_WAIT)
+
+
 def create_app(deps: ApiDeps) -> FastAPI:
     app = FastAPI(
         title="Defender platform API",
         version=API_VERSION,
         summary="Stub: the routes and shapes are the contract; the records behind them are not yet real.",
+        dependencies=[Depends(_check_origin)],
+        lifespan=_lifespan,
     )
     app.state.deps = deps
-    for router in (alerts, investigations, learning_jobs, lessons, systems):
+    in_tenant = APIRouter(prefix="/tenants/{tenant_id}", responses=responses(404))
+    for router in (alerts, investigations, learning_jobs, lessons, systems, people):
+        in_tenant.include_router(router)
+    for router in (auth, in_tenant, admin):
         app.include_router(router)
     install_problems(app)
     app.add_exception_handler(NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))
     # The literal, not starlette's constant: it was renamed across starlette releases.
     app.add_exception_handler(UnknownReference, refusal(422))
+    # Unlike the data ports' refusals, none of these answers carries a `WWW-Authenticate`: a
+    # session cookie has no challenge to offer.
+    app.add_exception_handler(_identity.NotAuthenticated, refusal(status.HTTP_401_UNAUTHORIZED))
+    app.add_exception_handler(_identity.Forbidden, refusal(status.HTTP_403_FORBIDDEN))
+    app.add_exception_handler(_identity.NotFound, refusal(status.HTTP_404_NOT_FOUND))
+    app.add_exception_handler(_identity.Conflict, refusal(status.HTTP_409_CONFLICT))
+    app.add_exception_handler(_identity.SignInUnavailable, refusal(status.HTTP_503_SERVICE_UNAVAILABLE))
     return app

@@ -27,9 +27,7 @@ from .models import (
 from .ports import (
     AuditAction,
     NotFound,
-    Principal,
     TimePosition,
-    Unauthenticated,
     UnknownReference,
 )
 
@@ -46,19 +44,6 @@ def _newest_after(rows: list[T], key: Callable[[T], TimePosition], after: TimePo
 
 def _ids_after(rows: list[T], key: Callable[[T], str], after: str | None, limit: int) -> list[T]:
     return [r for r in sorted(rows, key=key) if after is None or key(r) > after][:limit]
-
-
-class TokenAuthenticator:
-    """Fixed bearer tokens, each naming one principal. A stand-in for the hosted login provider
-    (#1131 "Open"); nothing about the token format is part of the contract."""
-
-    def __init__(self, tokens: dict[str, Principal]) -> None:
-        self._tokens = dict(tokens)
-
-    def authenticate(self, bearer_token: str | None) -> Principal:
-        if bearer_token is None or bearer_token not in self._tokens:
-            raise Unauthenticated("missing or unknown bearer token")
-        return self._tokens[bearer_token]
 
 
 class _Table(dict[tuple[str, str], T]):

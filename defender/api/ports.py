@@ -8,6 +8,7 @@ from contextlib import AbstractContextManager
 from typing import Literal, Protocol
 
 from defender._model import model
+from defender.identity import IdentityService
 from defender.tenancy._tenant import TenantId
 
 from .models import (
@@ -31,16 +32,12 @@ TimePosition = tuple[_dt.datetime, str]
 @model(frozen=True)
 class Principal:
     """Who is calling. The tenant scopes every read and write; the user id reaches only the
-    audit log (#1131 "Tenancy"). The tenant is checked against its grammar here, where the login
-    provider's answer becomes a caller, so no port ever sees an unchecked one; a login answer
-    that fails it is a 401 (`app._principal`)."""
+    audit log (#1131 "Tenancy"). The tenant is the request path's, checked against its grammar
+    here so no port ever sees an unchecked one, and against the caller's membership before a
+    `Principal` exists (`app._principal`)."""
 
     tenant_id: TenantId
     user_id: str
-
-
-class Unauthenticated(Exception):
-    """No usable login on the request."""
 
 
 class NotFound(Exception):
@@ -58,12 +55,6 @@ class UnknownReference(Exception):
 class StoreBrokePromise(Exception):
     """A port answered something its contract rules out. A 500: the store has a bug, and serving
     the answer would hand the client a wrong one."""
-
-
-class Authenticator(Protocol):
-    def authenticate(self, bearer_token: str | None) -> Principal:
-        """The caller behind `bearer_token`, or raise `Unauthenticated`."""
-        ...
 
 
 class AlertsRepository(Protocol):
@@ -226,7 +217,9 @@ class ApiDeps:
     ports are structural, checked by mypy at the composition root, and a test may hand in any
     object that answers the calls it scripts."""
 
-    authenticator: Authenticator
+    identity: IdentityService
+    #: The one `Origin` a state-changing request may carry (O6).
+    frontend_origin: str
     alerts: AlertsRepository
     investigations: InvestigationsRepository
     learning_jobs: LearningJobsRepository

@@ -211,3 +211,54 @@ class Problem(BaseModel):
     detail: str | None = Field(default=None, description="What happened to this request.")
     errors: list[FieldError] | None = Field(
         default=None, description="On a 422 from validation: each failing part of the request.")
+
+
+# --- people, memberships and sign-in (#1306) ---------------------------------------------------
+
+#: An email as typed: the shape is checked, deliverability is not. Stored lower-cased.
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+$"
+
+
+class InviteCreate(BaseModel):
+    """Invite a person by email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(pattern=EMAIL_PATTERN, max_length=254)
+
+
+class Invitation(BaseModel):
+    """An invitation as its inviters see it: only what they typed, its status and its date."""
+
+    id: str
+    email: str
+    status: Literal["invited"]
+    created_at: Instant
+
+
+class Member(BaseModel):
+    user_id: str
+    email: str
+    display_name: str
+
+
+class MeUser(BaseModel):
+    id: str
+    email: str
+    display_name: str
+
+
+class TenantRef(BaseModel):
+    tenant_id: str
+
+
+class InvitationRef(BaseModel):
+    id: str
+    tenant_id: str
+
+
+class Me(BaseModel):
+    user: MeUser
+    tenants: list[TenantRef]
+    administrator: bool = Field(description="Whether this session holds platform administrator powers.")
+    invitations: list[InvitationRef] = Field(description="Open invitations addressed to this user.")

@@ -49,6 +49,9 @@ EXCLUDED_PREFIXES = (
     "defender/docs/",
     # Per-vendor adapters live under integrations/ — by design vendor-named.
     "defender/integrations/",
+    # The sign-in provider's adapter (#1306 K1): the product's one named identity engine, behind
+    # the `SignInPort`; nothing else in `identity/` or `api/` names it.
+    "defender/identity/keycloak.py",
     # The record's settings parts (#1107): the ONE module that reads each system's `config.env`
     # into the run's record, so that no other platform module interprets them (the census test
     # `d4_elastic_keys_one_place` holds that for the corpus engine's keys). A file, not a directory: the carve-out is this module and nothing beside it.

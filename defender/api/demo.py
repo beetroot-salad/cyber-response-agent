@@ -3,7 +3,7 @@ tenant scoping is visible from a browser or `curl`, and one investigation in eac
 state in the first of them.
 
 There is no default tenant (#1078): `serve.py` requires `--tenant`, and every tenant ID here comes
-from the UUIDs it is given. The tokens are predictable and public, so `serve.py` binds to
+from the UUIDs it is given. The session values are predictable and public, so `serve.py` binds to
 loopback by default.
 """
 
@@ -11,21 +11,30 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 from collections.abc import Callable, Sequence
 from functools import partial
 
 from defender.run_repository import RUN_LAYOUT
 from defender.tenancy._tenant import TenantId, is_valid_tenant_id
 
+from defender.identity import (
+    Bootstrap,
+    IdentityService,
+    InMemoryIdentityRepository,
+    SignInUnavailable,
+    VerifiedSignIn,
+    register_tenant,
+)
+
 from .fakes import (
     InMemorySecrets,
     InMemoryStore,
     StubArtifactLinks,
     StubSystemChecker,
-    TokenAuthenticator,
 )
 from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
-from .ports import ApiDeps, Principal
+from .ports import ApiDeps
 
 #: The users each tenant gets; a token is `<tenant>-<role>`.
 DEMO_ROLES = ("analyst", "engineer")
@@ -36,15 +45,49 @@ _DEMO_COMMITS = ("d3a0c0de" * 5, "e4a1c0de" * 5)
 UTC_NOW: Callable[[], _dt.datetime] = partial(_dt.datetime.now, _dt.UTC)
 
 
-def demo_tokens(tenants: Sequence[str]) -> dict[str, Principal]:
-    """bearer token -> caller, one per tenant and role."""
-    return {
-        f"{tenant}-{role}": Principal(tenant_id=TenantId(tenant), user_id=f"{role}@{tenant}.example")
-        for tenant in tenants for role in DEMO_ROLES
-    }
+#: Where the demo's frontend is said to live; a state-changing request must carry it as `Origin`.
+DEMO_FRONTEND_ORIGIN = "http://localhost:3000"
+_SESSION_LIFETIME = _dt.timedelta(days=365)
+_logger = logging.getLogger(__name__)
 
 
-def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NOW) -> ApiDeps:
+def demo_sessions(tenants: Sequence[str]) -> dict[str, str]:
+    """session cookie value -> `<tenant>-<role>`'s name, one per tenant and role. Predictable
+    and public: the demo has no sign-in."""
+    return {f"{tenant}-{role}": f"demo-session-{tenant}-{role}" for tenant in tenants for role in DEMO_ROLES}
+
+
+class _NoSignIn:
+    """The demo has no sign-in provider: every sign-in call is unavailable (`/auth/login` answers 503)."""
+
+    _WHY = "the demo has no sign-in provider; use a seeded session cookie"
+
+    def create_account(self, *, username: str, email: str, required_actions: frozenset[str]) -> str:
+        raise SignInUnavailable(self._WHY)
+
+    def send_set_password_email(self, account_id: str, *, lifespan: _dt.timedelta) -> None:
+        raise SignInUnavailable(self._WHY)
+
+    def has_otp(self, account_id: str) -> bool:
+        raise SignInUnavailable(self._WHY)
+
+    def require_otp_setup(self, account_id: str) -> None:
+        raise SignInUnavailable(self._WHY)
+
+    def begin_signin(self, *, state: str, nonce: str, code_challenge: str) -> str:
+        raise SignInUnavailable(self._WHY)
+
+    def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
+        raise SignInUnavailable(self._WHY)
+
+
+class _LoggedMail:
+    def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
+        _logger.info("invitation %s to %s for tenant %s (not sent: demo)", invitation_id, to, tenant_id)
+
+
+def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NOW,
+              frontend_origin: str = DEMO_FRONTEND_ORIGIN) -> ApiDeps:
     """Fakes seeded for `tenants`: the full seed in the first, one alert in each other."""
     if not tenants:
         raise ValueError("name at least one tenant")
@@ -62,8 +105,21 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
             severity="low", rule="misc",
         ))
+    people = InMemoryIdentityRepository()
+    for tenant in tenants:
+        register_tenant(people, TenantId(tenant))
+        for role in DEMO_ROLES:
+            user = people.add_user(f"{role}@{tenant}.example", created_at=now, status="active",
+                                   display_name=role.title())
+            people.add_membership(user.id, tenant, status="active", invited_by="system",
+                                  created_at=now, accepted_at=now)
+            people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
+                               expires_at=now + _SESSION_LIFETIME)
+    identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock,
+                               bootstrap=Bootstrap(administrators=(), tenants={}))
     return ApiDeps(
-        authenticator=TokenAuthenticator(demo_tokens(tenants)),
+        identity=identity,
+        frontend_origin=frontend_origin,
         alerts=store,
         investigations=store,
         learning_jobs=store,

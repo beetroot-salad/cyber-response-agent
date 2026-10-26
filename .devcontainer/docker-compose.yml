@@ -142,3 +142,74 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
     restart: unless-stopped
+
+  # The identity provider for the platform API (#1306): Keycloak signs people in and holds their
+  # passwords and one-time codes; the API keeps everything else. Dev posture only: `start-dev`,
+  # plain HTTP, and the dev-only placeholder secrets in `keycloak/realm-defender.json` (realm
+  # `defender`, clients `defender-api` and `defender-api-admin`) and below.
+  # `--import-realm` creates the realm on first start only; an existing realm is left as it is, so
+  # after editing the export run `docker compose down -v` (drops the database volume) and `up`.
+  # From the dev container: http://keycloak:8080; from the host's browser:
+  # http://localhost:${KEYCLOAK_HTTP_PORT:-8080}. Keycloak's own mail goes to `mailpit`.
+  keycloak:
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.4.0}
+    container_name: response-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: defender
+      KC_DB_PASSWORD: dev-only-change-me
+      # The URL the host's browser opens, so the token issuer is the one the API is configured with.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_HTTP_PORT:-8080}
+      KC_HTTP_PORT: "8080"
+      # The master realm's first administrator, for the admin console only.
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: dev-only-change-me
+    volumes:
+      - ./keycloak/realm-defender.json:/opt/keycloak/data/import/realm-defender.json:ro
+    ports:
+      # Loopback only: the sign-in pages are for this machine's browser, not the network.
+      - "127.0.0.1:${KEYCLOAK_HTTP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: unless-stopped
+
+  # Keycloak's database (#1306): a `keycloak` database owned by the `defender` role, which is also
+  # the dev cluster's superuser, so the API can `createdb` its own beside it. Compose network only.
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16.6}
+    container_name: response-postgres
+    environment:
+      POSTGRES_USER: defender
+      POSTGRES_PASSWORD: dev-only-change-me
+      POSTGRES_DB: keycloak
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defender -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+
+  # The dev mail catcher (#1306): accepts Keycloak's mail (SMTP on mailpit:1025, the compose
+  # network only) and shows it, set-password links included, at http://localhost:${MAILPIT_HTTP_PORT:-8025}.
+  mailpit:
+    image: axllent/mailpit:${MAILPIT_VERSION:-v1.20}
+    container_name: response-mailpit
+    ports:
+      - "127.0.0.1:${MAILPIT_HTTP_PORT:-8025}:8025"
+    mem_limit: 128m
+    memswap_limit: 128m
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

@@ -90,6 +90,14 @@ api = [
     "fastapi>=0.115",
     # The ASGI server behind `api/serve.py`, the local dev entry point.
     "uvicorn>=0.30",
+    # Verifies the sign-in provider's ID tokens (`identity/keycloak.py`); `[crypto]` brings the RSA
+    # support RS256 needs.
+    "pyjwt[crypto]",
+    # The HTTP client `identity/keycloak.py` uses for the token endpoint and admin API; the `dev`
+    # extra's `httpx` is not installed in a production `api` sync.
+    "httpx",
+    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq.
+    "psycopg[binary]>=3.2",
 ]
 dev = [
     "pytest>=8.0",
