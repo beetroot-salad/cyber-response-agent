@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from defender.run_repository import Run
+from defender.records import Run
 
 _logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ def _declare_l_finding(run: Run, lead_id: str, name: str, system: str) -> bool:
     `validate_artifact`, keeping "a committed investigation parses" true. A seed that fails
     validation is not written. Never raises."""
     from defender.records._artifact_schema import validate_artifact
-    from defender.run_repository import RUN_LAYOUT
+    from defender.records import RUN_LAYOUT
 
     block = (
         f"## lead-0 ({lead_id}) — harness-authored, declared before the investigation begins\n\n"

@@ -24,13 +24,13 @@ from pydantic_ai.exceptions import ModelRetry
 from defender import box as box_mod
 from .. import permission
 from ..agent_definition import ResolvedRoots, ToolSet
-from ..agent_role import AgentRole
+from defender._agent_role import AgentRole
 from ..permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap_fresh
 from defender.records._artifact_schema import _utf8_len
 from defender.configuration._env import FatalConfigError, env_int
-from defender.integrations.faults import USAGE_EXIT_CODE
+from defender.kit.faults import USAGE_EXIT_CODE
 from defender.runtime.sql_engine import sql as defender_sql
 from defender.runtime import record_query
 from defender.runtime.payload_view import (

@@ -298,7 +298,7 @@ def io_private_names(io_source: ast.Module) -> frozenset[str]:
     return frozenset(name for name in out if name.startswith("_"))
 
 
-#: The public run-layout (`run_repository/_layout.py`) functions that touch nothing on disk.
+#: The public run-layout (`records/_layout.py`) functions that touch nothing on disk.
 #: Every other public top-level function there is in the vocabulary (`artifact_file`,
 #: `artifact_dir`, `plain_file` lstat the entry; `contained_payload` resolves it);
 #: `test_1134_census` checks the split against each body. Its classes (`RunPaths`, ...) only
@@ -308,8 +308,8 @@ RUN_PATHS_PURE = frozenset({"is_case_answer_key", "gather_summaries_shape", "ale
 
 #: The run layout's file under `defender/`, and the module names its functions are reached by:
 #: the door, which re-exports them, and the submodule itself (#1105).
-LAYOUT_MODULE = "run_repository/_layout.py"
-LAYOUT_SPELLINGS = frozenset({"defender.run_repository", "defender.run_repository._layout"})
+LAYOUT_MODULE = "records/_layout.py"
+LAYOUT_SPELLINGS = frozenset({"defender.records", "defender.records._layout"})
 
 
 def run_paths_vocabulary(source: ast.Module) -> frozenset[str]:

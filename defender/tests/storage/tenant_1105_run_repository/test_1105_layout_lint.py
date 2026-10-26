@@ -53,14 +53,14 @@ _CONTEXT = ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenanc
 
 def _planted(tmp_path: Path) -> Path:
     """A `defender/`-shaped tree holding a copy of the real package (the lint reads the layout
-    universe from the swept tree's `run_repository/_layout.py`) and the `_CONTEXT` modules, and
+    universe from the swept tree's `records/_layout.py`) and the `_CONTEXT` modules, and
     nothing else."""
     root = tmp_path / "defender"
     if H.PACKAGE.is_dir():
-        shutil.copytree(H.PACKAGE, root / "run_repository",
+        shutil.copytree(H.PACKAGE, root / "records",
                         ignore=shutil.ignore_patterns("__pycache__"))
     else:
-        (root / "run_repository").mkdir(parents=True)
+        (root / "records").mkdir(parents=True)
     for rel in _CONTEXT:
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(H.DEFENDER / rel, root / rel)
@@ -123,14 +123,14 @@ def test_1105_layout_lint_fails_a_planted_new_gated_use(tmp_path, capsys):
     lint_run_layout_imports = _lint()
     root = _sweep_copy(tmp_path)
     _plant(root, "learning/planted_new.py",
-           "from defender.run_repository import RunPaths  # noqa: F401\n")
+           "from defender.records import RunPaths  # noqa: F401\n")
     with (root / _CLI).open("a", encoding="utf-8") as fh:
         fh.write("\n\ndef _planted_second(run_dir):\n"
-                 "    from defender.run_repository import RunPaths\n"
+                 "    from defender.records import RunPaths\n"
                  "    return RunPaths(run_dir)\n")
     with (root / "learning/judge/render.py").open("a", encoding="utf-8") as fh:
         fh.write("\n\ndef _planted_page(run_dir):\n"
-                 "    from defender.run_repository import Run\n"
+                 "    from defender.records import Run\n"
                  "    return Run.at(run_dir)\n")
     code, out = _main(lint_run_layout_imports, root, capsys)
     assert isinstance(code, int), f"three planted gated uses passed:\n{out}"
@@ -142,7 +142,7 @@ def test_1105_layout_lint_fails_a_planted_new_gated_use(tmp_path, capsys):
         assert line, f"no finding names {module} / {function} / {name}:\n{out}"
     clean = _sweep_copy(tmp_path / "control")
     _plant(clean, "learning/planted_helper.py",
-           "from defender.run_repository import artifact_file  # noqa: F401\n")
+           "from defender.records import artifact_file  # noqa: F401\n")
     code, out = _main(lint_run_layout_imports, clean, capsys)
     assert code == 0, f"a helper import (artifact_file) was flagged:\n{out}"
 
@@ -166,7 +166,7 @@ def test_1105_layout_lint_fails_a_stale_allow_list_entry(tmp_path, capsys):
     # since F-09; the launcher is helpers-only).
     planted = _planted(tmp_path / "count")
     _plant(planted, caller,
-           "from defender.run_repository import RunPaths  # noqa: F401\n")
+           "from defender.records import RunPaths  # noqa: F401\n")
     entry = (caller, "<module>", "RunPaths")
     assert not lint_run_layout_imports.scan(planted, allow_list=(entry + (1,),)), (
         "one use, one entry of count 1: clean")
@@ -184,14 +184,14 @@ def test_1105_layout_lint_fails_a_stale_allow_list_entry(tmp_path, capsys):
 def test_1105_layout_lint_gates_every_layout_name_but_the_eight_helpers_including_a_new_export(tmp_path):
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
-    layout = root / "run_repository" / "_layout.py"
+    layout = root / "records" / "_layout.py"
     layout.parent.mkdir(parents=True, exist_ok=True)
     with layout.open("a", encoding="utf-8") as fh:
         fh.write('\n\nBRAND_NEW_LAYOUT_NAME = "brand-new"\n')
     mod = "learning/default_deny_probe.py"
-    imports = "".join(f"from defender.run_repository import {n}  # noqa: F401\n"
+    imports = "".join(f"from defender.records import {n}  # noqa: F401\n"
                       for n in (*sorted(HELPERS), *NAMED_GATED))
-    _plant(root, mod, imports + "from defender.run_repository._layout import "
+    _plant(root, mod, imports + "from defender.records._layout import "
                                 "BRAND_NEW_LAYOUT_NAME  # noqa: F401\n")
     flagged = {k[2] for k in _in(lint_run_layout_imports.scan(root, allow_list=()), mod)}
     assert flagged == {*NAMED_GATED, "BRAND_NEW_LAYOUT_NAME"}, (
@@ -201,12 +201,12 @@ def test_1105_layout_lint_gates_every_layout_name_but_the_eight_helpers_includin
 
 
 def test_1105_layout_lint_flags_a_star_import_from_the_door_or_an_owner(tmp_path):
-    """`from defender.run_repository import *` and a star import from _episode_paths,
+    """`from defender.records import *` and a star import from _episode_paths,
     _episode_handle or _tenant are flagged in a non-owner module."""
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
     modules = {f"learning/star_{i}.py": f"from {source} import *  # noqa: F403\n"
-               for i, source in enumerate(("defender.run_repository", "defender.episodes._episode_paths",
+               for i, source in enumerate(("defender.records", "defender.episodes._episode_paths",
                                            "defender.episodes._episode_handle", "defender.tenancy._tenant"))}
     for module, text in modules.items():
         _plant(root, module, text)
@@ -223,7 +223,7 @@ def test_1105_layout_lint_reports_an_unparseable_module(tmp_path, capsys):
     _plant(root, "learning/broken_syntax.py", "def broken(:\n")
     (root / "learning" / "broken_bytes.py").write_bytes(b"x = '\xff\xfe'\n")
     _plant(root, "learning/after_broken.py",
-           "from defender.run_repository import RunPaths  # noqa: F401\n")
+           "from defender.records import RunPaths  # noqa: F401\n")
     found = lint_run_layout_imports.scan(root, allow_list=())
     shown = _displays(found)
     for broken in ("learning/broken_syntax.py", "learning/broken_bytes.py"):

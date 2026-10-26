@@ -1,9 +1,9 @@
 # Run records — every kind of file a run reads and writes
 
 The inventory issue #1076 asked for: one page naming every record kind a run has and where it
-lives. #1077 turns that inventory into the file-backed `Run` handle: `defender/run_repository/_layout.py`
+lives. #1077 turns that inventory into the file-backed `Run` handle: `defender/records/_layout.py`
 (`RunPaths`), `defender/episodes/_episode_paths.py` (`EpisodePaths`) and `defender/tenancy/_tenant.py` own every
-name a run or episode record carries, and `defender/run_repository/_handle.py` (`Run`, `RunRecord`,
+name a run or episode record carries, and `defender/records/_handle.py` (`Run`, `RunRecord`,
 `RecordHandle`, `ArchivedWorld`) wraps them into the handle application code addresses by
 `(tenant_id, run_id)`.
 
@@ -73,7 +73,7 @@ unreachable by root containment rather than by a named deny.
 
 | kind | table | path | denied to | archived as | sub-collection | note |
 |---|---|---|---|---|---|---|
-| alert | 1 | `alert_input/alert.json` | — (deliberately not in the answer key, `run_repository/_layout.py`, the comment on `CASE_ANSWER_KEY_NAMES`) | alert.json | run.facts.alert | input copied by the host, into the run's read-only input directory beside its record (#1222) |
+| alert | 1 | `alert_input/alert.json` | — (deliberately not in the answer key, `records/_layout.py`, the comment on `CASE_ANSWER_KEY_NAMES`) | alert.json | run.facts.alert | input copied by the host, into the run's read-only input directory beside its record (#1222) |
 | report | 1 | `report.md` | confined | report.md | run.documents.report | the close tool is its only writer; no role holds a write grant for it (`close_tool.py:1`) |
 | investigation | 1 | `investigation.md` | confined | investigation.md | run.documents.investigation | seeds (lead-0, branch resume) write it before the first turn; the document tool during |
 | queries | 1 | `executed_queries.jsonl` | confined | staged as a table | run.tables.queries | append-only; the gather lane's denial rows land here too |
@@ -87,8 +87,8 @@ unreachable by root containment rather than by a named deny.
 | tool_trace | 1 | `tool_trace.jsonl` | — | — | run.observability.tool_trace | a whole-file rebuild from the session store, written once after the agent returns |
 | policy_denials | 1 | `policy_denials.jsonl` | — | — | run.tables.policy_denials |  |
 | lessons_loaded | 1 | `lessons_loaded.jsonl` | — | lessons_loaded.jsonl | run.observability.lessons_loaded | receipt of corpus consumption; `hooks/record_lesson_load` is the reader-side classifier |
-| ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`run_repository/_layout.py:231-233`) and the read cap survive |
-| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `run_repository/_layout.py`, the comment on `WIRE_LOG_DIR`) | — | run.observability.runtime_html | copied to `<publish root>/<tenant>/runs/<run id>/` on `dev` deployments only, written as the publish folder's owner (`visualize_run.mirror_page`, #1084/#1110/#1279) |
+| ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`records/_layout.py:231-233`) and the read cap survive |
+| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `records/_layout.py`, the comment on `WIRE_LOG_DIR`) | — | run.observability.runtime_html | copied to `<publish root>/<tenant>/runs/<run id>/` on `dev` deployments only, written as the publish folder's owner (`visualize_run.mirror_page`, #1084/#1110/#1279) |
 | box_sentinel | 1 | `.box-sentinel` | — | — | run.observability.box_sentinel | `unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family |
 | provenance | 1 | `provenance.json` | outright | provenance.json | run.facts.provenance | stamped by the host at materialize time |
 | run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |

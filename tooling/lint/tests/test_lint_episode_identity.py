@@ -23,7 +23,7 @@ IDENTITY_SYNTAX = [
      [("ref", "world_token_for")]),
     ("episode-deriver", "return family_model.episode_token_for(episode_id)",
      [("ref", "episode_token_for")]),
-    ("labelled-mint", "return RunId.mint(label)", [("mint-args", "defender.run_repository.RunId.mint")]),
+    ("labelled-mint", "return RunId.mint(label)", [("mint-args", "defender.records.RunId.mint")]),
     ("add", "return family.episode_id + '-' + label", [("concat", "family.episode_id + '-'")]),
     ("join", "return '-'.join([episode_id, label])", [("concat", "'-'.join([episode_id, label])")]),
     ("format", "return '{}-{}'.format(episode_id, label)",
@@ -42,7 +42,7 @@ IDENTITY_SYNTAX = [
         return f'{w}-x'
     return a, b, c, d, e""", [
         ("fstring", "{ep}-"), ("fstring", "{eid}-"), ("fstring", "{second}-"),
-        ("concat", "ep + '-'"), ("mint-args", "defender.run_repository.RunId.mint"), ("fstring", "{w}-")]),
+        ("concat", "ep + '-'"), ("mint-args", "defender.records.RunId.mint"), ("fstring", "{w}-")]),
     ("composer", "return compose(family.episode_id, label)",
      [("composer", "compose(family.episode_id, label)")]),
     ("class-attribute", """class Holder:
@@ -81,7 +81,7 @@ def test_id_census_syntax_partitions(tmp_path, name, source, expected):
 
     prefix = ("from defender._run_id import mint_run_id as m\n"
               "from defender.runtime.branch import _family as family_model\n"
-              "from defender import _run_id\nfrom defender.run_repository import RunId\n"
+              "from defender import _run_id\nfrom defender.records import RunId\n"
               "def episode_id_for(src):\n    return src\n"
               "def compose(eid, label):\n    joined = eid\n    return f'{joined}-{label}'\n")
     if source.startswith(("class ", "def ", "RUN_", "__all__")):
@@ -107,8 +107,8 @@ def test_the_id_census_leaves_tests_out(tmp_path):
 
 def test_a_folder_made_by_its_path_in_the_walk_owner_is_found_and_a_held_root_is_not(tmp_path):
     planted = tmp_path / "planted"
-    (planted / "run_repository").mkdir(parents=True)
-    (planted / "run_repository" / "_lookup.py").write_text(
+    (planted / "records").mkdir(parents=True)
+    (planted / "records" / "_lookup.py").write_text(
         "import os\n"
         "from pathlib import Path\n"
         "\n"
@@ -132,7 +132,7 @@ def test_the_rosters_name_is_found_outside_its_owner_and_not_in_a_docstring(tmp_
     planted = tmp_path / "planted"
     files = {
         "episodes/_episode_paths.py": f'ARM_ROSTER_NAME = "{_GATE.ROSTER_NAME}"\n',
-        "run_repository/_lookup.py": f'ROSTER = "{_GATE.ROSTER_NAME}"\n',
+        "records/_lookup.py": f'ROSTER = "{_GATE.ROSTER_NAME}"\n',
         "presentation/page.py": (
             f'def roster(ep):\n    """Reads {_GATE.ROSTER_NAME}."""\n'
             f'    return f"{{ep}}/{_GATE.ROSTER_NAME}"\n'),
@@ -142,12 +142,12 @@ def test_the_rosters_name_is_found_outside_its_owner_and_not_in_a_docstring(tmp_
         (planted / rel).parent.mkdir(parents=True, exist_ok=True)
         (planted / rel).write_text(text, encoding="utf-8")
     assert _GATE.roster_name_spellings(planted) == [
-        "presentation/page.py:3", "run_repository/_lookup.py:1"]
+        "presentation/page.py:3", "records/_lookup.py:1"]
 
 
 def test_the_rules_report_under_their_own_names(tmp_path):
-    (tmp_path / "run_repository").mkdir()
-    (tmp_path / "run_repository" / "_lookup.py").write_text(
+    (tmp_path / "records").mkdir()
+    (tmp_path / "records" / "_lookup.py").write_text(
         "import os\ndef claim(p):\n    os.makedirs(p)\n", encoding="utf-8")
     (tmp_path / "episodes").mkdir()
     (tmp_path / "episodes" / "_episode_paths.py").write_text("X = 1\n", encoding="utf-8")

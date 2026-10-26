@@ -143,7 +143,7 @@ WITHHELD_CENSUS: frozenset[tuple[str, str]] = frozenset((
 _STUB_ADAPTER = '''\
 from __future__ import annotations
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 
 
 @verb()

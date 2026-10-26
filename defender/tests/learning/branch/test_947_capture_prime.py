@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from defender._io import append_jsonl, read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.runtime.verbs import read_roster
 from defender.episodes._episode_handle import Episode
 from defender.episodes._episode_paths import BASE_FILENAME, SERVED_DIRNAME
@@ -42,7 +42,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 import json
 from pathlib import Path
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 
 CALLS = "adapter-calls.jsonl"
 

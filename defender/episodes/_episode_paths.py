@@ -6,7 +6,7 @@ import dataclasses
 from pathlib import Path, PurePosixPath
 
 from defender.records._run_id import episode_id_fault, uuid_id_fault
-from defender.run_repository._layout import (
+from defender.records._layout import (
     RUN_LAYOUT,
     ALERT,
     PROVENANCE,
@@ -67,7 +67,7 @@ PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
 
 #: The archive's names for the two sidecars, which live beside a run dir keyed by run id and
 #: are re-homed under the world as a bare `<kind>.json`. Other archived names are the run
-#: dir's own, from `run_repository._layout`.
+#: dir's own, from `records._layout`.
 ARCHIVED_SCRUB_VERDICT_NAME = "scrub_verdict.json"
 ARCHIVED_RUN_END_NAME = "run_end.json"
 #: The run's call join (`RunPaths.call_join`, #1255 G4/G6), re-homed under the world beside the
@@ -484,7 +484,7 @@ class OracleStorePaths:
 class EpisodePaths:
     """One episode's directories and accessors, rooted at ``episode_dir`` with a containment
     check on every composed path. The relative form is ``.rel`` / ``LAYOUT``. Locating the
-    episodes folder (`<T>/episodes/`) is `run_repository`'s job, not this module's.
+    episodes folder (`<T>/episodes/`) is `records`'s job, not this module's.
     """
 
     episode_dir: Path

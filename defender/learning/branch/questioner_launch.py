@@ -30,7 +30,7 @@ from defender._io import (
 )
 
 
-from defender.run_repository import (
+from defender.records import (
     Run,
     artifact_dir,
     artifact_file,

@@ -279,7 +279,7 @@ class QueryDoor:
             raise Refused(f"run_query {system}.{verb} was refused: {exc}") from None
         if decision.outcome != "GRANTED":
             raise Refused(f"run_query {system}.{verb} was refused: {decision.refusal}")
-        from defender.runtime.verbs import verb_class_of
+        from defender.kit.verbs import verb_class_of
 
         fn = self.real_verbs(system).get(verb)
         if fn is None or verb_class_of(fn) != "r":

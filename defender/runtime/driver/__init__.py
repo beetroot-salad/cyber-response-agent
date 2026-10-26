@@ -55,7 +55,7 @@ from .. import session_store
 from .. import system_status
 from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
-from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
+from defender._agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
 from ..exception_groups import carried, carried_unless_overridden
 from .. import review_roles
@@ -80,7 +80,7 @@ from defender.hooks.inject_system_skill_description import SystemIndex, descript
 from defender import _clock
 from defender.configuration._env import env_bool
 from defender._frontmatter import strip_frontmatter
-from defender.run_repository import Run, RunPaths
+from defender.records import Run, RunPaths
 from ..run_tenant import RunTenant
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,

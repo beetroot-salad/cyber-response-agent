@@ -44,11 +44,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 
-from defender.runtime.verbs import (  # noqa: E402
-    body_param_of,
-    engine_of,
-    verb,
-)
+from defender.kit.verbs import body_param_of, engine_of, verb  # noqa: E402
 from defender.tests.support.learning.curation._lead_author_1134 import held_skills, skills_view  # noqa: E402
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT, place_tenant  # noqa: E402
 from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID  # noqa: E402
@@ -680,7 +676,7 @@ def _scaffold_cmdb_tree(root: Path, template_body: str, *, verb: str = "get-host
     tenant's cmdb skill + execution.md (#1108 P4, decision 4) plus one crafted cmdb query
     template. Returns the defender tree."""
     (root / "integrations").mkdir(parents=True)
-    for f in ("cmdb_adapter.py", "_stub_transport.py", "faults.py"):
+    for f in ("cmdb_adapter.py", "_stub_transport.py"):
         src = DEFENDER / "integrations" / f
         if src.exists():
             (root / "integrations" / f).write_text(

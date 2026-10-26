@@ -326,7 +326,7 @@ def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     branchable run, recorded: its alert and record at the front door's places), the episode primed from
     it by the REAL launcher door (`cli.prepare_episode`) with its container made, and the
     family manifest (worlds a, b, c) written. The episodes root is pointed at its parent."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     planted = S.plant_tenant(SIBLING_TENANT)
     _base, src = location_path(T.runs_base)(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)

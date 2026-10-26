@@ -28,7 +28,7 @@ def _roots(tmp_path, monkeypatch):
 
 
 def _rid(text: str):
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return RunId.parse(text)
 
@@ -80,7 +80,7 @@ def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(
     faults are a bare `TenantRefused`, which an `except RunRefused` misses."""
     import uuid
 
-    from defender.run_repository import RunAbsent, RunAddress, RunRefused
+    from defender.records import RunAbsent, RunAddress, RunRefused
 
     r1 = str(uuid.uuid4())
     t = _uuid_tenant(r1)
@@ -119,7 +119,7 @@ def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(
     pinned by
     `ids_1187/test_1187_layout_isolation.py::test_a_link_at_an_arm_container_is_refused_and_the_real_folder_opens`.)
     (Name kept.)"""
-    from defender.run_repository import RunAbsent
+    from defender.records import RunAbsent
 
     t = _uuid_tenant()
     ep, episode_id, roster = _post_runs_episode(H.T_ID, ("a", "b"))
@@ -136,7 +136,7 @@ def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(
 
 def test_a_verify_opens_every_finished_arm_or_hands_back_its_refusal(tmp_path):
     from defender.learning.branch import cli
-    from defender.run_repository import Run, RunRefused
+    from defender.records import Run, RunRefused
 
     t = _uuid_tenant()
     labels = ("a", "b", "c")

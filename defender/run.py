@@ -55,8 +55,8 @@ from defender import _log  # noqa: E402
 from defender.records import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
-from defender.run_repository import Run  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import Run  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.tenancy import _tenant  # noqa: E402
 from defender.episodes._episode_handle import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
@@ -65,7 +65,7 @@ from defender.runtime import providers  # noqa: E402
 from defender.runtime import run_end  # noqa: E402
 from defender.runtime import run_knowledge  # noqa: E402
 from defender.runtime import system_status  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
 from defender.runtime.system_status import RunSystems  # noqa: E402
 from defender.runtime.verb_grant import GrantError  # noqa: E402
@@ -76,7 +76,7 @@ from defender.runtime.verbs import (  # noqa: E402
     ServingAbort,
     read_roster,
 )
-from defender.integrations import ticket_writer as _default_ticket_writer  # noqa: E402
+from defender.runtime import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -584,7 +584,7 @@ def _early_run(ns: argparse.Namespace, accepted: _tenant.Tenant, world: Any,
     handed to setup whole (#1279 rev 6): a sibling's arm from its episode's roster, else a fresh
     one the tenant's runs repository mints. No caller names the id (A3); nothing is made on disk
     for an arm, and only the natural runs container for an ordinary run."""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     try:
         if world is not None:
@@ -682,7 +682,7 @@ def _screened_source_alert(episode: Episode) -> Path:
     `materialize_run` follow it. Checked before the copy so outside bytes never become this
     run's alert.
     """
-    from defender.run_repository import artifact_file
+    from defender.records import artifact_file
 
     alert = episode.source_alert.path
     if not artifact_file(alert):
@@ -698,7 +698,7 @@ def _open_world_source(runs: Any, world: Any) -> Run:
     tenant's natural container (#1105 PR 2, decision A — an old manifest's `source_run_dir` is
     never read). An id the repository refuses, or a run that is not there, is the sibling's
     refusal, before anything is spent."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     try:
         return runs.open(RunId.parse(world.family.source_run_id))
@@ -717,7 +717,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
         # A sibling is only ever resumed through its held episode; without one it must not
         # run on as an ordinary investigation.
         sys.exit(f"[run.py] --episode {ns.episode}: no episode is held for it")
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
     from defender.runtime.branch._family import FamilyError
 
     if ns.update_ticket:
@@ -808,7 +808,7 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
     if ns.episode is None:
         return None
     from defender.episodes._episode_handle import EpisodeRefused
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     try:
         return accepted.runs_repository().episode(ns.episode, require_roster=True)

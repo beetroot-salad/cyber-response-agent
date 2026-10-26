@@ -15,12 +15,12 @@ from pydantic_ai.exceptions import ModelRetry
 from defender import box as box_mod
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
-from ..agent_role import AgentRole
+from defender._agent_role import AgentRole
 from ..run_state import run_state_of
 
 from defender._untrusted import wrap_fresh
 from defender.configuration._env import FatalConfigError
-from defender.integrations.faults import USAGE_EXIT_CODE
+from defender.kit.faults import USAGE_EXIT_CODE
 from defender.runtime.sql_engine import sql as defender_sql
 from defender.runtime import record_query
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID

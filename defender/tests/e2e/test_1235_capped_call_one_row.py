@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.query_tool import QueryCapture  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402

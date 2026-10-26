@@ -35,7 +35,7 @@ from defender.records._run_id import refuse_bad_case_id
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
-#: The run's provenance stamp. Shared with `presentation/workspace_map`, which hides it from the
+#: The run's provenance stamp. Shared with `runtime/workspace_map`, which hides it from the
 #: model-facing directory view; an independent spelling would stop hiding it after a rename.
 PROVENANCE = "provenance.json"
 

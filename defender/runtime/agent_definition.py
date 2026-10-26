@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 from defender._paths import PATHS
 
-from .agent_role import AgentRole
+from defender._agent_role import AgentRole
 from .permission import AgentPolicy, require_anchor_root
 from .permission.grant import Grant, PathShapes
 from .verb_grant import DENY_ALL, GrantError, VerbGrant
-from .model_view import ModelView, RootPairs
+from defender._model_view import ModelView, RootPairs
 
 if TYPE_CHECKING:
     from .tools import AgentDeps

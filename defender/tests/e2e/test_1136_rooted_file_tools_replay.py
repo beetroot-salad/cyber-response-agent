@@ -9,7 +9,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 
 pytest.importorskip("pydantic_ai")
 
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     Turn,

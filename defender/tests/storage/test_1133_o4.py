@@ -256,7 +256,7 @@ def _fds_on_episode(primed: Primed) -> list[int]:
 
 def _source(src: Path) -> Any:
     """The source run the launcher primes from, as the launcher holds it (a `Run`)."""
-    from defender.run_repository import Run
+    from defender.records import Run
 
     return Run.at(src)
 

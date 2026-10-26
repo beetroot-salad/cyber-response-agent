@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.invlang.validation import _invlang_warn_836 as W836
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
@@ -274,7 +274,7 @@ def _pre_trip(system: str = "elastic") -> Callable[[Path], None]:
 
 def _config_fault() -> BaseException:
     """A missing elastic config faults before reaching the backend."""
-    return S.sym("integrations.faults", "ConfigFault")(
+    return S.sym("kit.faults", "ConfigFault")(
         "config file not found: the tenant's settings/systems/elastic/config.env - this "
         "tenant's settings do not configure this system")
 

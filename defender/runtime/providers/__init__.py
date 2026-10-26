@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from ..agent_role import AgentRole
+from defender._agent_role import AgentRole
 from .anthropic import AnthropicProvider
 from .base import BuiltModel, Provider
 from .openai_compat import OpenAICompatProvider

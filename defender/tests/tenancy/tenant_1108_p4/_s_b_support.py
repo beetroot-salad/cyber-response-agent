@@ -281,7 +281,7 @@ class Launch:
 
 
 def read_stamp(run_dir: Path) -> dict[str, Any] | None:
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     path = RunPaths(run_dir).provenance
     if not path.is_file():
@@ -359,7 +359,7 @@ STAMP_SOURCE_KEYS = frozenset({"kind", "commit", "stale_kind"})
 
 
 def host_record_path(run_dir: Path) -> Path:
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     return Path(RunPaths(run_dir).knowledge_source())
 

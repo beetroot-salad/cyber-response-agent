@@ -287,7 +287,7 @@ def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tm
     drafts = batch.draft_root.parent.parent  # amendment A / U9: <T>/drafts/<id>/stage
     request = replace(batch.box_request(), spec=_PINNED)
     if fault == "code-check-missing":
-        from defender.runtime.model_view import ModelView
+        from defender._model_view import ModelView
 
         code = tmp_path / "code-without-check"
         code.mkdir()
@@ -896,7 +896,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
 
 
 def _with_code_at(request, source: Path):
-    from defender.runtime.model_view import ModelView
+    from defender._model_view import ModelView
 
     draft = request.view.to_host("/draft")
     assert draft is not None

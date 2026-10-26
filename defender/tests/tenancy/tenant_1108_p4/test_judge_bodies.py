@@ -80,7 +80,7 @@ class ProductRepo:
 
     def __call__(self, cwd, rev: str, path: str):
         from defender import _git
-        from defender.run_common import REPO_ROOT
+        from defender._git import REPO_ROOT
 
         self.asked.append((Path(cwd), rev, path))
         root = self.path if Path(cwd).resolve() == Path(REPO_ROOT).resolve() else Path(cwd)
@@ -177,7 +177,7 @@ def test_o6_a_pre_move_run_is_judged_on_the_product_tree_at_its_code_commit(scen
     a regression guard for P4.)"""
     _stamp(scene, code=scene.product.pre, knowledge={"commit": scene.k1})
     _only(_shown(scene), PRODUCT)
-    from defender.run_common import REPO_ROOT
+    from defender._git import REPO_ROOT
 
     assert (Path(REPO_ROOT).resolve(), scene.product.pre, PRODUCT_PATH) in [
         (c.resolve(), r, p) for c, r, p in scene.product.asked], (

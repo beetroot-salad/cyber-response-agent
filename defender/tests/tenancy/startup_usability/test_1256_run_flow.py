@@ -23,7 +23,7 @@ from defender.integrations import (  # noqa: E402
     identity_adapter,
     threat_intel_adapter,
 )
-from defender.integrations.faults import ConfigFault, TransportFault  # noqa: E402
+from defender.kit.faults import ConfigFault, TransportFault  # noqa: E402
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as R  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,

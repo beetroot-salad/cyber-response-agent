@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime.lead_zero import CORRELATION_HEADING  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.learning.branch._branch_947 import spec_at  # noqa: E402

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
-from defender.run_repository import Run
+from defender.records import Run
 
 import json
 import os

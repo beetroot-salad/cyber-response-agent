@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 import re
 from pathlib import Path
 

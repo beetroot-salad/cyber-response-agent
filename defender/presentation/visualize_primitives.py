@@ -20,7 +20,7 @@ ASSETS = Path(__file__).resolve().parent / "assets"
 CSS = read_text_utf8(ASSETS / "styles.css")
 
 from defender.records._report import ReportRead, read_report  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 
 
 

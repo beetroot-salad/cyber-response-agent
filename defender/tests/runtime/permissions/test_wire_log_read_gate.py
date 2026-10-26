@@ -10,13 +10,13 @@ pytest.importorskip("pydantic_ai")
 
 from defender.agents import CORPUS_AUTHOR_DEF, MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
-from defender.run_repository import WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: E402
+from defender.records import WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
     compile_policy_for,
 )
-from defender.presentation import workspace_map as wsm  # noqa: E402
+from defender.runtime import workspace_map as wsm  # noqa: E402
 
 READERS = ("main", "gather")
 

@@ -22,7 +22,7 @@ from defender.records import _alert_input
 from defender.records import _provenance
 from defender.tenancy import _tenant  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
-from defender.run_repository import (  # noqa: E402
+from defender.records import (  # noqa: E402
     RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest, sidecar_names,
 )
 from defender.presentation._page_failed import VisualizeFailed  # noqa: E402

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from defender.box._output import BoxOutputLimitExceeded
 from defender._io import read_text_utf8
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker, providers, run_end, system_status
@@ -298,7 +298,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
     if down is not None:
         return CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system=system)
 
-    from ..agent_role import GATHER_AGENT_ID_PREFIX
+    from defender._agent_role import GATHER_AGENT_ID_PREFIX
 
     session_id: str | None = None
     if store is not None:

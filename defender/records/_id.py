@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any, NoReturn
 
 from defender.records._run_id import mint_uuid, run_id_fault
-from defender.run_repository._errors import RunRefused
+from defender.records._errors import RunRefused
 
 def _admit(text: str) -> str:
     """`text` if it is a run id `RunId` admits (`run_id_fault`), else `RunRefused`. `text` is

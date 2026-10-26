@@ -61,7 +61,7 @@ Read the doc you need; don't duplicate it into what you scaffold.
 - `defender/docs/system-skill-shape.md` — the per-system `SKILL.md` /
   `execution.md` split and its fields.
 - `defender/skills/gather/query-schema.md` — the query-template format.
-- `defender/integrations/faults.py` + `defender/runtime/verbs.py` — the
+- `defender/kit/faults.py` + `defender/kit/verbs.py` — the
   fault taxonomy and the `VerbContext` / `VERBS` contract an adapter implements.
 - `defender/skills/handbook/` — runtime loop and run-dir reference, on demand.
 

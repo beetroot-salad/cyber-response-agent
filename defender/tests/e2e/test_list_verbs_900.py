@@ -28,12 +28,10 @@ from defender.runtime.verbs import (  # noqa: E402
     VerbContext,
     VerbRegistry,
     _resolved_hints,
-    declared_params,
     is_system_name,
-    model_facing_params,
     validate_params,
-    wrapper_only_params,
 )
+from defender.kit.verbs import declared_params, model_facing_params, wrapper_only_params
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,

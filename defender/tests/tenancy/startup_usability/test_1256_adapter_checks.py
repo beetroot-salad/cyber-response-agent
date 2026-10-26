@@ -12,8 +12,8 @@ from typing import Any
 import pytest
 
 from defender._io import read_jsonl_rows
-from defender.runtime.tenant_settings import NOT_CONFIGURED, SystemConfig
-from defender.integrations.faults import ConfigFault
+from defender.kit.settings import NOT_CONFIGURED, SystemConfig
+from defender.kit.faults import ConfigFault
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
@@ -344,7 +344,7 @@ def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
     elif system == "host-state":
         # Another adapter fault, its text pointing under the data root outside the tenant's own
         # folder (`outside`): a host path no settings-path redaction rewrites.
-        head.append("from defender.integrations.faults import TransportFault")
+        head.append("from defender.kit.faults import TransportFault")
         declared = ["def check_settings(*_a, **_k):",
                     f"    raise TransportFault({spec['token']!r} + ': see ' + {str(outside)!r})"]
     body = [

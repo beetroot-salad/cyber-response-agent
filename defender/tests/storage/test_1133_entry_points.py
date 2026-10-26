@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 from defender.episodes._episode_paths import LAYOUT
-from defender.run_repository import WIRE_LOG_NAMES
+from defender.records import WIRE_LOG_NAMES
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T

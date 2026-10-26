@@ -13,7 +13,7 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run
 import json
 from pathlib import Path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 import pytest
 
@@ -74,7 +74,7 @@ def _repository_refusal(root: Path, run_id: str, tenant_id: str = TID) -> BaseEx
     (#1105 PR 2). The replacement for `tenant_of_run_dir`'s location refusal (F-13): a run that
     is not at `<root>/<T>/runs/<run_id>` is not T's to fork."""
     from defender.tenancy._tenant import TenantRefused
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     with pytest.raises((RunRefused, TenantRefused)) as refused:
         H.accept(root, tenant_id).runs_repository().open(RunId.parse(run_id))
@@ -84,7 +84,7 @@ def _repository_refusal(root: Path, run_id: str, tenant_id: str = TID) -> BaseEx
 def _opens_as(root: Path, run_id: str, tenant_id: str = TID) -> str:
     """The tenant a run opened by id through `tenant_id`'s repository under `root` is addressed
     to — the replacement for `tenant_of_run_dir(...) == T` (F-13)."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return H.accept(root, tenant_id).runs_repository().open(RunId.parse(run_id)).tenant_id
 

@@ -6,7 +6,7 @@ import json
 import sys
 
 from defender._io import NotPlainEntry
-from defender.run_repository import LEAD_ID_RE, Run, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
+from defender.records import LEAD_ID_RE, Run, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
 
 #: `claim_lead`'s answers. Success must be distinguishable from "nothing was written": the
 #: sidecar's `O_EXCL` create is the only id-reuse gate, so dispatching without a row would let

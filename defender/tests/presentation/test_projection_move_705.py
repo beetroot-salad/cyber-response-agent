@@ -19,7 +19,7 @@ import pytest
 from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender.configuration._pricing import usage_cost
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.storage._session_store_705 import (
     crafted_html_payload,
     jsonl,
@@ -184,7 +184,7 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     runs = current_data_root() / tenant / "runs"
     runs.mkdir(exist_ok=True)
     # #1235 F2: the run -> case link is a sidecar beside the run folder, so the move carries it.
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     moved = runs / run_dir.name
     shutil.move(RunPaths(run_dir).session_pointer(), RunPaths(moved).session_pointer())
     return tenant, Path(shutil.move(run_dir, moved))

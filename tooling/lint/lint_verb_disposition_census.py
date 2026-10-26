@@ -33,11 +33,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender.tenancy import _tenant  # noqa: E402
-from defender.tenancy._tenant_census import (  # noqa: E402
-    CensusUnavailable,
-    table_findings,
-    take_census,
-)
+from defender.cli._tenant_census import CensusUnavailable, table_findings, take_census  # noqa: E402
 from defender.tenancy._tenants import SETTINGS_HALF, template_dir  # noqa: E402
 from defender.runtime.verb_dispositions import (  # noqa: E402
     DispositionError,

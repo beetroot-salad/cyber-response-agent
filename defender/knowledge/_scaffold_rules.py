@@ -24,15 +24,8 @@ from defender._io import Bound, RecordRead, bind
 from defender._model import model
 from defender._paths import adapters_under
 from defender.runtime.verb_grant import DENY_ALL
-from defender.runtime.verbs import (
-    ModuleVerbRegistry,
-    RegistryError,
-    Verb,
-    engine_of,
-    model_facing_params,
-    read_roster,
-    wrapper_only_params,
-)
+from defender.runtime.verbs import ModuleVerbRegistry, RegistryError, read_roster
+from defender.kit.verbs import Verb, engine_of, model_facing_params, wrapper_only_params
 
 #: The checked placeholder grammar, as `SCHEMA.md` documents it. The bare `{name}` form
 #: `lead_render` also substitutes is not checked: query-language bodies carry braces of their

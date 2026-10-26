@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.invlang.validation._invlang_warn_836 import (  # noqa: E402
     PROLOGUE,

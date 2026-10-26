@@ -31,7 +31,7 @@ from defender.tests.support.storage._session_store_705 import (
     tool_return_request,
     user_request,
 )
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 
 
 # the handle, the connection, the schema version
