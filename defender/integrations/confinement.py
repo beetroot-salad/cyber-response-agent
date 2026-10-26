@@ -18,7 +18,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
-from defender.integrations.faults import AdapterFault
+from defender.kit.faults import AdapterFault
 
 
 class ConfinementFault(AdapterFault):

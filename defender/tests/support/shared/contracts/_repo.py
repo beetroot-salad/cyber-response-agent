@@ -116,7 +116,7 @@ def seed_repo(
 _WAZUH_ADAPTER = '''\
 from __future__ import annotations
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 
 
 @verb()

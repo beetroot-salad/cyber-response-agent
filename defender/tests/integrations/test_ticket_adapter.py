@@ -9,7 +9,7 @@ import pytest
 from defender.runtime.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.integrations import ticket_adapter
-from defender.integrations.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
@@ -172,7 +172,7 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key,
 
 
 def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
 
     seen = {}
 

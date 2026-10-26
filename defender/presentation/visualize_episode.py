@@ -18,7 +18,7 @@ from defender.tenancy._tenant import TenantRefused, requested_tenant, resolve_da
 from defender.episodes._episode_handle import Episode, EpisodeRefused
 from defender._io import Bound
 from defender.episodes._episode_paths import LAYOUT, EpisodePaths
-from defender.run_repository import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
+from defender.records import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
 from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import timing as timing_mod
@@ -46,7 +46,7 @@ from defender.presentation.visualize_primitives import (
 )
 
 if TYPE_CHECKING:
-    from defender.run_repository import EpisodeRuns, Run, RunId, RunsRepository
+    from defender.records import EpisodeRuns, Run, RunId, RunsRepository
 
 from defender.presentation.episode_verdict import (
     EPISODE_CSS as EPISODE_CSS,

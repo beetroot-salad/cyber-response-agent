@@ -14,7 +14,7 @@ import pytest
 from defender import _git
 from defender.records import _provenance  # type: ignore[import-not-found]
 from defender.records._provenance import RunProvenance  # type: ignore[import-not-found]
-from defender.run_repository import PROVENANCE, RunPaths  # type: ignore[import-not-found]
+from defender.records import PROVENANCE, RunPaths  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._repo import seed_repo  # type: ignore[import-not-found]
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from defender._clock import parse_iso_utc
 
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.runtime.run_state import RunState

@@ -8,7 +8,7 @@ import subprocess
 import urllib.parse
 from typing import TYPE_CHECKING, Any
 
-from defender.runtime.tenant_settings import (
+from defender.kit.settings import (
     DOCKER_EXEC,
     NOT_CONFIGURED,
     SystemConfig,
@@ -16,17 +16,12 @@ from defender.runtime.tenant_settings import (
     is_blank,
     system_prefix,
 )
-from defender.runtime.verbs import VerbContext
+from defender.kit.verbs import VerbContext
 from defender.integrations.confinement import guard_outbound
-from defender.integrations.faults import (
-    USAGE_EXIT_CODE,
-    ConfigFault,
-    TransportFault,
-    UpstreamFault,
-)
+from defender.kit.faults import USAGE_EXIT_CODE, ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.run_tenant import RunTenant
+    from defender.kit.verbs import TenantRecord
 
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
@@ -58,7 +53,7 @@ def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
     return record_entry(ctx.tenant, system)
 
 
-def record_entry(tenant: RunTenant, system: str) -> SystemConfig:
+def record_entry(tenant: TenantRecord, system: str) -> SystemConfig:
     """`system`'s `config.env` as the RUN's record holds it (parsed once at resolve), or the
     `ConfigFault` for why there is none: a folder with no usable file keeps its own fault, and a
     system with no folder gets "this tenant's settings do not configure this system". A fresh
@@ -79,7 +74,7 @@ def access_context(ctx: VerbContext, system: str) -> str:
     return record_access_context(ctx.tenant, system)
 
 
-def record_access_context(tenant: RunTenant, system: str) -> str:
+def record_access_context(tenant: TenantRecord, system: str) -> str:
     """The docker context `system` is reached on — its `<PREFIX>_DOCKER_CONTEXT` — or
     `ConfigFault` (that system is not configured for this run: down from its start, #1256).
     THE ONE CHECK of how a system is reached (D2): `<PREFIX>_TRANSPORT` must be `docker-exec`
@@ -128,7 +123,7 @@ def load_config(
 
 
 def record_config(
-    tenant: RunTenant, system: str, prefix: str,
+    tenant: TenantRecord, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
     """`system`'s settings from the run's record: its `config.env`, prefix stripped."""
@@ -153,7 +148,7 @@ def record_config(
 
 
 def check_docker_curl_settings(
-    tenant: RunTenant, system: str, prefix: str,
+    tenant: TenantRecord, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> None:
     """The settings check of an adapter whose verbs load their config (`load_config`) and then

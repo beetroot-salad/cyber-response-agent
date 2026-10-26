@@ -181,7 +181,7 @@ def _old_entry(runs: Path, kind: str) -> str:
 @pytest.mark.parametrize("consumer", ["listing", "tracer"])
 def test_legacy_entry_refuses_before_serving_then_its_removal_restores_service(
         kind, consumer, data_root, tmp_path):
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     tenant = S.tenant(data_root, T)
     runs = S.natural_runs(data_root, T)

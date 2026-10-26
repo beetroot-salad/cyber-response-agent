@@ -55,7 +55,7 @@ def test_every_record_location_is_rejected_without_receiver_tracking():
 
 @pytest.mark.parametrize("source", [
     "from defender.tenancy._tenant import _unwrap_data_root as raw\ndef f(value):\n    return raw(value)\n",
-    "import defender.run_repository._layout as layout\ndef f(path):\n    return layout.RunsBase(path)\n",
+    "import defender.records._layout as layout\ndef f(path):\n    return layout.RunsBase(path)\n",
     "from defender.records._locations import _unwrap_learning_root as raw\ndef f(value):\n    return raw(value)\n",
     "from defender.records import _locations as loc\ndef f(value):\n    convert = loc._unwrap_learning_root\n    return convert(value)\n",
     "def f(value):\n    return value._record_location_path\n",
@@ -107,7 +107,7 @@ def test_all_declared_storage_boundaries_have_narrow_permissions():
 
 
 def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     tenant = set_up_tenant(tmp_path / "data")
     expected = {
@@ -127,7 +127,7 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
     with tenant.runs_repository().create_episode() as episode:
         assert isinstance(episode._folder, L.RunsBase)
     from defender import _io
-    from defender.run_repository._held import plan_retire
+    from defender.records._held import plan_retire
 
     with plan_retire(tenant, tmp_path / "external-archive", io=_io) as plan:
         assert isinstance(plan.lanes[0].source_path, L.RunsBase)

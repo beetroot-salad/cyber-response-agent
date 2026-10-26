@@ -16,8 +16,8 @@ from defender.learning.core.config import (
     StageWiring,
 )
 from defender.runtime import observe, providers
-from defender.runtime.agent_role import AgentRole
-from defender.runtime.model_view import ModelView
+from defender._agent_role import AgentRole
+from defender._model_view import ModelView
 from defender.runtime.driver import MakeModel, build_agent_core
 
 from pydantic_ai import Agent

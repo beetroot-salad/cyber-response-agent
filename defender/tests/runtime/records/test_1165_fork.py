@@ -162,7 +162,7 @@ def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_it
 
 @pytest.mark.parametrize("fault", [False, True])
 def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup(tmp_path, fault):
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.tests.support.runtime.state import _1255_snapshot as S
 
     driven = S.drive_source(tmp_path, (S.append(S.chunks(3)[0]), S.echo("x"), S.done()))

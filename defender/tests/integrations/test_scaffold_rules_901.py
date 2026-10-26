@@ -216,7 +216,7 @@ def test_the_resolver_answers_about_the_tree_it_was_handed(tmp_path):
     adapters.mkdir(parents=True)
     (adapters / "cmdb_adapter.py").write_text(
         "from __future__ import annotations\n"
-        "from defender.runtime.verbs import VerbContext, verb\n"
+        "from defender.kit.verbs import VerbContext, verb\n"
         "@verb()\n"
         "def only_here(ctx: VerbContext, *, x: str = '') -> dict:\n    return {}\n"
         "VERBS = {'only-here': only_here}\n"

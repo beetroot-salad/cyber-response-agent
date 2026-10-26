@@ -118,7 +118,7 @@ def test_gate_flags_a_literal_free_join_onto_an_owner_derived_value(tmp_path: Pa
     found = S.gate_findings(tmp_path, "runtime/record_query.py", '''
 from pathlib import Path
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 
 def direct(run_dir: Path, lead_id: str) -> Path:

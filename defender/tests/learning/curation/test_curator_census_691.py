@@ -12,7 +12,7 @@ from defender.tests.support.learning.curation._curator_691_harness import (  # n
 )
 
 from defender.agents import AGENTS  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     AgentDefinition,
     ToolSet,

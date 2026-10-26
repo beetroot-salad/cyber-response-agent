@@ -12,7 +12,7 @@ import pytest
 
 from defender.episodes._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 

@@ -82,7 +82,7 @@ def _main_deps_over_run_copy(tmp_path: Path) -> tuple[Any, Path]:
     from dataclasses import replace
 
     from defender.agents import MAIN_DEF
-    from defender.run_repository import Run
+    from defender.records import Run
     from defender.runtime.agent_definition import RunScope, bind
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.shared._locations_1210 import fixture_runs_base

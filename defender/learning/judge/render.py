@@ -49,7 +49,7 @@ from defender.learning.judge.calls import (
     ledger_partner,
 )
 from defender.learning.judge.runs import RunSet, read_run_set
-from defender.run_common import REPO_ROOT
+from defender._git import REPO_ROOT
 from defender.runtime.branch._family import world_id_for, parse_family
 
 #: The frame tag every model-authored body in the judge's prompt is wrapped in — the

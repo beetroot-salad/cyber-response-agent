@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from defender.records._alert_input import AlertReplaced
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.runtime import orient
 from defender.tests.support.storage._alert_plant import plant_alert
 

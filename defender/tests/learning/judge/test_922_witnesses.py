@@ -14,7 +14,7 @@ from defender.runtime.agent_definition import (
     compile_policy,
     effective_tools_for,
 )
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 from defender.runtime.tools import _tool_read_file
 from defender.runtime.verb_grant import GrantError
 from defender.tests.support.learning.judge import _judge_921 as J

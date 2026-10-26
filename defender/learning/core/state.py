@@ -36,7 +36,7 @@ from defender._io import (
 from defender.learning.core.config import DrainLabel
 
 if TYPE_CHECKING:
-    from defender.run_repository import RunAddress
+    from defender.records import RunAddress
     from defender.learning.core.config import LoopPaths
 
 _logger = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ def _address_fault(spec: dict) -> str | None:
     not a string, or off its grammar — or `None` when they can. The shape alone: no tenant
     folder is read (#1105 D-stored)."""
     from defender.tenancy._tenant import TenantRefused
-    from defender.run_repository import RunAddress, RunRefused
+    from defender.records import RunAddress, RunRefused
 
     for key in ("tenant_id", "run_id"):
         if not isinstance(spec.get(key), str):
@@ -208,7 +208,7 @@ class Claimed:
         """The run the request is about, as the row stores it (#1105 D-stored): its tenant and
         run id, checked on their grammars when the claim admitted the row. The drain accepts
         the tenant and opens the run through its repository."""
-        from defender.run_repository import RunAddress
+        from defender.records import RunAddress
 
         return RunAddress(self.spec["tenant_id"], self.spec["run_id"])
 

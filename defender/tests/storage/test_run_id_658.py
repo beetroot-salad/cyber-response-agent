@@ -6,7 +6,7 @@ import pytest
 
 from defender import run_common
 from defender.records._run_id import is_valid_run_id
-from defender.run_repository import RunId, RunPaths
+from defender.records import RunId, RunPaths
 from defender.box import container_name
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 from defender.tests.storage.ids_1187 import _spec1187 as S

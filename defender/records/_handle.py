@@ -17,9 +17,9 @@ from defender.episodes import _episode_paths
 from defender.records import _provenance
 from defender.records import _report
 from defender import _io as _real_io
-from defender.run_repository import _layout
-from defender.run_repository._id import RunId
-from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
+from defender.records import _layout
+from defender.records._id import RunId
+from defender.records._layout import RUN_LAYOUT, RunPaths, SessionPaths
 
 #: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")

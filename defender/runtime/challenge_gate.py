@@ -13,7 +13,7 @@ from typing import Any
 
 from defender.configuration._env import env_int
 from defender._model import model
-from defender.run_repository import Run
+from defender.records import Run
 from defender.runtime.providers import ProviderDown
 from defender.runtime.tools._deps import run_of
 from defender._untrusted import wrap_fresh

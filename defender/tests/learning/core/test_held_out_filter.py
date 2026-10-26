@@ -117,7 +117,7 @@ def test_symlink_cannot_walk_out_of_the_held_out_set(tmp_path: Path) -> None:
 def test_net_is_narrow(tmp_path: Path) -> None:
     """Control: the refusal is scoped to the held-out set."""
     assert run_common.is_held_out_fixture(tmp_path / "alert.json") is False
-    ordinary = (run_common.REPO_ROOT / "playground-v2" / "examples" / "alerts" / "v2-sshd-success-after-failures" / "alert.json")
+    ordinary = (run_common.REPO_ROOT / "defender" / "tests" / "fixtures" / "kibana_alerts" / "v2-sshd-success-after-failures" / "alert.json")
     assert ordinary.is_file(), "control must point at a real non-held-out fixture"
     assert run_common.is_held_out_fixture(ordinary) is False
 

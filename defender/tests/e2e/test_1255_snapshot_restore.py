@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime import challenge_gate  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.close_tool import (  # noqa: E402
@@ -20,7 +20,7 @@ from defender.runtime.close_tool import (  # noqa: E402
 )
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
-from defender.integrations.faults import TransportFault  # noqa: E402
+from defender.kit.faults import TransportFault  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.tenancy import _tenants1106
@@ -564,7 +564,7 @@ def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_
 def test_d2_a_call_time_configuration_fault_stays_down_after_the_fork(tmp_path):
     from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
 
-    from defender.integrations.faults import ConfigFault
+    from defender.kit.faults import ConfigFault
 
     reason = "FORK1255_REQUIRED_FEED_KEY"
     source_calls = []

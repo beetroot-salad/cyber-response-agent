@@ -453,7 +453,7 @@ def test_m1_a_real_denial_inside_a_dispatched_lead_is_that_leads_sentinel_row(tm
 
 def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     from defender._io import read_jsonl_rows
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
     from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
     from defender.runtime.run_state import RunState
 

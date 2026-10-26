@@ -11,8 +11,8 @@ from typing import Any
 
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.ledger import payload_text
-from defender.learning.branch.redaction import redact_model_visible
-from defender.runtime.agent_role import AgentRole
+from defender._redaction import redact_model_visible
+from defender._agent_role import AgentRole
 
 #: The frame tag every payload reaches the prompt inside. `wrap_fresh` mints a salt per frame, so
 #: a frame's delimiter cannot already occur in its own body.

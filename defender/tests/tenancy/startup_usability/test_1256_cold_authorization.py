@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from defender._io import read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.runtime import circuit_breaker
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, Turn, drive, materialize

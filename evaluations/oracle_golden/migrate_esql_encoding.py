@@ -14,7 +14,7 @@ migrate is untouched). It is idempotent.
 Payloads are found by shape (a dict carrying `query`, `columns`, `row_count` and
 `values`), never by a list of known positions, so a payload in a new position is not
 missed. The guard that keeps the corpus positional is
-`tests/evals/test_controls.py::test_the_corpus_speaks_the_SAME_esql_encoding_production_does`.
+`evaluations/tests/test_controls.py::test_the_corpus_speaks_the_SAME_esql_encoding_production_does`.
 
 Usage:
   python evaluations/oracle_golden/migrate_esql_encoding.py [--cases-dir DIR]

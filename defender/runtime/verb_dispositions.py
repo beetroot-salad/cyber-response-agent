@@ -8,7 +8,7 @@ from defender._model import model
 from pathlib import Path
 
 from defender import _yaml
-from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER, AgentRole
+from defender._agent_role import CORRELATION_GRANT_HOLDER, AgentRole
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import is_system_name
 

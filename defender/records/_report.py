@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from defender.run_repository import RecordHandle
+    from defender.records import RecordHandle
 
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_text_soft
 from defender._model import model

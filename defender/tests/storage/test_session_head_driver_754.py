@@ -28,7 +28,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
-from defender.run_repository import SessionPaths  # noqa: E402
+from defender.records import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

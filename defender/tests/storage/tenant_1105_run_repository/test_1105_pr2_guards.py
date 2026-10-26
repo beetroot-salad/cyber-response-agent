@@ -103,7 +103,7 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
         tmp_path):
     import json
 
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     est, src = P.launch_source(tmp_path)
     beta = P.second_tenant(location_path(P.data_root)(), H.U_ID)

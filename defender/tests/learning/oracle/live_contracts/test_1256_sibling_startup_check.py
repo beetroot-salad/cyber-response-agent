@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.run_repository import RunPaths  # noqa: E402
-from defender.run_repository import Run  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
+from defender.records import Run  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402

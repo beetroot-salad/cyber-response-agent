@@ -14,7 +14,7 @@ import pytest
 
 from defender.episodes._episode_handle import Episode
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender.execution import bash_exec
 from defender import box as box_mod
 from defender.box import BoxFault, BoxSpec

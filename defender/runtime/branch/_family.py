@@ -26,7 +26,7 @@ from defender._vocab import (
     HOST_ONLY_DISPOSITION,
     normalized_disposition,
 )
-from defender.run_repository import RunId
+from defender.records import RunId
 from defender.runtime.verbs import SYSTEM_MAX_LEN, is_system_name
 
 #: The base world's role: the control every other world is compared against. Exactly one world
@@ -476,7 +476,7 @@ def _parse_discriminator(raw: Any) -> dict:
 
 
 def _check_roster_capacity(world_count: int) -> None:
-    from defender.run_repository import RunRefused, check_arm_roster_capacity
+    from defender.records import RunRefused, check_arm_roster_capacity
 
     try:
         check_arm_roster_capacity(world_count)

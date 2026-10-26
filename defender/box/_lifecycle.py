@@ -19,7 +19,7 @@ from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_s
 from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.tenancy._tenant import TenantId
 from defender.configuration import publish_root
-from defender.run_repository import RUN_LAYOUT
+from defender.records import RUN_LAYOUT
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
     _BOX_MARK_ENV,
@@ -36,7 +36,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
     write_did_not_run,
 )
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
-from defender.runtime.model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
+from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
 from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock

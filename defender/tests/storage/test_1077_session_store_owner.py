@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.run_repository import RunPaths, SessionPaths
+from defender.records import RunPaths, SessionPaths
 from defender.runtime.session_store._write import CASE_ID_RE, InvalidCaseId, StoreError, open_store, store_path_for
 from defender.tests.e2e import _replay_harness as replay
 

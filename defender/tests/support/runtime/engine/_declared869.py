@@ -331,7 +331,7 @@ def seed_executed_query(
     the time. Seeding through that function rather than by hand is what keeps this fixture a
     real historical row instead of the test's own idea of one."""
     from defender._io import read_jsonl_rows
-    from defender.run_repository import Run, RunPaths
+    from defender.records import Run, RunPaths
     from defender.runtime.run_state import RunState
     from defender.runtime.record_query import append_query_row
 

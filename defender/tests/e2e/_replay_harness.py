@@ -25,7 +25,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender.records import _provenance  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import Run, RunPaths  # noqa: E402
+from defender.records import Run, RunPaths  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402

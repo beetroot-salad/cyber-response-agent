@@ -84,7 +84,7 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
 def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
     """O5: the row's `role` is the deps' `AgentRole` value for EVERY role, not "gather or else main"."""
     from defender.learning.author.lesson_read import _tool_lesson_read
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
     from defender.tests.support.learning.curation._curator_scene import curator_deps, curator_scene
 
     scene = curator_scene(tmp_path)
@@ -94,7 +94,7 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
     (corpus / "curated-936.md").write_text(
         "---\nname: curated-936\n---\nlesson body\n", encoding="utf-8")
     # This telemetry case explicitly supplies a record owner; ordinary curators need none.
-    from defender.run_repository import Run
+    from defender.records import Run
 
     deps = curator_deps(scene, corpus=corpus)
     deps = _with_live_run_1165(deps, run=Run.at(deps.run_dir))

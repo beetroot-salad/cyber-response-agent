@@ -11,7 +11,7 @@ from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
 from defender.knowledge._knowledge import KnowledgePaths
 from defender._untrusted import wrap_fresh
-from defender.runtime.model_view import MODEL_AGENT, ModelView
+from defender._model_view import MODEL_AGENT, ModelView
 from defender.runtime.system_status import NONE_DOWN
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
@@ -229,7 +229,7 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
         sections.append(lead_zero_section)
 
     try:
-        from defender.presentation.workspace_map import workspace_map
+        from defender.runtime.workspace_map import workspace_map
         sections.append(
             "## Workspace\n" + workspace_map(run_dir, systems=systems, view=view, down=down).strip())
     except Exception as e:  # noqa: BLE001 — orientation must never break the run

@@ -200,7 +200,7 @@ def _writes(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_episodes(
         box_session):
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     s = box_session
     assert str(uuid.UUID(RUN_ID)) == RUN_ID, "the run uses the canonical UUID contract"
@@ -226,7 +226,7 @@ def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_
 
 def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record_episodes_or_a_sibling(
         box_session):
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     s = box_session
     assert s["sandboxed"] is True, (

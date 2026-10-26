@@ -102,7 +102,7 @@ def host_record_path(run_dir: Path) -> Path:
     run's id, like the ticket receipt (`RunPaths.ticket_write`, `<run_id>.ticket-write.json`).
     ASSUMED SEAM (reported): `RunPaths(run_dir).knowledge_source(runs_base=None)` ->
     `<runs base>/<run_id>.knowledge-source.json`, JSON `{kind, commit, stale_kind?, reason}`."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     return Path(RunPaths(run_dir).knowledge_source())
 
@@ -124,7 +124,7 @@ def stamp_knowledge_source(run_dir: Path, source: dict[str, Any] | None) -> None
     """Write `source` as the `knowledge_source` field of the run's provenance stamp, keeping every
     other field; `None` removes it. The stamp sits in the box's rw bind (OD17: informational,
     authoritative for no reader), so the tests use this to play the BOX rewriting it."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     path = RunPaths(run_dir).provenance
     stamp = (json.loads(path.read_text(encoding="utf-8")) if path.is_file()
@@ -378,8 +378,8 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     `lifecycle`/`preflight`/`enqueue` recorders."""
     from functools import partial
 
-    from defender.integrations import ticket_writer
-    from defender.run_repository import RunPaths
+    from defender.runtime import ticket_writer
+    from defender.records import RunPaths
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
@@ -464,7 +464,7 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     naming no commit and using neither kind's words."""
     from functools import partial
 
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
     from defender import run as run_py
@@ -509,7 +509,7 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
     from functools import partial
 
     from defender import run as run_py
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 

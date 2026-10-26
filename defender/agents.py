@@ -6,7 +6,7 @@ from defender.learning.branch.questioner import QUESTIONER_DEF
 from defender.learning.judge_role import JUDGE_DEF
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
 from defender.runtime.agent_definition import AgentDefinition, build_registry
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF
 from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
 

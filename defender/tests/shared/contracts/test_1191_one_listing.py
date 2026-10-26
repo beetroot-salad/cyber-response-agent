@@ -364,14 +364,14 @@ def _layout_plant() -> str:
     """An import of a gated run-layout name — taken from the real door's layout universe."""
     name = sorted(load_lint_gate("lint_run_layout_imports",
                                  name="lint_run_layout_imports_1191").layout_names(DEFENDER))[0]
-    return f"from defender.run_repository import {name}\n"
+    return f"from defender.records import {name}\n"
 
 
 def _real_door() -> dict[str, str]:
     """The run-layout lint reads its layout universe from the swept tree: the real door's
     modules, copied."""
-    return {f"defender/run_repository/{src.name}": src.read_text(encoding="utf-8")
-            for src in sorted((DEFENDER / "run_repository").glob("*.py"))}
+    return {f"defender/records/{src.name}": src.read_text(encoding="utf-8")
+            for src in sorted((DEFENDER / "records").glob("*.py"))}
 
 
 @dataclass(frozen=True)
@@ -427,7 +427,7 @@ PLANTS: dict[str, Plant] = {
         "import json\n\n\ndef parse_1191(text: str) -> dict[str, int]:\n"
         "    return json.loads(text)\n",
         support=lambda: {"evaluations/inert_1191.py": ""}),
-    "lint_monkeypatch": Plant(MONKEYPATCH_PLANT),
+    "lint_monkeypatch": Plant(MONKEYPATCH_PLANT, support=lambda: {"evaluations/inert_1191.py": ""}),
     "lint_ungated_artifact_write": Plant(
         'def write_1191(d):\n    (d / "report.md").write_text("x", encoding="utf-8")\n'),
     "lint_unsafe_jsonl_io": Plant(JSONL_PLANT),

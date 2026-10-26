@@ -29,7 +29,7 @@ from .. import selection
 from ..request_ceiling import RequestCeiling, requests_so_far
 from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, ToolSet
-from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
+from defender._agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
 from .. import review_roles
 from ..close_tool import register_close_tool
@@ -45,7 +45,7 @@ from ..verb_grant import VerbGrant
 from ..verbs import ModuleVerbRegistry
 
 from defender._frontmatter import strip_frontmatter
-from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.records import RUN_LAYOUT, RunPaths
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS
 from ._prompts import DEFAULT_GATHER_MODEL, DEFAULT_MODEL, DEFAULT_TOOL_RETRIES, GATHER_REQUEST_LIMIT, _main_instructions, enforcement_enabled
 from ._budget import _make_hooks

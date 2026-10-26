@@ -26,7 +26,7 @@ def _no_episodes_variable(monkeypatch):
 # Local builders (pure filesystem over `_spec1187`) and observation helpers.
 
 def _rid(text: str):
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return RunId.parse(text)
 
@@ -34,7 +34,7 @@ def _rid(text: str):
 def _refusals():
     """The repository's two refusal classes (S-iso: a link refuses with either, naming the level)."""
     from defender.tenancy._tenant import TenantRefused
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     return (TenantRefused, RunRefused)
 
@@ -148,7 +148,7 @@ def test_a_container_with_no_record_opens_lists_and_hands_out_every_run(data_roo
 
 @pytest.mark.parametrize("entry", ["_tenant.json", "_episodes"])
 def test_the_listing_refuses_a_tenant_record_or_an_episodes_folder(data_root, entry):
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
 
     t = S.tenant(data_root, A_ID)
@@ -179,7 +179,7 @@ def test_the_listing_refuses_a_tenant_record_or_an_episodes_folder(data_root, en
 
 def test_an_arm_id_is_absent_from_the_natural_container_and_opens_through_its_episode(
         data_root):
-    from defender.run_repository import RunAbsent
+    from defender.records import RunAbsent
 
     a = _tenant_scene(data_root, A_ID)
     runs_dir = S.natural_runs(data_root, A_ID)
@@ -228,7 +228,7 @@ def _link_paths(root, scene):
 
 @pytest.mark.parametrize("level", ["runs", "episodes", "episode", "arms", "run", "arm"])
 def test_linked_repository_levels_refuse_and_restore(tmp_path, data_root, level):
-    from defender.run_repository import RunAbsent, RunRefused
+    from defender.records import RunAbsent, RunRefused
 
     a, b = _two_tenants(data_root)
     link, target = (_link_paths(data_root, scene)[level] for scene in (a, b))
@@ -307,7 +307,7 @@ def test_a_link_at_the_tenant_folder_is_refused_at_acceptance_and_the_real_folde
 
 def test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repository_door(
         tmp_path, data_root):
-    from defender.run_repository import RunAbsent
+    from defender.records import RunAbsent
 
     a, b = _two_tenants(data_root)
     link = S.tenant_dir(data_root, A_ID)
@@ -581,7 +581,7 @@ def test_two_episodes_get_two_fresh_uuid_folders_and_never_a_retry_suffix(data_r
 _CLAIM_CHILD = """
 import os, sys, uuid
 from pathlib import Path
-from defender.run_repository import RunRefused
+from defender.records import RunRefused
 from defender.tests.storage.ids_1187 import _spec1187 as S
 root, tenant_id, collide = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "collision"
 runs = S.tenant(root, tenant_id).runs_repository()
@@ -730,7 +730,7 @@ def test_another_tenants_episode_is_absent_to_this_tenants_repository(data_root)
 # R6 / declared change 13: no `_episodes` claim is read by `create`.
 
 def test_create_is_not_refused_by_an_episodes_claim_and_the_listing_refuses(data_root):
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
 
     t = S.tenant(data_root, A_ID)

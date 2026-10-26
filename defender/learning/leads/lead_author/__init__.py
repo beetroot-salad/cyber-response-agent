@@ -16,7 +16,7 @@ import string
 import sys
 from collections.abc import Callable, Mapping
 from defender._model import model
-from defender.run_repository import Run, RunPaths
+from defender.records import Run, RunPaths
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -564,7 +564,7 @@ def main(argv: list[str]) -> int:
                    help=f"the defender run, by its id — its folder holds "
                         f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
-    from defender.execution._command_line_run import open_command_line_run
+    from defender.tenancy._command_line_run import open_command_line_run
 
     # The request's tenant, accepted under the configured data root, and its run opened by id
     # through that tenant's repository (a link at the run's name is never followed). A refusal

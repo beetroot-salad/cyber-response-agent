@@ -16,13 +16,13 @@ else:
 from defender._paths import PATHS
 
 
-from defender.run_repository import Run
+from defender.records import Run
 from defender import box as box_mod
 from ..run_state import RunState, run_time_iso
 from .. import permission
 from ..agent_definition import ResolvedRoots
-from ..agent_role import AgentRole
-from ..model_view import ModelView
+from defender._agent_role import AgentRole
+from defender._model_view import ModelView
 
 from defender.configuration._env import env_int
 from defender.knowledge._knowledge import KnowledgePaths

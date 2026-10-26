@@ -25,7 +25,7 @@ from defender.integrations.confinement import (  # noqa: E402
     confine_read_endpoint,
     normalize_endpoint,
 )
-from defender.integrations.faults import TransportFault  # noqa: E402
+from defender.kit.faults import TransportFault  # noqa: E402
 from defender.integrations.host_state_adapter import (  # noqa: E402
     HOST_STATE_PROGRAMS,
     confine_host,

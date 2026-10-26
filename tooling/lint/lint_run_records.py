@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Run-records name gate: no code outside the name-owner modules (every file of the runs
-repository package `defender/run_repository/`, `defender/episodes/_episode_paths.py`,
+repository package `defender/records/`, `defender/episodes/_episode_paths.py`,
 `defender/episodes/_episode_handle.py`, `defender/tenancy/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
 composed part, or join a name onto a run or episode root.
 
@@ -49,7 +49,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _astlib import (
-    ScanBlind, callee, origin, reexport_origin, import_source, module_and_package, module_env, owner_derived,
+    ScanBlind, callee, origin, reexport_origin, import_source, module_and_package,
+    module_env, owner_derived, run_repository_files,
     read_and_parse, require_claimed, require_selected, scan_guard, selects, source_files,
 )
 
@@ -61,10 +62,19 @@ PAGE = DEFENDER / "docs" / "run-records.md"
 BEGIN_MARK = "<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run tooling/lint/lint_run_records.py --render -->"  # noqa: E501
 END_MARK = "<!-- end generated -->"
 
-#: The runs repository package's folder under `defender/`: every module in it is an owner
-#: (#1105 D1.5, which absorbed the layout and the handle), read off disk, so a module the
-#: package gains is an owner the day it lands rather than when a list is edited.
-OWNER_PACKAGE = "run_repository"
+#: The runs repository's files under `defender/` (#1105 D1.5, which absorbed the layout and the
+#: handle). Since #1080 merged the repository into `records/`, these are the door and the
+#: submodules its `_HOMES` map serves, not the record-format modules beside them
+#: (`_astlib.run_repository_files`). A door that cannot be read is the scan's blind report, not a
+#: crash on import: `scan` raises it.
+try:
+    OWNER_PACKAGE_FILES = run_repository_files()
+    _DOOR_BLIND: ScanBlind | None = None
+except ScanBlind as exc:
+    OWNER_PACKAGE_FILES = ()
+    _DOOR_BLIND = exc
+#: The folder that holds them.
+OWNER_PACKAGE = "records"
 #: The owners outside the package. `episodes/_episode_handle.py` owns the episode folder with
 #: `episodes/_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
 #: runs repository's episode view is built, is an owner read.
@@ -73,15 +83,15 @@ _OWNER_FLAT_MODULES = ("episodes/_episode_paths.py", "episodes/_episode_handle.p
 #: The owner modules by their path under `defender/`, the exempt set everything below is
 #: defined relative to. Matched by path, never by basename — a package submodule's basename
 #: (`__init__.py`, `_handle.py`) would otherwise exempt every same-named file in the sweep.
-#: Equals `defender.tests.support.shared.contracts._spec1077.OWNER_MODULE_FILES`, which reads the same folder.
+#: Equals `defender.tests.support.shared.contracts._spec1077.OWNER_MODULE_FILES`, which reads the same door map.
 OWNER_MODULES: frozenset[str] = frozenset({
-    *(f"{OWNER_PACKAGE}/{p.name}" for p in (DEFENDER / OWNER_PACKAGE).glob("*.py")),
+    *OWNER_PACKAGE_FILES,
     *_OWNER_FLAT_MODULES,
 })
 
 #: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
-                               "run_repository", "api", "tenancy", "identity", "knowledge", "episodes", "configuration", "records")
+                               "api", "tenancy", "identity", "knowledge", "episodes", "configuration", "records", "kit")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -113,7 +123,7 @@ def _composed_parts() -> tuple[str, ...]:
     than re-spelled here: this file is not an owner module, and (a) protects these too."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from defender.run_repository import _layout  # noqa: PLC0415
+    from defender.records import _layout  # noqa: PLC0415
 
     return (
         _layout.LEAD_CLAIM_SUFFIX, _layout.REVIEW_RECORD_PREFIX,
@@ -203,7 +213,7 @@ def _accessor_names() -> frozenset[str]:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender.episodes._episode_paths import EpisodePaths  # noqa: PLC0415
-    from defender.run_repository import RunPaths, SessionPaths  # noqa: PLC0415
+    from defender.records import RunPaths, SessionPaths  # noqa: PLC0415
 
     return frozenset(
         n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths))
@@ -211,7 +221,7 @@ def _accessor_names() -> frozenset[str]:
 
 
 def _is_owner_module(rel: str) -> bool:
-    return rel.startswith(f"{OWNER_PACKAGE}/") or rel in _OWNER_FLAT_MODULES
+    return rel in OWNER_MODULES
 
 
 
@@ -249,7 +259,7 @@ _ROOT_OVERRIDE_METHODS = frozenset({
 })
 _OWNER_CONSTRUCTORS = frozenset({
     "defender.tenancy._tenant._TenantPaths", "defender.tenancy._tenant._TenantLayout",
-    "defender.run_repository.SessionPaths", "defender.run_repository._layout.SessionPaths",
+    "defender.records.SessionPaths", "defender.records._layout.SessionPaths",
     "defender.learning.core.state.LearningAdoption",
 })
 
@@ -496,7 +506,7 @@ _OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
     "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED",
 })
 
-#: The owner modules' dotted names (`defender.run_repository`, `defender.tenancy._tenant`, ...): arm
+#: The owner modules' dotted names (`defender.records`, `defender.tenancy._tenant`, ...): arm
 #: (c) matches an import's fully resolved module against these, so an unrelated module that
 #: shares a last segment (`defender.learning._errors`) is not an owner.
 _OWNER_MODULE_NAMES: frozenset[str] = frozenset(
@@ -597,6 +607,8 @@ def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> 
     A file the sweep cannot parse is a finding: the scan continues, but that file is
     reported, not certified clean.
     """
+    if _DOOR_BLIND is not None:
+        raise _DOOR_BLIND
     allow_list = allow_list if allow_list is not None else ALLOW_LIST
     whole, parts = _owner_constants()
     accessor_names = _accessor_names()
@@ -673,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         for f in found:
             print(f"  {f.display}")
         print(
-            "\nNo code outside defender/run_repository/, episodes/_episode_paths.py, episodes/_episode_handle.py "
+            "\nNo code outside defender/records/, episodes/_episode_paths.py, episodes/_episode_handle.py "
             "and tenancy/_tenant.py "
             "may spell a run or episode record's name — reach it through the "
             "owner, or mark a deliberate diagnostic with "

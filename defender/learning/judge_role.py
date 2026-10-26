@@ -11,7 +11,7 @@ from typing import ClassVar
 from defender._model import model
 from defender.learning.core.config import judge_effort, judge_model
 from defender.runtime.agent_definition import AgentDefinition
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 
 #: The judge's refusal text, carried on its compiled policy. Only the bash gate reads it, which
 #: this tool-less role never invokes, so it surfaces to operators rather than to a draw.

@@ -347,7 +347,7 @@ def _findings(knowledge: Path) -> list[str]:
         findings.append(str(bad))
     # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
     # only `check` uses — `setup`, `scaffold` and `migrate` start without paying for it.
-    from defender.tenancy import _tenant_census
+    from defender.cli import _tenant_census
 
     table = dispositions_path(settings)
     census: _tenant_census.Census | None = None

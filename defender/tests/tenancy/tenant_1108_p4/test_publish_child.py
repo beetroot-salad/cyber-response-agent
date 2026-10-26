@@ -384,7 +384,7 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     from types import SimpleNamespace
 
     from defender import run_common
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import FakeStore, write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 

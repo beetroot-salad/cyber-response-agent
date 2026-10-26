@@ -16,7 +16,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender._io import read_jsonl_rows
 from defender.runtime import challenge_gate
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.runtime.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_NOTHING_LEFT_TO_ASK,

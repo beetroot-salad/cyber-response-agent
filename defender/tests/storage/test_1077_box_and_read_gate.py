@@ -34,7 +34,7 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
     """Every registered role's compiled policy — the enumeration picks the subjects."""
     from defender.agents import AGENTS
     from defender.runtime.agent_definition import RunScope, compile_policy_for
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
     from defender.tests.support.tenancy import _tenants1106
     # #1106 M4: gather binds with a RUN's grant (its definition carries none), as the driver does.
     defs = {role: (_tenants1106.fixture_gather_def() if role is AgentRole.GATHER else defn)
@@ -50,7 +50,7 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
 
 
 def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
-    from defender.run_repository import CASE_ANSWER_KEY_NAMES, RUN_LAYOUT
+    from defender.records import CASE_ANSWER_KEY_NAMES, RUN_LAYOUT
     from defender.runtime import permission
 
     owner = S.RunPaths(run_dir)
@@ -87,7 +87,7 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
     assert permission.decide_read(
         run_dir / "alert.json", run_dir=run_dir, defender_dir=worktree, policy=main).allow, (
         "positive control: the alert is deliberately NOT in the answer key "
-        "(`run_repository/_layout.py`'s answer-key names) and stays readable")
+        "(`records/_layout.py`'s answer-key names) and stays readable")
     well_shaped = owner.payload("l-abc123", 0)
     well_shaped.parent.mkdir(parents=True, exist_ok=True)
     well_shaped.write_text("{}\n", encoding="utf-8")
@@ -148,7 +148,7 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
 
     done = run_blocked(
         "import sys\n"
-        "import defender.run_repository as rp\n"
+        "import defender.records as rp\n"
         "assert rp.BOX_SENTINEL, 'the owner does not name the sentinel'\n"
         "import dataclasses\n"
         "assert dataclasses.is_dataclass(rp.RunPaths), 'RunPaths is not a stdlib dataclass'\n"

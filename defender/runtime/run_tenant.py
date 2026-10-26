@@ -25,10 +25,8 @@ from defender.runtime.verb_dispositions import RunGrants, require_gather_query, 
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime import tenant_settings
 from defender.runtime.case_ticket import CaseMapping, CaseTicketError, load_case_mapping
-from defender.runtime.tenant_settings import (
-    SystemConfig,
-)
-from defender.integrations.faults import ConfigFault
+from defender.kit.settings import SystemConfig
+from defender.kit.faults import ConfigFault
 
 if TYPE_CHECKING:
     from defender.runtime.lead_zero import CorrelationDispatch

@@ -197,7 +197,7 @@ def test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_
     checkout (CI) an unproven live knowledge revision (e.g. `unversioned` from capturing an
     export folder as if it were a clone) is a refusal, not a waiver."""
     from defender.records import _provenance
-    from defender.run_common import REPO_ROOT
+    from defender._git import REPO_ROOT
 
     code = _provenance.capture_tree(Path(REPO_ROOT))
     assert code.commit, f"fixture bug: the checkout's code commit is unreadable ({code})"

@@ -69,7 +69,7 @@ def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
         ToolSet,
         build_registry,
     )
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
     from defender.runtime.permission.grant import (
         Grant,
         PathShapes,

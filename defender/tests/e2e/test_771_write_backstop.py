@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender import _io  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks import record_lead  # noqa: E402
@@ -41,7 +41,7 @@ from defender.tests.e2e._spec771 import (  # noqa: E402
     worktree_tree,
     write_guarded,
 )
-from defender.run_repository import SessionPaths  # noqa: E402
+from defender.records import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

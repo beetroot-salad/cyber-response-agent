@@ -190,7 +190,7 @@ def test_naming_the_class_alone_is_not_a_door():
 
 
 def test_a_door_in_a_listed_module_is_a_violation_when_no_door_is_allowed():
-    found = _GATE.doors(ROOT, modules=("run_repository/_lookup.py",), allowed=frozenset())
+    found = _GATE.doors(ROOT, modules=("records/_lookup.py",), allowed=frozenset())
     assert any(f.startswith("doors: opens or creates an Episode outside") for f in found), found
 
 
@@ -243,7 +243,7 @@ def test_a_root_that_is_not_a_directory_is_blind(tmp_path):
 
 # Shared owner definitions make wrapper propagation observable in each independent caller.
 OWNER_PROGRAMS = {
-    "run_repository/_lookup.py": """from pathlib import Path
+    "records/_lookup.py": """from pathlib import Path
 from defender.episodes._episode_handle import Episode
 from defender._io import bind
 def walk(episode_dir):
@@ -263,9 +263,9 @@ class EpisodeRuns:
     def __init__(self, tenant, episode_id):
         self.episode = Episode.open(tenant.dir / episode_id)
 """,
-    "run_repository/_compat.py": """from pathlib import Path
+    "records/_held.py": """from pathlib import Path
 from defender.episodes._episode_handle import Episode
-from defender.run_repository._lookup import open_at
+from defender.records._lookup import open_at
 def create_at(path):
     return Episode.create(path, exclusive=True)
 def chained(where):
@@ -281,8 +281,8 @@ from defender.episodes._episode_handle import Episode
 from defender.episodes import _episode_handle as EH
 from defender import _io
 from defender._io import bind, hold
-from defender.run_repository._lookup import EpisodeRuns, Opener, helper, open_at
-from defender.run_repository._compat import chained, derived
+from defender.records._lookup import EpisodeRuns, Opener, helper, open_at
+from defender.records._held import chained, derived
 """
 OPENER_CASES = [
     ("pkg/dirty.py", """def direct(episode_dir, view):
@@ -299,7 +299,7 @@ def local(folder):
     with _io.bind(d) as bound, _io.hold(episode_dir / 'runs', follow=False) as h:
         pass
     a = open_at(d)
-    b = __import__('defender.run_repository._lookup', fromlist=['x'])
+    b = __import__('defender.records._lookup', fromlist=['x'])
     c = importlib.import_module('defender.episodes._episode_handle')
     e = chained(d)
     f = Opener.make(d)

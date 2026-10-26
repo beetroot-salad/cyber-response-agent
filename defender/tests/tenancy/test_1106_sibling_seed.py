@@ -20,7 +20,7 @@ from defender.tests.support.learning.branch import _triplet_947 as P
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV, current_data_root
 from defender.tests.learning.oracle.live_contracts import _spec1224 as O
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 
 @pytest.fixture(autouse=True)

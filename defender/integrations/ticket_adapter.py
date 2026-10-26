@@ -21,12 +21,12 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
-from defender.integrations.faults import TransportFault, UpstreamFault
+from defender.kit.faults import TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.run_tenant import RunTenant
+    from defender.kit.verbs import TenantRecord
 
 SYSTEM = "ticket"
 PREFIX = "TICKET"
@@ -42,7 +42,7 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
     return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
-def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
+def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
     `_config`'s keys, then the docker transport's access method — raised over the run's
     record, or None when the system is usable."""

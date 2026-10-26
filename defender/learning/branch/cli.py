@@ -64,7 +64,7 @@ from defender._io import (
 )
 from defender._paths import PATHS
 from defender.knowledge._knowledge import KnowledgePaths
-from defender.run_repository import (
+from defender.records import (
     EpisodeRuns,
     Run,
     RunId,
@@ -80,7 +80,7 @@ from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
 from defender.tenancy import _tenant
-from defender.run_common import REPO_ROOT
+from defender._git import REPO_ROOT
 from defender.runtime import branch, session_store
 from defender.runtime.branch._family import (
     FamilyError,

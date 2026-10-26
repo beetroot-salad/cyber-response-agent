@@ -230,7 +230,7 @@ def _with_run_state(deps: Any) -> Any:
     hooks raise on deps that carry none (#1235 round 3)."""
     from dataclasses import replace
 
-    from defender.run_repository import Run
+    from defender.records import Run
     from defender.runtime.run_state import RunState
 
     return replace(deps, run=Run.under(fixture_runs_base(deps.run_dir.parent), deps.run_dir.name),

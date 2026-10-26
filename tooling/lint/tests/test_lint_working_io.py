@@ -41,7 +41,7 @@ def f(run):
 
 def test_resolved_record_byte_reads_are_allowed_but_path_and_unknown_receivers_are_not():
     source = """
-from defender.run_repository import Run as Investigation, RecordHandle as Record
+from defender.records import Run as Investigation, RecordHandle as Record
 def f(run: Investigation, record: Record, mystery):
     alias = record
     alias.read_bytes()
@@ -93,7 +93,7 @@ def test_unknown_target_inside_an_existing_nonrecord_scope_is_not_exempt():
 
 def test_owner_alias_target_is_classified_as_record():
     source = """
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender._io import write_guarded
 def f(run_dir):
     owner = RunPaths(run_dir)
@@ -129,7 +129,7 @@ def test_missing_sweep_directory_and_unparseable_modules_fail(tmp_path):
 
 def test_working_file_alias_keeps_member_classification_without_exempting_fact_reads():
     body = """
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender._io import read_text_utf8
 def f(run_dir):
     inv = RunPaths(run_dir).investigation

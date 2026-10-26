@@ -18,7 +18,7 @@ from defender._io import (  # noqa: E402
     parse_jsonl_row,
     read_jsonl_rows,
 )
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.knowledge import _query_rules  # noqa: E402

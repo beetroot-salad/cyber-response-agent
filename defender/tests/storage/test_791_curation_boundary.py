@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -87,7 +87,7 @@ def _opened(body: dict) -> Path:
     tenant accepted under the data root, the run resolved through that tenant's repository."""
     from defender import _paths
     from defender.tenancy import _tenant
-    from defender.run_repository import RunAddress
+    from defender.records import RunAddress
 
     tenant = _tenant.accept_tenant(fixture_data_root(_tenant.resolve_data_root()), body["tenant_id"],
                                    defender_dir=_paths.process_defender_dir())

@@ -23,7 +23,7 @@ from pydantic_ai.messages import (  # noqa: E402
     UserPromptPart,
 )
 
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.learning.branch._branch_947 import spec_at  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql, store_factory, store_mod  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402

@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from defender.runtime.tenant_settings import SystemConfig
-from defender.integrations.faults import ConfigFault
+from defender.kit.settings import SystemConfig
+from defender.kit.faults import ConfigFault
 from defender.tests.tenancy.startup_usability.test_1256_adapter_checks import (
     FAULTS,
     Family,
@@ -22,7 +22,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 MARKER = "o5k"
 
-#: Values every key is tried with: blank and whitespace-only (`tenant_settings.is_blank`).
+#: Values every key is tried with: blank and whitespace-only (`kit.settings.is_blank`).
 _EVERY_KEY: tuple[tuple[str, str], ...] = (("blank", ""), ("whitespace", "   "))
 
 _GRAMMAR: dict[str, tuple[tuple[str, str], ...]] = {

@@ -14,7 +14,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.configuration._env import FatalConfigError  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.integrations import faults  # noqa: E402
+from defender.kit import faults  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S  # noqa: E402
 
 
@@ -208,7 +208,7 @@ import json
 import time
 from pathlib import Path
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 
 _STATE = Path({state!r})
 SYSTEM = "ticket"

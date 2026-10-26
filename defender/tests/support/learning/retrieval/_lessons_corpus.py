@@ -66,7 +66,7 @@ def _main_deps(tmp_path: Path):
     dfn.mkdir()
     from dataclasses import replace
 
-    from defender.run_repository import Run
+    from defender.records import Run
 
     return replace(bind(MAIN_DEF, run, defender_dir=dfn),
                    run=Run.under(fixture_runs_base(run.parent), run.name)), run, dfn
@@ -83,7 +83,7 @@ def _run_copy_main_deps(tmp_path: Path):
     from dataclasses import replace
 
     from defender.agents import MAIN_DEF
-    from defender.run_repository import Run
+    from defender.records import Run
     from defender.runtime.agent_definition import RunScope, bind
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 

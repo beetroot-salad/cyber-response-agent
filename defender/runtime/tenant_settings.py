@@ -6,30 +6,20 @@ import errno
 import logging
 import os
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
 
 from defender._io import is_plain_entry
-from defender.integrations.faults import ConfigFault
+from defender.kit.faults import ConfigFault
+from defender.kit.settings import NOT_CONFIGURED, SystemConfig, config_pointer, pointer_to
 
 _log = logging.getLogger(__name__)
-
-#: The one implemented access method (D2). A system's `<PREFIX>_TRANSPORT` names it.
-DOCKER_EXEC = "docker-exec"
-
-#: The text a missing system folder raises — one wording for "this tenant's settings do not
-#: configure this system", whether the folder is absent or its `config.env` is.
-NOT_CONFIGURED = "this tenant's settings do not configure this system"
 
 #: A settings file larger than this is not a settings file. Every one is read whole at resolve,
 #: so an unbounded read would let one sparse file exhaust memory before any fault could be kept
 #: as a value.
 SETTINGS_MAX_BYTES = 1 << 20
-
-#: The model-facing name of the tenant's settings folder, as `runtime.verbs.SETTINGS_POINTER`
-#: spells it. Restated rather than imported: `verbs` imports the record, not the other way.
-_SETTINGS_POINTER = "the tenant's settings/"
 
 #: A line ends at CRLF, CR or LF — exactly the endings a universal-newline read (the connect
 #: validator's `read_plain`) recognises, and no others (`str.splitlines` would also split on a
@@ -105,17 +95,6 @@ def read_regular_bytes(path: Path) -> bytes:
         os.close(fd)
 
 
-def pointer_to(rel: str) -> str:
-    """How a fault names the settings file at `rel` (relative to the tenant's `settings/`): by
-    the settings pointer, never by its host path, so no fault text has a host path to redact."""
-    return f"{_SETTINGS_POINTER}{rel}"
-
-
-def config_pointer(system: str) -> str:
-    """`pointer_to` for `system`'s `config.env`."""
-    return pointer_to(f"systems/{system}/config.env")
-
-
 def read_env_file(path: Path, *, shown: str) -> dict[str, str]:
     """`parse_env` over the file at `path`, or `ConfigFault` naming it as `shown`: a missing file
     is "this tenant's settings do not configure this system", and one that cannot be read or is
@@ -134,45 +113,9 @@ def read_env_file(path: Path, *, shown: str) -> dict[str, str]:
     return parse_env(text)
 
 
-def is_blank(value: str) -> bool:
-    """THE blank rule: empty or whitespace-only. Shared by the view and the validator."""
-    return not value.strip()
-
-
 # --------------------------------------------------------------------------------------------
 # The record's parts.
 # --------------------------------------------------------------------------------------------
-
-class SystemConfig(Mapping[str, str]):
-    """One system's `config.env`, verbatim: the keys as written (prefix included, so
-    `CMDB_URL_BASE`, never `URL_BASE`), each to its string value. Read-only."""
-
-    __slots__ = ("_data",)
-    _data: Mapping[str, str]
-
-    def __init__(self, data: Mapping[str, str]) -> None:
-        object.__setattr__(self, "_data", MappingProxyType(dict(data)))
-
-    def __getitem__(self, key: str) -> str:
-        return self._data[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def __setattr__(self, name: str, value: object) -> None:
-        raise AttributeError("SystemConfig is read-only")
-
-    def __repr__(self) -> str:
-        return f"SystemConfig(keys={sorted(self._data)})"
-
-
-def system_prefix(system: str) -> str:
-    """A system folder's config-key prefix: `case-history` → `CASE_HISTORY`."""
-    return system.upper().replace("-", "_")
-
 
 def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
     """One entry per non-hidden folder under `settings/systems/`, keyed by its exact name: the
@@ -210,18 +153,11 @@ def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
 
 
 __all__ = [
-    "DOCKER_EXEC",
-    "NOT_CONFIGURED",
     "SETTINGS_MAX_BYTES",
-    "SystemConfig",
     "assignments",
-    "config_pointer",
-    "is_blank",
     "parse_env",
-    "pointer_to",
     "read_env_file",
     "read_plain_fd",
     "read_regular_bytes",
     "read_systems",
-    "system_prefix",
 ]
