@@ -35,7 +35,7 @@ DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 # Runtime includes the former gather_tools; only ticket_writer belonged to case_history.
 # Box I/O moved out of runtime and retains the same counted coverage.
-ROOTS = ("runtime", "hooks", "box", "integrations/ticket_writer.py")
+ROOTS = ("runtime", "hooks", "box")
 READERS = frozenset({
     "read_jsonl_rows", "read_jsonl_rows_report", "read_text_soft", "read_text_utf8",
     "locked_for_read", "locked_json_read", "read_bytes_capped", "iter_plain_jsonl_rows",
@@ -79,8 +79,8 @@ def _typed(node: ast.expr, scan, wanted: str, seen: frozenset[str] = frozenset()
         if arg.arg == node.id and arg.annotation is not None:
             annotation = scan._annotation(arg.annotation)
             origin = scan.origin(annotation) if annotation is not None else None
-            if origin in {f"defender.run_repository.{wanted}",
-                          f"defender.run_repository._handle.{wanted}"}:
+            if origin in {f"defender.records.{wanted}",
+                          f"defender.records._handle.{wanted}"}:
                 return True
     bindings = scan.bindings(fn).get(node.id, [])
     return bool(bindings) and all(binding.value is not None and

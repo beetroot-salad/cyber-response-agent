@@ -35,7 +35,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.shared.contracts import _data_root_1078 as D
 from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
@@ -1172,12 +1172,12 @@ def envelope(docs: Sequence[Mapping[str, Any]], *, total: int | None = None,
 
 def transport_fault(detail: str = "docker exec curl timed out after 40s") -> BaseException:
     """RJ-04 (executed): the transport's own `TransportFault`."""
-    return sym("integrations.faults", "TransportFault")(detail)
+    return sym("kit.faults", "TransportFault")(detail)
 
 
 def upstream_fault(detail: str = "index_not_found_exception") -> BaseException:
     """RJ-06 (executed): a missing index answers `UpstreamFault`."""
-    return sym("integrations.faults", "UpstreamFault")(detail)
+    return sym("kit.faults", "UpstreamFault")(detail)
 
 
 def confinement_fault(index: str = ".ds-logs-system.auth-default-2026.05.24-000002") -> BaseException:
@@ -1324,7 +1324,7 @@ def store_factory(tmp_path: Path, *, fault: SS.StoreFault | None = None,
     base = SS.runs_base(tmp_path)
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("run_repository", "SessionPaths")(fixture_runs_base(base)))
+        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("records", "SessionPaths")(fixture_runs_base(base)))
         handle = LeadSessionFault(real, fault or default, once=once)
         if sink is not None:
             sink.append(handle)
@@ -1448,7 +1448,7 @@ class HoldingTicketStore(TicketStore):
 
 def ticket_writer(store: TicketStore) -> Any:
     """The REAL ticket writer's two legs bound to `store` — what `run.main(ticket_writer=…)` takes."""
-    tw = mod("integrations.ticket_writer")
+    tw = mod("runtime.ticket_writer")
     deps = tw.TicketWriterDeps(request=store.request)
     return SimpleNamespace(
         open_case_ticket=functools.partial(tw.open_case_ticket, deps=deps),

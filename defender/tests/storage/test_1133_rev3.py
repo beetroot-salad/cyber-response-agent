@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
-from defender.run_repository import Run
+from defender.records import Run
 
 import errno
 import json
@@ -23,7 +23,7 @@ from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.branch.test_947_capture_prime import append_call, call_row, source_run
 from defender.tests.support.learning.core import _state1135
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 
 EPISODE_ID = "ep-1133"
 #: Bytes that are not UTF-8: a plain file holding them is a refused text read.

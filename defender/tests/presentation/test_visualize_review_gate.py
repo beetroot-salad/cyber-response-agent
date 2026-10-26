@@ -6,7 +6,7 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run
 import json
 from pathlib import Path
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.runtime.challenge_gate import REVIEW_ROLES
 from defender.presentation import visualize_data as d
 from defender.presentation.visualize_primitives import parse_report

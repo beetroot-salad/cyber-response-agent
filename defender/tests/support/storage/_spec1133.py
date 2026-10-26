@@ -21,7 +21,7 @@ from typing import Any
 
 from defender import _io
 from defender.episodes._episode_paths import LAYOUT
-from defender.run_repository import WIRE_LOG_NAMES
+from defender.records import WIRE_LOG_NAMES
 from defender.tests.shared.filesystem.test_1111_rooted_io import (  # noqa: F401 — re-exported for the #1133 suite
     DEADLINE,
     HOST_BYTES,

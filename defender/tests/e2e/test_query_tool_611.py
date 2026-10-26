@@ -52,11 +52,7 @@ from defender.runtime.verbs import (  # noqa: E402
     VerbContext,
 )
 from defender.integrations import _stub_transport  # noqa: E402
-from defender.integrations.faults import (  # noqa: E402
-    ConfigFault,
-    TransportFault,
-    UpstreamFault,
-)
+from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e

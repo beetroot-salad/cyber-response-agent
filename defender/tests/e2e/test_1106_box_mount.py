@@ -46,7 +46,7 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
     shows the model view's `/agent` bound read-only from THIS run's copy of its own tenant's
     export (not the clone: the retired `agent` mount), and no mount exposes the copy's
     `settings/`, the tenant's clone, or anything of the other tenant."""
-    from defender.runtime.model_view import MODEL_AGENT
+    from defender._model_view import MODEL_AGENT
     from defender.tests.e2e._box665 import RecordingDocker
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
     from defender.tests.tenancy.tenant_1108_p4.test_run_copy import _boxed_lifecycle, _Investigation

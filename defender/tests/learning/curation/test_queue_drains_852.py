@@ -210,7 +210,7 @@ def _drain(t, paths, **overrides):
 
 def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_path, monkeypatch, tenant):
     """O4: a valid foreign Run address in A's queue cannot grant access to tenant B."""
-    from defender.run_repository import RunAddress
+    from defender.records import RunAddress
     from defender.tenancy import _tenant
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 

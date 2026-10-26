@@ -25,7 +25,7 @@ from defender.runtime import tools_gather  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
-from defender.presentation import workspace_map as wsm  # noqa: E402
+from defender.runtime import workspace_map as wsm  # noqa: E402
 from defender.tests.support.learning.curation._lead_author_1134 import skills_view  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[3]

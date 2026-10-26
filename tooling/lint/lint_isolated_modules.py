@@ -13,7 +13,7 @@ or call.
   JSON: its caps are set by the caller, so nothing in the environment can move them (`os.environ`,
   `environ.get`, `env_int(`, `open(`, `json.load(`).
 
-* The ticket writer (`integrations/ticket_writer.py`) finds nothing for itself: no call to
+* The ticket writer (`runtime/ticket_writer.py`) finds nothing for itself: no call to
   `process_defender_dir` or `cwd`. It and every `runtime/lead_zero/*.py` build and read no
   environment: no `run_env` call and no `os.environ` / `os.getenv` (run.py and the driver hand the
   environment in).
@@ -41,7 +41,7 @@ _REGISTRY = "integrations/tacit_knowledge_adapter.py"
 _MUTATING_ATTRS = frozenset({"write_text", "write_bytes", "mkdir", "unlink", "rmdir", "rename",
                              "touch", "safe_dump", "dump", "remove", "replace"})
 _MUTATING_MODULES = frozenset({"shutil"})
-_TICKET_WRITER = "integrations/ticket_writer.py"
+_TICKET_WRITER = "runtime/ticket_writer.py"
 _LEAD_ZERO = "runtime/lead_zero"
 _BUDGET = "hooks/budget_enforcer.py"
 _BUDGET_CALLS = frozenset({"env_int", "open"})

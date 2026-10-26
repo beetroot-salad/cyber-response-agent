@@ -97,7 +97,7 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
     dangling link and a non-directory there are not driven here: _io.hold(follow=False) tells
     those states apart (test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart).
     The tenant.runs arm is driven through run.main itself."""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
@@ -131,7 +131,7 @@ def test_1105_run_setups_refusal_of_a_linked_runs_folder_is_one_stderr_line_nami
     """The hold's refusal of a linked runs folder is TenantRefused shown as '[run.py] ...'
     naming the path. (The odd-occupant refusals at a run's own name moved with the pinned ids:
     see test_1187_roster_sibling's O8 cases.)"""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
@@ -153,7 +153,7 @@ def test_1105_run_setups_refusal_of_a_linked_runs_folder_is_one_stderr_line_nami
 def test_1279_o8_make_run_dir_makes_the_run_dir_once_and_refuses_a_second_time(
         tmp_path, data_root):
     """O8: the run dir is made exclusively through a handle from `create()`; no second make."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     t = H.tenant(data_root, H.T_ID)
     run = t.runs_repository().create()
@@ -174,7 +174,7 @@ def test_1279_o8_make_run_dir_makes_the_run_dir_once_and_refuses_a_second_time(
 def test_1279_o8_make_run_dir_refuses_anything_at_the_run_dir_without_following_it(
         tmp_path, data_root, kind):
     """O8: an empty dir, a setup-only dir, a file or a link at the run id is refused as found."""
-    from defender.run_repository import RunPaths
+    from defender.records import RunPaths
 
     t = H.tenant(data_root, H.T_ID)
     outside = tmp_path / "outside"
@@ -230,7 +230,7 @@ def test_1279_o8_make_run_dir_refuses_what_appears_between_a_check_and_the_make(
 
 
 def _sidecar_suffixes() -> tuple[str, ...]:
-    from defender.run_repository._layout import _SIDECAR_SUFFIXES
+    from defender.records._layout import _SIDECAR_SUFFIXES
 
     return tuple(_SIDECAR_SUFFIXES)
 
@@ -240,7 +240,7 @@ def _sidecar_suffixes() -> tuple[str, ...]:
 def test_1279_o8_natural_setup_refuses_any_entry_at_its_minted_ids_sidecar_name(
         tmp_path, data_root, monkeypatch, suffix, kind):
     """O8: in the natural lane too, any entry at the minted id's sidecar name is refused, naming it."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
     from defender.tests.support.storage import _setup_faults_1279 as F
 
     t = H.tenant(data_root, H.T_ID)

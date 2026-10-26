@@ -30,7 +30,7 @@ from defender.episodes._episode_handle import Episode
 
 
 
-from defender.run_repository import (
+from defender.records import (
     Run,
 )
 
@@ -239,7 +239,8 @@ def _originals(source_run_dir: Path) -> list[_Original]:
 def _not_admitted(reader: Any, call: _Original) -> str | None:
     """Why the live gather grant does not admit `call` for replay, or `None` when it does
     (M22=A: every replayed call goes through `decide`; only read verbs are replayed)."""
-    from defender.runtime.verbs import GRANTED, verb_class_of
+    from defender.runtime.verbs import GRANTED
+    from defender.kit.verbs import verb_class_of
 
     try:
         decision = reader.decide(call.system, call.verb)

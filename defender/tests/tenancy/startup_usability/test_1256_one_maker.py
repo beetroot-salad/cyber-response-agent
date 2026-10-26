@@ -48,7 +48,7 @@ def _roster_adapters(given: Path, resolved: Path) -> dict[str, str]:
     spelled = f"{given}/{{name}} ({resolved}/{{name}})"
     cmdb = f'''\
 """#1256 planted: a cmdb adapter in a roster outside the defender tree."""
-from defender.integrations.faults import ConfigFault
+from defender.kit.faults import ConfigFault
 
 
 def check_settings(*_a, **_k):

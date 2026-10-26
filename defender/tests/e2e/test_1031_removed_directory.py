@@ -32,7 +32,7 @@ pytestmark = pytest.mark.e2e
 ELASTIC_ADAPTER = '''\
 from pathlib import Path
 
-from defender.runtime.verbs import VerbContext, verb
+from defender.kit.verbs import VerbContext, verb
 
 REACHED = "adapter-reached.txt"
 

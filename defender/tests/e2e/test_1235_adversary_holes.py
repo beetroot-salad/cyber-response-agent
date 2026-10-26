@@ -14,7 +14,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

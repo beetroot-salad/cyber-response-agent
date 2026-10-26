@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.run_repository import (
+from defender.records import (
     GATHER_RAW_SHAPE,
     alert_input_shape,
     gather_summaries_shape,

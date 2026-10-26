@@ -16,7 +16,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.integrations.elastic_adapter import search_envelope  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import breaker_doc  # noqa: E402

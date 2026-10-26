@@ -56,7 +56,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender.records._report import UNKNOWN_DISPOSITION, read_report
 from defender.knowledge._knowledge import KnowledgePaths
 from defender._text import one_line
-from defender.run_repository import Run, RunPaths
+from defender.records import Run, RunPaths
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -186,7 +186,7 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
     """`tenant_runs`, or `None` with the refusal on stderr (one line, naming a stray entry
     or the refused tenant)."""
     from defender.tenancy import _tenant
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     try:
         runs = tenant_runs(raw_tenant)

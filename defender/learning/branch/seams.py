@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from defender.run_repository import WIRE_LOG_NAMES
+from defender.records import WIRE_LOG_NAMES
 from pathlib import Path
 from typing import Any
 

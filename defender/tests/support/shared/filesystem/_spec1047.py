@@ -297,7 +297,7 @@ class FakeTicketSystem:
         return self.status, ""
 
     def deps(self) -> Any:
-        return sym("integrations.ticket_writer", "TicketWriterDeps")(
+        return sym("runtime.ticket_writer", "TicketWriterDeps")(
             request=self.request)
 
     @property
@@ -326,7 +326,7 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     `closed_before_cut=`, passed in-process by `run.py` from the driver's own summary. Nothing
     here reads a store, a pointer file or anything else inside the run dir to get them."""
     fake = ticket or FakeTicketSystem()
-    mod("integrations.ticket_writer").record_case_ticket(
+    mod("runtime.ticket_writer").record_case_ticket(
         _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake), **kw)
     return fake
 
@@ -335,7 +335,7 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
     """Drive the REAL `open_case_ticket` — the leg that establishes the ticket key's namespace,
     with no `report.md` anywhere on disk (round-2 probe #30, EXECUTED)."""
     fake = ticket or FakeTicketSystem()
-    mod("integrations.ticket_writer").open_case_ticket(
+    mod("runtime.ticket_writer").open_case_ticket(
         _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake))
     return fake
 

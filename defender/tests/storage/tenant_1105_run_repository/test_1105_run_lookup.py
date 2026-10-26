@@ -42,7 +42,7 @@ def _container_refusal(name: str, err: object) -> bool:
     """Whether `err` is how the function `name` refuses a container fault: `TenantRefused`, but
     for an open, `RunUnreachable` raised from that `TenantRefused` (#1105 PR 2 review: opening
     a run answers one refusal family)."""
-    from defender.run_repository import RunUnreachable
+    from defender.records import RunUnreachable
 
     if name.startswith("runs.open"):
         return H.is_a(err, RunUnreachable) and H.is_a(getattr(err, "__cause__", None),
@@ -73,7 +73,7 @@ def _repository_calls(t, run_id: str):
     """`(name, thunk)` per natural lookup of `t`'s repository. #1187 R6 deletes the tenant-keyed
     record functions (`record_episode_runs`, `episode_runs`, `sibling_run_ids`), so these are
     every function a container fault reaches."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return [
         ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id))),
@@ -85,7 +85,7 @@ def _repository_calls(t, run_id: str):
 def _level_refusal(err: object) -> bool:
     """How #1187 refuses a link at a level below `<T>` (S-iso; declared change 8):
     `TenantRefused` or `RunRefused` (an open's `RunUnreachable` is one), naming the level."""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     return isinstance(err, (TenantRefused, RunRefused))
 
@@ -137,7 +137,7 @@ def test_1105_open_run_returns_the_tenants_run_under_tenant_runs(tmp_path):
     real directory returns the Run that Run.under(tenant.runs, id, tenant_id=tenant.id) builds:
     its tenant_id is tenant.id, its runs_base is tenant.runs (tenant.data_root / tenant.id /
     'runs'), its run_dir is tenant.runs / id; nothing is written."""
-    from defender.run_repository import Run, RunId, RunsRepository
+    from defender.records import Run, RunId, RunsRepository
 
     rid = str(uuid.uuid4())
     root, t = _fresh(tmp_path, rid)
@@ -167,7 +167,7 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     included; the proof that nothing was read is a runs folder planted as a link, which would
     otherwise refuse, and a recording io= seam passed to each refused call records no call at
     all. Positive control: the same calls with an accepted Tenant and a RunId answer."""
-    from defender.run_repository import RunId, RunsRepository
+    from defender.records import RunId, RunsRepository
     from defender.runtime.run_tenant import RunTenant
 
     rid = str(uuid.uuid4())
@@ -208,7 +208,7 @@ def test_1105_the_repository_answers_from_the_tenant_it_is_handed_and_reads_no_e
     folder removed after acceptance, every repository function answers exactly as before from
     tenant.runs of the Tenant it was handed. Positive control: accept_tenant at the edge
     refuses the same tenant once its knowledge folder is gone."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     r1, r2 = _uuids(2)
     root, t = _fresh(tmp_path, r1, r2)
@@ -246,7 +246,7 @@ def test_1105_a_copied_or_pickled_tenant_is_served_like_the_original(tmp_path):
     #1187 declared changes 1, 6 and 13 (R1, R6): `sibling_run_ids` is deleted with the
     `_episodes` record (runs.all_runs takes its place in the comparison); ids are UUIDs and the
     container holds no `_tenant.json`. (Name kept.)"""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     r1, r2 = _uuids(2)
     _root, t = _fresh(tmp_path, r1, r2)
@@ -269,7 +269,7 @@ def test_1105_every_repository_function_takes_an_injected_io_like_the_handle(tmp
     PR 2: RunsRepository(tenant, *, io=) — passes it to the Run it hands out, and routes each
     method's own open through it, so a recording seam sees it. The suite uses the seam to
     observe calls, never to inject an I/O fault (test shape)."""
-    from defender.run_repository import RunId, RunsRepository
+    from defender.records import RunId, RunsRepository
 
     rid = str(uuid.uuid4())
     _root, t = _fresh(tmp_path, rid)
@@ -306,7 +306,7 @@ def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path)
     (`H.SIDECAR_SUFFIXES`) and an id of the staged shape (a sidecar suffix, then '.staged-',
     then lowercase hex digits), even when the runs folder is absent (before the folder), and
     even when a real directory sits at the name over a good folder."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     rid = str(uuid.uuid4())
     root = tmp_path / "data"
@@ -341,7 +341,7 @@ def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path)
 
 def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listings_refuse(
         tmp_path):
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     rid = str(uuid.uuid4())
     _root, t = _fresh(tmp_path, rid)
@@ -364,7 +364,7 @@ def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listi
 
 
 def test_1105_a_refused_name_is_never_probed_on_disk(tmp_path):
-    from defender.run_repository import RunId, RunRefused, RunsRepository
+    from defender.records import RunId, RunRefused, RunsRepository
 
     rid = str(uuid.uuid4())
     _root, t = _fresh(tmp_path, rid)
@@ -410,7 +410,7 @@ def test_1105_refusal_text_quotes_names_repr_style_and_truncates_long_ones(tmp_p
     under 2,000 characters and still holds the name's first 20 characters. A name carrying DEL,
     a C1 control (U+009B) and U+2028 is escaped the same way (91 BF-09)."""
     from defender.records._run_id import episode_id_fault
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     for what, bad, escaped in (
             ("RunId.parse('a\\nb')", "a\nb", "a\\nb"),
@@ -443,7 +443,7 @@ def test_1105_refusal_text_quotes_names_repr_style_and_truncates_long_ones(tmp_p
 
 def test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidecar_files(
         tmp_path):
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     root = tmp_path / "data"
     root.mkdir(parents=True, exist_ok=True)
@@ -477,7 +477,7 @@ def test_1105_open_run_checks_types_then_name_then_folder_then_record_then_entry
     RunUnreachable from TenantRefused (the hold refuses it); an absent entry raises RunRefused."""
     import uuid
 
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     r1 = str(uuid.uuid4())
     root = tmp_path / "data"
@@ -507,7 +507,7 @@ def test_1105_open_run_checks_types_then_name_then_folder_then_record_then_entry
 
 def test_1105_open_run_serves_a_real_directory_entry_and_refuses_an_absent_one_naming_it(
         tmp_path):
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     base = str(uuid.uuid4())[:-1]
     absent, *neighbours = [base + c for c in "0123"]
@@ -532,7 +532,7 @@ def test_1105_a_held_run_is_not_rechecked_and_a_fresh_open_run_is(tmp_path):
     so swapping it for one naming another tenant is no container fault any more; the fault the
     fresh open meets is a link at `tenant.runs` (to the very folder that holds the run),
     refused at its level. The id is a UUID. (Name kept.)"""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     rid = str(uuid.uuid4())
     _root, t = _fresh(tmp_path, rid)
@@ -556,7 +556,7 @@ def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
     the empty folder runs.list answers [] and runs.open refuses only the absent entry
     (`RunAbsent`). Positive control: run setup does create the runs folder and the run — and
     writes no `_tenant.json`. Ids are UUIDs. (Name kept.)"""
-    from defender.run_repository import RunAbsent, RunId
+    from defender.records import RunAbsent, RunId
 
     root = tmp_path / "data"
     root.mkdir()
@@ -611,7 +611,7 @@ def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(
 
     #1187 (declared change 1): the run's id is a canonical UUID — an old `r1` is refused for its
     shape before any tenant is consulted, which would leave the isolation half unreached."""
-    from defender.run_repository import RunAbsent, RunId, RunRefused
+    from defender.records import RunAbsent, RunId, RunRefused
 
     root = tmp_path / "data"
     root.mkdir()
@@ -636,7 +636,7 @@ def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_
     #1187 declared changes 1, 6 and 8 (R1, S-iso): B's `_tenant.json` naming A is no case any
     more — no record is judged; isolation is where a folder sits plus the no-follow walk. The
     id is a UUID and neither container holds a record. (Name kept.)"""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     rid = str(uuid.uuid4())
     root, a = _fresh(tmp_path, rid)
@@ -663,7 +663,7 @@ def test_1105_a_box_writable_tenant_claim_neither_grants_nor_refuses_a_lookup(tm
     any tenant) is a stray the listing refuses with RunRefused naming it: the positive control
     that the listing does read what is in the folder. Ids are UUIDs; the episode folder sits
     under `<T>/episodes`. (Name kept.)"""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     r1, r2 = _uuids(2)
     _root, t = _fresh(tmp_path, r1, r2)
@@ -694,7 +694,7 @@ def test_1105_a_legacy_run_folder_named_off_the_rules_makes_the_listings_refuse_
     RunRefused naming that folder; moving it lets the listing answer. "Naming" is checked as
     the name's first 40 characters appearing in the message (design NF-8 may truncate a long
     name past them)."""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     ids = _uuids(2)
     _root, t = _fresh(tmp_path, *ids)
@@ -722,7 +722,7 @@ def test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it(tmp_path):
     way, so it is the no-follow walk that refuses. Positive control: the same calls answer over
     a real tenant.runs, and over a real tenant.runs under a linked data root (configuration,
     followed as spelled): open_run hands out the run and list_run_ids lists it."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     rid = str(uuid.uuid4())
     root = tmp_path / "data"
@@ -770,7 +770,7 @@ def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_
     name is test_1187_layout_isolation's
     test_a_link_at_a_runs_own_name_is_refused_and_the_real_folder_opens. Ids are UUIDs and the
     containers hold no `_tenant.json`. (Name kept.)"""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     r1, r2 = str(uuid.uuid4()), str(uuid.uuid4())
     root, t = _fresh(tmp_path, r1)
@@ -803,7 +803,7 @@ def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_na
     both runs once _episodes is gone, refuses the folder once it holds 'Bad Name'."""
     import uuid
 
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     r1, claimed = str(uuid.uuid4()), str(uuid.uuid4())
     root = tmp_path / "data"
@@ -844,7 +844,7 @@ def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
     #1187 declared changes 1, 6 and 13 (R1, R6): the record readers and the writer are deleted
     (their absent-folder answers with them); run setup makes the folder and the run and writes
     no `_tenant.json`; the run id is a UUID. (Name kept.)"""
-    from defender.run_repository import Listed, RunAbsent, RunId
+    from defender.records import Listed, RunAbsent, RunId
 
     root = tmp_path / "data"
     root.mkdir()
@@ -889,7 +889,7 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
     the container's refusal; RunRefused). The RunRefused paths include one after the folder is
     held for each lookup: a folder named 'Bad Name' (list_run_ids, all_runs) and a link at
     runs.open's own entry."""
-    from defender.run_repository import RunId, RunRefused, RunsRepository
+    from defender.records import RunId, RunRefused, RunsRepository
 
     rid, other, absent = (str(uuid.uuid4()) for _ in range(3))
     _root, t = _fresh(tmp_path, rid)
@@ -947,7 +947,7 @@ def test_1105_refusals_quoting_a_disk_read_entry_name_escape_it_and_stay_one_lin
     character and still naming the entry (a visible run of its characters appears); positive
     control: a plain-named stray entry is named verbatim. A run folder carrying DEL, a C1
     control (U+009B) and U+2028 is among the hostile names (91 BF-09)."""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     rid = str(uuid.uuid4())
     _root, t = _fresh(tmp_path, rid)

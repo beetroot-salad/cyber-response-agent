@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import functools
 import os
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -260,16 +261,54 @@ def import_source(node: ast.ImportFrom, package: str | None) -> str:
 
 
 #: The runs repository's door (#1105): its private submodules define what the door serves.
-_RUN_REPOSITORY = "defender.run_repository"
+_RUN_REPOSITORY = "defender.records"
+#: The door's own file in this checkout. #1080 merged the runs repository into `records/`, whose
+#: record-format modules the door does not serve; the door's `_HOMES` map is the one list of the
+#: submodules it does.
+_DOOR_FILE = Path(__file__).resolve().parents[2] / "defender" / "records" / "__init__.py"
+
+
+@functools.cache
+def door_modules() -> frozenset[str]:
+    """The runs repository's submodules: every module the door's `_HOMES` map serves a name from,
+    read from the door's source. ScanBlind when the map cannot be found — a gate that cannot tell
+    the repository's files from the record formats beside them cannot clear either."""
+    tree = parse_source(read_source(_DOOR_FILE, "records/__init__.py"), "records/__init__.py")
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else (
+            node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else None)
+        if isinstance(target, ast.Name) and target.id == "_HOMES" and isinstance(node.value, ast.Dict):
+            homes = set()
+            for key, value in zip(node.value.keys, node.value.values):
+                if key is None and isinstance(value, ast.Call) and len(value.args) == 2 \
+                        and ast.unparse(value.func) == "dict.fromkeys":
+                    value = value.args[1]  # `**dict.fromkeys((names...), "_module")`
+                if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                    raise ScanBlind(f"records/__init__.py: `_HOMES` holds {ast.unparse(value)!r}, "
+                                    "not a submodule name")
+                homes.add(value.value)
+            if homes:
+                return frozenset(homes)
+    raise ScanBlind("records/__init__.py: no `_HOMES` map naming the runs repository's submodules")
+
+
+@functools.cache
+def run_repository_files() -> tuple[str, ...]:
+    """The runs repository's files under `defender/`: the door and the submodules it serves.
+
+    Read from this checkout's door — the checkout the lint ships in, which is the one CI sweeps.
+    A gate sweeping another tree (a test's planted one) judges its files by this definition and
+    reads only those of them the tree holds."""
+    return tuple(f"records/{m}.py" for m in ("__init__", *sorted(door_modules())))
 
 
 def door_spelling(origin: str) -> str:
     """`origin` in its one spelling: a name the runs repository defines in a private submodule
-    (`defender.run_repository._layout.RunPaths`) is the door's (`defender.run_repository.
+    (`defender.records._layout.RunPaths`) is the door's (`defender.records.
     RunPaths`), since the door serves it; anything else is unchanged."""
     parts = origin.split(".")
-    if (origin.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3
-            and parts[2].startswith("_") and not parts[2].startswith("__")):
+    if origin.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3 \
+            and parts[2] in door_modules():
         del parts[2]
     return ".".join(parts)
 
@@ -411,26 +450,26 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
 _OWNER_CLASS_ORIGINS = frozenset({
     # An owner the runs repository defines is spelled as its door serves it (#1105): every
     # origin is compared through `door_spelling`, so the submodule spelling needs no line.
-    "defender.run_repository.RunPaths",
+    "defender.records.RunPaths",
     "defender.episodes._episode_paths.EpisodePaths",
     # The file-backed handle: a value reached through `run.facts.<record>` /
     # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
-    "defender.run_repository.Run",
+    "defender.records.Run",
     # The episode handle (#1133): `episode.served_base` / `episode.world(label).draw(n)` are
     # owner-derived like `EpisodePaths(ep).<record>`.
     "defender.episodes._episode_handle.Episode",
     "defender.episodes._episode_paths.WorldPaths",
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.
-    "defender.run_repository.SessionPaths",
+    "defender.records.SessionPaths",
 })
 
 #: The owner modules' module-level singletons — stateless layout values a caller imports rather
 #: than constructs. `RunPaths(d).alert` is a path; `RUN_LAYOUT.alert` is the same record's name
 #: relative to the run dir (the form `_io.Bound`'s readers take). Both are owner-derived.
 _OWNER_VALUE_ORIGINS = frozenset({
-    "defender.run_repository.RUN_LAYOUT",
-    "defender.run_repository.WIRE_LOG_NAMES",
+    "defender.records.RUN_LAYOUT",
+    "defender.records.WIRE_LOG_NAMES",
     "defender.episodes._episode_paths.LAYOUT",
     "defender.episodes._episode_paths.WORLD_LEAVES",
 })

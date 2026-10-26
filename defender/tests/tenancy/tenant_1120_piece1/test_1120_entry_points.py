@@ -456,7 +456,7 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
     assert rc == 0
     assert len(rec.lifecycle_calls) == 1
     run_dir = Path(rec.lifecycle_calls[0]["run_dir"])
-    from defender.run_repository import SessionPaths
+    from defender.records import SessionPaths
 
     # #1105 fork S(b): the layout owner's `SessionPaths` names the store, not a runs base.
     store = session_store.store_path_for("spec1120-case", sessions=SessionPaths(fixture_runs_base(run_dir.parent)))

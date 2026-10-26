@@ -390,7 +390,7 @@ def test_1279_o2_the_dev_copy_lands_under_the_runs_tenant_area_not_the_flat_fold
 def test_1279_o2_another_tenants_run_with_the_same_id_cannot_overwrite_or_land_in_the_first_area(
         tmp_path, data_root, run_visualizations_dir):
     """O2: tenants A and B each publish a run with one id; A's published page is untouched by B's."""
-    from defender.run_repository import Run
+    from defender.records import Run
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.shared._locations_1210 import fixture_runs_base

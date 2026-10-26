@@ -15,7 +15,7 @@ from defender.records import _alert_input
 from defender._io import (
     load_json_artifact,
 )
-from defender.run_repository import Run, RUN_LAYOUT, RunPaths
+from defender.records import Run, RUN_LAYOUT, RunPaths
 
 from ..run_state import RunState
 from . import _snapshot

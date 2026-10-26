@@ -39,7 +39,7 @@ def _listings(t, run_id: str = R1):
 def _every_function(t, *, run_id: str = R1):
     """Every lookup over the natural container. #1187 (R6, D-del): `record_episode_runs`,
     `episode_runs` and `sibling_run_ids` are deleted with the `_episodes` record."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return [*_listings(t, run_id),
             ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id)))]
@@ -81,7 +81,7 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
 def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind):
-    from defender.run_repository import RunUnreachable
+    from defender.records import RunUnreachable
 
     root = tmp_path / "data"
     root.mkdir()
@@ -104,7 +104,7 @@ def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind)
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
 def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     t = _good(tmp_path, R1)
     entry = Path(location_path(t.runs)) / R2
@@ -126,7 +126,7 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
     f"Bad Name.run-end.json{H.STAGED_TAIL}",
 ])
 def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tmp_path, name):
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     t = _good(tmp_path, R1)
     (Path(location_path(t.runs)) / name).write_text("{}\n", encoding="utf-8")
@@ -141,7 +141,7 @@ def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_pat
     """A link and a FIFO named `r1.run-end.json` beside run r1: runs.list raises RunRefused
     naming it. A known sidecar is a REGULAR file (rev 4.1). (#1187: r1 is a uuid, so the name
     is a real sidecar name and the refusal is the entry KIND's, not the id rule's.)"""
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     t = _good(tmp_path, R1)
     entry = Path(location_path(t.runs)) / f"{R1}.run-end.json"
@@ -160,7 +160,7 @@ def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_pat
 
 def test_1105_a_surrogate_escaped_run_id_is_refused_not_a_raw_encoding_error(tmp_path,
                                                                              data_root):
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     err = H.raised(RunId.parse, "r\udcff1")
     assert H.is_a(err, RunRefused), f"RunId.parse('r\\udcff1') raised {err!r}"

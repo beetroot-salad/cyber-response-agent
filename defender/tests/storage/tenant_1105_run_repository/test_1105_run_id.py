@@ -56,7 +56,7 @@ def test_1105_run_id_is_built_only_by_parse_and_mint():
 
     #1187 declared changes 1 and 2: `parse` takes canonical UUID text and `mint()` takes no
     label and no clock, so the minted text is a bare UUID rather than `<stamp>-<label>`."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     parsed = RunId.parse(S.SAMPLE_UUID)
     minted = RunId.mint()
@@ -76,7 +76,7 @@ def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_
     against another RunId, and never equals a str: RunId.parse(t) == t is False in both
     operand orders, and a dict holds the RunId and the str of the same text as two keys.
     #1187 declared change 1: the ids are canonical uuid4 texts (`U_A < U_B < U_C`), not 'a'."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     a = RunId.parse(U_A)
     assert str(a) == U_A, f"str(RunId.parse(U_A)) is {str(a)!r}"
@@ -109,7 +109,7 @@ def test_1105_run_id_parse_refuses_what_refuse_bad_run_id_refuses_and_any_non_st
     refuse_bad_run_id refuses ('', '_episodes', '_tenant.json', '../x', 'a/b', '.hidden', 'r1\n'),
     for text that is not case-stable ('Run1'), and for a non-str (5, None, b'r1'). Positive
     control: a canonical UUID parses."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     for good in (S.SAMPLE_UUID, S.new_id()):
         assert str(RunId.parse(good)) == good
@@ -130,7 +130,7 @@ def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
 
     Kept under its old name: the spec graph cites it."""
     from defender.records import _run_id
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     for size in (206, 207):
         err = H.raised(RunId.parse, _ascii_id(size))
@@ -142,7 +142,7 @@ def test_1105_run_id_mint_folds_then_bounds_the_id_and_never_truncates():
     """#1187 declared changes 1, 2 and 4: `mint` has no label to fold, bound or truncate, so
     there is nothing left of what this test pinned. A labelled mint is refused, and the
     no-argument mint is a UUID however many are made (the ids slice pins the format)."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     for label in ("Alert-X", "a" * 189, "ß" * 94, "a" * 190, "ß" * 95):
         assert H.raised(RunId.mint, label) is not None, f"mint accepted the label {label[:12]!r}"
@@ -157,7 +157,7 @@ def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
     'r1.run-end.json' names are not UUIDs either. Positive control: the bare UUID parses.
 
     Kept under its old name: the spec graph cites it."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     run_id = S.new_id()
     assert str(RunId.parse(run_id)) == run_id
@@ -176,7 +176,7 @@ def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tm
     refuse_bad_run_id and its ValueError; the name is kept because the spec graph cites it.)"""
     import uuid
 
-    from defender.run_repository import Run, RunId, RunRefused
+    from defender.records import Run, RunId, RunRefused
 
     runs = tmp_path / H.T_ID / "runs"
     runs.mkdir(parents=True)
@@ -200,7 +200,7 @@ def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subcla
     The forged payloads cover every pickle protocol (0 to pickle.HIGHEST_PROTOCOL), each RunId's
     own stream with its text overwritten in place; every replace route is driven, and one that
     does not exist must raise TypeError rather than be skipped (91 BF-08)."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.records import RunId, RunRefused
 
     text = S.SAMPLE_UUID  # 36 bytes: each in-place forgery below is exactly as long
     rid = RunId.parse(text)

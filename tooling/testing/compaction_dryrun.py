@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root → defender.*
 
-from defender.run_repository import WIRE_LOG, RunPaths
+from defender.records import WIRE_LOG, RunPaths
 from defender.runtime import compaction as C
 
 

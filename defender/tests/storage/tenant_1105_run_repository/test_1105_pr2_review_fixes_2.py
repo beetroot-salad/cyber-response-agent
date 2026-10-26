@@ -122,8 +122,8 @@ def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d
 @pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map"])
 def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant, monkeypatch,
                                                               cli):
-    from defender.execution._command_line_run import open_command_line_run
-    from defender.run_repository import Run
+    from defender.tenancy._command_line_run import open_command_line_run
+    from defender.records import Run
     from defender.tests.support.learning.core._state1135 import curation_run_dir
 
     run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
@@ -178,7 +178,7 @@ def test_4_a_quarantined_curation_row_shows_its_address(published, tmp_path):
 
 def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     from defender.learning.judge import JudgeRefused, grade_episode
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
     from defender.tests.support.learning.judge import _judge_921 as J
     from defender.tests.support.learning.core._state1135 import env_state
     from defender.tests.storage.ids_1187 import _spec1187 as S

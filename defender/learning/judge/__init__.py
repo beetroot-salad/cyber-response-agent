@@ -21,7 +21,7 @@ from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender.episodes._episode_handle import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
-from defender.run_repository import WIRE_LOG_NAMES  # noqa: E402
+from defender.records import WIRE_LOG_NAMES  # noqa: E402
 from defender.episodes._episode_paths import LAYOUT  # noqa: E402
 from defender.learning.branch import outcome as outcome_mod  # noqa: E402
 from defender.learning.judge import calls as calls_mod  # noqa: E402
@@ -35,7 +35,7 @@ from defender.runtime.branch._family import ManifestPredatesOracle  # noqa: E402
 from defender import _yaml
 
 if TYPE_CHECKING:
-    from defender.run_repository import RunsRepository
+    from defender.records import RunsRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
     refusal's reason)`."""
     from defender.learning.core.config import StageWiring
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
 
     if (scope == "family") != (world_id is None):
         raise JudgeRefused("only the family judge scope has no world UUID")

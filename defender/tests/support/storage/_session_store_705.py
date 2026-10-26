@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.run_repository import SessionPaths  # noqa: E402
+from defender.records import SessionPaths  # noqa: E402
 from pydantic_ai.messages import (  # noqa: E402
     ModelRequest,
     ModelResponse,

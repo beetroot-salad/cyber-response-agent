@@ -9,7 +9,7 @@ Three rules over production source, all static (nothing is imported):
   local alias or attribute), a call of a function that does so, the banned id deriver functions
   and the id-length constant (called, passed around, re-exported by name, or defined), and
   `RunId.mint` given a label or clock.
-* `owner-folders`. The walk owner (`run_repository/`, the episode handle) makes no folder by its
+* `owner-folders`. The walk owner (`records/`, the episode handle) makes no folder by its
   PATH (`os.makedirs`, `os.mkdir` without `dir_fd`, `Path(...).mkdir`); it goes through a held
   root.
 * `roster-name`. The arm roster's file name is spelled only in the episode layout

@@ -21,7 +21,7 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS, BudgetKill  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.records import RunPaths  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.execution.box_codec import BoxResult  # noqa: E402

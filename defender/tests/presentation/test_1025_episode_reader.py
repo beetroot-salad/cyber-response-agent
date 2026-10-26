@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 from defender._io import bind
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
 

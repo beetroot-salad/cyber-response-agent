@@ -13,7 +13,7 @@ from pydantic_ai.usage import UsageLimits
 
 from defender._model import model
 from defender.hooks.budget_enforcer import BudgetKill
-from defender.run_repository import Run
+from defender.records import Run
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.hooks.inject_system_skill_description import SystemIndex
@@ -27,8 +27,8 @@ from . import providers
 from . import run_end
 from . import session_store
 from . import tools
-from .agent_role import GATHER_AGENT_ID_PREFIX
-from .model_view import ModelView
+from defender._agent_role import GATHER_AGENT_ID_PREFIX
+from defender._model_view import ModelView
 from .tools import (
     DeadEnd,
     GatherDeps,

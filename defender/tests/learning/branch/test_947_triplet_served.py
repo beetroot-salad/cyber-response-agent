@@ -9,7 +9,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
-from defender.integrations.faults import UpstreamFault  # noqa: E402
+from defender.kit.faults import UpstreamFault  # noqa: E402
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     FakeVerbs,
@@ -162,7 +162,7 @@ def _branched_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
     """`_faulting_backend`, as a registry serving one world of a pinned-source family: it
     declares the family's identities — over the roster's arm ids (#1187) — through the seam a
     `WorldRegistry` answers."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     family = T.sym("runtime.branch._family", "parse_family")(
         T.family_doc(episode_id=PINNED_EPISODE, source_run_id="live-lever-up-20260930-sudo"))

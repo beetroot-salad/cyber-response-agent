@@ -6,12 +6,8 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
-from defender.runtime.verbs import (  # noqa: E402
-    ModuleVerbRegistry,
-    VerbContext,
-    model_facing_params,
-    validate_params,
-)
+from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, validate_params  # noqa: E402
+from defender.kit.verbs import model_facing_params
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     FakeVerbs,

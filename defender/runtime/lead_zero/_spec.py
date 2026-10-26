@@ -1,7 +1,7 @@
 """Lead-0 vocabulary: the correlation lead's id, provenance and endings. Imports none of its siblings."""
 from __future__ import annotations
 
-from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER
+from defender._agent_role import CORRELATION_GRANT_HOLDER
 from defender.runtime.verb_dispositions import (
     HEALTH_CHECK,
     Disposition,

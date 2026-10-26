@@ -370,7 +370,7 @@ D5_SUMMARY = ("FD1256-D5-SUMMARY window 2026-05-25T13:00Z..17:00Z anchored on al
 def _escape() -> BaseException:
     """A call-time `ConfigFault` the start check did not raise (O-5b), worded as the adapters word
     one: the key it needs and that the tenant's settings do not configure the system."""
-    return S.sym("integrations.faults", "ConfigFault")(
+    return S.sym("kit.faults", "ConfigFault")(
         f"{ESCAPE_TOKEN} is not set - this tenant's settings do not configure this system")
 
 
@@ -662,7 +662,7 @@ _NOT_CONFIGURED_ELASTIC = f'''\
 """#1256 planted: an elastic adapter whose settings check finds it not configured."""
 from pathlib import Path
 
-from defender.integrations.faults import ConfigFault
+from defender.kit.faults import ConfigFault
 
 
 def _record_planted_call(verb):

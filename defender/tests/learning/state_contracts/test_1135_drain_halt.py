@@ -549,7 +549,7 @@ def cell(name, root):
     out = {"raised": None, "errno": None, "refusal": False, "oserror": False, "answer": None}
     try:
         if name == "e1":
-            from defender.run_repository import RunId
+            from defender.records import RunId
             from defender.tenancy._tenant import data_root_from_path, requested_tenant
 
             run_dir = Path(spec["e1_runs"][root])

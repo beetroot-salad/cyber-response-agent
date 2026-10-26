@@ -17,7 +17,7 @@ import pytest
 from defender.episodes._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
@@ -281,7 +281,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
         order.append("materialize")
         run_dir = T.sibling_run_dir(base, "b", stamp=False)
         made.append(run_dir)
-        return T.sym("run_repository", "Run").under(fixture_runs_base(base), run_dir.name, tenant_id=tenant_id)
+        return T.sym("records", "Run").under(fixture_runs_base(base), run_dir.name, tenant_id=tenant_id)
 
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=lambda m, **_kw: order.append("preflight") or 0,

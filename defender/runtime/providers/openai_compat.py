@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from defender.configuration._env import FatalConfigError, env_str
 
-from ..agent_role import AgentRole
+from defender._agent_role import AgentRole
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model

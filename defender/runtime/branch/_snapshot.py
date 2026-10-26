@@ -13,7 +13,7 @@ from typing import Any
 
 from defender._clock import parse_iso_utc
 from defender._io import parse_jsonl_row
-from defender.run_repository import RecordHandle, Run
+from defender.records import RecordHandle, Run
 
 from pydantic_ai.messages import ModelResponse
 

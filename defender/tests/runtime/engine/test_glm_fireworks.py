@@ -22,7 +22,7 @@ import run  # noqa: E402
 from defender import agents  # noqa: E402
 from defender.configuration._pricing import UnknownModel  # noqa: E402
 from defender.runtime import driver, providers  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime import review_roles  # noqa: E402
 from defender.runtime.driver import _prompts  # noqa: E402

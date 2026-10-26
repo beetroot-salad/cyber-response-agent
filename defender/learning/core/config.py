@@ -16,7 +16,7 @@ from typing import Any
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender.configuration._env import env_int, env_str
 from defender.configuration._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
-from defender.run_repository import WIRE_LOG_NAMES
+from defender.records import WIRE_LOG_NAMES
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
 from defender.knowledge._knowledge import LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths
 
@@ -128,7 +128,7 @@ class LoopPaths(DefenderPaths):
     @classmethod
     def for_tenant(cls, tenant: Tenant) -> LoopPaths:
         """@owns tenant learning root — accepted identity selects mutable state, never env."""
-        from defender.run_repository._held import require_accepted_tenant
+        from defender.records._held import require_accepted_tenant
 
         accepted = require_accepted_tenant(tenant)
         return accepted.learning_paths(cls, repo_root=REPO_ROOT)

@@ -17,7 +17,7 @@ PLANTED = ("gather_raw/.calls", ".query_join.jsonl", "gather_raw/l-001/.join.jso
 
 def named_records() -> frozenset[str]:
     """Compose explicit record names using only the declared layout accessors."""
-    from defender.run_repository import RUN_LAYOUT
+    from defender.records import RUN_LAYOUT
     from defender.runtime.challenge_gate import REVIEW_ROLES
 
     composed = {RUN_LAYOUT.alert, RUN_LAYOUT.alert_record, RUN_LAYOUT.wire_log,

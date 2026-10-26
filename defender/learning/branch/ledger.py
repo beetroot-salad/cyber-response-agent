@@ -11,7 +11,7 @@ from typing import Any, Self
 
 from defender._io import read_jsonl_rows
 from defender.episodes._episode_handle import AppendRecord, Episode
-from defender.run_repository import artifact_file
+from defender.records import artifact_file
 from pydantic import ValidationInfo, field_validator
 
 from defender.knowledge._query_rules import _json_safe_params, _request_key

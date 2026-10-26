@@ -1,7 +1,7 @@
 """#632 — shared machinery for the verb-authorization spec suite. NOT a test module."""
 from __future__ import annotations
 
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -27,8 +27,8 @@ from defender.runtime.verbs import (  # noqa: E402
     VerbDecision,
     VerbRegistry,
     read_roster,
-    verb_class_of,
 )
+from defender.kit.verbs import verb_class_of
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,

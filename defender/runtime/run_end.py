@@ -6,7 +6,7 @@ from defender._model import model
 from pathlib import Path
 from typing import Any
 
-from defender.run_repository import Run, RunPaths
+from defender.records import Run, RunPaths
 
 TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
 TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"

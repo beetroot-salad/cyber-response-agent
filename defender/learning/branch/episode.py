@@ -19,7 +19,7 @@ from defender.learning.branch.ledger import (
     LedgerError,
     correlation_key_of,
 )
-from defender.run_repository import EpisodeRuns
+from defender.records import EpisodeRuns
 from defender.runtime.branch._family import (
     BASE_ROLE,
     family_identities,

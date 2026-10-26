@@ -21,7 +21,7 @@ from defender.integrations import (
     threat_intel_adapter,
     ticket_adapter,
 )
-from defender.integrations.faults import AdapterFault, ConfigFault, TransportFault
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._by_path import load_module
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S

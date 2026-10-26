@@ -24,7 +24,7 @@ from defender.knowledge._query_rules import (
     _json_safe_params,
     _request_key,
 )
-from defender.run_repository import Run, LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
+from defender.records import Run, LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 

@@ -39,7 +39,7 @@ def _family(episode_id: str):
 
 def _arm_ids() -> dict:
     """The roster's ids, as `family_identities` takes them (#1187: `{label: RunId}`)."""
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return {T.fixture_world_id(label): RunId.parse(text) for label, text in ROSTER.items()}
 
@@ -51,7 +51,7 @@ def _known(episode_id: str) -> frozenset[str]:
 
 
 def _redact(detail, known):
-    return T.sym("learning.branch.redaction", "redact_model_visible")(detail, known)
+    return T.sym("_redaction", "redact_model_visible")(detail, known)
 
 
 # ---------------------------------------------------------------------------------------
@@ -147,7 +147,7 @@ def test_an_empty_or_non_text_member_neither_raises_nor_shreds_the_detail():
 def test_the_known_set_is_a_required_argument():
     """A caller cannot forget it: there is no default meaning "none"."""
     params = inspect.signature(
-        T.sym("learning.branch.redaction", "redact_model_visible")).parameters
+        T.sym("_redaction", "redact_model_visible")).parameters
     assert params["known_ids"].default is inspect.Parameter.empty
 
 

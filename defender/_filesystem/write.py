@@ -409,7 +409,7 @@ def guarded_mkdir(path: Path, *, base: Path) -> None:
         )
     # Skip on the hot path once the root exists. `is_dir()` follows a link at `base` on
     # purpose: `base` is the caller's trust root. A runs folder is not a link-tolerant base: it
-    # is held no-follow first (`run_repository.hold_runs_folder`, #1105 OP-2), which refuses a
+    # is held no-follow first (`records.hold_runs_folder`, #1105 OP-2), which refuses a
     # link there before this runs; a bigger disk is reached by moving the data root.
     if not base.is_dir():
         os.makedirs(base, exist_ok=True)

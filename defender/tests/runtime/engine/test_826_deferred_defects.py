@@ -14,7 +14,7 @@ from defender.runtime.circuit_breaker import (
     error_class_for_exit,
 )
 from defender.integrations import elastic_adapter as ea
-from defender.integrations.faults import UpstreamFault
+from defender.kit.faults import UpstreamFault
 from defender.knowledge import _query_rules
 from defender.runtime import record_query as rq
 
@@ -115,7 +115,7 @@ def test_the_result_envelope_says_which_end_of_the_window_it_holds():
 
 
 def test_the_sort_param_is_visible_to_the_model_on_both_search_verbs():
-    from defender.runtime.verbs import declared_params
+    from defender.kit.verbs import declared_params
 
     for verb in (ea.query, ea.alerts):
         declared = declared_params(verb)

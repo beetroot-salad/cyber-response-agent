@@ -20,7 +20,7 @@ from typing import Any, ClassVar
 from defender.configuration._env import env_str
 from defender.runtime import observe
 from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
-from defender.runtime.agent_role import REVIEW_AGENT_ID_PREFIX, AgentRole
+from defender._agent_role import REVIEW_AGENT_ID_PREFIX, AgentRole
 from defender.runtime.tools import AgentDeps
 
 __all__ = [

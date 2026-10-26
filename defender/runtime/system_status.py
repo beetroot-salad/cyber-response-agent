@@ -10,7 +10,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from defender._paths import adapters_under, name_roots, root_spellings
-from defender.learning.branch.redaction import redact_model_visible
+from defender._redaction import redact_model_visible
 from defender.runtime import circuit_breaker
 from defender.runtime.verb_dispositions import HEALTH_CHECK, gather_query_systems
 from defender.runtime.verb_grant import GrantError

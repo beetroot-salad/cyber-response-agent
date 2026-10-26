@@ -20,7 +20,7 @@ from typing import Any
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._by_path import LINT_DIR, load_module
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
-from defender.run_repository import SessionPaths
+from defender.records import SessionPaths
 
 REPO_ROOT = T1106.REPO_ROOT
 DEFENDER = T1106.DEFENDER
@@ -84,7 +84,7 @@ def record_type(name: str) -> type:
 
 def config_fault() -> type:
     """`ConfigFault` — the adapters' own class, exit 2 (CX5)."""
-    return mod("integrations.faults").ConfigFault
+    return mod("kit.faults").ConfigFault
 
 
 def case_ticket_error() -> type:
@@ -595,7 +595,7 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 # ======================================================================================
 
 def ticket_writer() -> Any:
-    return mod("integrations.ticket_writer")
+    return mod("runtime.ticket_writer")
 
 
 def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
@@ -615,7 +615,7 @@ def open_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
 
 def receipt_path(run_dir: Path) -> Path:
     """The receipt: a sidecar beside the run dir, keyed by the run's name, out of the box's reach."""
-    return mod("run_repository._layout").RunPaths(Path(run_dir)).ticket_write(fixture_runs_base(Path(run_dir).parent))
+    return mod("records._layout").RunPaths(Path(run_dir)).ticket_write(fixture_runs_base(Path(run_dir).parent))
 
 
 def receipt(run_dir: Path) -> dict[str, Any] | None:
@@ -651,7 +651,7 @@ def render_page(run_dir: Path, *, update_ticket: bool) -> str:
 
 
 def page_html(run_dir: Path) -> str:
-    path = mod("run_repository._layout").RunPaths(Path(run_dir)).runtime_html
+    path = mod("records._layout").RunPaths(Path(run_dir)).runtime_html
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 

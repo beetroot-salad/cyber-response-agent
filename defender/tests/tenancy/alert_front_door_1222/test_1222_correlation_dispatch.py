@@ -15,7 +15,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from typing import Any
 
 from defender._io import read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.runtime.state import _1255_snapshot as S1255

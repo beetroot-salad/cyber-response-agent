@@ -185,7 +185,7 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
     in_folder_name = "session_store_pointer.json"
 
     def addresses(run_dir: Path) -> dict[str, Path]:
-        sidecar = S.sym("run_repository", "RunPaths")(run_dir).session_pointer()
+        sidecar = S.sym("records", "RunPaths")(run_dir).session_pointer()
         assert sidecar.parent == run_dir.parent, (
             f"the case pointer is not a sidecar beside the run dir: {sidecar}")
         return {"in-folder": run_dir / in_folder_name, "sidecar": sidecar}

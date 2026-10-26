@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from defender._io import read_jsonl_rows
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
@@ -69,7 +69,7 @@ def _base_members() -> frozenset[str]:
 
 
 def _agent(lead: str) -> str:
-    return f"{S.sym('runtime.agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
+    return f"{S.sym('_agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
 
 
 def _session_ending(stores: list, lead: str) -> str | None:
@@ -234,7 +234,7 @@ def _main_append_fault_store(tmp: Path, sink: list) -> Callable[..., Any]:
     fault = SS.StoreFault(on="append", after=0, mode="disk-full")
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("run_repository", "SessionPaths")(fixture_runs_base(base)))
+        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("records", "SessionPaths")(fixture_runs_base(base)))
         handle = _AgentAppendFault(real, fault, agent_id="main")
         sink.append(handle)
         return handle

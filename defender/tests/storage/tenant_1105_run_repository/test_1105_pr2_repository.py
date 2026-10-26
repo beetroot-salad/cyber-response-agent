@@ -49,7 +49,7 @@ def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
 
 
 def _rid(text: str):
-    from defender.run_repository import RunId
+    from defender.records import RunId
 
     return RunId.parse(text)
 
@@ -60,7 +60,7 @@ def _ids(listed) -> list[str]:
 
 
 def _refusal_classes():
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     return (RunRefused, TenantRefused)
 
@@ -114,7 +114,7 @@ def test_the_accepted_tenant_hands_out_a_repository_that_opens_its_own_runs_by_i
 
 
 def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
-    from defender.run_repository import RunAbsent, RunRefused
+    from defender.records import RunAbsent, RunRefused
 
     _root, t = _good(tmp_path, R1)
     (Path(location_path(t.runs)) / AFILE).write_text("x\n", encoding="utf-8")
@@ -139,7 +139,7 @@ def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
 
 
 def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):  # name kept; the owner changed the class (#1105 PR 2 review)
-    from defender.run_repository import RunAbsent, RunUnreachable
+    from defender.records import RunAbsent, RunUnreachable
 
     root = tmp_path / "data"
     root.mkdir()
@@ -165,7 +165,7 @@ def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):  
 
 
 def test_list_tells_an_absent_container_from_an_empty_one_and_judges_every_entry(tmp_path):
-    from defender.run_repository import RunRefused
+    from defender.records import RunRefused
 
     root = tmp_path / "data"
     root.mkdir()
@@ -232,7 +232,7 @@ def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_
 
 
 def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_path):
-    from defender.run_repository import RunAddress, RunId
+    from defender.records import RunAddress, RunId
 
     root, t, (r1,) = _uuid_container(tmp_path, 1)
     u = H.tenant(root, H.U_ID)
@@ -258,7 +258,7 @@ def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_pat
 
 
 def test_a_run_address_checks_its_fields_at_construction_and_is_frozen():
-    from defender.run_repository import RunAddress, RunId
+    from defender.records import RunAddress, RunId
 
     run_id, arm_id, episode_id = (str(uuid.uuid4()) for _ in range(3))
     good = RunAddress(tenant_id=_tenant.TenantId(H.T_ID), run_id=RunId.parse(run_id),
@@ -288,7 +288,7 @@ def test_a_run_address_checks_its_fields_at_construction_and_is_frozen():
         "int", "old-minted", "old-episode", "latest", "uuid-upper", "uuid-braced",
         "uuid-no-hyphens"])
 def test_a_run_address_holds_its_episode_id_to_the_owners_episode_grammar(episode_id):
-    from defender.run_repository import RunAddress, RunId
+    from defender.records import RunAddress, RunId
 
     good = str(uuid.uuid4())
     fields = {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(str(uuid.uuid4()))}
@@ -299,7 +299,7 @@ def test_a_run_address_holds_its_episode_id_to_the_owners_episode_grammar(episod
 
 def test_an_arm_created_for_t_opens_for_t_through_its_episode_and_never_as_a_natural_run(
         tmp_path, episodes):
-    from defender.run_repository import RunAbsent, RunId
+    from defender.records import RunAbsent, RunId
 
     root, t = _good(tmp_path, R1)
     episode_id, ep, roster = _new_episode(root, roster=True)

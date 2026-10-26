@@ -21,7 +21,7 @@ from defender.learning._pydantic_stage import run_stage
 from defender.learning._prompt import stage_user_message
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission import build_scoped_write_allow
 from defender.runtime.permission.grant import (
@@ -32,7 +32,7 @@ from defender.runtime.permission.grant import (
     under,
 )
 from defender.runtime.tools import AgentDeps
-from defender.runtime.model_view import MODEL_WORKSPACE
+from defender._model_view import MODEL_WORKSPACE
 
 AuthorError = _shared.AuthorError
 

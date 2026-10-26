@@ -70,8 +70,8 @@ A verb is a plain annotated function. The whole contract is in its
 signature and its return:
 
 ```python
-from defender.runtime.verbs import VerbContext
-from defender.integrations import faults
+from defender.kit.verbs import VerbContext
+from defender.kit import faults
 
 def get_host(ctx: VerbContext, *, host: str) -> dict:
     """One host's record. `host` is a declared param; a call that omits it,
@@ -95,7 +95,7 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   it, so a quoted `"20"` or `"false"` is caught before it reaches the body.
 - **A native-query verb declares its engine.** A verb whose body IS a query
   language — an ES|QL pipe, a Lucene/KQL/SQL string that lives whole in ONE
-  param — imports `verb` from `defender.runtime.verbs` and carries a
+  param — imports `verb` from `defender.kit.verbs` and carries a
   `@verb(engine=…, body_param=…)` decoration: `engine=` names the language
   (`esql`, `lucene`, `sql`, …) and `body_param=` names the single param the query
   body rides in. It only stamps two attributes and returns the function unchanged,
@@ -127,7 +127,7 @@ the defender asked.
 
 ## Faults, not exit codes
 
-Import the taxonomy from `integrations/faults.py` and **raise** the
+Import the taxonomy from `kit/faults.py` and **raise** the
 member that matches the condition. The query tool turns the fault into the
 queries-table row and the exit code the circuit breaker keys on — you never
 write an exit code yourself:

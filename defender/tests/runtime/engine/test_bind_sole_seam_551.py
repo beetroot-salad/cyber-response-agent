@@ -16,7 +16,7 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.leads.lead_author_engine import LeadAuthorDeps  # noqa: E402
 from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission.grant import Grant  # noqa: E402
 from defender.runtime.permission.policies._common import reader_grants  # noqa: E402
 from defender.runtime.permission.policy import AgentPolicy  # noqa: E402

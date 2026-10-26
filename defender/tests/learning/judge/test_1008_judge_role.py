@@ -22,7 +22,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def _role():
-    return T.sym("runtime.agent_role", "AgentRole")
+    return T.sym("_agent_role", "AgentRole")
 
 
 def _agents():

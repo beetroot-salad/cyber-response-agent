@@ -16,7 +16,7 @@ _CLEAN = {
     "integrations/tacit_knowledge_adapter.py":
         "import yaml\nfrom pathlib import Path\n"
         "def load(p):\n    return yaml.safe_load(Path(p).read_text())\n",
-    "integrations/ticket_writer.py": "def write(env):\n    return env['X']\n",
+    "runtime/ticket_writer.py": "def write(env):\n    return env['X']\n",
     "runtime/lead_zero/run.py": "def go(env):\n    return env\n",
     "hooks/budget_enforcer.py": "DEFAULT = 5\ndef cap(limits):\n    return limits.get('x', DEFAULT)\n",
 }
@@ -85,10 +85,10 @@ def test_a_budget_enforcer_read_of_the_environment_or_a_file_is_found(tmp_path, 
 
 
 @pytest.mark.parametrize("rel, body", [
-    ("integrations__ticket_writer.py", "process_defender_dir()"),
-    ("integrations__ticket_writer.py", "Path.cwd()"),
-    ("integrations__ticket_writer.py", "run_env(x)"),
-    ("integrations__ticket_writer.py", "os.environ['X']"),
+    ("runtime__ticket_writer.py", "process_defender_dir()"),
+    ("runtime__ticket_writer.py", "Path.cwd()"),
+    ("runtime__ticket_writer.py", "run_env(x)"),
+    ("runtime__ticket_writer.py", "os.environ['X']"),
     ("runtime__lead_zero__run.py", "os.getenv('X')"),
     ("runtime__lead_zero__run.py", "run_env(x)"),
 ])

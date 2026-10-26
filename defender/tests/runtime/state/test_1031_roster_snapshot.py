@@ -28,7 +28,7 @@ GRANT = grant_of("gather", (("elastic", "query"),))
 
 #: An adapter declaring `query`, so `GRANT`'s load check passes over it.
 QUERY_ADAPTER = (
-    "from defender.runtime.verbs import VerbContext, verb\n"
+    "from defender.kit.verbs import VerbContext, verb\n"
     "@verb()\n"
     "def query(ctx: VerbContext, *, native_query: str) -> list[dict]:\n"
     "    return [{'hit': native_query}]\n"

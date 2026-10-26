@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import run_common
-from defender.run_repository import RunPaths
+from defender.records import RunPaths
 from defender.learning.branch.estate.registry import EstateError
 from defender.runtime import run_tenant
 from defender.tests.support.runtime.engine import _spec767 as M

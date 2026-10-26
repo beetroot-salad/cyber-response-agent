@@ -6,7 +6,7 @@ import pytest
 from defender.runtime.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.integrations import ticket_adapter
-from defender.integrations.faults import TransportFault
+from defender.kit.faults import TransportFault
 from defender.tests.support.tenancy import _tenants1106
 
 CURL_FAULTS = [
