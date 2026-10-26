@@ -128,10 +128,12 @@ class LoopPaths(DefenderPaths):
     @classmethod
     def for_tenant(cls, tenant: Tenant) -> LoopPaths:
         """@owns tenant learning root — accepted identity selects mutable state, never env."""
-        from defender.records._held import require_accepted_tenant
+        from defender.tenancy._tenant import Tenant
 
-        accepted = require_accepted_tenant(tenant)
-        return accepted.learning_paths(cls, repo_root=REPO_ROOT)
+        if not isinstance(tenant, Tenant):
+            raise TypeError(f"the runs repository takes an accepted Tenant, not "
+                            f"{type(tenant).__name__}")
+        return tenant.learning_paths(cls, repo_root=REPO_ROOT)
 
     @property
     def state_root(self) -> Path | LearningRoot:

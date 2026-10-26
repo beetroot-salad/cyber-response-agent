@@ -73,7 +73,7 @@ def _repository_refusal(root: Path, run_id: str, tenant_id: str = TID) -> BaseEx
     source `run_id` — what the launcher opens its source through and passes through verbatim
     (#1105 PR 2). The replacement for `tenant_of_run_dir`'s location refusal (F-13): a run that
     is not at `<root>/<T>/runs/<run_id>` is not T's to fork."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     from defender.records import RunId, RunRefused
 
     with pytest.raises((RunRefused, TenantRefused)) as refused:

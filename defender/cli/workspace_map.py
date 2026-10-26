@@ -10,6 +10,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender._paths import adapters_under  # noqa: E402
 from defender.runtime.workspace_map import DEFENDER_DIR, workspace_map  # noqa: E402
+from defender.records._tenant_id import TenantRefused
 
 def main(argv: list[str]) -> int:
     """`workspace_map.py --tenant T <run_id>` (#1105 declared change 10, J8): the map of T's
@@ -57,7 +58,7 @@ def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
         return None
     try:
         tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
-    except _tenant.TenantRefused:
+    except TenantRefused:
         return None
     agent = tenant.export_folder(commit) / "agent"
     return agent if agent.is_dir() else None

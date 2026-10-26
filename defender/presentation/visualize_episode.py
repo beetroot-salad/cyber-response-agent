@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Any
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.tenancy._tenant import TenantRefused, requested_tenant, resolve_data_root
+from defender.tenancy._tenant import requested_tenant, resolve_data_root
+from defender.records._tenant_id import TenantRefused
 from defender.records._episode_handle import Episode, EpisodeRefused
 from defender._io import Bound
 from defender.records._episode_paths import LAYOUT, EpisodePaths
@@ -47,6 +48,7 @@ from defender.presentation.visualize_primitives import (
 
 if TYPE_CHECKING:
     from defender.records import EpisodeRuns, Run, RunId, RunsRepository
+    from defender.tenancy._tenant import Tenant
 
 from defender.presentation.episode_verdict import (
     EPISODE_CSS as EPISODE_CSS,
@@ -543,7 +545,7 @@ def _write_page(episode: Episode, html_text: str) -> Path:
     return page.path
 
 
-def render_episode(runs: RunsRepository, episode_id: str) -> Path:
+def render_episode(runs: RunsRepository[Tenant], episode_id: str) -> Path:
     """Render episode `episode_id` of `runs`'s tenant into its own folder. The door is the
     episode view (`open_episode_view`): a missing episode, an id that is not a UUID, a link or
     a file at any level of the walk is `JudgeRefused` before anything else is read, and
@@ -560,7 +562,7 @@ def render_episode(runs: RunsRepository, episode_id: str) -> Path:
         return _write_page(view.episode, html_text)
 
 
-def open_episode_view(runs: RunsRepository, episode_id: str) -> EpisodeRuns:
+def open_episode_view(runs: RunsRepository[Tenant], episode_id: str) -> EpisodeRuns:
     """`runs.episode(episode_id)`, every refusal of its door as the page's `JudgeRefused`: an
     id that is not a UUID (`latest` included), a missing episode, a link or a file at any
     level of the tenant's walk; nothing is created. The caller closes the view."""

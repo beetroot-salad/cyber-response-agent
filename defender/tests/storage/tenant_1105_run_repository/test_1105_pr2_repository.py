@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from defender.tenancy import _tenant
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.records._tenant_id import TenantId
 
 #: #1187 declared change 1: `RunId` admits only canonical lowercase uuid4 text, so the fixture's
 #: natural runs and the names its refusals are asked about are uuids derived from their old
@@ -238,10 +238,10 @@ def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_pat
     u = H.tenant(root, H.U_ID)
     H.make_run(location_path(u.runs), r1)
 
-    addr = RunAddress(tenant_id=_tenant.TenantId(H.T_ID), run_id=RunId.parse(r1),
+    addr = RunAddress(tenant_id=TenantId(H.T_ID), run_id=RunId.parse(r1),
                       episode_id=None)
     stored = {"tenant_id": str(addr.tenant_id), "run_id": str(addr.run_id)}
-    back = RunAddress(tenant_id=_tenant.TenantId(stored["tenant_id"]),
+    back = RunAddress(tenant_id=TenantId(stored["tenant_id"]),
                       run_id=RunId.parse(stored["run_id"]), episode_id=None)
     assert back == addr
 
@@ -250,7 +250,7 @@ def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_pat
     assert Path(resolved.run_dir) == Path(location_path(t.runs)) / r1
     assert str(resolved.tenant_id) == H.T_ID
 
-    beta_addr = RunAddress(tenant_id=_tenant.TenantId(H.U_ID), run_id=RunId.parse(r1),
+    beta_addr = RunAddress(tenant_id=TenantId(H.U_ID), run_id=RunId.parse(r1),
                            episode_id=None)
     crossed = H.raised(t.runs_repository().resolve, beta_addr)
     assert isinstance(crossed, _refusal_classes()), f"another tenant's address: {crossed!r}"
@@ -261,21 +261,21 @@ def test_a_run_address_checks_its_fields_at_construction_and_is_frozen():
     from defender.records import RunAddress, RunId
 
     run_id, arm_id, episode_id = (str(uuid.uuid4()) for _ in range(3))
-    good = RunAddress(tenant_id=_tenant.TenantId(H.T_ID), run_id=RunId.parse(run_id),
+    good = RunAddress(tenant_id=TenantId(H.T_ID), run_id=RunId.parse(run_id),
                       episode_id=None)
-    arm = RunAddress(tenant_id=_tenant.TenantId(H.T_ID), run_id=RunId.parse(arm_id),
+    arm = RunAddress(tenant_id=TenantId(H.T_ID), run_id=RunId.parse(arm_id),
                      episode_id=episode_id)
     assert arm.episode_id == episode_id
     assert good.episode_id is None
 
     for bad in ({"tenant_id": "Not A Tenant", "run_id": RunId.parse(run_id), "episode_id": None},
-                {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": "../r1", "episode_id": None},
-                {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(run_id),
+                {"tenant_id": TenantId(H.T_ID), "run_id": "../r1", "episode_id": None},
+                {"tenant_id": TenantId(H.T_ID), "run_id": RunId.parse(run_id),
                  "episode_id": "a/b"},
-                {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(arm_id),
+                {"tenant_id": TenantId(H.T_ID), "run_id": RunId.parse(arm_id),
                  "episode_id": "20260101t000000z-x"}):
         assert H.raised(RunAddress, **bad) is not None, f"RunAddress accepted {bad!r}"
-    assert H.raised(setattr, good, "tenant_id", _tenant.TenantId(H.U_ID)) is not None
+    assert H.raised(setattr, good, "tenant_id", TenantId(H.U_ID)) is not None
     assert str(good.tenant_id) == H.T_ID
 
 
@@ -291,7 +291,7 @@ def test_a_run_address_holds_its_episode_id_to_the_owners_episode_grammar(episod
     from defender.records import RunAddress, RunId
 
     good = str(uuid.uuid4())
-    fields = {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(str(uuid.uuid4()))}
+    fields = {"tenant_id": TenantId(H.T_ID), "run_id": RunId.parse(str(uuid.uuid4()))}
     assert RunAddress(**fields, episode_id=good).episode_id == good
     assert H.raised(RunAddress, **fields, episode_id=episode_id) is not None, (
         f"RunAddress accepted the episode id {episode_id!r}")

@@ -600,7 +600,7 @@ def _client(*investigations: Any) -> Any:
     from defender.api.fakes import (InMemorySecrets, InMemoryStore, StubArtifactLinks,
                                     StubSystemChecker, TokenAuthenticator)
     from defender.api.ports import ApiDeps, Principal
-    from defender.tenancy._tenant import TenantId
+    from defender.records._tenant_id import TenantId
 
     store = InMemoryStore(lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC))
     for inv in investigations:

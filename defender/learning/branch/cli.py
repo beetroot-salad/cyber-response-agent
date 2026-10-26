@@ -72,6 +72,7 @@ from defender.records import (
     RunsRepository,
 )
 from defender.runtime.run_tenant import RunTenant
+from defender.tenancy._tenant import Tenant
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
@@ -187,7 +188,7 @@ def _copy_source_input(episode: Episode, raw: bytes, record_text: str,
 
 
 def prepare_episode(
-    runs: RunsRepository, source: Run, *,
+    runs: RunsRepository[Tenant], source: Run, *,
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
     knowledge_commit: str | None = None,
 ) -> EpisodeRuns:
@@ -198,7 +199,7 @@ def prepare_episode(
     raw, record_text = source_input(source)
     try:
         view = runs.create_episode()
-    except (RunRefused, _tenant.TenantRefused) as refused:
+    except (RunRefused, TenantRefused) as refused:
         raise LauncherRefused(f"[branch] a fresh episode could not be claimed: {refused}") \
             from refused
     try:
@@ -247,7 +248,7 @@ def _prime_once(
         "than replayed")
 
 
-def _episode_tenant(tenant_id: _tenant.TenantId, data_root: DataRoot) -> RunTenant:
+def _episode_tenant(tenant_id: TenantId, data_root: DataRoot) -> RunTenant:
     """The episode's tenant: the request's (`--tenant`), accepted under `data_root` — or the
     refusal, before anything is spent (S2: the tenant comes from the request, never from a
     record or a stamp).
@@ -270,7 +271,7 @@ def _episode_tenant(tenant_id: _tenant.TenantId, data_root: DataRoot) -> RunTena
         raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
 
 
-def _open_launch_source(runs: RunsRepository, source_run_id: str) -> Run:
+def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run:
     """The source run, by id, in the request's tenant's natural container — or the refusal,
     before anything is spent. `runs.open` walks `<T>/runs` from the tenant's folder no-follow
     (a link at any level is refused) and takes only a real directory at the id; a path, or an
@@ -283,7 +284,7 @@ def _open_launch_source(runs: RunsRepository, source_run_id: str) -> Run:
             f"{refusal}") from refusal
 
 
-def _source_stamp_agrees(source: Run, tenant_id: _tenant.TenantId) -> None:
+def _source_stamp_agrees(source: Run, tenant_id: TenantId) -> None:
     """Refuse a source whose provenance stamp names another tenant than the request's. The
     stamp is in the box's writable run dir, so it is never the tenant's authority — the
     request is, and the source was opened under that tenant's own folder — but a disagreement
@@ -305,7 +306,7 @@ def _source_stamp_agrees(source: Run, tenant_id: _tenant.TenantId) -> None:
 
 
 def sibling_argv(
-    episode_id: str, world_label: str, *, tenant_id: _tenant.TenantId, model: str | None = None,
+    episode_id: str, world_label: str, *, tenant_id: TenantId, model: str | None = None,
     knowledge_commit: str | None = None,
 ) -> list[str]:
     """One sibling's command line: its tenant, its episode and which arm of it this process is
@@ -378,7 +379,7 @@ SPAWN_FAILED_EXIT = 70
 def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every arm runs on, the rate they share and the failures already counted
     episode: Episode, world_ids: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
-    tenant_id: _tenant.TenantId | None, rate: float | None = None, failed_before: int = 0,
+    tenant_id: TenantId | None, rate: float | None = None, failed_before: int = 0,
     knowledge_commit: str | None = None,
 ) -> dict[str, int]:
     """Start the selected world UUIDs together, returning exits keyed by those UUIDs."""
@@ -479,6 +480,7 @@ from defender.learning.branch.verification import (
     _write_family_stamp as _write_family_stamp,
     verify_family as verify_family,
 )
+from defender.records._tenant_id import TenantId, TenantRefused
 
 if _missing := [f for f in _ANCHORED if _HELD[f].off_anchor is None]:
     raise RuntimeError(f"anchored stamp field(s) {_missing} have no refusal text in _HELD_RULES")
@@ -549,7 +551,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     try:
         tenant_id = _tenant.requested_tenant_id(ns.tenant)
         data_root = _tenant.resolve_data_root()
-    except _tenant.TenantRefused as refusal:
+    except TenantRefused as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
     tenant = _episode_tenant(tenant_id, data_root)
     runs = tenant.tenant.runs_repository()
@@ -621,7 +623,7 @@ def _launch(  # noqa: PLR0913 — see `main`
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
     ns: argparse.Namespace, *, source: Run, source_stamp: dict, episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
-    tenant: RunTenant, runs: RunsRepository, served: Sequence[str], oracle: Any,
+    tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
     verifier: Any, roster: Any, started: threading.Event, knowledge_commit: str | None = None,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
@@ -713,7 +715,7 @@ def _finished_arms(view: EpisodeRuns, world_ids: Sequence[str]) -> dict[str, Run
         return {world_id: handout[ids[world_id]] for world_id in world_ids}
 
 
-def _render_page(runs: RunsRepository, *, episode_id: str) -> None:
+def _render_page(runs: RunsRepository[Tenant], *, episode_id: str) -> None:
     """Render the episode page, by id in the request's tenant's repository. Never fatal to the
     launch: a failure is logged, not raised."""
     try:
@@ -726,7 +728,7 @@ def _render_page(runs: RunsRepository, *, episode_id: str) -> None:
                         f"({render_failed!r})")
 
 
-def _grade(runs: RunsRepository, *, episode_id: str, judge: Any) -> None:
+def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any) -> None:
     """The grade, the body of the `JUDGE` frame; any failure is logged, never raised. The
     judge opens the episode by id through `runs`, the request's tenant's repository."""
     try:

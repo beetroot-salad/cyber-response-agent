@@ -98,6 +98,7 @@ from defender.runtime import run_tenant  # noqa: E402
 from defender.learning.core import state as learning_state  # noqa: E402
 from defender.runtime.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.runtime import case_ticket  # noqa: E402
+from defender.records._tenant_id import TenantId, TenantRefused
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
 #: path, so a call still running is blocked (a FIFO where git expects a file), not slow.
@@ -126,7 +127,7 @@ def setup(tenant_id: str, learning_state_from: Path | None = None, *,
     remain completable; recreated source records are preserved and reported. Refusals are
     printed visibly, exit 1."""
     try:
-        tid = _tenant.TenantId(tenant_id)
+        tid = TenantId(tenant_id)
         root = _tenant.resolve_data_root()
         _tenant.refuse_foreign_data_root(root, tid)
         settings, has_row = _tenant.accept_placed_knowledge(
@@ -139,7 +140,7 @@ def setup(tenant_id: str, learning_state_from: Path | None = None, *,
         if learning_state_from is not None:
             print(f"learning state adopted from {learning_state_from}")
         tenant = _tenant.accept_tenant(root, tid, defender_dir=_DEFENDER_DIR)
-    except (OSError, _tenant.TenantRefused) as refused:
+    except (OSError, TenantRefused) as refused:
         _say(refused)
         return 1
     if _has_forge_binding(tenant):
@@ -150,7 +151,7 @@ def setup(tenant_id: str, learning_state_from: Path | None = None, *,
 def _has_forge_binding(tenant: _tenant.Tenant) -> bool:
     try:
         _tenant.read_forge_binding(tenant)
-    except _tenant.TenantRefused:
+    except TenantRefused:
         return False
     return True
 
@@ -162,7 +163,7 @@ def _settings_files_parse(settings: Path) -> None:
     try:
         case_ticket.check_mapping(settings)
     except case_ticket.CaseTicketError as bad:
-        raise _tenant.TenantRefused(str(bad)) from bad
+        raise TenantRefused(str(bad)) from bad
 
 
 # ==========================================================================================
@@ -175,7 +176,7 @@ def check_tenant(tenant_id: str) -> int:
     try:
         tenant = _tenant.accept_tenant(
             _tenant.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         _say(refused)
         return 1
     return _report([*_findings(tenant.knowledge), *_publish_findings(tenant)])
@@ -252,7 +253,7 @@ def _publish(tenant: _tenant.Tenant, *, by: str, client=None, identity=None,
         with recording(tenant, by=by), _delivery(
                 tenant, client=client, identity=identity, issuer_config=issuer_config) as delivery:
             export = delivery.publish()
-    except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
+    except (vc.DeliveryRefused, vc.ForgejoAuthError, TenantRefused) as refused:
         _say(f"publish refused: {refused}")
         return 1
     print(f"published {export.commit} as tenant {tenant.id}'s current knowledge")
@@ -267,7 +268,7 @@ def update(tenant_id: str, *, client=None, identity=None,
     try:
         tenant = _tenant.accept_tenant(
             _tenant.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         _say(refused)
         return 1
     return _publish(tenant, by="tenant.py update", client=client, identity=identity,
@@ -311,7 +312,7 @@ def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
             batch = delivery.start_batch(f"propose-{secrets.token_hex(4)}", lanes=lanes)
             batch.commit(change_set, f"propose: {', '.join(sorted(files))[:200]}")
             delivered = delivery.finish(batch)
-    except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
+    except (vc.DeliveryRefused, vc.ForgejoAuthError, TenantRefused) as refused:
         _say(f"propose refused: {refused}")
         return 1
     finally:
@@ -328,7 +329,7 @@ def check_folder(folder: Path) -> int:
     containment is applied — that belongs to a process that mounts the folder."""
     try:
         _tenant.check_knowledge_folder(folder, tenant_id=None)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         _say(refused)
         return 1
     return _report(_findings(folder))
@@ -344,7 +345,7 @@ def _findings(knowledge: Path) -> list[str]:
     findings: list[str] = []
     try:
         _settings_files_parse(settings)
-    except _tenant.TenantRefused as bad:
+    except TenantRefused as bad:
         findings.append(str(bad))
     # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
     # only `check` uses — `setup`, `scaffold` and `migrate` start without paying for it.
@@ -446,8 +447,8 @@ def scaffold(tenant_id: str, target: Path) -> int:
     the first write leaves `target` empty again — or, when the undo itself fails, says so and
     names the folder to empty by hand."""
     try:
-        tid = _tenant.TenantId(tenant_id)
-    except _tenant.TenantRefused as refused:
+        tid = TenantId(tenant_id)
+    except TenantRefused as refused:
         _say(refused)
         return 1
     target = Path(target).absolute()  # git runs with cwd=target: a relative GIT_DIR would nest
@@ -532,7 +533,7 @@ def _committed_files(source: str, rev: str = "HEAD") -> list[tuple[str, str]]:
     return files
 
 
-def _commit_new_tenant_repo(target: Path, tid: _tenant.TenantId,
+def _commit_new_tenant_repo(target: Path, tid: TenantId,
                             files: list[tuple[str, str]], message: str) -> None:
     """Write `files` (from `_committed_files`) and `agent/.tenant-id` into `target`, and commit
     exactly those on a new branch `main`, whatever the operator's ignore rules say."""
@@ -581,8 +582,8 @@ def migrate(tenant_id: str, target: Path) -> int:
     identity, or a history with no copy for the id (a shallow clone is told to fetch its
     history); a failure after it creates `target` removes `target` again."""
     try:
-        tid = _tenant.TenantId(tenant_id)
-    except _tenant.TenantRefused as refused:
+        tid = TenantId(tenant_id)
+    except TenantRefused as refused:
         _say(refused)
         return 1
     target = Path(target).absolute()
@@ -702,7 +703,7 @@ def main(argv: list[str]) -> int:
     migrate_p.add_argument("target", type=Path)
     ns = p.parse_args(argv)
     if ns.command == "new-id":
-        print(_tenant.TenantId.mint())
+        print(TenantId.mint())
         return 0
     if ns.command == "scaffold":
         return scaffold(ns.tenant_id, ns.target)

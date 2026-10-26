@@ -24,6 +24,7 @@ from defender.records import (  # noqa: E402
     RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest, sidecar_names,
 )
 from defender.presentation._page_failed import VisualizeFailed  # noqa: E402
+from defender.records._tenant_id import TenantId, TenantRefused
 
 _logger = logging.getLogger(__name__)
 
@@ -330,7 +331,7 @@ def enqueue_curation(
     from defender.learning.core.config import LoopPaths
     from defender.learning.core.state import LearningState, StateRefused
 
-    address = RunAddress(tenant_id=_tenant.TenantId(run.tenant_id), run_id=run.id)
+    address = RunAddress(tenant_id=TenantId(run.tenant_id), run_id=run.id)
     # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
     # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:
@@ -350,7 +351,7 @@ def enqueue_curation(
         _logger.error(f"NOT enqueuing for curation: could not enqueue the request, refused "
                       f"{refused.record}: {refused.reason}")
         return False
-    except (FatalConfigError, _tenant.TenantRefused) as config_error:
+    except (FatalConfigError, TenantRefused) as config_error:
         _logger.error(f"NOT enqueuing for curation: could not enqueue the request: "
                       f"{config_error}")
         return False

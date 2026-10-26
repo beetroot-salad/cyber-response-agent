@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from defender.knowledge._corpus import QueryTemplate, iter_query_templates
 from defender.knowledge._knowledge import KnowledgePaths
-from defender.tenancy._tenant import Tenant, TenantId, TenantRefused, accept_tenant, clone_halves
+from defender.tenancy._tenant import Tenant, accept_tenant, clone_halves
+from defender.records._tenant_id import TenantId, TenantRefused
 from defender.tenancy._tenants import AGENT_HALF
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import GrantError, VerbGrant

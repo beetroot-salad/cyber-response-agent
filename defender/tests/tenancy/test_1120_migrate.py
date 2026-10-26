@@ -16,6 +16,7 @@ from defender._paths import PATHS
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.tests.tenancy.tenant_1120_piece1 import test_1120_scaffold as S
+from defender.records._tenant_id import TenantId
 
 _TID = fixture_uuid("tenant:playground")
 _LAB = f"knowledge/tenants/{_TID}"
@@ -119,7 +120,7 @@ def test_migrate_gives_an_old_shape_tenant_a_folder_setup_accepts(
     assert H.census_diff(after, H.tree_census(root)) == [f"added: {_TID}/learning"], (
         "setup changed more than provisioning the migrated tenant's learning root")
     assert list((root / _TID / "learning").iterdir()) == []
-    accepted = _tenant.accept_tenant(fixture_data_root(root), _tenant.TenantId(_TID),
+    accepted = _tenant.accept_tenant(fixture_data_root(root), TenantId(_TID),
                                      defender_dir=PATHS.defender_dir)
     assert accepted.knowledge == knowledge
 

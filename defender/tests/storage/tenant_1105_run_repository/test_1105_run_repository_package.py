@@ -65,7 +65,7 @@ _DOOR = "defender.records"
 
 
 def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     from defender.records import RunRefused
 
     assert isinstance(RunRefused, type), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
@@ -151,7 +151,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
     # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6; +1 for #1279's `sidecar_names`).
-    assert _out(proc).split()[0] == "72", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 

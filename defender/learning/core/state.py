@@ -179,7 +179,7 @@ def _address_fault(spec: dict) -> str | None:
     """Why a curation row's `tenant_id` / `run_id` cannot be read as a run address — missing,
     not a string, or off its grammar — or `None` when they can. The shape alone: no tenant
     folder is read (#1105 D-stored)."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     from defender.records import RunAddress, RunRefused
 
     for key in ("tenant_id", "run_id"):
@@ -886,7 +886,7 @@ class LearningAdoption:
 
     def __init__(self, destination: LearningRoot, source: Path | None, *, tenant_id: str,
                  data_root: DataRoot, repo_root: Path) -> None:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
 
         destination_path = _unwrap_learning_root(destination)
         root_path = _unwrap_data_root(data_root)
@@ -917,7 +917,7 @@ class LearningAdoption:
         self._validate_existing_state()
 
     def _validate_existing_state(self) -> None:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
 
         assert self.aside is not None
         source, destination = self.source, self.destination
@@ -951,7 +951,7 @@ class LearningAdoption:
                 self._check_permissions(base)
 
     def _validate_staging(self) -> bool:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
 
         assert self.stage is not None
         assert self.aside is not None
@@ -979,7 +979,7 @@ class LearningAdoption:
 
     @staticmethod
     def _token(root: Path) -> str | None:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
         path = root / ".adoption"
         if not os.path.lexists(path):
             return None
@@ -996,7 +996,7 @@ class LearningAdoption:
         return [self.source / name for name in self.entries if os.path.lexists(self.source / name)]
 
     def _check_permissions(self, base: Path) -> None:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
         if not os.access(base, os.W_OK | os.X_OK):
             raise TenantRefused(f"{base}: learning adoption requires write and search permission")
         for name in self.entries:
@@ -1030,7 +1030,7 @@ class LearningAdoption:
                     shutil.copystat(original, copied, follow_symlinks=False)
 
     def run(self, *, before_move: Callable[[], object] | None = None) -> None:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
 
         try:
             with contextlib.ExitStack() as locks:
@@ -1059,7 +1059,7 @@ class LearningAdoption:
             raise TenantRefused(f"learning adoption {self.source} -> {self.destination}: {failed}") from failed
 
     def _lock_existing(self, locks: contextlib.ExitStack) -> None:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
         import fcntl
         import stat
 
@@ -1131,7 +1131,7 @@ class LearningAdoption:
         self._refuse_remaining()
 
     def _refuse_remaining(self) -> None:
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
         remaining = self._remaining()
         if remaining:
             raise TenantRefused(f"learning adoption completed but source records were recreated: "
