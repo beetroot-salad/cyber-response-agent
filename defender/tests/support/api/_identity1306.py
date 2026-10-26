@@ -95,14 +95,17 @@ class FailingRepository:
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._inner, name)
-        if name not in self.failing:
+        if not callable(attribute):
             return attribute
 
-        def refuse(*args: Any, **kwargs: Any) -> Any:
-            self.refusals[name] = self.refusals.get(name, 0) + 1
-            raise InjectedFailure(f"{name} failed")
+        def call(*args: Any, **kwargs: Any) -> Any:
+            # Decided at CALL time, so a caller that kept the bound method still sees later changes.
+            if name in self.failing:
+                self.refusals[name] = self.refusals.get(name, 0) + 1
+                raise InjectedFailure(f"{name} failed")
+            return attribute(*args, **kwargs)
 
-        return refuse
+        return call
 
 
 @dataclasses.dataclass(frozen=True)
@@ -153,6 +156,8 @@ class FakeSignIn:
         self.during_send: Callable[[], None] | None = None
         #: email -> the exception (any type) every send to that account raises until removed.
         self.raise_on_send_to: dict[str, Exception] = {}
+        #: email -> the exception (any type) every `create_account` for that email raises until removed.
+        self.raise_on_create_to: dict[str, Exception] = {}
         #: The lifespan's sender runs on its own thread; views read snapshots taken under this lock.
         self._lock = threading.RLock()
 
@@ -160,6 +165,8 @@ class FakeSignIn:
     def create_account(self, username: str, email: str, required_actions: frozenset[str]) -> str:
         with self._lock:
             self.create_calls.append(username)
+            if email in self.raise_on_create_to:
+                raise self.raise_on_create_to[email]
             if username not in self.accounts:
                 self.accounts[username] = Account(
                     username, email, frozenset(required_actions), f"kc-{next(self._ids):04d}")

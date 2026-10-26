@@ -162,7 +162,7 @@ def test_a_failed_send_stays_pending_and_is_retried_until_it_goes_out(kind: str)
     assert got() == 1
 
 
-@pytest.mark.parametrize("error", ["sign-in-unavailable", "any-exception"])
+@pytest.mark.parametrize("error", ["sign-in-unavailable", "any-exception", "any-exception-on-create"])
 @pytest.mark.parametrize("failing", [NEW, NINA])
 def test_a_set_password_send_that_fails_does_not_stop_the_next_persons_in_the_same_pass(
         failing: str, error: str) -> None:
@@ -173,11 +173,14 @@ def test_a_set_password_send_that_fails_does_not_stop_the_next_persons_in_the_sa
     world.invite(ann, T1, NINA)
     if error == "any-exception":
         world.signin.raise_on_send_to[failing] = InjectedFailure("not a SignInUnavailable")
+    elif error == "any-exception-on-create":
+        world.signin.raise_on_create_to[failing] = InjectedFailure("not a SignInUnavailable")
     else:
         world.signin.fail_sends_to.add(failing)
     world.send_pending()
     assert (world.signin.sends_to(failing), world.signin.sends_to(other)) == (0, 1)
     world.signin.raise_on_send_to.clear()
+    world.signin.raise_on_create_to.clear()
     world.signin.fail_sends_to.clear()
     world.clock.advance(HOUR + SECOND)
     world.send_pending()
@@ -243,6 +246,9 @@ def test_the_lifespan_makes_its_first_pass_at_once_not_after_one_interval() -> N
     world = World(administrators=[OPS], tenants={LAB: [ME]}, start=False, send_interval=HOUR)
     with world.lifespan_client():
         assert wait_until(lambda: world.signin.sends_to(OPS) == 1 and world.signin.sends_to(ME) == 1)
+        leaving = time.monotonic()
+    # Prompt shutdown (S-2): leaving the lifespan stops the loop even partway through the hour.
+    assert time.monotonic() - leaving < 2
 
 
 def test_a_periodic_pass_that_raises_does_not_stop_the_loop() -> None:

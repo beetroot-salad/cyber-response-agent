@@ -381,6 +381,7 @@ _ADMIN_CALLS = {
     "create_account": lambda port: port.create_account(
         username=USER_ID, email="a@example.test", required_actions=frozenset({"set_password"})),
     "has_otp": lambda port: port.has_otp(USER_ID),
+    "require_otp_setup": lambda port: port.require_otp_setup(USER_ID),
 }
 
 

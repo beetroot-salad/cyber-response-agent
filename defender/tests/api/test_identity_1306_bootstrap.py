@@ -116,7 +116,8 @@ def test_a_dropped_send_is_re_requested_when_the_person_is_later_listed_as_admin
     world = lab()
     me_session = world.sign_in(ME)
     assert world.invite(me_session, LAB, X).status_code == 202
-    me_session.delete(f"/tenants/{LAB}/invitations/{invitation_id(me_session, LAB, X)}")
+    revoked = me_session.delete(f"/tenants/{LAB}/invitations/{invitation_id(me_session, LAB, X)}")
+    assert revoked.status_code == 204
     world.send_pending()
     world.clock.advance(HOUR + SECOND)
     world.send_pending()
