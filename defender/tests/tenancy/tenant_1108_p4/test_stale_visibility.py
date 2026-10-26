@@ -566,7 +566,11 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
 
 _NOW = "2026-10-22T12:00:00+00:00"
 _TENANT = "6f1c3b9e-4a5d-4e8f-9a0b-1c2d3e4f5a6b"
-_AUTH = {"Authorization": "Bearer tok"}
+#: #1306 O7: routes live under `/tenants/{T}`; the caller is a seeded session (cookie + Origin).
+_ROUTE = f"/tenants/{_TENANT}"
+_SESSION = "stale-visibility-session"
+_ORIGIN = "https://app.defender.test"
+_AUTH = {"Cookie": f"__Host-defender_session={_SESSION}", "Origin": _ORIGIN}
 
 
 def _knowledge(status: str, stale_kind: str | None = None) -> dict[str, Any]:
@@ -588,6 +592,13 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
     return Investigation.model_validate(doc)
 
 
+class _NoPort:
+    """A sign-in or mail port these route tests never exercise: any call is a failure."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"a route test reached the unused port: {name}")
+
+
 def _client(*investigations: Any) -> Any:
     """The real app over the stub's own store (`InMemoryStore`, the store port's fake), seeded
     through its `add_investigation`."""
@@ -598,20 +609,30 @@ def _client(*investigations: Any) -> Any:
 
     from defender.api.app import create_app
     from defender.api.fakes import (InMemorySecrets, InMemoryStore, StubArtifactLinks,
-                                    StubSystemChecker, TokenAuthenticator)
-    from defender.api.ports import ApiDeps, Principal
+                                    StubSystemChecker)
+    from defender.api.ports import ApiDeps
+    from defender.identity import (Bootstrap, IdentityService, InMemoryIdentityRepository,
+                                   register_tenant)
     from defender.tenancy._tenant import TenantId
 
     store = InMemoryStore(lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC))
     for inv in investigations:
         store.add_investigation(_TENANT, inv)
+    now = lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC)  # noqa: E731
+    repo = InMemoryIdentityRepository()
+    register_tenant(repo, TenantId(_TENANT))
+    ann = repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
+    repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by="system",
+                        created_at=now(), accepted_at=now())
+    repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
+    identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
+                               bootstrap=Bootstrap(administrators=(), tenants={}))
     deps = ApiDeps(
-        authenticator=TokenAuthenticator({"tok": Principal(tenant_id=TenantId(_TENANT),
-                                                           user_id="ann@example.invalid")}),
+        identity=identity, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks())
-    return TestClient(create_app(deps))
+    return TestClient(create_app(deps), base_url="https://testserver")
 
 
 CASES = [("stale", "transient"), ("stale", "operator"), ("current", None), ("pinned", None)]
@@ -623,10 +644,10 @@ def test_o_warn_api_serves_investigation_knowledge_through_the_store_port(status
     list as the store holds it: status, the commit used, and the stale kind (null unless stale)."""
     inv = _investigation(f"inv-{status}-{stale_kind}", _knowledge(status, stale_kind))
     client = _client(inv)
-    one = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH)
+    one = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH)
     assert one.status_code == 200, one.text
     assert one.json().get("knowledge") == _knowledge(status, stale_kind), one.json()
-    listed = client.get("/investigations", headers=_AUTH).json()
+    listed = client.get(f"{_ROUTE}/investigations", headers=_AUTH).json()
     assert [i.get("knowledge") for i in listed["items"]] == [_knowledge(status, stale_kind)], listed
 
 
@@ -675,7 +696,7 @@ def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_th
     text = write_host_record(run_dir, record).read_text(encoding="utf-8")
     store.add_run_knowledge(_TENANT, inv.investigation_id, text)
 
-    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge") == wire, (
         f"O-WARN: the record {record} is served as {served.get('knowledge')}, not {wire}")
     assert "reason" not in (served.get("knowledge") or {}), served
@@ -721,11 +742,13 @@ def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
-    from defender.api.demo import demo_deps
+    from defender.api.demo import demo_deps, demo_sessions
 
-    client = TestClient(create_app(demo_deps((_TENANT,))))
-    items = client.get("/investigations", headers={"Authorization": f"Bearer {_TENANT}-analyst"}
-                       ).json()["items"]
+    deps = demo_deps((_TENANT,))
+    client = TestClient(create_app(deps), base_url="https://testserver")
+    session = demo_sessions((_TENANT,))[f"{_TENANT}-analyst"]
+    auth = {"Cookie": f"__Host-defender_session={session}", "Origin": deps.frontend_origin}
+    items = client.get(f"{_ROUTE}/investigations", headers=auth).json()["items"]
     knowledge = [i.get("knowledge") for i in items]
     stale = [k for k in knowledge if isinstance(k, dict) and k.get("status") == "stale"]
     assert stale, f"O-WARN: the stub seeds no stale investigation: {knowledge}"
@@ -822,19 +845,19 @@ def test_od22_an_investigation_with_no_run_serves_null_knowledge():
     fresh record's text on the same investigation is served `current`."""
     inv = _investigation("inv-no-run", None)
     client = _client(inv)
-    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert "knowledge" in served, served
     assert served["knowledge"] is None, served
 
     store = client.app.state.deps.investigations
     store.add_run_knowledge(_TENANT, inv.investigation_id, None)
-    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge", "absent") is None, (
         f"OD22': an investigation with no run is served {served.get('knowledge', 'absent')!r}")
 
     store.add_run_knowledge(_TENANT, inv.investigation_id,
                             json.dumps(knowledge_source("fresh")))
-    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge") == _knowledge("current"), served
 
 
@@ -865,11 +888,11 @@ def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case):
 
     store.add_run_knowledge(_TENANT, inv.investigation_id, json.dumps(knowledge_source("fresh")),
                             stamp_knowledge_source=stamp_view(knowledge_source("fresh")))
-    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge") == _knowledge("current"), served
 
     store.add_run_knowledge(_TENANT, inv.investigation_id, text,
                             stamp_knowledge_source=stamp_source)
-    served = client.get(f"/investigations/{inv.investigation_id}", headers=_AUTH).json()
+    served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge", "absent") == expected, (
         f"OD22': the {case} run is served {served.get('knowledge', 'absent')!r}, not {expected!r}")
