@@ -78,7 +78,7 @@ Two details the layout does not show:
   `attack_contribution.payload`) is in `esql_payload`'s **positional** shape — `values` is
   a list of rows, cell `i` named by `columns[i]` — matching what production writes. A
   corpus rerun (`controls.py`) or hand edit that puts a dict-row payload back is caught by
-  `tests/evals/test_controls.py::test_the_corpus_speaks_the_SAME_esql_encoding_production_does`,
+  `evaluations/tests/test_controls.py::test_the_corpus_speaks_the_SAME_esql_encoding_production_does`,
   which runs in CI. (`migrate_esql_encoding.py` did the one-time re-encode, #1054.)
 
 **A story is an oracle input, so it may never state or justify the expected

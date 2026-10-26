@@ -3,13 +3,14 @@
 The **measurement layer** for the defender. This is the eval home — separate
 from `defender/tests/` on purpose: tests are deterministic CI gates that assert
 invariants; evals run on a researcher's cadence, make LLM calls, and emit
-*scores/trends* rather than pass/fail. Nothing here is collected by CI.
+*scores/trends* rather than pass/fail. The evals themselves are never run by CI.
 
-The split is by *what a file is*, not by what it covers: the unit tests of this
-tooling ARE deterministic CI gates, so #720 moved them to `defender/tests/evals/`
-with the rest of the suite. They had been sitting here uncollected, because
-`evals/` was missing from the workflow's collection roots. A test in the source
-tree is a test nobody is running.
+The tooling's own unit tests are the exception, and they live in `tests/` here, beside what they
+cover. They are deterministic CI gates — no model calls — and CI collects them in a step of their
+own (`pytest evaluations/tests`), because the defender suite's `tests/` root does not reach this
+tree. That step is load-bearing: before #720 these tests sat here with no CI step naming them and
+ran nowhere, and a test nobody is running is not a test. `tests/conftest.py` borrows the defender
+suite's data-root and deployment isolation, so no test here can touch a real data root.
 
 Everything here measures the defender or its learning loop. The dependency
 direction is one-way: `evals/` imports/invokes `learning/` and `runtime/`,

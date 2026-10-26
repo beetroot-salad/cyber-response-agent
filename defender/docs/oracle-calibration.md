@@ -307,13 +307,13 @@ python3 evaluations/oracle_golden/score.py  cases/<case-id> \
 `_run_oracle_pydantic`) and reads **only** `oracle_visible/`, so a projection is
 production-identical apart from where its inputs came from. `score.py` is pure —
 a function of (`expected.yaml`, `projection.yaml`), no clock, no network, no
-model — which is what lets `defender/tests/evals/test_oracle_golden_693.py` assert that
+model — which is what lets `evaluations/tests/test_oracle_golden_693.py` assert that
 every checked-in `scores/*.json` still reproduces from its projection. **Re-run
 the scorer over every case after changing `score.py`**, and run that test file
 before committing:
 
 ```bash
-defender/.venv/bin/python -m pytest defender/tests/evals/test_oracle_golden_693.py -q
+defender/.venv/bin/python -m pytest evaluations/tests/test_oracle_golden_693.py -q
 ```
 
 Read the dimensions, never one number:

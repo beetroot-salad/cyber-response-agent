@@ -13,8 +13,8 @@ import pytest
 
 from evaluations.oracle_golden import migrate_esql_encoding as MIGRATE
 
-DEFENDER_DIR = Path(__file__).resolve().parents[2]
-GOLDEN_DIR = DEFENDER_DIR.parent / "evaluations" / "oracle_golden"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+GOLDEN_DIR = REPO_ROOT / "evaluations" / "oracle_golden"
 MIGRATION_SCRIPT = GOLDEN_DIR / "migrate_esql_encoding.py"
 
 

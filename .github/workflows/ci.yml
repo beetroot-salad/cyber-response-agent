@@ -217,6 +217,15 @@ jobs:
         if: matrix.shard == 1
         run: defender/.venv/bin/python -m pytest tooling/lint/tests -q
 
+      # The eval tooling's own tests live beside it in evaluations/tests, not in the defender
+      # suite (evaluations/ is the measurement layer; its tests are deterministic and make no
+      # model calls). The defender step's `tests/` root does not reach them, so this step is
+      # their only collection — the gap #720 found when they sat uncollected in evaluations/.
+      - name: Run eval tool tests
+        # Once, not per shard: a separate suite (evaluations/tests), not part of the split.
+        if: matrix.shard == 1
+        run: defender/.venv/bin/python -m pytest evaluations/tests -q
+
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
   # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
   # gVisor box cost 61s, the largest single file in the suite, and pytest-xdist cannot shrink

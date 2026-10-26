@@ -2,7 +2,7 @@
 """Lint the golden-set case tree, and report how complete it is.
 
 These are checks on samples, not code, so they run as a CLI that exits non-zero rather than
-as pytest sweeps (the tools themselves are tested under `defender/tests/evals/`). Checks:
+as pytest sweeps (the tools themselves are tested under `evaluations/tests/`). Checks:
 
   structure          every file the README promises is present
   environment        every case carries the notes both judge passes read
