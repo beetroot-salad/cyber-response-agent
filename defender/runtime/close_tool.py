@@ -47,7 +47,7 @@ from defender.skills.invlang.validate import (
 from . import challenge_gate
 from . import tools as tools_mod
 from .tools import CompanionRead
-from .agent_role import AgentRole
+from defender._agent_role import AgentRole
 from .tools import AgentDeps
 from defender.runtime.tools._deps import run_of
 

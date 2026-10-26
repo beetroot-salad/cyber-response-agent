@@ -35,7 +35,7 @@ DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 # Runtime includes the former gather_tools; only ticket_writer belonged to case_history.
 # Box I/O moved out of runtime and retains the same counted coverage.
-ROOTS = ("runtime", "hooks", "box", "integrations/ticket_writer.py")
+ROOTS = ("runtime", "hooks", "box", "runtime/ticket_writer.py")
 READERS = frozenset({
     "read_jsonl_rows", "read_jsonl_rows_report", "read_text_soft", "read_text_utf8",
     "locked_for_read", "locked_json_read", "read_bytes_capped", "iter_plain_jsonl_rows",

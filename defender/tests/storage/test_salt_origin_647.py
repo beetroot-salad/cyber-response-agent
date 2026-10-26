@@ -11,7 +11,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender import run_common
 from defender.run_repository import PROVENANCE, RunPaths
-from defender.presentation.workspace_map import _unlisted
+from defender.runtime.workspace_map import _unlisted
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     GOLDEN_AB3,

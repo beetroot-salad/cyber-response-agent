@@ -122,7 +122,7 @@ def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d
 @pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map"])
 def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant, monkeypatch,
                                                               cli):
-    from defender.execution._command_line_run import open_command_line_run
+    from defender.tenancy._command_line_run import open_command_line_run
     from defender.run_repository import Run
     from defender.tests.support.learning.core._state1135 import curation_run_dir
 

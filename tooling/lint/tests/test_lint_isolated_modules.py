@@ -16,7 +16,7 @@ _CLEAN = {
     "integrations/tacit_knowledge_adapter.py":
         "import yaml\nfrom pathlib import Path\n"
         "def load(p):\n    return yaml.safe_load(Path(p).read_text())\n",
-    "integrations/ticket_writer.py": "def write(env):\n    return env['X']\n",
+    "runtime/ticket_writer.py": "def write(env):\n    return env['X']\n",
     "runtime/lead_zero/run.py": "def go(env):\n    return env\n",
     "hooks/budget_enforcer.py": "DEFAULT = 5\ndef cap(limits):\n    return limits.get('x', DEFAULT)\n",
 }

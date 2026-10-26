@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING
 
 from defender.knowledge._corpus import iter_query_templates
 from defender.knowledge._knowledge import KnowledgePaths
-from defender._paths import adapters_under
+from defender._paths import PATHS, adapters_under
 from defender.run_repository import RUN_LAYOUT
 from defender.runtime.system_status import NONE_DOWN
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.model_view import ModelView
+    from defender._model_view import ModelView
 
-DEFENDER_DIR = Path(__file__).resolve().parent.parent
-REPO_ROOT = DEFENDER_DIR.parent
+DEFENDER_DIR = PATHS.defender_dir
+REPO_ROOT = PATHS.repo_root
 
 #: Run-dir children the map does not name. The map is inlined into MAIN's message 0 as its
 #: directory view (MAIN has no `ls`), so naming a path the gate refuses only teaches it to ask
@@ -72,7 +72,7 @@ def _map_roots(run_dir: Path, view: ModelView | None, agent_root: Path | None):
     path is shown, and the roots it names. In a run's view the knowledge is the view's agent
     tree (the run copy, #1108 P4); on the operator's command line it is `agent_root`."""
     if view is not None:
-        from defender.runtime.model_view import MODEL_AGENT
+        from defender._model_view import MODEL_AGENT
 
         defender_dir = view.to_host("/defender")
         assert defender_dir is not None

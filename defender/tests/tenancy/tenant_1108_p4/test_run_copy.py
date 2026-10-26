@@ -124,7 +124,7 @@ def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_tok
     copy's `settings/` or `owner` record, the clone, the exports or the host-held
     knowledge-source record; startup read back the token from `stage/`; nothing reads a
     `.tenant-id` in the box (P2's check retired)."""
-    from defender.runtime.model_view import MODEL_AGENT
+    from defender._model_view import MODEL_AGENT
 
     monkeypatch.setenv("BAO_TOKEN", "s-b-operator-bao-token-77e1")
     monkeypatch.setenv("VAULT_TOKEN", "s-b-operator-vault-token-91a4")

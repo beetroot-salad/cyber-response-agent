@@ -378,7 +378,7 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     `lifecycle`/`preflight`/`enqueue` recorders."""
     from functools import partial
 
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
     from defender.run_repository import RunPaths
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
@@ -464,7 +464,7 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     naming no commit and using neither kind's words."""
     from functools import partial
 
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
     from defender import run as run_py
@@ -509,7 +509,7 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
     from functools import partial
 
     from defender import run as run_py
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 

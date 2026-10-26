@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
     from pydantic_ai.settings import ModelSettings
 
-    from ..agent_role import AgentRole
+    from defender._agent_role import AgentRole
 
 
 @model(frozen=True)

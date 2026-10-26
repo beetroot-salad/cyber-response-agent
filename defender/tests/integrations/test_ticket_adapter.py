@@ -172,7 +172,7 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key,
 
 
 def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
 
     seen = {}
 

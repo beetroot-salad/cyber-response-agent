@@ -595,7 +595,7 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 # ======================================================================================
 
 def ticket_writer() -> Any:
-    return mod("integrations.ticket_writer")
+    return mod("runtime.ticket_writer")
 
 
 def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str],

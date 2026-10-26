@@ -15,7 +15,7 @@ from defender.learning.leads.declared_systems import adapter_systems_under
 from defender.learning._pydantic_stage import run_stage as _run_stage_fn
 from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 from defender.runtime.driver import MakeModel
 from defender.runtime.permission.grant import SEG, Grant, PathShapes
 from defender.runtime.tools import AgentDeps
@@ -122,7 +122,7 @@ def _rm_skills_grant(skills_dir: Path, systems: tuple[str, ...]) -> Grant:
     a batch discard at the commit gate. `SEG` excludes spaces and newlines, matching the write
     side; `..` can't match since system names are `SEG`-shaped and `_draft` is literal.
     """
-    from defender.runtime.model_view import MODEL_DRAFT
+    from defender._model_view import MODEL_DRAFT
 
     # Relative to the agent root (the drain box's workdir), as the box names it, and on the host.
     spellings = "|".join(re.escape(s) for s in (

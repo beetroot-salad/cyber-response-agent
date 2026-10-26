@@ -16,7 +16,7 @@ from .. import orient
 from defender.configuration._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_utf8
-from defender.runtime.model_view import ModelView
+from defender._model_view import ModelView
 
 _logger = logging.getLogger(__name__)
 

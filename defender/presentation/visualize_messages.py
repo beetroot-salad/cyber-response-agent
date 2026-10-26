@@ -10,7 +10,7 @@ from defender.records._report import ReportRead
 from defender.run_repository import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
 # From `agent_role`, not `review_roles`: the latter pulls in the whole runtime (pydantic-ai
 # included), and `learning/frontend/build.py` imports this package just for the page CSS.
-from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
+from defender._agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
 from defender.configuration._pricing import usage_cost
 from defender.presentation.visualize_data import phase_verb
 from defender.presentation.visualize_primitives import parse_report

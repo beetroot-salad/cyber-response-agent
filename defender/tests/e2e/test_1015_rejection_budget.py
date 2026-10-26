@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime import session_store  # noqa: E402
-from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX  # noqa: E402
+from defender._agent_role import GATHER_AGENT_ID_PREFIX  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
 from defender.runtime import record_query as rq  # noqa: E402
 # `wrap_fresh`'s frame grammar and the real store's read channel, both spent from their one

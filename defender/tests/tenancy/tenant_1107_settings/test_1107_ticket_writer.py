@@ -11,7 +11,7 @@ from typing import Any
 from defender import run_common
 from defender.run_repository import RunPaths
 from defender.runtime import run_end, run_tenant
-from defender.integrations import ticket_writer
+from defender.runtime import ticket_writer
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid

@@ -28,7 +28,7 @@ from pydantic_ai.exceptions import (
 
 
 from defender.knowledge._knowledge import SKILLS
-from defender.runtime.model_view import MODEL_AGENT
+from defender._model_view import MODEL_AGENT
 
 from defender.hooks.budget_enforcer import BudgetKill
 

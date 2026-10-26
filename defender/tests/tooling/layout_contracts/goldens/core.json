@@ -67,7 +67,7 @@
    "refuse_unnameable_world",
    "world_view"
   ],
-  "defender/learning/branch/redaction.py": [
+  "defender/_redaction.py": [
    "VIEW_NAMESPACE"
   ],
   "defender/learning/branch/staging.py": [

@@ -585,7 +585,7 @@ def main(argv: list[str]) -> int:
     cannot be opened (the refusal printed on stderr), when the record was not saved, or when a
     `dev` copy failed — refreshing that copy is often why an operator re-renders."""
     from defender import _log
-    from defender.execution._command_line_run import open_command_line_run
+    from defender.tenancy._command_line_run import open_command_line_run
 
     try:
         ns = _parse_run_page_args(argv[1:])

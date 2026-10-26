@@ -88,7 +88,7 @@ def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
     recording request seam, is handed the run's record — and both the store it
     addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
     injected tenant's."""
-    writer = T.mod("integrations.ticket_writer")
+    writer = T.mod("runtime.ticket_writer")
     # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run-1106")
     run_dir.mkdir()

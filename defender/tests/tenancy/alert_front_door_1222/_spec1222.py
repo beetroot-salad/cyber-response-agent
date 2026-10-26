@@ -1448,7 +1448,7 @@ class HoldingTicketStore(TicketStore):
 
 def ticket_writer(store: TicketStore) -> Any:
     """The REAL ticket writer's two legs bound to `store` — what `run.main(ticket_writer=…)` takes."""
-    tw = mod("integrations.ticket_writer")
+    tw = mod("runtime.ticket_writer")
     deps = tw.TicketWriterDeps(request=store.request)
     return SimpleNamespace(
         open_case_ticket=functools.partial(tw.open_case_ticket, deps=deps),

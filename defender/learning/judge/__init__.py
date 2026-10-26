@@ -136,7 +136,7 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
     refusal's reason)`."""
     from defender.learning.core.config import StageWiring
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
 
     if (scope == "family") != (world_id is None):
         raise JudgeRefused("only the family judge scope has no world UUID")

@@ -458,7 +458,7 @@ class VerbRegistry:
     def branch_identities(self) -> frozenset[str]:
         """Every branch identity of the world this registry serves (episode id and token,
         world tokens, arm run ids), which the query tool removes from model-visible fault text
-        (`learning/branch/redaction.py`). A registry over real systems serves a natural run,
+        (`_redaction.py`). A registry over real systems serves a natural run,
         which has none; the one registry that serves a world (`estate.registry.WorldRegistry`,
         whose constructor requires the world) answers with its family's, and a wrapper answers
         with what it wraps."""

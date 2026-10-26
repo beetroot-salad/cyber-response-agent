@@ -441,7 +441,7 @@ def session_rows(store_path: Path) -> dict[str, list[tuple[str, str | None]]]:
 
 
 def gather_agent(lead: str) -> str:
-    return f"{sym('runtime.agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
+    return f"{sym('_agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
 
 
 def sidecar(run_dir: Path) -> dict[str, Any] | None:

@@ -34,7 +34,7 @@ from defender.learning.leads.lead_author_engine import (  # noqa: E402
 from defender.learning._pydantic_stage import run_stage  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission import AgentPolicy  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402

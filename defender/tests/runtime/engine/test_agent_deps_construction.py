@@ -12,7 +12,7 @@ pytest.importorskip("pydantic_ai")
 from defender._paths import PATHS  # noqa: E402
 from defender.runtime import tools  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 

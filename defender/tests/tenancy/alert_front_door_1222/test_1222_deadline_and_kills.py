@@ -69,7 +69,7 @@ def _base_members() -> frozenset[str]:
 
 
 def _agent(lead: str) -> str:
-    return f"{S.sym('runtime.agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
+    return f"{S.sym('_agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
 
 
 def _session_ending(stores: list, lead: str) -> str | None:

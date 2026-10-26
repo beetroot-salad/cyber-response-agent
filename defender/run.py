@@ -65,7 +65,7 @@ from defender.runtime import providers  # noqa: E402
 from defender.runtime import run_end  # noqa: E402
 from defender.runtime import run_knowledge  # noqa: E402
 from defender.runtime import system_status  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
 from defender.runtime.system_status import RunSystems  # noqa: E402
 from defender.runtime.verb_grant import GrantError  # noqa: E402
@@ -76,7 +76,7 @@ from defender.runtime.verbs import (  # noqa: E402
     ServingAbort,
     read_roster,
 )
-from defender.integrations import ticket_writer as _default_ticket_writer  # noqa: E402
+from defender.runtime import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 

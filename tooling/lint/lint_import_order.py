@@ -58,6 +58,7 @@ _ADAPTER_IMPORTS = frozenset({"kit", "_flat", "knowledge"})
 #: The files outside `integrations/` that may import it (#1080 N2; #1172 removes each).
 INTEGRATIONS_IMPORTERS = frozenset({
     "cli/tacit_cli.py",                          # the tacit adapter's private helpers
+    "runtime/ticket_writer.py",                  # the shared transport
     "skills/connect/examples/example_adapter.py",  # the connect skill's example adapter
 })
 _API = "api"

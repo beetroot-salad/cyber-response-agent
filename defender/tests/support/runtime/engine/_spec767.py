@@ -436,7 +436,7 @@ class FakeStore:
 
 def writer_deps(store: FakeStore):
     """Bind the fake into the writer's real injection seam (g16)."""
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
 
     return ticket_writer.TicketWriterDeps(request=store)
 
@@ -452,7 +452,7 @@ def _handed(run_dir: Path, config: dict[str, str] | None | object) -> dict[str, 
 def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
            **kw: Any) -> Any:
     """Drive D2's writer over one run dir, through the real seam."""
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
 
     fn = require(
         ticket_writer, "record_case_ticket",
@@ -465,7 +465,7 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | o
 def open_ticket(
     run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
 ) -> Any:
-    from defender.integrations import ticket_writer
+    from defender.runtime import ticket_writer
 
     return ticket_writer.open_case_ticket(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config))
 

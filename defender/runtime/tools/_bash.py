@@ -15,7 +15,7 @@ from pydantic_ai.exceptions import ModelRetry
 from defender import box as box_mod
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
-from ..agent_role import AgentRole
+from defender._agent_role import AgentRole
 from ..run_state import run_state_of
 
 from defender._untrusted import wrap_fresh

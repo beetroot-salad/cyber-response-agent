@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from defender._io import guarded_mkdir
 from defender.execution import bash_exec
 from defender.execution.box_codec import BoxResult, RawExec, decode_request, encode_response
-from defender.runtime.model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
+from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 
 from ._spec import BoxExecutor, BoxSpec
 

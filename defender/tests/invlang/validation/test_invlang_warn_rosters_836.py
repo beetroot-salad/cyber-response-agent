@@ -45,7 +45,7 @@ def _registered_names(defn) -> set[str]:
 def test_exactly_one_agent_definition_is_offered_fix_row():
     """A5: `fix_row` rides `append=True` — no new capability bit, matching N4's posture of not widening the write surface — and exactly ONE definition in the tree grants it."""
     from defender.agents import AGENTS
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
 
     granting = {role for role, defn in AGENTS.items() if defn.tools.append}
     assert granting == {AgentRole.MAIN}
@@ -94,7 +94,7 @@ def test_budget_tripped_run_still_completes_repair_cycle(tmp_path):
         should_refuse,
         tier,
     )
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
 
     assert tier("fix_row", AgentRole.MAIN) == "tail"
     assert "fix_row" not in BUDGET_EXEMPT_TOOLS, "R1 deliberately did NOT exempt it"
@@ -114,7 +114,7 @@ def test_budget_tripped_run_still_completes_repair_cycle(tmp_path):
 def test_repair_verb_under_budget_pressure(tmp_path):
     """R1's accepted trade-off, and the boundary the design's own text does not state."""
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS, TAIL_ALLOWANCE, BudgetKill, tier
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
 
     assert tier("fix_row", AgentRole.MAIN) == "tail"
 

@@ -55,7 +55,7 @@ from .. import session_store
 from .. import system_status
 from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
-from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
+from defender._agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
 from ..exception_groups import carried, carried_unless_overridden
 from .. import review_roles

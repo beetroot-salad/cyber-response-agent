@@ -34,7 +34,7 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
     """Every registered role's compiled policy — the enumeration picks the subjects."""
     from defender.agents import AGENTS
     from defender.runtime.agent_definition import RunScope, compile_policy_for
-    from defender.runtime.agent_role import AgentRole
+    from defender._agent_role import AgentRole
     from defender.tests.support.tenancy import _tenants1106
     # #1106 M4: gather binds with a RUN's grant (its definition carries none), as the driver does.
     defs = {role: (_tenants1106.fixture_gather_def() if role is AgentRole.GATHER else defn)

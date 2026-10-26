@@ -298,7 +298,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
     if down is not None:
         return CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system=system)
 
-    from ..agent_role import GATHER_AGENT_ID_PREFIX
+    from defender._agent_role import GATHER_AGENT_ID_PREFIX
 
     session_id: str | None = None
     if store is not None:

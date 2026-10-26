@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..agent_role import AgentRole
+from defender._agent_role import AgentRole
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model

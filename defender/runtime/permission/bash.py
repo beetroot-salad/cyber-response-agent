@@ -22,7 +22,7 @@ from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, rm_target_files
 from .policy import AgentPolicy
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.model_view import ModelView
+    from defender._model_view import ModelView
 
 
 ADAPTER_RETIRED_REASON = (

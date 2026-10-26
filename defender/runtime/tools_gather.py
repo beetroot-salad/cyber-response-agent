@@ -27,8 +27,8 @@ from . import providers
 from . import run_end
 from . import session_store
 from . import tools
-from .agent_role import GATHER_AGENT_ID_PREFIX
-from .model_view import ModelView
+from defender._agent_role import GATHER_AGENT_ID_PREFIX
+from defender._model_view import ModelView
 from .tools import (
     DeadEnd,
     GatherDeps,

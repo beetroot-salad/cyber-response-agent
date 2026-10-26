@@ -175,8 +175,8 @@ def test_the_workspace_map_names_knowledge_through_the_run_copy(tmp_path):
     """O-TEXT / O2 (orient's view mapping): with a run view whose agent tree is the run copy,
     the workspace map's system-skill and query-template sections name the agent tree's model
     paths and list the run copy's content — never the product tree's, which holds none."""
-    from defender.presentation.workspace_map import workspace_map
-    from defender.runtime.model_view import ModelView
+    from defender.runtime.workspace_map import workspace_map
+    from defender._model_view import ModelView
 
     product = tmp_path / "product" / "defender"
     for skill in PRODUCT_SKILLS:

@@ -21,7 +21,7 @@ from defender.learning.core.config import (
     oracle_settings,
 )
 from defender.runtime.agent_definition import AgentDefinition
-from defender.runtime.agent_role import AgentRole
+from defender._agent_role import AgentRole
 from defender.execution.bash_exec import Pipeline, Stage
 from defender.box._oracle import (
     BoxStartRefused,
