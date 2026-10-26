@@ -5,6 +5,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from defender.api.models import AlertSummary  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
     ANN,
@@ -33,7 +34,9 @@ def test_a_request_without_a_valid_session_cookie_is_401_with_no_bearer_challeng
     world, ann, _ = two_tenants()
     assert ann.get("/me").status_code == 200
     for browser in (world.client(), world.client_with_cookie("no-such-session")):
-        for path in (f"/tenants/{T1}/alerts", "/me", "/admin/tenants"):
+        # Check order: the session before the tenant, so an unknown or malformed tenant is 401 too.
+        for path in (f"/tenants/{T1}/alerts", f"/tenants/{UNKNOWN}/alerts", f"/tenants/{BAD_TENANT}/alerts",
+                     f"/tenants/{BAD_TENANT}/members", "/me", "/admin/tenants"):
             response = browser.get(path)
             assert response.status_code == 401, path
             assert "bearer" not in response.headers.get("www-authenticate", "").lower()
@@ -99,6 +102,30 @@ def test_an_invitation_id_of_someone_else_or_nobody_is_the_same_404_at_accept() 
     assert masked(refused, mine) == masked(missing, NO_SUCH_ID)
     assert problem_type(refused) == problem_type(missing)
     assert bob.post(f"/invitations/{mine}/accept").status_code == 200
+
+
+def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> None:
+    """The path's tenant, not one of the caller's others, is the tenant every data route acts in (P-D, O7)."""
+    world, ann, bob = two_tenants()
+    other = ALERT.model_copy(update={"alert_id": "al-2", "title": "T2's own"})
+    world.store.add_alert(T2, other)
+    world.invite(bob, T2, ANN)
+    world.send_pending()
+    [invitation] = me(ann)["invitations"]
+    assert ann.post(f"/invitations/{invitation['id']}/accept").status_code == 200
+    assert tenants_of(ann) == {T1, T2}
+    for tenant, own, foreign in ((T1, ALERT, other), (T2, other, ALERT)):
+        summary = AlertSummary.model_validate(own.model_dump(exclude={"raw"})).model_dump(mode="json")
+        assert items(ann.get(f"/tenants/{tenant}/alerts")) == [summary], tenant
+        assert ann.get(f"/tenants/{tenant}/alerts/{own.alert_id}").json() == own.model_dump(mode="json")
+        assert ann.get(f"/tenants/{tenant}/alerts/{foreign.alert_id}").status_code == 404, tenant
+    created = ann.post(f"/tenants/{T2}/investigations", json={"alert_id": "al-2", "client_request_id": "r1"})
+    assert created.status_code == 201, created.text
+    [event] = world.store.audit_events
+    assert (event.tenant_id, event.user_id) == (T2, user_id(ann))
+    assert items(ann.get(f"/tenants/{T1}/investigations")) == []
+    assert [i["investigation_id"] for i in items(bob.get(f"/tenants/{T2}/investigations"))] == [
+        created.json()["investigation_id"]]
 
 
 def test_the_alerts_routes_answer_unchanged_under_the_tenant_prefix() -> None:

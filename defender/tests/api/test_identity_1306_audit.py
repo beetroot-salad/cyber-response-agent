@@ -5,6 +5,7 @@ invitation's id for member.invite / invitation.accept / invitation.revoke, the r
 for member.remove, the tenant id for admin.invite, the user id for admin.flag.*."""
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import pytest
@@ -12,12 +13,18 @@ import pytest
 pytest.importorskip("fastapi")
 
 from defender.tests.support.api._identity1306 import (  # noqa: E402
+    ANN,
     BOB,
+    DAY,
     EMPTY,
     LAB,
     ME,
     NEW,
+    NINA,
     NO_SUCH_ID,
+    OPS,
+    SECOND,
+    SEVEN_DAYS,
     T1,
     SESSION_COOKIE,
     T2,
@@ -25,7 +32,9 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     World,
     AuditLog,
     Event,
+    InjectedFailure,
     lab,
+    tenants_of,
     two_tenants,
     user_id,
 )
@@ -60,6 +69,44 @@ def test_accepting_logs_invitation_accept_for_the_endpoint_and_for_each_tenant_a
     assert sorted(audit.since(mark), key=lambda e: e.tenant_id or "") == sorted(
         [Event("invitation.accept", user_id(new), T1, r1), Event("invitation.accept", user_id(new), T2, r2)],
         key=lambda e: e.tenant_id or "")
+
+
+def test_an_accept_that_does_not_apply_logs_nothing(audit: AuditLog) -> None:
+    """Expired, revoked or already accepted: 404 and no invitation.accept; the renewed one logs once (K11, flow 3)."""
+    world, ann, bob = two_tenants()
+    expired = world.invite(ann, T1, BOB).json()["id"]
+    world.send_pending()
+    world.clock.advance(SEVEN_DAYS + SECOND)
+    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+    revoked = world.invite(bob, T2, ANN).json()["id"]
+    world.send_pending()
+    assert bob.delete(f"/tenants/{T2}/invitations/{revoked}").status_code == 204
+    for row, who in ((expired, bob), (revoked, ann)):
+        mark = audit.mark()
+        assert who.post(f"/invitations/{row}/accept").status_code == 404
+        assert audit.since(mark) == [], row
+    world.invite(ann, T1, BOB)  # control: a re-send renews the expired row, which then logs once
+    world.send_pending()
+    mark = audit.mark()
+    assert bob.post(f"/invitations/{expired}/accept").status_code == 200
+    assert audit.since(mark) == [Event("invitation.accept", user_id(bob), T1, expired)]
+    mark = audit.mark()
+    assert bob.post(f"/invitations/{expired}/accept").status_code == 404  # already accepted
+    assert audit.since(mark) == []
+
+
+def test_first_sign_in_logs_an_accept_only_for_the_invitations_it_accepted(audit: AuditLog) -> None:
+    """An expired row is not accepted at first sign-in and so is not logged (K11, flow 2)."""
+    world, ann, _ = two_tenants()
+    open_row = world.invite(ann, T1, NEW).json()["id"]
+    world.send_pending()
+    new_user = world.repo.user_by_email(NEW)
+    world.repo.add_membership(new_user.id, T2, status="invited", invited_by="system",
+                              created_at=world.clock.now - SEVEN_DAYS - DAY, expires_at=world.clock.now - SECOND)
+    mark = audit.mark()
+    new = world.sign_in(NEW)
+    assert tenants_of(new) == {T1}
+    assert audit.since(mark) == [Event("invitation.accept", user_id(new), T1, open_row)]
 
 
 def test_removing_and_revoking_log_who_did_it_to_what(audit: AuditLog) -> None:
@@ -112,6 +159,28 @@ def test_administrator_actions_log_platform_events_and_an_invite_also_logs_the_t
     assert audit.since(mark) == [Event("admin.flag.clear", "system", None, ops_id)]
 
 
+def test_flag_events_follow_real_flag_changes_only(audit: AuditLog) -> None:
+    """A restart with an unchanged file logs nothing; a flag write that fails logs nothing (K11, DC-5)."""
+    world = World(administrators=[OPS], tenants={LAB: [ME]}, failing_writes=True)
+    ops_id = world.repo.user_by_email(OPS).id
+    mark = audit.mark()
+    world.restart(administrators=[OPS], tenants={LAB: [ME]})
+    assert audit.since(mark) == []
+    world.repo.failing.add("set_platform_admin")
+    for administrators in ([OPS, NINA], []):  # a new flag to set; a flag to clear
+        mark = audit.mark()
+        with contextlib.suppress(InjectedFailure):
+            world.restart(administrators=administrators, tenants={LAB: [ME]})
+        assert [e for e in audit.since(mark) if e.action.startswith("admin.flag.")] == [], administrators
+    world.repo.failing.clear()  # control: the same changes, written, are logged
+    mark = audit.mark()
+    world.restart(administrators=[NINA], tenants={LAB: [ME]})
+    nina_id = world.repo.user_by_email(NINA).id
+    flags = [e for e in audit.since(mark) if e.action.startswith("admin.flag.")]
+    assert sorted(flags, key=lambda e: e.action) == [
+        Event("admin.flag.clear", "system", None, ops_id), Event("admin.flag.set", "system", None, nina_id)]
+
+
 def test_a_refused_action_logs_nothing_while_the_same_action_done_properly_does(audit: AuditLog) -> None:
     """A refusal (409/404/403/401) leaves no trace; a write that fails is the next test (K11)."""
     world = lab()
@@ -143,25 +212,28 @@ def test_a_refused_action_logs_nothing_while_the_same_action_done_properly_does(
     assert audit.since(mark) == []
 
 
-@pytest.mark.parametrize(("write", "expected"), [
-    ("ensure_invitation", "member.invite"),
-    ("end_membership", "member.remove"),
-    ("revoke_invitation", "invitation.revoke"),
+@pytest.mark.parametrize(("case", "write", "expected"), [
+    ("invite", "ensure_invitation", ["member.invite"]),
+    ("remove", "end_membership", ["member.remove"]),
+    ("revoke", "revoke_invitation", ["invitation.revoke"]),
+    ("admin-invite", "ensure_invitation", ["admin.invite", "member.invite"]),
 ])
 def test_an_action_whose_write_fails_logs_no_event_and_the_retry_logs_one(
-        audit: AuditLog, write: str, expected: str) -> None:
+        audit: AuditLog, case: str, write: str, expected: list[str]) -> None:
     """The event is written only after the change is in (K11): a failing repository write leaves no event."""
-    world = World(tenants={LAB: [ME]}, failing_writes=True)
+    world = World(administrators=[OPS], tenants={LAB: [ME]}, failing_writes=True)
+    world.register(EMPTY)
     member = world.sign_in(ME)
     nina = world.member(member, LAB, "nina@n.example")
     pending = world.invite(member, LAB, NEW).json()["id"]
-    cookie = member.cookies[SESSION_COOKIE]
+    cookie = (world.sign_in_admin() if case == "admin-invite" else member).cookies[SESSION_COOKIE]
     acts = {
-        "ensure_invitation": lambda c: c.post(f"/tenants/{LAB}/invitations", json={"email": BOB}),
-        "end_membership": lambda c: c.delete(f"/tenants/{LAB}/members/{user_id(nina)}"),
-        "revoke_invitation": lambda c: c.delete(f"/tenants/{LAB}/invitations/{pending}"),
+        "invite": lambda c: c.post(f"/tenants/{LAB}/invitations", json={"email": BOB}),
+        "remove": lambda c: c.delete(f"/tenants/{LAB}/members/{user_id(nina)}"),
+        "revoke": lambda c: c.delete(f"/tenants/{LAB}/invitations/{pending}"),
+        "admin-invite": lambda c: c.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": BOB}),
     }
-    act = acts[write]
+    act = acts[case]
     world.repo.failing.add(write)
     failing_browser = world.client_with_cookie(cookie, raise_errors=False)
     mark = audit.mark()
@@ -169,4 +241,4 @@ def test_an_action_whose_write_fails_logs_no_event_and_the_retry_logs_one(
     assert audit.since(mark) == []
     world.repo.failing.clear()  # control: the same action on the same channel succeeds and logs
     assert act(failing_browser).status_code in (202, 204)
-    assert audit.actions(mark) == [expected]
+    assert sorted(audit.actions(mark)) == sorted(expected)

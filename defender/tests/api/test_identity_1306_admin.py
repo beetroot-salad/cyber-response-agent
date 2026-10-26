@@ -18,6 +18,8 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     OPS,
     SESSION_COOKIE,
     UNKNOWN,
+    Bootstrap,
+    IdentityService,
     invitation_id,
     invitation_rows,
     items,
@@ -77,7 +79,9 @@ def test_a_non_administrator_is_403_on_platform_routes_and_an_administrator_is_n
     world.register(EMPTY)
     me_session = world.sign_in(ME)
     assert me_session.get("/admin/tenants").status_code == 403
-    assert me_session.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 403
+    # The same 403 whatever the tenant: unknown, with members, malformed (no probing, O1/P-D).
+    for tenant in (EMPTY, UNKNOWN, LAB, "not-a-tenant-id"):
+        assert me_session.post(f"/admin/tenants/{tenant}/invitations", json={"email": NEW}).status_code == 403, tenant
     ops = world.sign_in_admin()
     assert ops.get("/admin/tenants").status_code == 200
     assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202
@@ -105,6 +109,21 @@ def test_the_identity_refusals_are_rfc_9457_problems() -> None:
         assert (problem["status"], problem["title"]) == (code, HTTPStatus(code).phrase)
     assert "www-authenticate" not in refusals[0][1].headers
     assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202  # control
+
+
+def test_an_administrators_invitation_calls_no_port_before_the_response() -> None:
+    """P-E/DC-8 on the platform route too: the request writes rows; the sender sends afterwards (O2, O5)."""
+    world = lab()
+    world.register(EMPTY)
+    world.sign_in(ME)
+    ops = world.sign_in_admin()
+    before = (list(world.signin.every_call), list(world.mail.attempts))
+    for email in (NEW, ME):  # a new person, and an active one with an account
+        assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": email}).status_code == 202
+    assert (world.signin.every_call, world.mail.attempts) == before
+    world.send_pending()  # control: both were pending
+    assert world.signin.sends_to(NEW) == 1
+    assert [n.to for n in world.mail.sent] == [ME]
 
 
 def test_an_administrator_invites_only_into_a_tenant_with_no_active_members() -> None:
@@ -163,6 +182,20 @@ def test_an_invitation_to_an_administrator_expires_seven_days_after_it_was_made(
     assert tenants_of(world.sign_in(OPS)) == ({LAB} if joins else set())
 
 
+def test_a_flagged_user_cannot_accept_even_through_a_session_without_a_code() -> None:
+    """Acceptance refuses the flagged user, not only the code-backed session (K10, flow 3)."""
+    world = lab()
+    me_session = world.sign_in(ME)  # a password-only session, kept across the restart
+    assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
+    world.restart(administrators=[OPS, ME], tenants={LAB: []})  # ME is now flagged
+    ops = world.sign_in_admin()
+    row = ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": ME})
+    assert row.status_code == 202
+    assert me(me_session)["invitations"] == []
+    assert me_session.post(f"/invitations/{row.json()['id']}/accept").status_code == 404
+    assert tenants_of(me_session) == set()
+
+
 def test_an_administrator_cannot_accept_an_invitation() -> None:
     """Acceptance refuses flagged users: 404, and the row stays open (K10, flow 3)."""
     world = lab()
@@ -192,3 +225,15 @@ def test_removing_an_email_from_the_file_removes_powers_at_the_next_request_afte
     [invitation] = me(ops)["invitations"]
     assert ops.post(f"/invitations/{invitation['id']}/accept").status_code == 200
     assert tenants_of(ops) == {LAB}
+
+
+def test_an_unflagging_made_by_another_process_takes_effect_at_this_processs_next_request() -> None:
+    """P-A: the flag is read on every request; a session already used keeps no stale powers (O5, DC-5)."""
+    world = lab()
+    ops = world.sign_in_admin()
+    assert ops.get("/admin/tenants").status_code == 200  # the session has been used
+    other_process = IdentityService(world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
+                                    bootstrap=Bootstrap(administrators=(), tenants={LAB: (ME,)}))
+    other_process.start()  # another API process, started with OPS removed from the file
+    assert ops.get("/admin/tenants").status_code == 403
+    assert me(ops)["administrator"] is False

@@ -224,10 +224,14 @@ def test_inviting_twice_yields_one_row(seeded):
 
 
 def test_an_invitation_can_carry_an_expiry_from_the_start(seeded):
-    """DC-1: a flagged invitee's row is inserted with expires_at = created_at + 7 days."""
+    """DC-1: a flagged invitee's row is inserted with expires_at = created_at + 7 days; finding it again does not renew it."""
     u = _user(seeded)
     row = _invited(seeded, u, expires_at=NOW + WEEK)
     assert row.expires_at == NOW + WEEK
+    later = NOW + dt.timedelta(days=3)
+    again = seeded.ensure_invitation(u.id, T1, invited_by="system", now=later, expires_at=later + WEEK)
+    assert again.id == row.id
+    assert (again.expires_at, seeded.membership(row.id).expires_at) == (NOW + WEEK, NOW + WEEK)
 
 
 def test_inviting_an_active_member_reports_it_and_adds_no_row(seeded):
@@ -437,13 +441,35 @@ def test_a_stale_settle_does_not_apply(seeded):
     assert (got.set_password_sent_seq, got.set_password_sent_at) == (2, t_sent)
 
 
+@pytest.mark.parametrize("kind", ["set_password", "notification"])
+def test_a_settle_beyond_what_was_requested_does_not_apply(seeded, kind):
+    """Fixed details: a settle applies only when sent_seq < read_seq <= requested_seq; a read past requested_seq changes nothing."""
+    u = _user(seeded)
+    row = _invited(seeded, u)
+    if kind == "set_password":
+        seeded.request_set_password(u.id, now=NOW)
+        settle, counter = seeded.settle_set_password, (lambda: seeded.user(u.id).set_password_sent_seq)
+        target = u.id
+    else:
+        seeded.request_notification(row.id, now=NOW)
+        settle, counter = seeded.settle_notification, (lambda: seeded.membership(row.id).notify_sent_seq)
+        target = row.id
+    assert settle(target, 2, sent_at=NOW, expires_at=NOW + WEEK) is False
+    assert counter() == 0
+    assert seeded.membership(row.id).expires_at is None
+    assert settle(target, 1, sent_at=NOW, expires_at=NOW + WEEK) is True  # control: the requested value applies
+    assert counter() == 1
+
+
 def test_a_dropped_send_advances_the_counter_without_a_send_time(seeded):
     """Fixed details: a dropped send advances sent_seq; set_password_sent_at stays the real send time."""
     u = _user(seeded)
+    row = _invited(seeded, u)
     seeded.request_set_password(u.id, now=NOW)
-    assert seeded.settle_set_password(u.id, 1) is True
+    assert seeded.settle_set_password(u.id, 1, expires_at=NOW + WEEK) is True  # dropped: no send time
     got = seeded.user(u.id)
     assert (got.set_password_sent_seq, got.set_password_sent_at) == (1, None)
+    assert seeded.membership(row.id).expires_at is None  # nothing went out, so nothing runs out
     with seeded.claim_pending_set_password() as claimed:
         assert claimed is None
 
@@ -453,6 +479,7 @@ def test_a_real_send_sets_the_expiry_of_the_users_invited_rows_only(seeded):
     u = _user(seeded)
     invited = _invited(seeded, u, T1)
     revoked_row = seeded.add_membership(u.id, T1, status="revoked", invited_by="system", created_at=NOW)
+    active_row = _active(seeded, u, T2)
     other = _user(seeded, "o@x.org")
     others_row = _invited(seeded, other, T1)
     seeded.request_set_password(u.id, now=NOW)
@@ -460,6 +487,7 @@ def test_a_real_send_sets_the_expiry_of_the_users_invited_rows_only(seeded):
     assert seeded.settle_set_password(u.id, 1, sent_at=NOW, expires_at=expiry) is True
     assert seeded.membership(invited.id).expires_at == expiry
     assert seeded.membership(revoked_row.id).expires_at is None
+    assert seeded.membership(active_row.id).expires_at is None
     assert seeded.membership(others_row.id).expires_at is None
     # a stale settle does not touch expiry
     assert seeded.settle_set_password(u.id, 1, sent_at=NOW, expires_at=NOW + 2 * WEEK) is False
@@ -511,9 +539,22 @@ def test_a_dropped_notification_advances_without_a_send_time(seeded):
     u = _user(seeded)
     row = _invited(seeded, u)
     seeded.request_notification(row.id, now=NOW)
-    assert seeded.settle_notification(row.id, 1) is True
+    assert seeded.settle_notification(row.id, 1, expires_at=NOW + WEEK) is True  # dropped: no send time
     got = seeded.membership(row.id)
     assert (got.notify_sent_seq, got.notified_at, got.expires_at) == (1, None, None)
+
+
+def test_a_notification_settle_sets_the_expiry_of_that_row_only(seeded):
+    """Fixed details: a notification's expires_at goes on that one row; the user's other pending rows keep none."""
+    u = _user(seeded, status="active")
+    r1, r2 = _invited(seeded, u, T1), _invited(seeded, u, T2)
+    seeded.request_notification(r1.id, now=NOW)
+    seeded.request_notification(r2.id, now=NOW)
+    assert seeded.settle_notification(r1.id, 1, sent_at=NOW, expires_at=NOW + WEEK) is True
+    assert seeded.membership(r1.id).expires_at == NOW + WEEK
+    assert seeded.membership(r2.id).expires_at is None
+    with seeded.claim_pending_notification() as claimed:  # control: the other is still pending
+        assert claimed.id == r2.id
 
 
 def test_a_notification_is_pending_only_while_the_row_is_invited(seeded):

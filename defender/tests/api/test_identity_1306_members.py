@@ -9,6 +9,8 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
     DAY,
+    HOUR,
+    NEW,
     NINA,
     SEVEN_DAYS,
     SECOND,
@@ -74,6 +76,38 @@ def test_an_invitation_whose_notification_has_not_gone_out_does_not_expire() -> 
     assert row["tenant_id"] == T1
     assert bob.post(f"/invitations/{row['id']}/accept").status_code == 200
     assert tenants_of(bob) == {T1, T2}
+
+
+def test_a_notified_invitation_lasts_seven_days_from_the_send_not_the_request() -> None:
+    """Expiry counts from the actual send on the notification path too (O2, flow 1)."""
+    world, ann, bob = two_tenants()
+    world.invite(ann, T1, BOB)
+    world.clock.advance(2 * DAY)
+    world.send_pending()  # the notification goes out on day 2
+    world.clock.advance(5 * DAY + HOUR)  # T0 + 7d 1h: past a request-based expiry
+    bob = world.sign_in(BOB)
+    [row] = me(bob)["invitations"]
+    assert bob.post(f"/invitations/{row['id']}/accept").status_code == 200
+    assert tenants_of(bob) == {T1, T2}
+
+
+def test_an_invitation_into_a_tenant_that_does_not_exist_is_neither_offered_nor_accepted() -> None:
+    """/me lists, and accept and first sign-in take, only invitations whose tenant exists (flows 2, 3)."""
+    world = World(tenants={T1: [ANN], T2: [BOB]}, failing_writes=True)
+    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+    row = world.invite(bob, T2, ANN).json()["id"]
+    world.invite(ann, T1, NEW)
+    world.invite(bob, T2, NEW)
+    world.send_pending()
+    assert [r["id"] for r in me(ann)["invitations"]] == [row]  # control: offered while T2 exists
+    world.repo.missing_tenants.add(T2)
+    assert me(ann)["invitations"] == []
+    assert ann.post(f"/invitations/{row}/accept").status_code == 404
+    assert tenants_of(ann) == {T1}
+    assert tenants_of(world.sign_in(NEW)) == {T1}
+    world.repo.missing_tenants.clear()  # control: the same row, its tenant back, is accepted
+    assert ann.post(f"/invitations/{row}/accept").status_code == 200
+    assert tenants_of(ann) == {T1, T2}
 
 
 def test_removing_a_member_ends_only_that_membership() -> None:
