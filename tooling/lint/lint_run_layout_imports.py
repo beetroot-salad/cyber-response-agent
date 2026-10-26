@@ -81,12 +81,8 @@ _VE = "presentation/visualize_episode.py"
 #: `defender/`. `owners` are exempt; the layout-exempt rows below may take layout names; a
 #: module in no row gets no exemption.
 CATEGORIES: Mapping[str, Sequence[str]] = {
-    "owners": (
-        "records/__init__.py", "records/_layout.py", "records/_handle.py",
-        "records/_lookup.py", "records/_held.py",
-        "records/_id.py",
-        "records/_errors.py", "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py",
-    ),
+    # And every file of the runs repository (`_astlib.run_repository_files`, `_row_of`).
+    "owners": ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py"),
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
         "hooks/record_lead.py",
@@ -759,6 +755,8 @@ def sweep_files(root: Path) -> list[Path]:
 
 
 def _row_of(rel: str) -> str | None:
+    if rel in _astlib.run_repository_files():
+        return "owners"
     for row, mods in CATEGORIES.items():
         if rel in mods:
             return row

@@ -103,7 +103,15 @@ def test_any_import_of_adapter_code_from_outside_is_found(tmp_path):
         "imports-adapters:cli/tacit_cli.py:defender.integrations._transport"]
 
 
+def test_importing_a_folder_package_by_name_is_judged(tmp_path):
+    root = _tree(tmp_path, {"records/store.py": "from defender import learning\n",
+                            "learning/core.py": ""})
+    assert _prints(_GATE.scan(root)) == ["records/store.py:defender.learning"]
+
+
 @pytest.mark.parametrize("src", [
+    "from defender._gone import y\n",
+    "from defender import _gone\n",
     "def f():\n    from defender.tests.support import helper\n",
     "try:\n    from defender.optional_thing import x\nexcept ImportError:\n    x = None\n",
 ])

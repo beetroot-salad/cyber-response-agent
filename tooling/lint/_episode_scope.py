@@ -7,6 +7,7 @@ its scope. `walk_owner` is the ONE definition of the repository's walk owner (re
 from __future__ import annotations
 
 import ast
+import functools
 from collections.abc import Mapping
 
 try:  # bare-name import, as every gate reaches its siblings
@@ -75,12 +76,13 @@ def scoped_nodes(tree: ast.AST) -> list[tuple[ast.AST, dict[str, list[ast.expr]]
     return out
 
 
-def walk_owner() -> tuple[str, ...]:
+@functools.cache
+def walk_owner() -> frozenset[str]:
     """The walk's owner: the run repository's files (`_astlib.run_repository_files`, read from the
     door's own map, so a module the door gains is an owner the day it serves a name) and the
     episode handle. Read when a scan asks, so a door that cannot be read is that scan's
     ScanBlind."""
-    return (*run_repository_files(), "episodes/_episode_handle.py")
+    return frozenset({*run_repository_files(), "episodes/_episode_handle.py"})
 
 
 def owned(rel: str) -> bool:

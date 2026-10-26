@@ -675,6 +675,7 @@ def _walk_calls_missing(found: set[tuple[str, str, frozenset[str]]],
 # `records/` and `_episode_handle.py`. A door inside the owner is the walk's own; what the census
 # polices is the owner's PATH-TAKING doors reached from outside (`laundered`), however deep the
 # wrappers nest (adversary F2).
+@functools.cache
 def owner_packages() -> frozenset[str]:
     """The owner's dotted modules: one imported BY A STRING (`__import__`,
     `importlib.import_module`) outside the owner is a door no resolver can follow (adversary F2's
@@ -915,7 +916,8 @@ def doors(root: Path, modules: Iterable[str] = O5_MODULES,
            f"walked view's episode instead): {hit}"
            for hit in sorted(h for h in found if not _allowed(h, allowed))]
     owner: set[tuple[str, str, str]] = set()
-    for rel in (owner_files if owner_files is not None else _astlib.run_repository_files()):
+    for rel in (owner_files if owner_files is not None else
+                [r for r in _astlib.run_repository_files() if (root / r).is_file()]):
         owner |= o5_doors(_module_name(rel), _read(root, rel))
     out += [f"doors: the walk owner (the runs repository) does not call Episode.{verb} - the episode is "
             "opened or created somewhere the door scans do not look"

@@ -280,7 +280,8 @@ def door_modules() -> frozenset[str]:
         if isinstance(target, ast.Name) and target.id == "_HOMES" and isinstance(node.value, ast.Dict):
             homes = set()
             for key, value in zip(node.value.keys, node.value.values):
-                if key is None and isinstance(value, ast.Call) and len(value.args) == 2:
+                if key is None and isinstance(value, ast.Call) and len(value.args) == 2 \
+                        and ast.unparse(value.func) == "dict.fromkeys":
                     value = value.args[1]  # `**dict.fromkeys((names...), "_module")`
                 if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
                     raise ScanBlind(f"records/__init__.py: `_HOMES` holds {ast.unparse(value)!r}, "
@@ -291,8 +292,13 @@ def door_modules() -> frozenset[str]:
     raise ScanBlind("records/__init__.py: no `_HOMES` map naming the runs repository's submodules")
 
 
+@functools.cache
 def run_repository_files() -> tuple[str, ...]:
-    """The runs repository's files under `defender/`: the door and the submodules it serves."""
+    """The runs repository's files under `defender/`: the door and the submodules it serves.
+
+    Read from this checkout's door — the checkout the lint ships in, which is the one CI sweeps.
+    A gate sweeping another tree (a test's planted one) judges its files by this definition and
+    reads only those of them the tree holds."""
     return tuple(f"records/{m}.py" for m in ("__init__", *sorted(door_modules())))
 
 

@@ -35,8 +35,7 @@ from defender.runtime.verbs import (  # noqa: E402
     fresh_adapter_module,
     read_roster,
 )
-from defender.kit import verbs as kit_verbs  # noqa: E402
-from defender.kit.verbs import engine_of  # noqa: E402
+from defender.kit.verbs import VerbContext as AdapterContext, engine_of  # noqa: E402
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
@@ -51,7 +50,7 @@ def _is_ctx(param: inspect.Parameter) -> bool:
     `def get_host(host: str)` the tool would bind the ctx object into `host`. Accepts the
     class, the string annotation, and qualified spellings."""
     ann = param.annotation
-    if ann is kit_verbs.VerbContext or ann is VerbContext:
+    if ann is AdapterContext or ann is VerbContext:
         return True
     return isinstance(ann, str) and ann.rpartition(".")[2] == "VerbContext"
 

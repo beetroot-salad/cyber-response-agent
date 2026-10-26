@@ -79,17 +79,19 @@ def node_of(rel: str) -> str:
     return "_flat" if stem.startswith("_") else stem
 
 
+def _scanned(module: str, modules: dict[str, str]) -> bool:
+    """Is `module` a scanned module, or a package holding one (a folder needs no `__init__.py`)?
+    The one test of what an import names; anything else is outside the order."""
+    return module in modules or any(m.startswith(f"{module}.") for m in modules)
+
+
 def _node_of_module(module: str, modules: dict[str, str]) -> str | None:
-    """The node of a dotted `defender.` module, or None for anything outside `defender`."""
+    """The node of a dotted `defender.` module, or None for anything not scanned."""
     parts = module.split(".")
-    if parts[0] != "defender" or len(parts) < 2:
+    if parts[0] != "defender" or len(parts) < 2 or not _scanned(f"defender.{parts[1]}", modules):
         return None
-    head = parts[1]
-    if f"defender.{head}" in modules:
-        return node_of(modules[f"defender.{head}"])
-    if any(m.startswith(f"defender.{head}.") for m in modules):  # a folder without __init__.py
-        return head
-    return "_flat" if head.startswith("_") else head
+    head = f"defender.{parts[1]}"
+    return node_of(modules[head]) if head in modules else parts[1]
 
 
 @dataclass(frozen=True)
@@ -113,7 +115,7 @@ def _resolved(node: ast.Import | ast.ImportFrom, package: str,
         return
     for alias in node.names:
         sub = f"{source}.{alias.name}"
-        yield sub if sub in modules else source
+        yield sub if _scanned(sub, modules) else source
 
 
 def _imports(rel: str, tree: ast.Module, modules: dict[str, str]) -> Iterator[_Import]:
@@ -137,8 +139,7 @@ def scan(root: Path) -> list[Finding]:
     if not root.is_dir():
         raise _astlib.ScanBlind(f"{root} is not a directory")
     modules = _files(root)
-    scanned = {node_of(rel) for rel in modules.values()}
-    unplaced = sorted(scanned - _RANK.keys())
+    unplaced = sorted({node_of(rel) for rel in modules.values()} - _RANK.keys())
     if unplaced:
         raise Unplaced(", ".join(unplaced))
     imports: dict[str, list[_Import]] = {}
@@ -150,7 +151,7 @@ def scan(root: Path) -> list[Finding]:
         source = node_of(rel)
         for imp in found:
             target = _node_of_module(imp.module, modules)
-            if target is None or target == source or target not in scanned:
+            if target is None or target == source:
                 continue
             where = f"{rel}:{imp.line}"
             if _RANK[target] > _RANK[source]:

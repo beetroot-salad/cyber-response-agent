@@ -13,8 +13,7 @@ import urllib.parse
 import urllib.request
 from typing import TYPE_CHECKING, Any
 
-from defender.kit.verbs import VerbContext
-from defender.kit.verbs import verb
+from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport
 from defender.kit import faults
 

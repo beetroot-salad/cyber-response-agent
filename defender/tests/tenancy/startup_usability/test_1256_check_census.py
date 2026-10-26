@@ -22,7 +22,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 MARKER = "o5k"
 
-#: Values every key is tried with: blank and whitespace-only (`tenant_settings.is_blank`).
+#: Values every key is tried with: blank and whitespace-only (`kit.settings.is_blank`).
 _EVERY_KEY: tuple[tuple[str, str], ...] = (("blank", ""), ("whitespace", "   "))
 
 _GRAMMAR: dict[str, tuple[tuple[str, str], ...]] = {
