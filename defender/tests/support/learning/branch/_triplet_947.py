@@ -336,21 +336,8 @@ def base_world() -> dict:
     return world_doc("a", role="A", axis=None, facts=[])
 
 
-#: Manifest fields `Family` no longer declares (#1255); `family_doc` drops them. NOT `fences_at`:
-#: the judge still reads it, so dropping it from `Family` must fail `test_947_triplet_manifest`
-#: loudly rather than be hidden by this helper.
-RETIRED_FAMILY_FIELDS = ("continuation_prompt",)
-
-
-def _declared_family_fields() -> set[str]:
-    import dataclasses
-
-    return {f.name for f in dataclasses.fields(sym("records._family", "Family"))}
-
-
 def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs/source",
-               as_of: str = AS_OF, continuation_prompt: str = "Continue from here.",
-               **over: Any) -> dict:
+               as_of: str = AS_OF, **over: Any) -> dict:
     """A v2 `Family` document: the launcher's derived half, the operator's instrument field and
     the questioner's authored half, one document."""
     doc: dict[str, Any] = {
@@ -360,7 +347,6 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
         "branch_message_id": BRANCH_MESSAGE_ID,
         "fences_at": 4,
         "as_of": as_of,
-        "continuation_prompt": continuation_prompt,
         "base_story": "the captured story",
         # The launcher records the systems the tenant's gather grant served (#1224); the loader
         # reads no settings.
@@ -373,28 +359,8 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
             world_doc("c", role="C", facts=[fact("f2")]),
         ],
     }
-    declared = _declared_family_fields()
-    for retired in RETIRED_FAMILY_FIELDS:
-        if retired not in declared:
-            doc.pop(retired, None)
     doc.update(over)
     return doc
-
-
-def retired_continuation_argv() -> list[str]:
-    """`["--continuation-prompt", "go"]` while the branch CLI still requires the flag, else `[]`.
-
-    Asked of the CLI's own parser. Always `[]` since #1255 removed the flag: vestigial."""
-    import contextlib
-    import io
-
-    parse = sym("learning.branch.cli", "parse_branch_args")
-    with contextlib.redirect_stderr(io.StringIO()):
-        try:
-            parse(["--tenant", SOURCE_TENANT, "run-x", "1"])
-        except SystemExit:
-            return ["--continuation-prompt", "go"]
-    return []
 
 
 def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
@@ -593,7 +559,6 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
     # The case pointer is a host-only sidecar beside the run dir (#1235).
     if RunPaths(src).session_pointer().exists():
         return
-    from defender.tests.support.learning.branch import _branch_947
     from defender.tests.support.storage import _session_store_705 as S
 
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
@@ -606,10 +571,9 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
         ss.write_case_pointer(_source_handle(src), case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
-        if not _branch_947.declares_retired_prompt():
-            # A branch point is a MAIN response that called tools (#1255 D1): one leading row
-            # shifts every pair so `BRANCH_MESSAGE_ID` lands on a call, not its return.
-            store.append(session_id, [S.text_response("orienting")], agent_id="main")
+        # A branch point is a MAIN response that called tools: one leading row shifts every
+        # pair so `BRANCH_MESSAGE_ID` lands on a call, not its return.
+        store.append(session_id, [S.text_response("orienting")], agent_id="main")
         while BRANCH_MESSAGE_ID not in ss.path_row_ids(store, session_id):
             store.append(session_id, list(S.complete_pair()), agent_id="main")
         if not pre_snapshot and is_fixture_uuid_shape(src.name):

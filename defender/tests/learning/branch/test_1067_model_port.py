@@ -14,7 +14,6 @@ import pytest
 from pydantic import ValidationError
 
 from defender._model import model
-from defender.tests.support.learning.branch import _branch_947 as B947
 
 
 # the decorator itself
@@ -62,8 +61,7 @@ def test_model_refuses_a_keyword_the_class_has_no_field_for():
 # the branch spec: every mistyped field is a `BranchError`, at construction
 
 
-_RETIRED_PROMPT = {B947.RETIRED_PROMPT_FIELD: "go"} if B947.declares_retired_prompt() else {}
-_GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, **_RETIRED_PROMPT,
+_GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3,
              as_of=datetime(2026, 1, 1, tzinfo=UTC))
 
 

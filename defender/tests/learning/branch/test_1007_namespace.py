@@ -65,12 +65,11 @@ def test_an_episode_is_read_under_one_namespace(tmp_path):
     assert not hasattr(fam, "episode_token_for")
     params = inspect.signature(cli.preflight_episode).parameters
     assert "episode_token" not in params, "the operator-named token is still a parameter"
-    retired = {"continuation_prompt": "go"} if "continuation_prompt" in params else {}
     with pytest.raises(TypeError, match="episode_token"):
         cli.preflight_episode(
             source=fixture_run(ep), branch_message_id=W.BRANCH_MESSAGE_ID,
             preflight=W.no_preflight, model=None, allow_dirty=False,
-            live_tree=T.source_capture(), episode_token=OPERATOR_NAMED, **retired)
+            live_tree=T.source_capture(), episode_token=OPERATOR_NAMED)
 
 
 @pytest.mark.parametrize("length", [220, 1000])

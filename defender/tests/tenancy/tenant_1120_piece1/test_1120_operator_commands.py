@@ -236,7 +236,7 @@ def _launch(source: Path) -> BaseException | int:
     try:
         return branch_entry.main(
             ["--tenant", source.parent.parent.name, source.name,
-             str(T947.BRANCH_MESSAGE_ID), *T947.retired_continuation_argv()],
+             str(T947.BRANCH_MESSAGE_ID)],
             spawn=spawn, preflight=T947.no_preflight)
     except SystemExit as refused:
         return refused

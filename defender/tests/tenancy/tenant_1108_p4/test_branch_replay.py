@@ -125,7 +125,7 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     try:
         rc = S.mod("cli.learning.branch").main(
             ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID),
-             *T.retired_continuation_argv(), *argv_extra],
+             *argv_extra],
             spawn=spawn, questioner=questioner, **seams)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))

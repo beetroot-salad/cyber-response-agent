@@ -34,8 +34,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
     before = set(episodes.glob("*"))
     try:
         got: object = branch_entry.main(
-            ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-             *T.retired_continuation_argv()],
+            ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
             spawn=spawn, questioner=questioner, preflight=recording_preflight,
             live_tree=T.source_capture())
     except (SystemExit, AssertionError, *T.refusals()) as refused:

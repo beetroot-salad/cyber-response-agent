@@ -28,7 +28,7 @@ def test_the_launcher_refuses_before_its_role_preflight(tmp_path: Path, monkeypa
     source = root / H.TID / "runs" / T.SOURCE_RUN_ID
     try:
         got: object = branch_entry.main(
-            [str(source), str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
+            [str(source), str(T.BRANCH_MESSAGE_ID)],
             spawn=T.FakeSpawn(), preflight=recording_preflight)
     except SystemExit as refused:
         got = refused

@@ -450,9 +450,6 @@ def family_for(source: Path, *, episode_id: str = T.EPISODE_ID, roster: bool = T
 # The branch launcher.
 # ======================================================================================
 
-CONTINUATION = "Continue from here."
-
-
 def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID, *,
                 tenant_id: str | None = None) -> list[str]:
     """The launcher's command line (`--tenant T <source_run_id> <message>`) for the source run at
@@ -460,8 +457,7 @@ def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID, *,
     place_knowledge_for_rows()
     source = Path(source)
     requested = source.parent.parent.name if tenant_id is None else tenant_id
-    return ["--tenant", requested, source.name, str(message_id),
-            *T.retired_continuation_argv()]
+    return ["--tenant", requested, source.name, str(message_id)]
 
 
 def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:

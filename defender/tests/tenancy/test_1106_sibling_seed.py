@@ -135,8 +135,7 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
         # The request names the tenant whose `<root>/<T>/runs/<run id>` the source sits at,
         # and the source by its id.
         outcome = T.mod("cli.learning.branch").main(
-            ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID),
-             *P.retired_continuation_argv()],
+            ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID)],
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
             preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
@@ -294,8 +293,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     spawn = SpawnRecorder()
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("cli.learning.branch").main(
-            ["--tenant", fixture_uuid("tenant:acme"), src.name, str(P.BRANCH_MESSAGE_ID),
-             *P.retired_continuation_argv()],
+            ["--tenant", fixture_uuid("tenant:acme"), src.name, str(P.BRANCH_MESSAGE_ID)],
             spawn=spawn, questioner=questioner,
             preflight=O.no_preflight, live_tree=P.source_capture(tenant_id=fixture_uuid("tenant:acme")))
     text = f"{refused.value} {capsys.readouterr().err}"

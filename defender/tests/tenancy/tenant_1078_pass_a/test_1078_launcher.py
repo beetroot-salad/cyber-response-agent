@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
-from defender.tests.support.learning.branch import _branch_947 as B947
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
@@ -49,8 +48,7 @@ def _launch_id(source_run_id: str):
     spawn = seams.pop("spawn")
     seams.setdefault("preflight", H.no_preflight)
     H.place_knowledge_for_rows()
-    argv = ["--tenant", TID, source_run_id, str(T.BRANCH_MESSAGE_ID),
-            *T.retired_continuation_argv()]
+    argv = ["--tenant", TID, source_run_id, str(T.BRANCH_MESSAGE_ID)]
     try:
         result = H.branch_entry().main(argv, spawn=spawn, **seams)
     except SystemExit as refused:
@@ -274,11 +272,7 @@ def test_o4_fork_store_location(tmp_path, data_root):
     br = H.mod("investigation.branch")
     with br.open_source_store(src, source_run=_run_handle_1165(src)) as store:
         as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))
-    # Compat: the retired prompt reaches the spec only while the spec still declares it.
-    retired = ({B947.RETIRED_PROMPT_FIELD: H.CONTINUATION}
-               if B947.declares_retired_prompt() else {})
-    spec = br.BranchSpec(source_run_dir=src, branch_message_id=T.BRANCH_MESSAGE_ID,
-                         as_of=as_of, **retired)
+    spec = br.BranchSpec(source_run_dir=src, branch_message_id=T.BRANCH_MESSAGE_ID, as_of=as_of)
     sib = (data_root / TID / "episodes" / T.EPISODE_ID / "runs"
            / fixture_uuid("o4-fork-sibling-b"))
     sib.mkdir(parents=True)

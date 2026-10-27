@@ -161,8 +161,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     seams.setdefault("roster", est.roster())
     before = now_iso()
     # The tenant and the source run, by id.
-    rc = _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                      *T.retired_continuation_argv()],
+    rc = _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                      spawn=spawn, judge=judge, oracle=oracle.model, verifier=verifier.model,
                      **seams)
     return Launch(rc, spawn, judge, nxt.dir, before, now_iso())

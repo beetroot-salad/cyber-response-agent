@@ -86,7 +86,7 @@ class Launch:
         # The tenant, and the source run by id.
         self.rc = _entry().main(
             ["--tenant", self.src.parent.parent.name, self.src.name, str(T.BRANCH_MESSAGE_ID),
-             *T.retired_continuation_argv(), *argv_extra],
+             *argv_extra],
             spawn=self.spawn, questioner=self.questioner, judge=self.judge,
             preflight=lambda model, **_kw: self.roles.append(model) or 0,
             live_tree=self.live_tree, roster=self.estate.roster(), oracle=self.oracle.model,

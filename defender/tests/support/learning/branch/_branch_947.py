@@ -55,26 +55,11 @@ def branch_mod():
     return importlib.import_module("defender.investigation.branch")
 
 
-#: The field #1255 removed from `BranchSpec` (an arm is told nothing on arrival).
-RETIRED_PROMPT_FIELD = "continuation_prompt"
-
-
-def declares_retired_prompt() -> bool:
-    """Whether `BranchSpec` still declares `continuation_prompt`. False since #1255 landed: this
-    check and `spec_at`'s `prompt` parameter are vestigial and can be removed."""
-    return RETIRED_PROMPT_FIELD in {f.name for f in dataclasses.fields(branch_mod().BranchSpec)}
-
-
-def spec_at(store: Any, run_dir: Path, message_id: int, *,
-            prompt: str = "continue", as_of: Any = DERIVE):
+def spec_at(store: Any, run_dir: Path, message_id: int, *, as_of: Any = DERIVE):
     """The `BranchSpec` this branch point admits, T0 included."""
     branch = branch_mod()
-    coordinates: dict[str, Any] = {
-        "source_run_dir": Path(run_dir), "branch_message_id": message_id, "as_of": DRAFT_MOMENT,
-    }
-    if declares_retired_prompt():
-        coordinates[RETIRED_PROMPT_FIELD] = prompt
-    draft = branch.BranchSpec(**coordinates)
+    draft = branch.BranchSpec(source_run_dir=Path(run_dir), branch_message_id=message_id,
+                              as_of=DRAFT_MOMENT)
     moment = (  # lint-default: ok — a sentinel-defaulted override, not an optional re-coalesced in the body  # noqa: E501
         branch.branch_point_time(store, Path(run_dir), message_id, source_run=_run_handle_1165(Path(run_dir)))
         if as_of is DERIVE else as_of)

@@ -1951,7 +1951,7 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
     with _launcher_judge_suppressed(tmp_path):
         try:
             rc = mod("cli.learning.branch").main(["--tenant", src.parent.parent.name, src.name,
-                                str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
+                                str(T.BRANCH_MESSAGE_ID)],
                                spawn=spawn, **seams)
         except SystemExit as stop:
             rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))

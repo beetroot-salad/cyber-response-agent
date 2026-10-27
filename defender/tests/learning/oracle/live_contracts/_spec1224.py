@@ -864,7 +864,6 @@ def family_v2(*, worlds: list[dict] | None = None,
         "branch_message_id": T.BRANCH_MESSAGE_ID,
         "fences_at": 4,
         "as_of": as_of,
-        "continuation_prompt": "Continue from here.",
         "base_story": "the captured story",
         "served_systems": list(served_systems),
         "discriminator": {"predicate": predicate},
@@ -875,13 +874,6 @@ def family_v2(*, worlds: list[dict] | None = None,
                                                 ("bob", "carol", "10.0.0.9"))]),
         ],
     }
-    # The fields `T.RETIRED_FAMILY_FIELDS` names are written only while `Family` declares them
-    # (`_triplet_947.family_doc`'s rule), so the strict loader's unknown-key refusal does not fail
-    # every test here on a retired key.
-    declared = T._declared_family_fields()  # noqa: SLF001 — the sibling builder's own filter
-    for retired in T.RETIRED_FAMILY_FIELDS:
-        if retired not in declared:
-            doc.pop(retired, None)
     doc.update(over)
     return doc
 
@@ -1536,7 +1528,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         # The tenant and the source run by id: the source sits at
         # `<data root>/<tenant>/runs/<run id>`.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(BRANCH_MESSAGE_ID),
-                       *T.retired_continuation_argv(), *argv_extra], spawn=spawn, **seams)
+                       *argv_extra], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code

@@ -228,7 +228,7 @@ def at_branch_launch(w: World) -> Verdict:
     try:
         S.mod("cli.learning.branch").main(
             ["--tenant", w.planted.tenant_id, w.source_run.name,
-             str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
+             str(T.BRANCH_MESSAGE_ID)],
             spawn=spawn, preflight=preflight,
             live_tree=T.source_capture(knowledge=stamp["knowledge"]))
     except SystemExit as stop:

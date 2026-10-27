@@ -284,8 +284,8 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     already = _names(root)
     try:
         # The tenant and the source run by id.
-        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
-                       *S.T.retired_continuation_argv()], spawn=spawn, **seams)
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID)],
+                      spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code

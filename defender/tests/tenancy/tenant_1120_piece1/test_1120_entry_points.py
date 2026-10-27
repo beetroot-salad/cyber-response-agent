@@ -107,8 +107,7 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     requested = source.parent.parent.name if tenant_id is None else tenant_id
     try:
         return branch_entry.main(
-            ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID),
-             *T.retired_continuation_argv()],
+            ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID)],
             spawn=spawn, **seams)
     except SystemExit as refused:
         return refused

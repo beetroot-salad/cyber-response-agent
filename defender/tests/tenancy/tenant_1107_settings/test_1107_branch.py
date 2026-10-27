@@ -61,8 +61,7 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
     refused with)."""
     S._require_data_root(root)
     # The tenant and the source run, by id.
-    argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-            *T.retired_continuation_argv()]
+    argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)]
     try:
         return branch_entry.main(argv, **seams), None
     except SystemExit as refused:

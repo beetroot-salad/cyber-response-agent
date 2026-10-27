@@ -91,8 +91,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     src = invalid
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
-        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                     *T.retired_continuation_argv()],
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert agent.calls == 0
@@ -118,8 +117,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
         agent = T.FakeAgent()
         prepare()
         with pytest.raises(SystemExit):
-            _entry().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
-                         *T.retired_continuation_argv()],
+            _entry().main(["--tenant", src.parent.parent.name, src.name, *argv_extra],
                         spawn=T.FakeSpawn(), questioner=agent,
                         preflight=S.no_preflight, live_tree=T.source_capture())
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
@@ -139,8 +137,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     RunPaths(src).alert.symlink_to(secret)
     agent = T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
     with pytest.raises(T.refusals()) as refusal:
-        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                     *T.retired_continuation_argv()],
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert "alert" in str(refusal.value)
