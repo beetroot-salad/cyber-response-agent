@@ -36,12 +36,11 @@ def _pitfall(pid: str) -> dict:
 
 
 def _drain_stage(data_root: Path, shape: str) -> tuple[int | None, BaseException | None, Path]:
-    """One curator-drain stage through `_run_stage` over a tenant (#1108 P4 flow 4: the drain
-    serves an accepted tenant's own learning root) whose learning root has `shape` — `missing`,
-    `not-a-folder` or a `dangling` link — every non-state seam faked (no model, no box; the
-    forge and issuer P3's fakes): `(exit code, what escaped _run_stage, the root's spelling)`.
+    """One curator-drain stage through `_run_stage` over a tenant whose learning root has `shape`
+    (`missing`, `not-a-folder` or a `dangling` link), every non-state seam faked (no model, no
+    box, fake forge and issuer): `(exit code, what escaped _run_stage, the root's spelling)`.
     The tenant is a second one under the test's data root, its scratch kept outside `tmp_path`,
-    so the test's own snapshots and D9's runs are untouched."""
+    so the test's own snapshots and the curation run's tenant are untouched."""
     import tempfile
 
     from defender.tests.tenancy.tenant_1108_p4._drain_support import (
@@ -83,8 +82,8 @@ def _claim_all(state) -> list:
 
 
 def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, caplog):
-    # rejected: a StateRefused subclassing OSError (every `except OSError` arm would catch it;
-    # X2 shows today's arms swallow the core's refusal exactly that way)
+    # Rejected design: a StateRefused subclassing OSError, which every `except OSError` arm
+    # would catch and swallow.
     paths = S.built_paths(tmp_path)
     S.plant(location_path(paths.state_root) / "_pending" / "findings.jsonl", "symlink", target=S.outside(tmp_path))
     state = S.LearningState.open(paths)
@@ -118,7 +117,7 @@ def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, 
 
 
 def test_open_holds_the_resolved_existing_scratch_root(tmp_path: Path):
-    # Explicit scratch paths retain the handle's resolved-once semantics.
+    # An explicit scratch root is resolved once, at open.
     real = tmp_path / "real"
     elsewhere = tmp_path / "elsewhere"
     real.mkdir()
@@ -162,9 +161,9 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_ro
     assert isinstance(opened, FatalConfigError), f"open answered {opened!r}"
     assert str(root.resolve()) in str(opened), f"the error does not name the root: {opened}"
 
-    # The run's tenant (D9's, set up by `curation_run_dir` on a FRESH data root) is made before
-    # the drain stage publishes its second tenant under the same data root: set-up refuses a
-    # data root that already holds another tenant.
+    # The run's tenant (set up by `curation_run_dir` on a FRESH data root) is made before the
+    # drain stage publishes its second tenant under the same data root: set-up refuses a data
+    # root that already holds another tenant.
     planted = S.curation_run_dir("case-r15")
     run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
     scrub_mod.scrub(run_dir)
@@ -183,7 +182,7 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_ro
         run_state.rmdir()
     if shape == "not-a-folder":
         run_state.write_text("a file, not a folder\n", encoding="utf-8")
-    monkeypatch.setenv(ENV, str(run_state))  # safe input for the pre-#1186 implementation
+    monkeypatch.setenv(ENV, str(run_state))  # a retired knob: nothing reads it
     answered: list[bool] = []
     enqueued = S.caught(lambda: answered.append(
         run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")))
@@ -229,7 +228,8 @@ def test_1135_root_is_a_dangling_link(tmp_path: Path, data_root: Path, monkeypat
 
 @pytest.mark.parametrize("value", [None, ""], ids=["unset", "empty"])
 def test_1135_unset_and_empty_state_env_keep_the_explicit_tenant_root(data_root, monkeypatch, value):
-    """#1186 O1: absence of the retired override never selects the code package."""
+    """With the retired override unset or empty, the state root is the tenant's, never the code
+    package."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     tenant = set_up_tenant(data_root)
@@ -251,7 +251,7 @@ def test_1135_unset_and_empty_state_env_keep_the_explicit_tenant_root(data_root,
 
 @pytest.mark.parametrize("at", ["queue-file", "holding-folder"])
 def test_a_linked_queue_read_raises_and_never_reads_as_empty(tmp_path: Path, at):
-    # rejected: N14 — a refused read is never folded to empty outside E1-E3
+    # A refused read is never folded to empty outside the E1-E3 exemptions.
     paths = S.built_paths(tmp_path)
     outside_dir = tmp_path / "outside"
     payload = (json.dumps(_finding("x/0")) + "\n").encode()
@@ -447,7 +447,7 @@ def test_a_linked_lock_name_raises_for_a_try_once_role_and_creates_no_target(tmp
 
 
 def test_a_plain_lock_role_is_taken_refused_while_held_and_released(tmp_path: Path):
-    # rejected: N8 — no lease or claim-epoch model; locks stay flock
+    # Rejected design: a lease or claim-epoch model; locks stay flock.
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
     drain_lock = location_path(paths.state_root) / "_pending" / ".lock"
@@ -579,8 +579,8 @@ def test_a_non_plain_entry_at_a_record_name_halts_when_the_claim_opens_it(tmp_pa
 
 
 def test_a_listing_keeps_record_names_and_never_opens_a_foreign_name(tmp_path: Path, caplog):
-    # rejected: halting on a non-plain entry at a foreign name (3.1 D: O2 holds because nothing
-    # follows it)
+    # Rejected design: halting on a non-plain entry at a foreign name (safe because nothing
+    # follows it).
     paths = S.built_paths(tmp_path)
     queue = location_path(paths.state_root) / "author-queue"
     queue.mkdir()
@@ -619,15 +619,15 @@ def test_a_listing_keeps_record_names_and_never_opens_a_foreign_name(tmp_path: P
     assert named == [], f"a foreign name was reported: {named}"
 
 
-#: The core's refusal shapes (X1, G8, G9), each planted at the read verb's queue (rows) and the
-#: write verb's claimed record (stamp): (verb, where, shape).
+#: The core's refusal shapes, each planted at the read verb's queue (rows) and the write verb's
+#: claimed record (stamp): (verb, where, shape).
 _CONVERSION = [
     ("rows", "leaf", "symlink"),         # NotPlainEntry, ELOOP (link at the leaf)
     ("rows", "leaf", "hardlink"),        # NotPlainEntry, EMLINK (hard link)
     ("rows", "leaf", "fifo"),            # a refused Bound read's reason (`other` at the name)
     ("rows", "leaf", "folder"),          # `other` entry at a record name
     ("rows", "folder", "symlink"),       # plain OSError(ELOOP): a linked holding folder
-    ("rows", "folder", "file"),          # NotADirectoryError(ENOTDIR) on the walk (R16)
+    ("rows", "folder", "file"),          # NotADirectoryError(ENOTDIR) on the walk
     ("stamp", "leaf", "symlink"),
     ("stamp", "leaf", "hardlink"),
     ("stamp", "folder", "symlink"),
@@ -713,8 +713,7 @@ def _vanishing_pass(state, paths: LoopPaths):
 
 
 def test_a_request_whose_identity_is_already_claimed_this_pass_waits_a_pass(tmp_path: Path):
-    # rejected: revision 2's newest-wins removal of the orphan (R5, superseded by R14); N2 —
-    # request record bodies are unchanged
+    # Rejected design: newest-wins removal of the orphan. Request record bodies are unchanged.
     paths = S.built_paths(tmp_path)
     run_a, run_b = S.curation_run_dir("run-a"), S.curation_run_dir("run-b")
     orphan = S.seed_request(paths, "case-x", run_a, inflight=True)
@@ -736,8 +735,7 @@ def test_a_request_whose_identity_is_already_claimed_this_pass_waits_a_pass(tmp_
 
 
 def test_a_refused_ledger_stops_rotate_before_the_queue_is_replaced(tmp_path: Path):
-    # rejected: closing the crash window between the queue replace and the ledger append
-    # (unchanged, O3; X11)
+    # Out of scope: closing the crash window between the queue replace and the ledger append.
     paths = S.built_paths(tmp_path)
     queue = location_path(paths.state_root) / "_pending" / "findings.jsonl"
     keep, done = _finding("a/0"), _finding("a/1")
@@ -756,8 +754,8 @@ def test_a_refused_ledger_stops_rotate_before_the_queue_is_replaced(tmp_path: Pa
 
 
 def test_move_at_renames_under_the_held_root(tmp_path: Path):
-    # rejected: a hard-linked, FIFO, link or folder destination enumeration (R17: no host-actor
-    # edge enumeration; #20 is the move guard)
+    # Out of scope: enumerating hard-linked, FIFO, link or folder destinations (no host-actor
+    # edge enumeration; the move guard is separate).
     move_at = S.core_fn("move_at")
     paths = S.built_paths(tmp_path)
     root = location_path(paths.state_root)
@@ -788,8 +786,7 @@ def test_move_at_renames_under_the_held_root(tmp_path: Path):
 
 
 def test_open_lock_at_opens_a_plain_lock_without_truncating(tmp_path: Path):
-    # rejected: N13 — a lock mode looser than 0644 is not kept; the hard-link/FIFO lock cases
-    # (R17)
+    # Out of scope: keeping a lock mode looser than 0644, and hard-link/FIFO lock entries.
     open_lock_at = S.core_fn("open_lock_at")
     paths = S.built_paths(tmp_path)
     root = location_path(paths.state_root)

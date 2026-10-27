@@ -1,4 +1,4 @@
-"""Substrate for the issue-870 executable spec (`docs/archive/spec-graphs/spec_graph_870.yaml`)."""
+"""Shared literals and builders for the #870 pitfalls-lane tests (no tests here)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -35,60 +35,48 @@ from defender.tests.support.runtime.engine._declared869 import (  # noqa: F401 �
     write_marker,
 )
 
-# THE ONE LITERAL THIS ROUND ADDS, and the shape of the document behind it.
-#
-# Spelled HERE rather than imported from the target: an oracle a test reads out of the code
-# it is judging cannot disagree with it (`tests/_repo.plant_named_dirs`' rule). Every
-# assertion below is against these literals, and `test_870_handoff.py` asserts the REAL
-# committed file still matches them — so a drift in production is a red test, not a silently
-# agreeing one.
+# The literals the tests assert against, spelled HERE rather than imported from the target: an
+# oracle read out of the code it judges cannot disagree with it. `test_870_handoff.py` asserts
+# the real committed file still matches them.
 
-#: The reducer surface the pitfalls lane writes — #1108 P4: the tenant's add-on
-#: `agent/skills/gather/defender-sql.pitfalls.md` (carried decision 2026-10-08, A1), repo-relative
-#: in the tenant repo (OD6), the exact spelling `_pitfalls_path_rule` compares and the batch's
-#: change set carries. Before P4 it was the product page below.
+#: The reducer surface the pitfalls lane writes: the tenant's add-on page, repo-relative in the
+#: tenant repo, as `_pitfalls_path_rule` compares it and the batch's change set carries (#1108 P4).
 REDUCER_REL = "agent/skills/gather/defender-sql.pitfalls.md"
 
-#: The product reducer page (O1: it stays in the product tree). No tenant write touches it
-#: after P4 (O7): the lane's path rule refuses it, and it carries no `## Common pitfalls`.
+#: The product reducer page. No tenant write touches it: the lane's path rule refuses it, and it
+#: carries no `## Common pitfalls`.
 PRODUCT_REDUCER_REL = "defender/skills/gather/defender-sql.md"
 
-#: Three `##` sections a human wrote in the add-on, verbatim (the planted fixture's; FF-12's
-#: shape, moved from the product page). FK-2's content rule keeps all three across an edit.
+#: Three `##` sections a human wrote in the add-on, verbatim; the content rule keeps all three
+#: across an edit.
 REDUCER_HEADINGS: tuple[str, ...] = (
     "## The payload becomes the table",
     "## The binding each shape needs",
     "## Results that lie",
 )
 
-#: The file's YAML frontmatter keys. The file has one today and no scaffold rule anywhere
-#: requires it (FF-12) — FK-2's content rule is the first thing that does.
+#: The file's YAML frontmatter keys, which only the content rule requires.
 REDUCER_FRONTMATTER_KEYS: tuple[str, ...] = ("name", "description")
 
-#: The section curator additions land in — created if absent, which it is today.
+#: The section curator additions land in, created if absent (as in the planted file).
 PITFALLS_SECTION = "## Common pitfalls"
 
-#: The two-character `git status --porcelain` shapes FK-1 closes the round over. `_git.
-#: git_status` hands the rule whatever it emits, and M7's own text enumerates none of them.
+#: The two-character `git status --porcelain` shapes the path rule is checked over
+#: (`git_status` hands it whatever git emits).
 STATUS_SHAPES: tuple[str, ...] = ("M ", " M", "MM", "D ", " D", "R ", "RM", "??")
 
-#: The shapes that carry a `D`, i.e. the ones the delete branch must still refuse ON THE NEW
-#: PATH. That it is a subset of STATUS_SHAPES rather than a second list is the point: the
-#: rule's verdict over the WHOLE alphabet is the demand, not two hand-picked members.
+#: The shapes carrying a `D`, which the delete branch must refuse ON THE NEW PATH. A subset of
+#: `STATUS_SHAPES`, not a second list: the demand is the verdict over the WHOLE alphabet.
 DELETING_SHAPES: tuple[str, ...] = ("D ", " D")
 
-#: l-003's real diagnosis in `reviewer-measure-0807-b` — one unchanging `Binder Error` under
-#: eight varied attempts. The round's motivating incident, and the digest that makes N rows
-#: ONE record with `occurrences: N` (C8/C17, executed).
+#: A real diagnosis (one unchanging `Binder Error` under eight varied attempts): the digest that
+#: makes N rows ONE record with `occurrences: N`.
 BINDER = "exit=1; Binder Error: No function matches unnest(JSON) - candidates: unnest(LIST)"
 
 
 def reducer_surface_text(*, bullets: tuple[str, ...] = ()) -> str:
-    """The reducer surface as it stands at this base, optionally curated.
-
-    A WRITER, never an oracle: the frontmatter block and the three sections are the shape the
-    content rule protects, and `bullets` is what a compliant curator adds — appended under
-    `## Common pitfalls`, which the file does not have until the first one lands.
+    """The reducer surface as planted, optionally curated. A WRITER, never an oracle: `bullets`
+    are what a compliant curator appends under `## Common pitfalls`.
     """
     body = (
         "---\n"
@@ -111,10 +99,9 @@ def write_reducer_surface(repo: Path, *, bullets: tuple[str, ...] = ()) -> Path:
 
 
 def curate_reducer_surface(bullet: str = "keep the unnest argument a LIST"):
-    """The edit a COMPLIANT curator makes: one bullet appended under `## Common pitfalls`.
-
-    Returned as a `Spawn` edit callable, so a test hands it to the entry point's own `invoke=`
-    seam and the real file is really written into the real worktree before the real gate runs.
+    """The edit a COMPLIANT curator makes: one bullet appended under `## Common pitfalls`, as a
+    `Spawn` edit callable for the entry point's `invoke=` seam, so the real file is written into
+    the real worktree before the real gate runs.
     """
 
     def _edit(root: Path) -> None:
@@ -176,9 +163,8 @@ def shim_lead(
 ) -> ExecutedLead:
     """One failing terminal reduce, as the offline extraction sees it.
 
-    `query_id` defaults to the sentinel and is a parameter because the whole of U3 is that the
-    routing key is EQUALITY with that value — the near-miss and the other two sentinels are
-    driven through this same builder so they differ from the positive case in one field.
+    `query_id` is a parameter because routing is EQUALITY with the sentinel: the near-miss and
+    the other sentinels differ from the positive case in this one field.
     """
     return ExecutedLead(
         lead_id=lead_id, query_index=query_index, is_multi_query=True, entry_index=0,
@@ -192,8 +178,8 @@ def shim_lead(
 
 
 def shim_row(pid: str, *, digest: str = BINDER, system: str = "", **extra: Any) -> dict:
-    """One QUEUED reducer row — post-M5′, so its `system` is `""` and its `query_id` is the
-    sentinel. The queue is a real file and these go into it through `append_pitfalls`."""
+    """One QUEUED reducer row: `system` is `""` and `query_id` is the sentinel. Tests append it
+    to the real queue file through `append_pitfalls`."""
     return {
         "schema_version": 1,
         "pitfall_id": pid,
@@ -210,21 +196,14 @@ def shim_row(pid: str, *, digest: str = BINDER, system: str = "", **extra: Any) 
 
 def silent_shim_row(pid: str, **extra: Any) -> dict:
     """A CONTENT-LESS reducer row: the adapter's `exit=N; ` envelope and nothing else.
-
-    PO-R2 (executed) established what this is worth — `pitfall_key` sends it to
-    `(system, "\\x00" + pitfall_id)`, unique per row, so it merges with nothing and can never
-    carry `occurrences > 1`. It is the negative arm of FK-3's new gate.
+    `pitfall_key` keys it per row, so it merges with nothing and never reaches `occurrences > 1`.
     """
     return shim_row(pid, digest="exit=1; ", **extra)
 
 
 def by_surface(handoffs: list[dict]) -> dict[str, list[dict]]:
-    """The handoff list, indexed by its discriminator.
-
-    Both legal values are seeded and `surface` is read with `.get`, so a build that never grew
-    the key fails on the assertion the demand actually makes — "there is no reducer entry" —
-    rather than on a `KeyError` in the helper, which reads as a broken test rather than as an
-    unmet demand.
+    """The handoff list, indexed by `surface`. Both legal values are seeded and the key read
+    with `.get`, so a build without it fails the demand's own assertion, not a `KeyError` here.
     """
     out: dict[str, list[dict]] = {"system": [], "reducer": []}
     for entry in handoffs:
@@ -233,7 +212,7 @@ def by_surface(handoffs: list[dict]) -> dict[str, list[dict]]:
 
 
 def queue_ids(paths) -> list[str]:
-    """The ids still pending, in file order — the observable FK-7's held rows live in."""
+    """The ids still pending, in file order (where held rows stay)."""
     from defender.learning.core import persist
     from defender.tests.support.learning.core import _state1135
 

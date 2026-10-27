@@ -19,7 +19,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def _family_row(fid: str, **over) -> dict:
-    """A well-formed defender row as the judge appends it (#1234 shape)."""
+    """A well-formed defender row as the judge appends it."""
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
                type="decision-discipline", subject="defender",
                subject_anchor="l-001", subject_topic="holding-system coverage",
@@ -44,7 +44,7 @@ def test_1166_the_appender_refuses_a_defender_row_that_is_not_family(tmp_path, d
 @pytest.mark.parametrize("direction", ["benign", "adversarial", None])
 def test_1166_a_queued_non_family_row_is_held_by_name_and_the_batch_still_authors(
         tmp_path, direction):
-    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    # The REAL lessons tick over a batch's git-free draft.
     lane = C.draft_lane(tmp_path)
     paths = lane.paths
     channel = D.channel_of("findings")

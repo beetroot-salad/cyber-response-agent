@@ -124,13 +124,7 @@ def test_grant_pattern_refuses_a_bare_string():
     assert AgentPolicy(write_allow=(shape,)).write_allow[0] is shape
 
 
-# PR 3 — defender/learning/
-
-
-# the second review pass
-
-
-# PR5: the two model-facing validators batch every problem into one refusal
+# the two model-facing validators batch every problem into one refusal
 
 
 def test_validate_params_names_every_problem_once_in_one_refusal():

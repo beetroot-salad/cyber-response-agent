@@ -1,4 +1,4 @@
-"""#881 — two pieces of the author drain's plumbing that lost a row in silence."""
+"""#881: two pieces of the author drain's plumbing that lost a row in silence."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -20,12 +20,9 @@ from defender.tests.support.learning.curation._drain719 import drain  # noqa: F4
 def _ids_in(line: str, label: str) -> str:
     """The contents of one `<label>=[...]` list on a held-report line.
 
-    A MISSING LABEL FAILS HERE rather than answering `""`. The two assertions this feeds are
-    negative — a gate hold must appear in neither `deferred_ids` nor `skipped_ids` — so an
-    absent label made them vacuously true: rename the field, drop an empty list, or move the
-    line to JSON, and the whole "never merged under one label" demand passes without reading
-    anything. `re.escape` for the same reason: a label carrying a regex metacharacter would
-    silently match nothing."""
+    A MISSING LABEL FAILS HERE rather than answering `""`: the assertions this feeds are
+    negative, so an absent label would make them vacuously true. `re.escape` for the same
+    reason: a label carrying a regex metacharacter would silently match nothing."""
     found = re.search(rf"{re.escape(label)}=\[(.*?)\]", line)
     assert found is not None, (
         f"the held-report line carries no {label}=[...] list, so asserting a row is absent "
@@ -35,9 +32,9 @@ def _ids_in(line: str, label: str) -> str:
 
 
 def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_report(tmp_path):
-    """#1108 P4 (O7, OD12 class ii): the ticks run over a batch draft
-    (`_curator1134.draft_lane`, the real lessons config with `batch=`), since the lane commits
-    only into a tenant batch; the held report is learning state, unchanged."""
+    """The ticks run over a batch draft (`_curator1134.draft_lane`, the real lessons config with
+    `batch=`), since the lane commits only into a tenant batch; the held report is learning
+    state."""
     from defender.tests.support.learning.curation import _curator1134 as C
 
     lane = C.draft_lane(tmp_path)
@@ -191,13 +188,10 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(
 
 
 def _unkeyable(rid: str, **body) -> dict:
-    """A well-formed findings row with its id field removed — the shape `_retire_unkeyable`
-    exists for.
-
-    `body` overrides ordinary content fields, which is how two such rows are made to differ
-    in their BODY while sharing a `run_id`. Deriving the difference from `rid` instead would
-    move `run_id` and `source_run_dir` too, and a fold keyed on the run would then be
-    indistinguishable from one keyed on the row."""
+    """A well-formed findings row with its id field removed, the shape `_retire_unkeyable`
+    exists for. `body` overrides content fields, so two such rows can differ in their BODY while
+    sharing a `run_id` (deriving the difference from `rid` would move the run too, and a
+    run-keyed fold would look like a content-keyed one)."""
     return {
         k: v for k, v in h.row_for("findings", rid, **body).items() if k != "finding_id"
     }

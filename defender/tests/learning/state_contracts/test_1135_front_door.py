@@ -1,4 +1,4 @@
-"""#1135/#1186 — tenant-selected state and explicit scratch roots preserve handle I/O routes."""
+"""Tenant-selected state and explicit scratch roots preserve the handle's I/O routes."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -18,7 +18,7 @@ def test_the_kept_root_routes_still_resolve(
 
     tenant = set_up_tenant(data_root)
     location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
-    # Overlapping ambient values formerly refused tenant acceptance. They are now inert.
+    # An overlapping ambient value is inert: the queue must not land under it.
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(data_root))
     paths = config.LoopPaths.for_tenant(tenant)
     assert location_path(paths.state_root) == location_path(tenant.learning)

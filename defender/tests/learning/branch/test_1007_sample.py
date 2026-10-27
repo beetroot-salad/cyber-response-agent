@@ -1,4 +1,4 @@
-"""#1007 — M4: the questioner's own samples, the per-world judge prompt, and the evidence scope."""
+"""#1007: the questioner's own samples, the per-world judge prompt, and the evidence scope."""
 from __future__ import annotations
 
 from defender.records._episode_handle import Episode
@@ -46,7 +46,7 @@ def queued_types() -> list[str]:
 
 
 def assert_set_aside_for_its_sample(built, index: int, what: str) -> None:
-    """b's draw-0 finding `index` took the O16 lane (`unqueueable`, naming samples.yaml)."""
+    """b's draw-0 finding `index` was set aside as `unqueueable`, its reason naming samples.yaml."""
     fid = built.finding_id("b", 0, index)
     entries = [e for e in S.ledger(built) if e.get("finding_id") == fid]
     assert [e.get("lane") for e in entries] == [S.LANES["unqueueable"]], (
@@ -143,8 +143,7 @@ def test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket(
 
 def test_a_two_system_family_names_each_systems_sample_availability_independently(
         tmp_path, monkeypatch):
-    """A family serving TWO systems is graded — and rendered — per system, never reduced to one
-    (O5's own falsifier)."""
+    """A family serving TWO systems is graded — and rendered — per system, never reduced to one."""
     answer = '{"marker": "the-sampled-systems-answer"}'
     built, judge = graded(
         tmp_path, monkeypatch,
@@ -184,8 +183,8 @@ def test_the_judges_sample_is_byte_identical_to_the_questioners_within_one_attem
 
 def test_every_attacker_influenced_section_of_the_judge_prompt_carries_the_run_salted_frame(
         tmp_path, monkeypatch):
-    """The samples section and pre-flight's record carry the SAME run-salted untrusted frame the
-    capture sections already carry — parity per cell, at this sink."""
+    """The samples section and pre-flight's record carry the run-salted untrusted frame the
+    capture sections carry."""
     marker_fault = "a-preflight-reason-marker"
     _built, judge = graded(tmp_path, monkeypatch, outcome_reason=marker_fault,
                            samples=samples_of(SYSTEM, '{"host": "a-sample-marker-host"}'))
@@ -198,7 +197,7 @@ def test_every_attacker_influenced_section_of_the_judge_prompt_carries_the_run_s
 
 def test_a_second_attempts_step_2_overwrites_the_first_attempts_samples(
         tmp_path, monkeypatch):
-    """THE ACCEPTED BEHAVIOUR, PINNED: a second `Step.QUESTIONER` write's samples WIN."""
+    """A deliberate choice, pinned: a second `Step.QUESTIONER` write's samples WIN."""
     cli = W.mod("learning.branch.cli")
     _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
     ep = W.episode(tmp_path, root=root)

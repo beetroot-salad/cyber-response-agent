@@ -9,8 +9,8 @@ from defender._text import as_str, is_content_less, strip_zero_width
 from defender.learning import loop
 from defender.learning.core.config import RunUnprocessable
 
-# Renders as nothing, on both sides of isspace(). The zero-width half is what the old
-# `.strip()` gate let through.
+# Renders as nothing, on both sides of isspace(); the zero-width half is what a `.strip()` gate
+# lets through.
 CONTENT_LESS = [
     ("ascii-spaces", "   "),
     ("U+00A0-no-break-space", " "),
@@ -75,10 +75,7 @@ def _report(tmp_path: Path, disposition: str) -> Path:
     return p
 
 
-# the "non-empty string" gates — a field that renders as nothing is empty
-
-
-# the keyword gates — the same split, running the other way
+# the keyword gates — matched on what a value renders as
 
 
 @pytest.mark.parametrize(("tag", "written"), [("clean", "benign")])
@@ -91,8 +88,8 @@ def test_a_report_disposition_is_matched_on_what_it_renders_as(tmp_path, tag, wr
     [
         ("not-a-keyword", "spicy"),
         ("content-less", "​"),
-        # #923: moved from the "matched on what it renders as" set above — the read side no
-        # longer coerces a zero-width- or BOM-laced disposition into the member it resembles.
+        # The read side does not coerce a zero-width- or BOM-laced disposition into the member
+        # it resembles (#923).
         ("trailing-zwsp", "benign​"),
         ("bom", "﻿benign"),
     ],
@@ -115,8 +112,7 @@ def test_strip_zero_width_keeps_the_whitespace_callers_split_on():
 
 
 def test_as_str_answers_on_the_type_and_not_on_emptiness():
-    """`as_str` is the coercion #871 gave a shared home, and what it must do is turn a
-    NON-STRING into `""` — not merely turn `None` into one."""
+    """`as_str` turns any NON-STRING into `""`, not merely `None`."""
     assert as_str("elastic") == "elastic"
     assert as_str("") == ""
     for not_a_string in (None, 12345, True, ["a"], {"n": 1}, 1.5, b"bytes"):

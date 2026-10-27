@@ -1,4 +1,4 @@
-"""#1007 — the judge record's #1007 fields, and their round trip."""
+"""#1007: the judge record's #1007 fields, and their round trip."""
 from __future__ import annotations
 
 
@@ -41,7 +41,7 @@ def test_grade_episode_returns_extended_record(tmp_path, monkeypatch):
 
 
 def test_judge_yaml_round_trips_every_new_field(tmp_path, monkeypatch):
-    """Every field written by `_write_judge_yaml` is read back by `judge.read_grade` ."""
+    """Every field `_write_judge_yaml` writes is read back by `read_grade` on a second pass."""
     built = W.contrast_family(tmp_path, monkeypatch)
     judge = S.judge({"b": graded_reply()})
 

@@ -154,7 +154,7 @@ def test_a_link_wearing_an_artifacts_name_is_refused_rather_than_followed(tmp_pa
     else:
         target.unlink()
     target.symlink_to(secret if name != "queries table" else secret_file)
-    caplog.clear()  # the control's own lines (today: its D1 refusal) are not this arm's
+    caplog.clear()  # the control's own log lines are not this arm's
     caplog.set_level(logging.INFO)
 
     arm = S.drive_arm(tmp_path, spec, S.Recorder([S.done()]), name="linked", run_id="linked-1255")

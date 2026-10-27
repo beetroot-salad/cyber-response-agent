@@ -65,32 +65,25 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
 )
 
 # ---------------------------------------------------------------------------------------
-# The names #1007 introduces. Spelled ONCE, because the graph's address space and the code's
-# symbol table join BY NAME (schema.md, "Coin ids from the code's name"): a private synonym
-# here would cost the join, silently.
+# The names #1007 introduces, spelled ONCE: the contract graph joins the code by name, so a
+# private synonym here would silently break the join.
 # ---------------------------------------------------------------------------------------
 
-#: `defender/lessons-questioner/` — the second authored corpus (M7/D3). The path accessor pair
-#: the graph binds as boundary `lessons_questioner_dir` lives on `_paths.DefenderPaths`, beside
-#: `lessons_dir` / `lessons_dir_rel`, because that class is the one owner of corpus directory
-#: NAMES (its own docstring: the names stay owned by `_paths.py` alone).
+#: `defender/lessons-questioner/`, the second authored corpus (accessor: `lessons_questioner_dir`).
 QUESTIONER_CORPUS_DIRNAME = "lessons-questioner"
 QUESTIONER_CORPUS_REL = "defender/lessons-questioner/"
 
-#: `_pending/questioner_findings.jsonl` — the second queue channel (M6). A2 (§7) settled its
-#: lock topology: its OWN `append_lock` and `consumed` file, and the SHARED drain lock, so two
-#: curators never hold the worktree at once.
+#: `_pending/questioner_findings.jsonl`, the second queue channel: its OWN `append_lock` and
+#: `consumed` file but the SHARED drain lock, so two curators never hold the worktree at once.
 QUESTIONER_QUEUE_FILENAME = "questioner_findings.jsonl"
 
-#: The `_CURATOR_MODULES` key and the drain-trigger module name for M7's curator. `author` is
-#: the incumbent defender-side one; after this change the fixed dict has a fourth key and the
-#: drain triggers exactly these two.
+#: The `_CURATOR_MODULES` keys of the two curators the author drain triggers: the questioner's
+#: and the defender-side `author`.
 QUESTIONER_CURATOR_MODULE = "questioner_curator"
 DEFENDER_CURATOR_MODULE = "author"
 
-#: The two `subject` literals. Exactly two string literals, no case-fold and no trim anywhere
-#: (the graph's `subject` domain) — which is what makes the appender's guard and the bucket
-#: selector agree by construction.
+#: The two `subject` literals, matched exactly (no case-fold, no trim), so the appender's guard
+#: and the bucket selector agree by construction.
 SUBJECT_DEFENDER = "defender"
 SUBJECT_WORLD = "world"
 
@@ -120,9 +113,8 @@ def read_yaml(path: Path) -> Any:
 
 
 def read_yaml_record(bound: Any, name: str) -> Any:
-    """`read_yaml`'s twin in the `reader=` seam's shape — `(bound, name)`, never a path (#1049
-    d-21, RF-R2): the record's text comes off the bound primitive and is parsed; an absent
-    record is `None`, the seam's typed absent answer; a refused one is a fixture fault here."""
+    """`read_yaml` in the `reader=` seam's shape, `(bound, name)`, never a path: an absent record
+    is `None`; a refused one is a fixture fault."""
 
     read = bound.read(name)
     assert read.refusal is None, f"fixture fault: {read.refusal}"
@@ -154,10 +146,9 @@ def write_samples(episode_dir: Path, samples: dict[str, Any] | None = None) -> P
 
 def write_outcome(episode_dir: Path, *, outcome: str = "accepted", reason: str = "",
                   family_stamp: bool = True) -> Path:
-    """Materialise pre-flight's `<episode>/outcome.yaml` — the record the judge's gate reads —
-    through the production writer (`learning/branch/outcome.py::write_outcome`). An `accepted`
-    family also gets `verify_family`'s family stamp unless `family_stamp=False` (PR #1232
-    round 7: only a stamped family is graded)."""
+    """Materialise pre-flight's `<episode>/outcome.yaml` (what the judge's gate reads) through the
+    production writer. An `accepted` family also gets `verify_family`'s family stamp unless
+    `family_stamp=False`: only a stamped family is graded."""
     from defender.records._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome as _write
     from defender.tests.support.learning.judge._judge_921 import comparable_family_stamp
@@ -183,11 +174,9 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
 
 def served_row(*, world: str = "b", key: str = "k1", source: str = "oracle",
                payload_text: str | None = None, **extra: Any) -> dict[str, Any]:
-    """One `served/<world>.jsonl` row, `ServedCall.row()`-shaped.
-
-    Built on `_judge_921.ledger_row` so `world_id` is the COMPOSED world token a real row
-    carries — never the short archive label. `source: oracle` is a call the world's live
-    oracle answered (#1224); `asked_params` and `params` are the one form the model asked.
+    """One `served/<world>.jsonl` row, `ServedCall.row()`-shaped, built on `ledger_row` so
+    `world_id` is the COMPOSED world token a real row carries, not the archive label.
+    `source: oracle` is a call the world's live oracle answered.
     """
     asked = {"index": EVENTS_PATTERN, "window": "24h", "scope_key": "host.name"}
     row = ledger_row(
@@ -200,29 +189,21 @@ def served_row(*, world: str = "b", key: str = "k1", source: str = "oracle",
 
 
 def write_served(episode_dir: Path, world: str, rows: list[dict]) -> Path:
-    """Materialise one world's served ledger under `<episode>/served/`.
-
-    Through `_judge_921.write_ledger` so the FILENAME is the composed world token rather than
-    the short archive label — a reader opening `served/<label>.jsonl` finds nothing, and a
-    fixture that spelled the short name would make every ledger assertion pass on an empty read.
+    """Materialise one world's served ledger under `<episode>/served/`, named by the composed
+    world token (via `write_ledger`): a `served/<label>.jsonl` would read as empty, and every
+    ledger assertion would pass on that empty read.
     """
     return write_ledger(episode_dir, world, list(rows))
 
 
 # ---------------------------------------------------------------------------------------
-# The graded episode. #1234 replaced the reply this suite once scripted (`findings` with a
-# `subject` key, `episode_outcome`, the family `verdict_word`) with three filed lists and typed
-# pointers, and made a run usable only through its call-id-joined records (A3, A12) — so a
-# graded scenario here is built and judged by #1234's own builders (`_spec1234`: `family`,
-# `inv`, `wf`, `world_reply`, `family_reply`, `judge`, `grade`), never by a copy of them.
+# The graded episode: built and judged by #1234's own builders (`_spec1234`), never a copy.
 # ---------------------------------------------------------------------------------------
 
 
 def contrast_family(tmp_path: Path, monkeypatch, worlds: Any = None, **kw: Any) -> Any:
     """`_spec1234.family(tmp_path, worlds, **kw)` (control `a`, planted `b` and `c` by
-    default), with the learning state root pointed inside `tmp_path` — what #1234's own
-    conftest does for its suite, done here per scenario. (#1187 O9: the episode lands under the
-    data root's tenant, `<T>/episodes/`; no episodes root is configured.)"""
+    default), with the learning state root inside `tmp_path`, as #1234's conftest does."""
     from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 
     Path(tmp_path).mkdir(parents=True, exist_ok=True)  # a scenario's own subfolder (`tmp_path / "clean"`)
@@ -232,11 +213,8 @@ def contrast_family(tmp_path: Path, monkeypatch, worlds: Any = None, **kw: Any) 
 
 @dataclass
 class RecordingReader:
-    """A counting wrapper over any single-argument read, as an injection seam.
-
-    A demand that needs "how many times was this read" as an OBSERVATION rather than an
-    inspection wraps the read in this. A counter that only counts leaves the
-    argument unpinned, so every call's argument is recorded too.
+    """A counting wrapper over any read, as an injection seam; it records each call's arguments
+    too, since a counter alone leaves the argument unpinned.
     """
 
     inner: Any
@@ -253,15 +231,12 @@ class RecordingReader:
 
 # ---------------------------------------------------------------------------------------
 # The one place this suite drives a REAL primitive over a REAL response: `elastic_adapter`.
-#
-# `_search`'s normalization strips `took`, `_shards` and the per-hit `_id` before the ledger
-# ever sees a payload. The claim is about what the primitive DOES to a raw cluster response, so
-# a test writes a raw cluster response and runs the real adapter over it.
+# `_search` strips `took`, `_shards` and per-hit `_id` before the ledger sees a payload, so the
+# test runs the real adapter over a raw cluster response.
 # ---------------------------------------------------------------------------------------
 
-#: A `docker` on the run's own PATH that answers the curl lane from a JSON file the test wrote,
-#: and records nothing it does not need to. The shebang is the RUNNING interpreter's absolute
-#: path because the child's PATH holds this directory alone.
+#: A `docker` on the run's PATH answering the curl lane from a JSON file the test wrote. The
+#: shebang is the RUNNING interpreter's absolute path: the child's PATH holds this directory alone.
 _ES_DOCKER_SHIM = r'''
 import json
 import os
@@ -278,9 +253,8 @@ else:
     sys.stdout.write("")
 '''
 
-#: A RAW Elasticsearch search response, carrying every incidental field `_search` discards.
-#: `took` moves with cluster load, `_shards` moves with the cluster's own topology, and `_id`
-#: is minted per indexed document — so two reads of one unchanged corpus differ on all three.
+#: A RAW search response carrying the incidental fields `_search` discards (`took`, `_shards`,
+#: `_id`): two reads of one unchanged corpus differ on all three.
 RAW_ES_RESPONSE = {
     "took": 37,
     "timed_out": False,
@@ -299,11 +273,8 @@ RAW_ES_RESPONSE = {
 
 
 def elastic_ctx(tmp_path: Path, *, response: dict | None = None):
-    """A real `VerbContext` whose transport reaches a `docker` shim answering `response`.
-
-    Environment steering through the ctx the production caller already builds — `query_tool`
-    constructs a `VerbContext(defender_dir=…, run_dir=…, env=…)` and the transport forks into
-    exactly that env — so nothing here patches a module attribute.
+    """A real `VerbContext` whose transport reaches a `docker` shim answering `response`, steered
+    through the ctx's own `env` (the transport forks into it): no module attribute is patched.
     """
     verbs = mod("systems.verbs")
     bindir = tmp_path / "bin"
@@ -316,8 +287,7 @@ def elastic_ctx(tmp_path: Path, *, response: dict | None = None):
                        encoding="utf-8")
     defender_dir = tmp_path / "defender"
     defender_dir.mkdir(parents=True, exist_ok=True)
-    # #1107: the elastic config lives in the RUN's tenant folder; the ctx carries the record
-    # resolved from it, never the process env.
+    # The elastic config comes from the RUN's tenant folder (#1107), never the process env.
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as spec1107
     tenants_root = tmp_path / "tenants"
     folder = spec1107.plant(tenants_root, marker="spec1007", configs=spec1107.config_texts(
@@ -337,11 +307,8 @@ def elastic_ctx(tmp_path: Path, *, response: dict | None = None):
 
 
 def loop_paths(tmp_path: Path, *, repo_root: Path | None = None):
-    """A `LoopPaths` rooted in `tmp_path` — the shipped injection seam every drain frame takes.
-
-    `state_dir` is separated from `repo_root` deliberately: the queues are mutable state and
-    the corpora are checked-in trees, and a scenario about one must be able to move it without
-    moving the other.
+    """A `LoopPaths` rooted in `tmp_path`. `state_dir` is kept apart from `repo_root` (queues are
+    mutable state, corpora checked-in trees) so a scenario can move one without the other.
     """
     cfg = mod("learning.core.config")
     root = repo_root if repo_root is not None else tmp_path / "repo"
@@ -356,8 +323,8 @@ def learning_state(paths: Any):
 
 
 def queue_rows(paths: Any, channel: Any) -> list[dict]:
-    """Every row on a state `Channel`'s queue under `paths`' state root, in written order.
-    Missing file reads as no rows, which is the honest answer for a pass that enqueued nothing."""
+    """Every row on a state `Channel`'s queue under `paths`' state root, in written order; a
+    missing file reads as no rows."""
     path = location_path(paths.state_root) / channel.queue
     if not path.is_file():
         return []
@@ -367,11 +334,8 @@ def queue_rows(paths: Any, channel: Any) -> list[dict]:
 
 def questioner_lesson(paths: Any, name: str = "q-lesson", *, body: str = "Ask the corpus.",
                       systems: list[str] | None = None, **frontmatter: Any) -> Path:
-    """One `<name>.md` in the questioner corpus — the shape `_corpus.iter_lessons` globs.
-
-    The selection key (`systems`) lives in the frontmatter because that is what M8's selector
-    reads (#1224 O12): a lesson is shown at call 1 when its systems share a member with the
-    episode's served systems.
+    """One `<name>.md` in the questioner corpus. Its selection key `systems` is frontmatter: a
+    lesson is shown at call 1 when its systems meet the episode's served systems.
     """
 
     corpus = Path(paths.lessons_questioner_dir)

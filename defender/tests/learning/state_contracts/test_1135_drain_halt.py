@@ -1,7 +1,7 @@
 """The corpus drain tick: halt on a refused state entry, containment of everything else. Drives the
 real `drains.author_drain` through `cli._run_stage` over the fixture tenant published for real
-(#1108 P4 flow 4: its learning root, its draft, its forge), the corpus seen-lessons committed in
-the TENANT repo. `_scratch_world` keeps the curator-level case on its scratch repo."""
+(its learning root, its draft, its forge), with the seen lessons committed in the TENANT repo.
+`_scratch_world` keeps the curator-level case on its scratch repo."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -43,13 +43,11 @@ from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published
 
 #: The world row the committed questioner lesson already cites (consumed with no model call).
 SEEN_WORLD_ID = "ep-1/b/0/0"
-#: The defender rows the committed `lessons/` lesson already cites (consumed with no model call,
-#: as a `caught` row was before #1234 retired the family word).
+#: The defender rows the committed `lessons/` lesson already cites (consumed with no model call).
 SEEN_DEFENDER_IDS = ("ep-1/b/0/1", "ep-1/b/0/5", "ep-1/b/0/6", "ep-1/b/0/7", "ep-1/b/0/8",
                      "ep-1/b/0/9", "ep-1/b/0/10")
 
-#: Lock files a tick creates below an existing root, as today (R15: "lock files and holding
-#: folders below an existing root are still created as today"). Empty files; never data.
+#: Lock files a tick creates below an existing root: empty files, never data.
 LOCK_NAMES = {
     ".author-drain.lock", "_author.lock", "_pending/.lock", "_pending/.findings.lock",
     "_pending/.questioner_findings.lock",
@@ -82,8 +80,8 @@ def _scratch_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pat
     return repo, tmp_path / "learning-state", paths
 
 
-#: The tenant repo's seen lessons (#1108 P4: the corpus lives in the tenant's `agent/`): a
-#: questioner lesson citing `SEEN_WORLD_ID` and a `lessons/` lesson citing `SEEN_DEFENDER_IDS`.
+#: The tenant repo's seen lessons (the corpus lives in the tenant's `agent/`): a questioner
+#: lesson citing `SEEN_WORLD_ID` and a `lessons/` lesson citing `SEEN_DEFENDER_IDS`.
 SEEN_FILES = {
     "agent/lessons-questioner/seen.md":
         f"---\nname: seen\nsource_finding_ids:\n- {SEEN_WORLD_ID}\n---\n\nbody\n",
@@ -108,10 +106,10 @@ def world(tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _defender_row(fid: str, judge_outcome: str) -> dict:
-    """A family defender row in the #1234 shape (`_gate_family`). `judge_outcome` names the
-    pre-#1234 role the row plays and is never written (the word is retired, A4): `caught` is a
-    row the committed `lessons/` lesson already cites (`SEEN_DEFENDER_IDS`), consumed unauthored;
-    `survived` is a fresh row, admitted for authoring."""
+    """A family defender row in the `_gate_family` shape. `judge_outcome` names the role the row
+    plays and is never written (the field is retired): `caught` is a row the committed `lessons/`
+    lesson already cites (`SEEN_DEFENDER_IDS`), consumed unauthored; `survived` is a fresh row,
+    admitted for authoring."""
     assert (fid in SEEN_DEFENDER_IDS) is (judge_outcome == "caught"), (
         f"fixture bug: {fid} plays {judge_outcome!r} but the seen-lesson list says otherwise")
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"), subject="defender",
@@ -141,7 +139,7 @@ def _queue(root: Path) -> Path:
 
 
 def _seed(root: Path, findings: list[dict], questioner: list[dict] | None = None) -> None:
-    """Seed both channels' queues by today's names (the fixture's write, not the handle's)."""
+    """Seed both channels' queue files directly (the fixture's write, not the handle's)."""
     S.write_jsonl(_queue(root), findings)
     S.write_jsonl(root / "_pending" / "questioner_findings.jsonl",
                   [_world_row()] if questioner is None else questioner)
@@ -262,13 +260,12 @@ def test_a_refused_stuck_report_raises_instead_of_logging_not_written(
 
 
 class _FirstCommitsSecondFaults:
-    """The `trigger_author=` seam — the one seam through which a curator's MODEL can be faked
-    (no real input commits a lesson without a model). For the lessons curator it runs the REAL
+    """The `trigger_author=` seam, the one seam through which a curator's MODEL can be faked (no
+    real input commits a lesson without a model). For the lessons curator it runs the REAL
     curator over the lane's held trees of the draft (`_drain_support.CuratorTrigger`: the real
     builder, `run_batch`, gate, commit, closing rotation) with only the model faked
     (`_drain719.committing`); for the questioner curator it raises `StageAbort`, a
-    SYSTEMIC_FAULTS member that is not a refusal, at the seam — C32's executed shape (a
-    non-OSError systemic fault raised in trigger_author is contained)."""
+    SYSTEMIC_FAULTS member that is not a refusal, which the tick must contain."""
 
     def __init__(self) -> None:
         self.modules: list[str] = []
@@ -470,7 +467,7 @@ def test_1135_a_deadline_lock_name_is_a_planted_entry_when_run_batch_takes_the_r
     _seed(root, [row])
     queue_bytes = _queue(root).read_bytes()
     target = tmp_path / "outside" / "repo.lock"
-    target.parent.mkdir()  # the link's target is absent; its folder exists (C10's shape)
+    target.parent.mkdir()  # the link's target is absent; its folder exists
     lock = S.plant(root / "_author.lock", "symlink", target=target)
 
     rc, _box = _tick(t, paths)
@@ -591,7 +588,7 @@ print(json.dumps({"results": results, "warm_e1": warm["e1"],
 
 
 #: The second row of the unreadable queue: a rotate that read the queue as empty and replaced
-#: it from nothing would lose it (92 F1's data-loss tail).
+#: it from nothing would lose it.
 _KEPT_ROW_ID = "ep-1/b/0/10"
 
 
@@ -638,8 +635,8 @@ def _verb_tree(base: Path, name: str, row: dict, run_dir: Path) -> Path:
 
 def _assert_an_unreadable_queue_never_reads_as_empty(
         results: dict[str, Any], after: dict[str, Any], row: dict[str, Any]) -> None:
-    """The read-side cells of s_a12 (JF2 A): a queue that cannot be read fails as an ordinary
-    OSError, answers no rows, and a rotate over it keeps the queue's bytes and makes no ledger."""
+    """The read-side cells: a queue that cannot be read fails as an ordinary OSError, answers no
+    rows, and a rotate over it keeps the queue's bytes and makes no ledger."""
     for name in ("read", "rotate_unreadable"):
         got = results[name]
         assert got["raised"] is not None, (
@@ -663,7 +660,7 @@ def _accepted_enqueue_run(base: Path, label: str):
     from defender.box import _scrub as scrub_mod
 
     tenant = set_up_tenant(base / label)
-    run = tenant.runs_repository().create()  # #1279 (A3): the id is minted
+    run = tenant.runs_repository().create()  # the repository mints the id
     run.run_dir.mkdir()
     plant_alert(run.run_dir, {"rule": {"name": "everyday"}})
     scrub_mod.scrub(run.run_dir)
@@ -674,8 +671,8 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
     base = Path(tempfile.mkdtemp(prefix="ls1135-everyday-", dir="/tmp"))
     os.chmod(base, 0o755)
     try:
-        # O1/O2: enqueue derives state from an accepted Run, so the permission fault
-        # belongs under its real tenant.learning, with a separate accepted warm-up run.
+        # Enqueue derives state from an accepted Run, so the permission fault belongs under its
+        # real tenant.learning, with a separate accepted warm-up run.
         tenant, run_dir = _accepted_enqueue_run(base, "e1-data")
         warm_tenant, warm_run_dir = _accepted_enqueue_run(base, "e1-warm-data")
         row = _defender_row("ep-1/b/0/9", "caught")
@@ -713,8 +710,8 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
             claimed = S.LearningState.open(LoopPaths(repo_root=repo, state_dir=Path(cells["move"])))
             after["queued"] = claimed.has_requests()
 
-        # The rotate over the unreadable queue, by today's record names (R14): made readable
-        # again first (this process may not be root), never through the handle under test.
+        # The rotate over the unreadable queue, read by its file names: made readable again
+        # first (this process may not be root), never through the handle under test.
         unreadable = Path(cells["rotate_unreadable"]) / "_pending"
         os.chmod(unreadable / "findings.jsonl", 0o644)
         after["unreadable_queue"] = (unreadable / "findings.jsonl").read_bytes()

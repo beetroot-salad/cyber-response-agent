@@ -1,4 +1,4 @@
-"""#947 — what a refusal may tell the model about a branched episode (§7 NEW-1)."""
+"""#947: what a refusal may tell the model about a branched episode."""
 from __future__ import annotations
 
 import pytest
@@ -9,7 +9,7 @@ TOKEN_A = T.fixture_world_id("a")
 TOKEN_C = T.fixture_world_id("c")
 
 
-# NEW-1 — no model-visible text names a run or world token
+# no model-visible text names a run or world token
 
 
 def _model_text(detail: str) -> str:
@@ -38,7 +38,8 @@ def test_947_an_ordinary_refusal_still_tells_the_model_something_actionable():
     assert "falls outside the configured patterns" in redacted
 
 
-#: Words that only a BRANCHED run could honestly use about itself. A defender reading any of
+#: Words that only a BRANCHED run could honestly use about itself: a defender reading any of
+#: them in a refusal learns it is inside a branched episode.
 _SCHEME_WORDS = ("world", "staged", "staging", "episode", "sibling", "branch", "overlay",
                  "corpus", "view")
 

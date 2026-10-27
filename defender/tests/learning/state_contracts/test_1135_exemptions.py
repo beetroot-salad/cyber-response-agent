@@ -49,8 +49,8 @@ LEAKED = "outside-leak-1135"
 
 
 def _judge_roots(tmp_path: Path, monkeypatch, root: Path) -> Path:
-    """The judge's three roots inside `tmp_path`, the state root spelled through the env var (as
-    the launcher's `_grade` resolves it). Returns the runs base."""
+    """The judge's three retired root knobs, set inside `tmp_path` as decoys: the grade opens the
+    request tenant's own roots and reads none of them. Returns the runs base."""
     runs_base = tmp_path / "defender-runs"
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(runs_base))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
@@ -67,9 +67,8 @@ def _gradable_episode(tmp_path: Path) -> Path:
 
 
 def _launcher_grade(ep: Path) -> BaseException | None:
-    """The launcher's `_grade` over the episode at `ep`, caught (#1105 PR 2: by id, through the
-    request's tenant's repository — `_grade(runs, episode_id=, judge=)` — the episode opened
-    under that tenant's own `<T>/episodes/`, #1187 O9)."""
+    """The launcher's `_grade` over the episode at `ep`, caught: by id, through the request's
+    tenant's repository, the episode opened under that tenant's own `<T>/episodes/`."""
     return S.caught(lambda: branch_cli._grade(J.episode_runs_for(ep), episode_id=ep.name,
                                               judge=_model()))
 
@@ -108,14 +107,14 @@ def _channel(view: dict, name: str) -> dict:
 def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path: Path, monkeypatch,
                                                                       caplog, at):
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
-    # #1105 PR 2 (declared change 8): run end hands the curation request its `Run` — a natural
-    # run of a real tenant (`S.curation_run_dir`) — and the row it files is that run's address.
+    # Run end hands the curation request its `Run`, a natural run of a real tenant
+    # (`S.curation_run_dir`), and the row it files is that run's address.
     planted = S.curation_run_dir("case-1135")
     run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
     scrub_mod.scrub(run_dir)
     paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=run_dir.parent.parent / "learning")
     location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv(ENV, str(location_path(paths.state_root)))  # inert after #1186; safe for the old implementation
+    monkeypatch.setenv(ENV, str(location_path(paths.state_root)))  # a retired knob: nothing reads it
     case_id = case_ref(RunPaths(run_dir).alert.read_bytes())
 
     if at == "queue-folder":
@@ -154,7 +153,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     assert S.tree_snapshot(tmp_path / "outside") == outside_before, \
         "the investigation's own enqueue wrote through the planted link"
 
-    # Positive control: the same request with the plant gone is enqueued at today's name.
+    # Positive control: the same request with the plant gone is enqueued at its usual name.
     os.unlink(planted)
     answered.clear()
     assert S.caught(lambda: answered.append(
@@ -258,8 +257,8 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
         assert isinstance(opened, FatalConfigError), \
             f"LearningState.open over the missing root answered {opened!r}"
 
-    # Positive control: the fault removed (the link unplanted, or the root created by the
-    # operator), a fresh episode's grade runs through and enqueues at today's name (R14).
+    # Positive control: with the fault removed (the link unplanted, or the root created by the
+    # operator), a fresh episode's grade runs through and enqueues at its tenant's queue.
     if fault == "linked-queue":
         os.unlink(planted)
     else:
@@ -348,8 +347,8 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
     assert read_back == S.jsonl_rows(location_path(paths.state_root) / FINDINGS.queue), \
         "enqueued_to does not name the queue the grade appended to"
 
-    # #1105 PR 2 (declared change 4): the page builds from the episode view, opened by id
-    # through the tenant's repository (#1187: under its own `<T>/episodes/`).
+    # The page builds from the episode view, opened by id through the tenant's repository
+    # (under its own `<T>/episodes/`).
     with visualize_episode.open_episode_view(J.episode_runs_for(ep), ep.name) as view:
         shown = visualize_episode.build_page(view)
     assert f"enqueued to {findings}" in shown, \
@@ -368,9 +367,9 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
         tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", "no-such-model-1135")
-    # #1108 P4 (OD12 class ii, OD16): the pitfalls lane runs over a batch's git-free draft
-    # holding the seeded skills tree (`_curator1134.draft_lane`, lane `skills`), the product
-    # checkout holding the adapters; its learning state at the non-default root.
+    # The pitfalls lane runs over a batch's git-free draft holding the seeded skills tree
+    # (`_curator1134.draft_lane`, lane `skills`), with the product checkout holding the
+    # adapters and its learning state at the non-default root.
     seeded = seed_skills_repo(tmp_path / "seed")
     agent = tmp_path / "agent-src"
     shutil.copytree(seeded / "defender" / "skills", agent / "skills")
@@ -405,7 +404,7 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
         default_after = (S.entry_kind(default), S.tree_snapshot(default))
     finally:
         if default_kind == "absent" and S.entry_kind(default) == "dir" and not any(default.iterdir()):
-            default.rmdir()  # what today's import-frozen spawn made in the checkout
+            default.rmdir()  # what an import-frozen spawn made in the checkout
 
     assert len(spawned) == 1, f"the pitfalls stage was spawned {len(spawned)} times (escaped {escaped!r})"
     stage_dir = Path(spawned[0]["learning_run_dir"])

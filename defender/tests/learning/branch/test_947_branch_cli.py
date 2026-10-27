@@ -1,4 +1,4 @@
-"""#947 — the family launcher's refusals that nothing later could recover from."""
+"""#947: the family launcher's refusals that nothing later could recover from."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -24,7 +24,7 @@ def cli_mod():
 
 @pytest.fixture
 def tenant_paths(tmp_path, monkeypatch):
-    """#1078: `episodes_root`'s refused/accepted zones are judged against a TENANT's data root now, not a single configured runs base."""
+    """The tenant whose data root the episode-id refusals are judged against."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     root = tmp_path / "data"
@@ -39,13 +39,10 @@ def _tree(root: Path) -> list[str]:
 
 @pytest.fixture
 def episodes_root(tmp_path, monkeypatch):
-    """The CONFIGURED episodes root, through the env var #947 anchors it on."""
+    """The retired configured episodes root, set as a decoy: nothing may be created there."""
     root = tmp_path / "episodes-root"
     monkeypatch.setenv("DEFENDER_EPISODES_BASE", str(root))
     return root
-
-
-#: #1078 D4/J52: the two cases pinning the pre-#1078 distant-source pre-check (a source run
 
 
 @pytest.mark.parametrize("episode_id", ["../escaped", "/tmp/escaped", "nested/episode"])
@@ -54,8 +51,8 @@ def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
     """Absolute and traversing episode ids never reach the capture writer."""
     from defender.records._run_id import episode_id_fault
 
-    # #1120: an accepted tenant's data root exists before the launcher runs, so "created
-    # nothing under the data root" is compared on its tree rather than on its absence.
+    # An accepted tenant's data root exists before the launcher runs, so "created nothing under
+    # the data root" is compared on its tree rather than on its absence.
     data_root = location_path(tenant_paths.data_root)
     before = _tree(data_root)
     runs = tenant_paths.runs_repository()
@@ -132,8 +129,8 @@ def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
 
 
 def test_p4_a_branch_request_without_a_continuation_prompt_is_complete():
-    """P4: a tenant, a source run and a branch point are the whole request — it parses, and the
-    parsed request carries no prompt field. Today the parser refuses it for the missing flag."""
+    """A tenant, a source run and a branch point are the whole request: it parses, and carries no
+    prompt field."""
     ns = cli_mod().parse_branch_args(["--tenant", fixture_uuid("tenant:acme"), "run-x", "59"])
 
     assert (ns.tenant, ns.source_run_id, ns.branch_message_id) == (fixture_uuid("tenant:acme"), "run-x", 59)
@@ -151,8 +148,8 @@ def test_p4_the_branch_command_line_refuses_a_continuation_prompt(capsys):
 
 
 def test_p4_the_branch_help_offers_no_continuation_prompt(capsys):
-    """P4: the operator's help names no continuation prompt. Positive control: it still names
-    the required tenant, so this is the launcher's help."""
+    """The operator's help names no continuation prompt. Positive control: it still names the
+    required tenant, so this is the launcher's help."""
     with pytest.raises(SystemExit) as exc:
         cli_mod().parse_branch_args(["--help"])
 

@@ -1,4 +1,4 @@
-"""#1017 — the queries row's ONE schema, and the read surface that projects all of it."""
+"""#1017: the queries row's ONE schema, and the read surface that projects all of it."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -70,7 +70,7 @@ def _searchable_row(seq: int, **overrides) -> dict:
 
 def _inherited_state(source: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
     """A branch sibling's run state after seeding inherited `source`'s table for `LEAD` — the
-    one way a run's state holds rows it did not write (#1235 round 2)."""
+    one way a run's state holds rows it did not write."""
     from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
     from defender.investigation.run_state import RunState
 
@@ -107,8 +107,8 @@ def _lead_file(run_dir: Path, goal: str = "a goal", *, lead_id: str = LEAD,
 
 
 def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref():
-    """D2/O1 — `QueryRow`'s field set is `QUERY_ROW_COLUMNS` with the ONE recorded derivation:
-    `payload_path` is read as the containment-checked `raw_ref`. Bound to the."""
+    """`QueryRow`'s field set is `QUERY_ROW_COLUMNS` with ONE derivation: `payload_path` is read
+    as the containment-checked `raw_ref`. The retained `_record` stays out of repr and equality."""
     fields = {f.name for f in dataclasses.fields(QueryRow) if not f.name.startswith("_")}
     expected = (set(QUERY_ROW_COLUMNS) - {"payload_path"}) | {"raw_ref"}
     assert fields == expected, \
@@ -121,9 +121,10 @@ def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref
 
 
 def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
-    """D2/O2 — `QueryRow.record()` returns the parsed JSON record retained on the row: dict equality
-    with the raw line, key for key and value for value, on a row carrying every."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    """`QueryRow.record()` is the parsed line itself, key for key and value for value — rows
+    missing columns and rows the typed view coerces included — and is what seeding puts on the
+    guard's state."""
+    # A run id is a canonical UUID: the folder is fixture_uuid(<label>).
     run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
     full = _row(0, system_key=KEY_MARKER)
@@ -134,7 +135,7 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
     no_class.pop("error_class")
     # NON-CANONICAL BYTES in every column the typed view coerces: a re-projection of the typed
     # fields over the retained dict agrees with the raw line on writer-canonical rows and
-    # differs on this one (adversary H6) — the record must be the line, coercions and all.
+    # differs on this one — the record must be the line, coercions and all.
     odd = _row(3, system=None, verb=7, params="not-a-dict", exit_code="64",
                payload_digest=5, payload_status=None)
     odd["seq"] = "3"
@@ -153,16 +154,17 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
         "a column the run never wrote"
     assert "error_class" not in rows[2].record(), \
         "record() wrote the surface's DERIVED error_class back into the record"
-    # The typed view still coerces and derives — that is O1's job, and it is what makes the
-    # equality above a discrimination rather than a tautology.
+    # The typed view still coerces and derives, which makes the equality above a discrimination
+    # rather than a tautology.
     assert (rows[1].system_key, rows[1].payload_sha256) == ("", "")
     assert rows[2].error_class == AGENT_FIXABLE_ERROR_CLASS
 
 
 def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path):
-    """D2/O2, C16 executed — two exit-64 `∅.above-repeat-guard` rows written WITHOUT an
-    `error_class` key (a table from before the column existed). The guard's domain predicate."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    """Two exit-64 `∅.above-repeat-guard` rows with NO `error_class` key (a table from before the
+    column existed): the live guard does not trip on them, so a replay over `record()` must not
+    either, though a re-projection carrying the derived class would."""
+    # A run id is a canonical UUID: the folder is fixture_uuid(<label>).
     run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
     call = {"system": "", "verb": "query", "params": {"native_query": "FROM logs"}}
@@ -186,8 +188,8 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
     rows = load_queries(run_dir)
     assert [r.error_class for r in rows] == [AGENT_FIXABLE_ERROR_CLASS] * 2, \
         "the surface stopped deriving error_class — the typed view is no longer a reader's view"
-    # The re-projection C16 warns against, spelled out so the test says what it refutes: it
-    # trips, because the derived class puts both rows into the guard's domain.
+    # The re-projection this test refutes, spelled out: it trips, because the derived class puts
+    # both rows into the guard's domain.
     reprojected = [{**r.record(), "error_class": r.error_class} for r in rows]
     assert all(in_rejection_domain(r) for r in reprojected)
     assert rejection_trip(reprojected, LEAD, system_key="", **call) is not None, \
@@ -201,8 +203,9 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
 
 
 def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
-    """S2, and #1032 O1 — every model-facing render of the rows ENUMERATES its fields: `actor_view`
-    / `render_actor_view_yaml`, `render_joined_yaml`, and (since #1032 M1) the."""
+    """Every model-facing render of the rows ENUMERATES its fields (`actor_view`,
+    `render_actor_view_yaml`, `render_joined_yaml`, the questioner's joined-leads section), so
+    neither `system_key` nor `payload_sha256` reaches a model."""
     from defender.learning._prompt import titled_section
     from defender.learning.branch.questioner import UNTRUSTED_TAG
     from defender.learning.branch.cli import _joined_leads
@@ -273,8 +276,8 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
 
 
 def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
-    """D3 — the judge's per-lead goal used to be read behind its own `artifact_file` gate; with the
-    read moved to the surface (`load_leads`), the surface keeps that posture: a."""
+    """`load_leads`, which the judge's per-lead goal is read through, refuses a symlink or a hard
+    link at a lead file's name; a regular file reads."""
     elsewhere = tmp_path / "elsewhere" / "planted.lead.json"
     elsewhere.parent.mkdir()
     elsewhere.write_text(
@@ -300,8 +303,8 @@ def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
 
 
 def test_the_surface_tolerates_a_lead_file_nested_past_the_parsers_limit(tmp_path):
-    """D3 — the judge read the lead file through `render.json_mapping`, whose tolerance names
-    `RecursionError` beside the decode errors; the surface's `load_leads` keeps that."""
+    """`load_leads` skips a lead file nested past the parser's limit (`RecursionError`, not just
+    a decode error) and keeps the healthy one."""
     gather = RunPaths(tmp_path).gather_raw
     gather.mkdir(parents=True)
     (gather / "l-999.lead.json").write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
@@ -313,8 +316,8 @@ def test_the_surface_tolerates_a_lead_file_nested_past_the_parsers_limit(tmp_pat
 
 
 def test_the_surface_refuses_a_link_at_the_tables_name_and_reads_an_absent_table_as_none(tmp_path):
-    """D3 — the table's `lstat` gate is the surface's own, not the judge's private check ahead of it
-    (which threw the lead files' goals away with the rows): a SYMLINK at."""
+    """A SYMLINK at the table's name is refused and counted as one unreadable record without
+    losing the lead files' goals; an absent table reads as no rows."""
     elsewhere = tmp_path / "elsewhere"
     _table(elsewhere, [_row(0, params={"native_query": "LINKED"})])
 

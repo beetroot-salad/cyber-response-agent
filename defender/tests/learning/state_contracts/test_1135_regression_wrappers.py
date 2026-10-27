@@ -29,9 +29,9 @@ def _finding_ids(rows: list[dict]) -> list[str]:
 @pytest.mark.e2e
 def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, data_root: Path,
                                                                monkeypatch):
-    """The spine over the tenant path (#1108 P4 flow 4): the graded rows reach the curator on
-    the handle the drain opens over the tenant's learning root, the lesson lands as one commit
-    on a `lessons/` branch of the tenant repo, and after its merge a second tick retires them."""
+    """The spine over the tenant path: the graded rows reach the curator on the handle the drain
+    opens over the tenant's learning root, the lesson lands as one commit on a `lessons/` branch
+    of the tenant repo, and after its merge a second tick retires them."""
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
         paths = drain_paths(t, product_repo(tmp_path))
@@ -52,7 +52,7 @@ def _spine(t, tmp_path: Path, paths, monkeypatch) -> None:
     (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     state = S.LearningState.open(paths)
     graded = S.caught(lambda: J.grade_at(
-        ep, judge=J.FakeJudge(  # the family-scope call files family findings only (#1234 A17)
+        ep, judge=J.FakeJudge(  # the family-scope call files family findings only
             default=J.as_reply_text(J.reply_doc()),
             family_default=J.as_reply_text(J.family_reply())),
         draws=1, state=state))
@@ -60,7 +60,7 @@ def _spine(t, tmp_path: Path, paths, monkeypatch) -> None:
     record = J.judge_record(ep)
 
     # hop 1: the judge's record says how many rows it enqueued, and the queue carries them
-    # (#1234: the episode word is retired, A17 — every graded world is measured and committed)
+    # (every graded world is measured and queued)
     assert all(row.get("measured") and row.get("state") == "queued"
                for row in record.get("worlds", [])), f"the episode graded {record.get('worlds')!r}"
     queued = _finding_ids(D.pending(paths, channel))
@@ -117,7 +117,7 @@ def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_pa
     paths = S.built_paths(tmp_path, repo_root=D.make_repo(tmp_path))
     channel = D.channel_of("findings")
     rows = [D.row_for("findings", "a/0")]
-    # The append lock by today's record name (R14); the handle exposes no append-lock role.
+    # The append lock by its file name: the handle exposes no append-lock role.
     append_lock = (location_path(paths.state_root) / channel.queue).parent / D.APPEND_LOCK_NAMES_TODAY["findings"]
     caplog.set_level(logging.INFO)
     observed: dict[int, float] = {}

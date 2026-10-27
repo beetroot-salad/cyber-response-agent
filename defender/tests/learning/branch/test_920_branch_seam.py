@@ -1,4 +1,4 @@
-"""#920 PR 1 — the turn-N branch seam: what may be branched from, and where the fork lands."""
+"""#920: the turn-N branch seam — how a fork is seeded, and the store a sibling forks into."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -33,13 +33,12 @@ from defender.tests.support.storage._session_store_705 import (  # noqa: E402
 
 
 def branch_mod():
-    """`defender.investigation.branch` — PR 1's new module, imported per test."""
+    """`defender.investigation.branch`, imported per test."""
     return importlib.import_module("defender.investigation.branch")
 
 
 def _sibling_state(sibling_dir: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
-    """A fresh run state for the sibling at `sibling_dir`: what the driver hands seeding as
-    its third argument (#1235 round 2, where it was the sibling's run dir)."""
+    """A fresh run state for the sibling at `sibling_dir`, as the driver hands seeding."""
     from defender.investigation.run_state import RunState
 
     return RunState(sibling_dir, sibling_dir.name)
@@ -48,8 +47,6 @@ def _sibling_state(sibling_dir: Path):  # noqa: ANN202 — a `RunState` (#1235: 
 # the caller contract: fork's seeding and send-role hydration are one number
 
 def test_a_fresh_framework_message_list_underflows_against_a_fork(tmp_path):
-    # provenance: issue O1 ("observed failing by: IngestTailUnderflow out of selection.ingest");
-    # claim C4 (executed) measured this exact message on a 3-message prefix.
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -67,8 +64,6 @@ def test_a_fresh_framework_message_list_underflows_against_a_fork(tmp_path):
 
 
 def test_the_hydrated_prefix_plus_one_turn_appends_exactly_one_row(tmp_path):
-    # provenance: issue O1 / claim C4 — "with the prefix: accepted, path rows [1,2,3,4],
-    # exactly one new row". M1 ("hydrates the prefix and passes it as message_history").
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -135,7 +130,7 @@ def test_a_fork_at_a_call_bearing_response_hands_that_response_to_the_framework(
 
 def _source_run(tmp_path, *, case_id: str = "case-source"):
     """A finished run's store and run dir, wired the way `run_investigation` wires them: the
-    store under the runs base's own `sessions/`, and a case pointer in the run dir naming it.
+    store under the runs base's own `sessions/`, and the run's case pointer naming it.
 
     Returns `(store, run_dir, session_id, path_ids)`."""
     ss = store_mod()
@@ -152,8 +147,7 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
 
 
 def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
-    # provenance: design M1 ("the store the factory hands back is the SOURCE run's, and the
-    # prefix rows live in it"); the seam itself is R12's `run_investigation(store_factory=…)`.
+    # The seam is `run_investigation(store_factory=…)`.
     ss = store_mod()
     branch = branch_mod()
     store, run_dir, session_id, path_ids = _source_run(tmp_path)
@@ -175,7 +169,7 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
 
 
 def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
-    # provenance: driver.py's `StoreFactory = Callable[[str, Path], Any]`; design M1 reuses it.
+    # The driver's `StoreFactory = Callable[[str, Path], Any]`.
     branch = branch_mod()
     store, run_dir, _session_id, path_ids = _source_run(tmp_path)
     factory = branch.store_factory_for(spec_at(store, run_dir, path_ids[-1]), source_run=fixture_run(run_dir))
@@ -190,6 +184,3 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
     assert Path(first.path) == Path(second.path), (
         "the factory's answer moved with its arguments; a sibling's own case id and run dir "
         "must not choose which database its prefix lives in")
-
-
-# the two named seams

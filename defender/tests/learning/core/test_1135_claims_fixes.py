@@ -1,4 +1,4 @@
-"""#1135 claims-adversary findings, each pinned by a test that fails without its fix."""
+"""#1135 queue-state findings, each pinned by a test that fails without its fix."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def test_releasing_a_claim_or_a_delivery_survives_an_ordinary_unlink_failure(tmp
     state = LearningState.open(paths)
     from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir
 
-    # The row is the run's address (#1105 PR 2 declared change 8), where it named its folder.
+    # The row is the run's address.
     state.enqueue_curation("case-1", curation_row("case-1", curation_run_dir("r")))
     [claim] = list(state.claim("case_id"))
 

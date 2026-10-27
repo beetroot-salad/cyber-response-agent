@@ -28,11 +28,9 @@ STATE_MODULE_FILE = DEFENDER / "learning" / "core" / "state.py"
 
 
 class _Missing:
-    """Stands in for a name of the not-yet-written handle module.
-
-    NOT a skip and NOT a soften: every use raises `ModuleNotFoundError`, so each test fails on
-    its own at the point it first needs the handle. The indirection exists only so a missing
-    target does not abort the collection of this whole directory."""
+    """Stands in for a name the handle module does not export. NOT a skip: every use raises
+    `ModuleNotFoundError`, so each test fails on its own where it first needs the name, rather
+    than the whole directory failing to collect."""
 
     def __init__(self, name: str, err: BaseException) -> None:
         self._name, self._err = name, err
@@ -50,8 +48,8 @@ class _Missing:
         return self._raise()
 
 
-# NOT YET WRITTEN at d9128afa — the module this suite is the contract for. One `try` per name,
-# so an implementation that exists but spells one name differently fails only where it is used.
+# One `try` per name, so an implementation that spells one name differently fails only where
+# that name is used.
 try:
     from defender.learning.core.state import LearningState  # type: ignore[import-not-found]
 except ImportError as _absent:  # pragma: no cover — the pre-implementation state
@@ -70,7 +68,7 @@ except ImportError as _absent:  # pragma: no cover
     Claimed = _Missing("Claimed", _absent)  # type: ignore[assignment,misc]
 
 
-#: Every spelling this suite coins (see the module docstring). Renamed here, and only here.
+#: Every spelling this suite coins on the handle's module. Renamed here, and only here.
 COINED = (
     "FINDINGS", "QUESTIONER_FINDINGS", "PITFALLS",
     "REPO_LOCK", "AUTHOR_DRAIN_LOCK", "LEAD_AUTHOR_DRAIN_LOCK", "LEAD_QUEUE_LOCK",
@@ -94,10 +92,8 @@ def coined(name: str) -> Any:
 
 
 def core_fn(name: str) -> Callable[..., Any]:
-    """`move_at` / `open_lock_at` — D2's two module functions beside `Held` in `defender._io`.
-
-    Reached by name so their absence at base is this test's own assertion, not an import error
-    hiding the file."""
+    """`move_at` / `open_lock_at`, beside `Held` in `defender._io`, reached by name so a missing
+    one fails this test's own assertion rather than the file's import."""
     from defender import _io
 
     fn = getattr(_io, name, None)
@@ -111,8 +107,8 @@ def core_fn(name: str) -> Callable[..., Any]:
 
 
 def built_paths(tmp_path: Path, *, repo_root: Path | None = None) -> LoopPaths:
-    """`LoopPaths` over a CREATED state root at `<tmp>/learning-state` (R15: the root must
-    exist; the operator, here the fixture, creates it). Nothing below the root is made."""
+    """`LoopPaths` over a CREATED state root at `<tmp>/learning-state` (the root must exist;
+    the operator, here the fixture, creates it). Nothing below the root is made."""
     root = tmp_path / "learning-state"
     root.mkdir(parents=True, exist_ok=True)
     return LoopPaths(repo_root=repo_root or (tmp_path / "repo"), state_dir=root)
@@ -131,8 +127,7 @@ def outside(tmp_path: Path, name: str = "target.jsonl", text: str = '{"outside":
 # Plants: real non-plain entries made with the real primitive
 # ---------------------------------------------------------------------------------------------
 
-#: The four entry shapes revision 3.1 D names for a record name, and the folder shapes of
-#: R16 / 3.1 D. Each is made on disk by `plant`.
+#: The non-plain entry shapes a record name can be planted as; `plant` makes each on disk.
 SHAPES = ("symlink", "fifo", "folder", "hardlink")
 
 
@@ -235,7 +230,7 @@ def caught(fn: Callable[[], Any]) -> BaseException | None:
 
 
 def refusal_class() -> type[BaseException] | None:
-    """`StateRefused` when it is a real exception class (it is not at base or under a stub)."""
+    """`StateRefused` when it is a real exception class (not a `_Missing` stub)."""
     return StateRefused if isinstance(StateRefused, type) and issubclass(
         StateRefused, BaseException) else None
 
@@ -267,15 +262,15 @@ def write_jsonl(p: Path, rows: list[dict]) -> None:
 
 def request_body(case_id: str, run_dir: Path, **extra: Any) -> dict:
     """The curation request record body: `{case_id, tenant_id, run_id}`, the address of the
-    natural run at `run_dir` (#1105 PR 2 declared change 8; the row named its `run_dir`
-    before), read off where it lives (`_state1135.curation_row`; plant the run with
-    `_state1135.curation_run_dir`)."""
+    natural run at `run_dir`, read off where it lives (`_state1135.curation_row`; plant the run
+    with `_state1135.curation_run_dir`)."""
     return {**curation_row(case_id, run_dir), **extra}
 
 
 def seed_request(paths: LoopPaths, case_id: str, run_dir: Path, *, inflight: bool = False,
                  **extra: Any) -> Path:
-    """A plain request record at today's name, written by the fixture."""
+    """A plain request record at `author-queue/[inflight/]<case_id>.json`, written by the
+    fixture."""
     run_dir.mkdir(parents=True, exist_ok=True)
     folder = location_path(paths.state_root) / "author-queue" / ("inflight" if inflight else "")
     folder.mkdir(parents=True, exist_ok=True)
@@ -293,7 +288,7 @@ def seed_request(paths: LoopPaths, case_id: str, run_dir: Path, *, inflight: boo
 def held_flock(path: Path) -> Iterator[None]:
     """Hold an exclusive `flock` on `path` through a separate open of the file — another
     holder, as a second process or an appender would be. Two opens of one name exclude each
-    other even in one process (C7). The file is made if absent (`O_CREAT`, as `a+` does)."""
+    other even in one process. The file is made if absent (`O_CREAT`, as `a+` does)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:

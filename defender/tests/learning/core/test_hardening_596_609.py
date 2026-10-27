@@ -27,8 +27,8 @@ def _load_tl():
 
 @pytest.fixture(autouse=True)
 def _data_root(tmp_path, monkeypatch):
-    """The tracer walks a tenant's natural runs (#1105 PR 2, J8: `--tenant` is required and
-    `--runs-dir` is gone), so every scenario's runs live under a data root."""
+    """The tracer walks a tenant's natural runs (`--tenant` is required), so every scenario's
+    runs live under a data root."""
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
@@ -126,8 +126,8 @@ def test_d_b1_or_none_tolerates_flood_and_recovers():
 
 
 def test_d_b5_iter_lessons_warn_skips_flood_lesson(tmp_path, capsys):
-    """d: b5 — a flooded lesson is one warn-skip (with its ``on_skip`` marker), not the
-    end of the corpus walk; the healthy sibling is still yielded."""
+    """A flooded lesson is one warn-skip (with its ``on_skip`` marker), not the end of the
+    corpus walk; the healthy sibling is still yielded."""
     lessons = tmp_path / "lessons"
     lessons.mkdir()
     (lessons / "flood.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
@@ -198,8 +198,8 @@ def test_d_a1_all_marks_unparseable_created_at_row(tmp_path, capsys):
 
 
 def test_d_a2_all_marks_absent_created_at_distinctly(tmp_path, capsys):
-    """d: a2 — an ABSENT created_at (never stamped) is a different fix for the curator
-    than a garbage one; the marker says "no created_at" instead of echoing a value."""
+    """An ABSENT created_at (never stamped) is a different fix for the curator than a garbage
+    one; the marker says "no created_at" instead of echoing a value."""
     row, _ = _all_row(tmp_path, "name: L\ndescription: real desc", capsys)
     cols = row.split("\t")
     assert len(cols) == 4
@@ -255,8 +255,8 @@ def test_d_a9_all_echo_survives_every_line_breaker(tmp_path, capsys):
 
 
 def test_d_a10_echo_is_clamped_to_80_chars(tmp_path, capsys):
-    """d: a10 — a huge value cannot bloat the row: the echo shows the first 80 chars of
-    the flattened value and an ``…`` continuation, never the full payload."""
+    """A huge value cannot bloat the row: the echo shows the first 80 chars of the flattened
+    value and an ``…`` continuation, never the full payload."""
     row, _ = _all_row(tmp_path, f'name: L\ndescription: d\ncreated_at: "{"x" * 500}"', capsys)
     desc_col = row.split("\t")[1]
     assert "x" * 80 in desc_col

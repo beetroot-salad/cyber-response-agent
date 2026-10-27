@@ -24,11 +24,7 @@ def _noop_stop_box(_box, **_kw):
 
 
 class FakeSubagents:
-    """In-memory Subagents double — canned per-step outputs, records call counts.
-
-    Replaces the monkeypatch wall over invoke_actor/oracle/judge; the SDK migration
-    will swap loop's real adapter the same way this swaps a fake.
-    """
+    """In-memory Subagents double: canned per-step outputs, recorded call counts."""
 
     def __init__(self, *, story="story body\n", story_benign="story body\n",
                  oracle="projections: []\n", judge="", judge_benign=""):

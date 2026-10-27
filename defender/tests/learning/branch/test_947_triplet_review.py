@@ -1,4 +1,4 @@
-"""#947 — the blind comparator (M5, O8), and the elastic adapter's read allowlist."""
+"""#947: the blind comparator, and the elastic adapter's read allowlist."""
 from __future__ import annotations
 
 import pytest
@@ -17,7 +17,7 @@ def test_947_count_endpoint_is_absent_from_the_elastic_adapter_allowlist(tmp_pat
                      ("/_cluster/health", "GET"), ("/api/status", "GET")}
 
 
-# the comparator (M5, O8)
+# the comparator
 
 
 def test_947_compare_admits_only_two_payloads_and_an_axis():
