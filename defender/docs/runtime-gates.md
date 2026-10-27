@@ -35,7 +35,7 @@ hooks). The gates:
   never `grep -n s X` — and there is no `ls`/`cd` on any lane, which leaves the whole
   bash surface with no recursive-descent primitive and no path-opening program but `cat`.
   Each agent hangs its own grant builder on its own `AgentDefinition.bash_shapes`
-  (`compile_policy` composes what the defs bring; `runtime/` enumerates no agents and
+  (`compile_policy` composes what the defs bring; `investigation/` enumerates no agents and
   imports no `learning/` private — the registry lives at `defender/agents.py`). Two
   grants are `pins_path` exemptions, where the operand IS the program and the pattern is
   the containment: the actor's pinned `python3 <script>` and the lead author's / curator's

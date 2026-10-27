@@ -31,7 +31,8 @@ Measurement harnesses, golden cases, and judge-alignment research data live in r
 Labelled playground alert inputs live in `evaluations/fixtures/held_out/`; Kibana-shaped test
 alerts live in `defender/tests/fixtures/kibana_alerts/`. Production accepts an explicit alert
 path and does not discover samples from the source tree.
-`runtime/` executes investigations and enforces permissions; `records/` owns shared
+`investigation/` executes investigations and enforces permissions; `systems/` decides which
+systems a run may call and whether they are up; `records/` owns shared
 run identities and persistence for runtime, learning, and presentation, and defines
 investigation inputs, artifact schemas, provenance, and report values; `kit/` holds what
 crosses the adapter boundary (faults, the verb decorator, the call context adapters see); `episodes/` owns

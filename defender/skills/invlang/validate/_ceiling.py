@@ -227,7 +227,7 @@ def _cap_is_identifier_shaped(cap: str) -> bool:
 
     `cap` is the one receipt field checked by absence (`not _capability_exists`), which any
     non-capability string satisfies, `</report>` included. `ref` and `state` are checked by exact
-    membership, which already refuses non-members. Uses `systems.verbs`' system-name alphabet for
+    membership, which already refuses non-members. Uses `kit.verbs`' system-name alphabet for
     both halves, since verb names share it."""
     from defender.kit.verbs import SYSTEM_PATTERN, is_system_name
 
