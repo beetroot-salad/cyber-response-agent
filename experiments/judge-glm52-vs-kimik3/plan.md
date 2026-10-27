@@ -66,7 +66,7 @@ repo's `FIREWORKS_API_KEY` — but is absent from the alias map and the pricing 
 need a one-line addition before the run:
 
 ```diff
- # defender/runtime/providers/__init__.py
+ # defender/providers/__init__.py
          "kimi-k2.6": "accounts/fireworks/models/kimi-k2p6",
          "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
 +        "kimi-k3":   "accounts/fireworks/models/kimi-k3",

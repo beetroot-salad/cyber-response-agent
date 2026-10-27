@@ -27,10 +27,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from defender._artifact_schema import validate_investigation  # noqa: E402
 from defender._frontmatter import strip_frontmatter  # noqa: E402
-from defender.runtime import observe  # noqa: E402
-from defender.runtime import orient as orient_mod  # noqa: E402
-from defender.runtime.clerk import ClerkCaller  # noqa: E402
-from defender.runtime.driver import build_agent_core  # noqa: E402
+from defender.investigation import observe  # noqa: E402
+from defender.investigation import orient as orient_mod  # noqa: E402
+from defender.investigation.clerk import ClerkCaller  # noqa: E402
+from defender.investigation.driver import build_agent_core  # noqa: E402
 
 FENCE_RE = re.compile(r"```invlang\s*\n.*?```\n?", re.DOTALL)
 FENCE_CAPTURE_RE = re.compile(r"```invlang\s*\n(.*?)```", re.DOTALL)

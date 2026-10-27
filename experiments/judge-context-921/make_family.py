@@ -15,9 +15,9 @@ from defender.learning.branch import cli as launcher
 from defender.learning.branch import questioner as qmod
 from defender.learning.branch.seams import model_seam
 from defender.learning.lead_repository import joined, questioner_leads
-from defender.runtime import session_store as ss
-from defender.runtime.branch import _frontier
-from defender.runtime.branch._family import check_identities, parse_family, write_family
+from defender.records import session_store as ss
+from defender.investigation.branch import _frontier
+from defender.episodes._family import check_identities, parse_family, write_family
 
 import argparse
 _ap = argparse.ArgumentParser()

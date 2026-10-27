@@ -72,7 +72,7 @@ diff between them is quoted in `variants/README.md`.
 
 The whole-run loop is the wrong instrument: the variable fires in ~10% of dispatches, amid live
 playground drift. Instead, a **single gather dispatch** per trial, built with the runtime's own
-`build_gather_agent` (`runtime/driver/_build.py`):
+`build_gather_agent` (`investigation/driver/_build.py`):
 
 - Model: `glm-5.3-flash` at gather's shipped effort (the provider clamps it to `low`).
 - Prompt and skill texts: whatever `build_gather_agent` assembles, with the arm's `defender-sql.md`

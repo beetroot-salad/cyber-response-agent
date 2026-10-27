@@ -151,14 +151,14 @@ claims:
   - id: C11
     kind: referential
     claim: "A grant naming a system or verb with no adapter is refused at run start; case-history is never granted."
-    probe: "runtime/verbs.py ModuleVerbRegistry.__init__ (GrantError); reviewer read"
+    probe: "systems/verbs.py ModuleVerbRegistry.__init__ (GrantError); reviewer read"
     probe_kind: read
     observed: "as claimed"
     verdict: holds
   - id: C12
     kind: referential
     claim: "require_gather_query refuses a run whose grants give gather no query verb."
-    probe: "runtime/verb_dispositions.py:152-163"
+    probe: "systems/verb_dispositions.py:152-163"
     probe_kind: read
     observed: "as claimed"
     verdict: holds

@@ -6,7 +6,7 @@
 # copied from here is refused at run start until an operator grants gather at least one verb:
 # an empty gather grant is a run that could query nothing.
 #
-# Read defender/runtime/verb_dispositions.py and the playground tenant's table before granting.
+# Read defender/systems/verb_dispositions.py and the playground tenant's table before granting.
 
 dispositions:
 

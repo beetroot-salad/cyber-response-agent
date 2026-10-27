@@ -66,7 +66,7 @@ the single most retrieval-worthy open slot there is"). It feeds lesson retrieval
 never been shown to MAIN. **Reuse it; do not write a second walk.**
 
 ```
-defender/runtime/driver/_prompts.py   render + inject at PLAN
+defender/investigation/driver/_prompts.py   render + inject at PLAN
 defender/skills/invlang/frontier.py   reuse the node axis; add the edge rendering
 ```
 
@@ -213,8 +213,8 @@ contract.
 Build shape for B/C (not yet written):
 ```
 defender/agents.py                +AUDITOR_DEF in build_registry(...)
-defender/runtime/review_roles.py  +AUDITOR_DEF
-defender/runtime/driver/          one call after block commit
+defender/investigation/review_roles.py  +AUDITOR_DEF
+defender/investigation/driver/          one call after block commit
 defender/skills/auditor/SKILL.md  the role prompt
 ```
 
