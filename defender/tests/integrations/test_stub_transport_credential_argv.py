@@ -12,7 +12,7 @@ import threading
 
 import pytest
 
-from defender.runtime.verbs import VerbContext
+from defender.systems.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.tests.support.tenancy import _tenants1106
 
