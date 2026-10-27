@@ -21,7 +21,7 @@ from defender.execution.box_codec import BoxFault
 
 @pytest.fixture(autouse=True)
 def _input_dir_not_under_test(monkeypatch):
-    """These tests drive the argv builders over run dirs that do not exist (the mount translation is the..."""
+    """The run dirs here do not exist (mount translation is the subject), so the input-directory check is stubbed out."""
     from defender.box import _lifecycle
 
     monkeypatch.setattr(  # lint-monkeypatch: ok — the input-directory check has its own tests
@@ -35,9 +35,12 @@ MOUNTS: tuple[tuple[Path, Path], ...] = (
     (Path("/root/.claude"), Path("/home/dev/.claude")),
 )
 
-#: The real tree, for the two env-lever helpers below that cannot pass a `spec=`.
+#: The real tree, for the env-lever tests below: they cannot pin a `spec=`, so the rootfs
+#: resolves from the mounted tree (#1092).
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+#: A stock image for the fake trees, which lack the image inputs. Refusal sites keep `BoxSpec()`:
+#: C46 refuses before the image resolver runs.
 PINNED = BoxSpec(rootfs="python:3.11-slim")
 
 
@@ -53,26 +56,26 @@ def test_the_mount_point_itself_translates():
 
 
 def test_a_pass_through_mount_translates_to_itself():
-    """Identity is a legitimate MAPPING here, not a missing one — the socket is bind-mounted at the same path on..."""
+    """Identity is a real mapping here (the socket is bind-mounted at the same path), so it counts as covered."""
     p = Path("/var/run/docker.sock")
     assert _covered(p, MOUNTS)
     assert _daemon_source(p, MOUNTS) == p
 
 
 def test_no_mounts_is_the_identity_so_a_native_daemon_is_unchanged():
-    """The native case must be byte-identical to pre-fix behavior: no mount table discovered (not in a container,..."""
+    """No mount table (off-container, or the daemon could not be asked) means no rewriting at all."""
     for p in ("/tmp/defender-runs/r1", "/workspace/defender", "/etc"):
         assert _daemon_source(Path(p), ()) == Path(p)
 
 
 def test_an_uncovered_path_is_left_alone_by_the_pure_helper():
-    """`_daemon_source` stays total; refusing an uncovered path is the CALLER's job, so the two argv builders can..."""
+    """`_daemon_source` stays total; refusing is the callers' job, so both argv builders raise one message."""
     assert _daemon_source(Path("/tmp/defender-runs/r1"), MOUNTS) == Path("/tmp/defender-runs/r1")
     assert not _covered(Path("/tmp/defender-runs/r1"), MOUNTS)
 
 
 def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
-    """The load-bearing assertion. source= must be the DAEMON's path; target=, --workdir and the env must stay..."""
+    """`source=` is the daemon's path; `target=` and `--workdir` stay the box's fixed paths."""
     argv = _create_argv("defender-run-r1", Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"), PINNED, MOUNTS, lane=_run_lane_mounts(Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"), None)).argv
     joined = " ".join(argv)
     assert (
@@ -93,13 +96,13 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
 def test_create_argv_is_untouched_when_there_is_no_mount_table():
     argv = _create_argv("defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), PINNED, (), lane=_run_lane_mounts(Path("/tmp/defender-runs/r1"), Path("/srv/defender"), None)).argv
     joined = " ".join(argv)
-    # #1255 P1: no table, no translation of the SOURCE; the target is the model view's path.
+    # No table, no translation of the source; the target is the model view's fixed path.
     assert "type=bind,source=/tmp/defender-runs/r1,target=/runs/current" in joined
     assert "type=bind,source=/srv/defender,target=/defender,readonly" in joined
 
 
 def test_create_argv_refuses_a_run_dir_off_every_shared_mount():
-    """The pre-fix failure surfaced as docker's "bind source path does not exist", which reads like a bug rather..."""
+    """A C46 refusal naming the shared mounts, not docker's misleading "bind source path does not exist"."""
     with pytest.raises(BoxFault) as e:
         _create_argv("defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/workspace/defender"), BoxSpec(), MOUNTS, lane=_run_lane_mounts(Path("/tmp/defender-runs/r1"), Path("/workspace/defender"), None))
     assert "C46" in str(e.value)
@@ -107,7 +110,6 @@ def test_create_argv_refuses_a_run_dir_off_every_shared_mount():
 
 
 def test_render_argv_translates_request_mounts_too():
-    """The BoxRequest path (the learning loop's run-cycle + drain boxes) had the identical defect; fixing only..."""
     from defender.box import BoxRequest, Mount
 
     request = BoxRequest(
@@ -145,7 +147,7 @@ def test_render_argv_refuses_an_uncovered_request_mount():
 
 
 def test_a_traversal_path_cannot_smuggle_a_source_off_the_shared_mount():
-    """`PurePath` does not collapse `..`, so `/workspace/../etc` lists `/workspace` among its parents...."""
+    """`PurePath` keeps `..`, so `/workspace/../etc` has `/workspace` as a parent and, un-normalized, looks covered."""
     escape = Path("/workspace/../etc/shadow")
     assert not _covered(escape, MOUNTS)
     assert _daemon_source(escape, MOUNTS) == escape
@@ -158,14 +160,14 @@ def test_a_normalized_traversal_that_stays_inside_still_translates():
 
 
 def test_create_argv_refuses_a_traversal_run_dir():
-    """The traversal has to be refused by the ARGV BUILDER, not merely reported uncovered by the pure helper: the..."""
+    """The builder emits `source=`, so it must refuse the traversal itself, not just see it reported uncovered."""
     with pytest.raises(BoxFault) as e:
         _create_argv("defender-run-r1", Path("/workspace/../etc/runs/r1"), Path("/workspace/defender"), BoxSpec(), MOUNTS, lane=_run_lane_mounts(Path("/workspace/../etc/runs/r1"), Path("/workspace/defender"), None))
     assert "C46" in str(e.value)
 
 
 def test_render_argv_refuses_a_traversal_mount_source():
-    """Same for the request builder — `_render_argv` checks each mount source separately, so fixing only..."""
+    """`_render_argv` checks each mount source on its own, so it needs the same refusal as `_create_argv`."""
     from defender.box import BoxRequest, Mount
 
     request = BoxRequest(
@@ -179,7 +181,7 @@ def test_render_argv_refuses_a_traversal_mount_source():
 
 
 def test_a_nested_mount_wins_over_the_parent_that_also_contains_the_path():
-    """`_own_container_mounts` sorts longest-destination-first precisely so this resolves to the INNER mount...."""
+    """The outer mount would give a path that exists on the daemon: a wrong bind, not a failed one."""
     nested = (
         (Path("/workspace/vendor"), Path("/mnt/vendor")),
         (Path("/workspace"), Path("/home/dev/projects/repo")),
@@ -209,20 +211,15 @@ _TABLE = "/workspace\t/home/dev/repo\n/workspace/x\t/mnt/x\n/tmp/s.sock\t\n\n"
 
 
 def test_the_mount_table_parses_and_sorts_longest_destination_first():
+    """The sourceless (tmpfs) row is dropped: with no host path to bind, it must not cover anything."""
     assert box_mod._own_container_mounts(_InspectDocker("abc", _TABLE), ["abc"]) == (
         (Path("/workspace/x"), Path("/mnt/x")),
         (Path("/workspace"), Path("/home/dev/repo")),
     )
 
 
-def test_a_sourceless_mount_row_is_skipped():
-    """tmpfs mounts appear in `.Mounts` with an EMPTY source — there is no host path to bind, so a row like that..."""
-    table = box_mod._own_container_mounts(_InspectDocker("abc", _TABLE), ["abc"])
-    assert Path("/tmp/s.sock") not in [d for d, _ in table]
-
-
 def test_a_renamed_host_falls_back_to_the_id_from_proc():
-    """`--hostname`, compose, and Kubernetes all override /etc/hostname. Without the /proc/self/mountinfo..."""
+    """`--hostname`, compose and Kubernetes override /etc/hostname; without the mountinfo id the table is empty."""
     cid = "a" * 64
     rec = _InspectDocker(cid, _TABLE)
     assert box_mod._own_container_mounts(rec, ["my-service", cid])
@@ -244,7 +241,7 @@ def test_the_proc_id_is_recovered_when_the_hostname_is_a_service_name(tmp_path):
 
 
 def test_an_undecodable_hostname_is_skipped_rather_than_raising(tmp_path):
-    """#589: a UnicodeDecodeError is a ValueError, NOT an OSError. Guarding the read with `except OSError` would..."""
+    """A `UnicodeDecodeError` is a `ValueError`, not an `OSError`, so it would escape `start_box` (#589)."""
     (tmp_path / "hostname").write_bytes(b"\xff\xfe not utf-8")
     (tmp_path / "mountinfo").write_text("no container id here", encoding="utf-8")
     assert box_mod._own_container_ids(tmp_path / "hostname", tmp_path / "mountinfo") == ()
@@ -254,9 +251,9 @@ def test_absent_id_sources_off_a_container_are_not_an_error(tmp_path):
     assert box_mod._own_container_ids(tmp_path / "nope", tmp_path / "also-nope") == ()
 
 
-# F1 — the runtime lever, exercised at BOTH settings (intent_540 §542)
+# F1 — the runtime lever, exercised at both settings
 class _CapturingDocker:
-    """Minimal `docker=` seam: reports no live container, fails create so `start_box` raises before any sentinel..."""
+    """Minimal `docker=` seam: inspect finds nothing, create fails, so `start_box` raises after capturing the argv."""
 
     def __init__(self):
         self.create_argv: list[str] | None = None
@@ -277,8 +274,6 @@ def _runtime_of(monkeypatch, value: str | None) -> str:
     else:
         monkeypatch.setenv(BoxSpec.ENV_VAR, value)
     rec = _CapturingDocker()
-    # The real tree: this helper tests the env lever, so it cannot pass a `spec=` to pin a
-    # rootfs, and an unset rootfs resolves from the tree the box would mount (#1092).
     with pytest.raises(BoxFault):
         start_box(Path("/tmp/defender-runs/r1"), REPO_ROOT / "defender", docker=rec)
     assert rec.create_argv is not None
@@ -286,17 +281,16 @@ def _runtime_of(monkeypatch, value: str | None) -> str:
 
 
 def test_runtime_lever_defaults_to_runsc_when_unset(monkeypatch):
-    """The default is ANCHORED, not env-derived: runc is the weaker isolation tier and must never be reached by..."""
+    """The default is anchored, not env-derived: runc, the weaker tier, is never reached by fallback."""
     assert _runtime_of(monkeypatch, None) == "runsc"
 
 
 def test_runtime_lever_honours_an_explicit_runc(monkeypatch):
-    """Pre-fix this returned runsc — `from_env` existed but nothing called it, so the RSD's "ships on whatever..."""
     assert _runtime_of(monkeypatch, "runc") == "runc"
 
 
 def test_runtime_lever_rejects_an_unknown_runtime(monkeypatch):
-    """Through `start_box`, not just `from_env`: the wiring is the thing under test, and a typo'd lever must fail..."""
+    """Through `start_box`, not just `from_env`: a typo'd lever fails loudly instead of falling back to a tier."""
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")
     with pytest.raises(ValueError, match="not a known box runtime"):
@@ -304,12 +298,11 @@ def test_runtime_lever_rejects_an_unknown_runtime(monkeypatch):
 
 
 def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypatch):
-    """`start_box(request)` never uses the `spec=` parameter — a BoxRequest carries its own. Resolving the env..."""
+    """`start_box(request)` ignores `spec=`, so a typo must not raise there: a `ValueError` dead-letters case after case."""
     from defender.box import BoxRequest
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    # The real tree: the request's spec must come from its own factory (the thing under test),
-    # so no `spec=` pin — an unset rootfs resolves from `workdir / "defender"` (#1092).
+    # The request's own spec factory is under test; its rootfs resolves from `workdir / "defender"`.
     request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT)
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")  # AFTER the request is built
     with pytest.raises(BoxFault):  # the create fault, not a ValueError
@@ -317,7 +310,7 @@ def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypa
 
 
 def _request_runtime_of(monkeypatch, value: str | None) -> str:
-    """The lever as reached through a BoxRequest — the learning run-cycle's and the curator drains' only entry..."""
+    """The lever through a `BoxRequest` (the run-cycle's and drains' entry point), whose spec factory reads it."""
     from defender.box import BoxRequest
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
@@ -326,8 +319,6 @@ def _request_runtime_of(monkeypatch, value: str | None) -> str:
     else:
         monkeypatch.setenv(BoxSpec.ENV_VAR, value)
     rec = _CapturingDocker()
-    # The real tree, for the reason `_runtime_of` gives: the lever is what the spec factory
-    # must read, so nothing here may pass a `spec=` (#1092).
     request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT)
     with pytest.raises(BoxFault):
         start_box(request, docker=rec)
@@ -348,7 +339,7 @@ def test_the_discovered_table_reaches_the_run_dir_create_argv(tmp_path):
             run_dir, defender_dir, PINNED, rec, lambda _docker: mounts,
         )
     joined = " ".join(rec.create_argv or [])
-    # Targets are the model view's fixed paths (#1255 P1); the SOURCES carry the translation.
+    # Targets are the model view's fixed paths; the sources carry the translation.
     assert (
         "type=bind,source=/home/dev/projects/repo/.defender-runs/r1,"
         "target=/runs/current" in joined
@@ -379,7 +370,7 @@ def test_the_discovered_table_reaches_the_request_render_argv():
 
 
 def test_an_uncovered_run_dir_is_refused_before_any_container_is_created():
-    """The refusal happens while BUILDING the argv, so nothing is created and there is no container to reap. A..."""
+    """The refusal fires while building the argv; a check after `docker run` would leave a box behind."""
     rec = _CapturingDocker()
     with pytest.raises(BoxFault, match="C46"):
         box_mod._start_boxed(
@@ -390,6 +381,6 @@ def test_an_uncovered_run_dir_is_refused_before_any_container_is_created():
 
 
 def test_the_discovery_seam_degrades_to_the_identity_when_no_id_resolves():
-    """`_shared_mounts` composes ids -> table. On a daemon that knows none of this process's candidate ids the..."""
+    """No known id yields the empty (native) table, never a raise: this runs on bare CI runners and in devcontainers."""
     unknown = _InspectDocker("no-such-container-id", _TABLE)
     assert box_mod._shared_mounts(unknown) == ()
