@@ -10,7 +10,7 @@ from enum import StrEnum
 
 from defender import _git
 from defender.tenancy._exports import DeliveryRefused
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 
 from .auth import ForgejoAuthError
 from .forgejo import ForgeError, PullRequest

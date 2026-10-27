@@ -53,7 +53,7 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
 #: exact drift `normalized_truncated_by` exists to make impossible.
 def vocabulary() -> tuple[str, ...]:
     """`TRUNCATED_BY_VALUES`, from the module that owns it."""
-    return tuple(sym("runtime.session_store", "TRUNCATED_BY_VALUES"))
+    return tuple(sym("records.session_store", "TRUNCATED_BY_VALUES"))
 
 
 #: The two exits on which the model was stopped before it could close and the host still owes
@@ -81,7 +81,7 @@ def run_end_name() -> str:
     archive.py now holds no record name, and both the writer and this helper reach the same
     accessor on `_episode_paths`.
     """
-    return str(sym("episodes._episode_paths", "WORLD_LEAVES").run_end)
+    return str(sym("records._episode_paths", "WORLD_LEAVES").run_end)
 
 
 def sidecar_path(run_dir: Path) -> Path:
@@ -90,7 +90,7 @@ def sidecar_path(run_dir: Path) -> Path:
     Resolved through the production function, never composed here: the whole of O3's security
     argument is that this path is a pure function of a path the host already holds, and a
     fixture that spelled its own would be a second opinion about where the record lives."""
-    return sym("runtime.run_end", "sidecar_path")(Path(run_dir))
+    return sym("records.run_end", "sidecar_path")(Path(run_dir))
 
 
 def plant_sidecar(run_dir: Path, *, truncated_by: str | None = None,
@@ -297,7 +297,7 @@ class FakeTicketSystem:
         return self.status, ""
 
     def deps(self) -> Any:
-        return sym("runtime.ticket_writer", "TicketWriterDeps")(
+        return sym("investigation.ticket_writer", "TicketWriterDeps")(
             request=self.request)
 
     @property
@@ -326,7 +326,7 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     `closed_before_cut=`, passed in-process by `run.py` from the driver's own summary. Nothing
     here reads a store, a pointer file or anything else inside the run dir to get them."""
     fake = ticket or FakeTicketSystem()
-    mod("runtime.ticket_writer").record_case_ticket(
+    mod("investigation.ticket_writer").record_case_ticket(
         _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake), **kw)
     return fake
 
@@ -335,7 +335,7 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
     """Drive the REAL `open_case_ticket` — the leg that establishes the ticket key's namespace,
     with no `report.md` anywhere on disk (round-2 probe #30, EXECUTED)."""
     fake = ticket or FakeTicketSystem()
-    mod("runtime.ticket_writer").open_case_ticket(
+    mod("investigation.ticket_writer").open_case_ticket(
         _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake))
     return fake
 
@@ -356,7 +356,7 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
         _spec1107.plant(root, "t1047", configs={})
         record = _spec1107.resolve(root, "t1047")
     return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
-            "env": mod("run_common").run_env(_tenants1106.DEFENDER, Path(run_dir))}
+            "env": mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir))}
 
 
 def receipt_path(run_dir: Path) -> Path:
@@ -412,7 +412,7 @@ def drive(deps: Any, model: Any, *, bounds: Any = None, store: Any = None) -> tu
     `run_investigation` flattens onto its summary."""
     import asyncio
 
-    from defender.runtime import challenge_gate, driver
+    from defender.investigation import challenge_gate, driver
     from defender.tests.support.runtime.engine import _spec923
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
 
@@ -429,7 +429,7 @@ def killing_model(exc: BaseException) -> Any:
 
     REAL EXCEPTION CLASSES ONLY, and only the ones the driver's own handlers name:
     `BudgetKill` (`hooks/budget_enforcer.py`) and `RunAborted`
-    (`runtime/circuit_breaker.py`). What is under test is the driver's classification, not
+    (`systems/circuit_breaker.py`). What is under test is the driver's classification, not
     where the kill originated — the same construction `test_992_close_contract.py` already
     uses for these two arms."""
 

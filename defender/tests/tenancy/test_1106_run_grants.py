@@ -18,7 +18,7 @@ def _pairs(grant) -> set[tuple[str, str]]:
 
 def _registry(grant, **kw):
     from defender._paths import adapters_under
-    from defender.runtime.verbs import ModuleVerbRegistry, read_roster
+    from defender.systems.verbs import ModuleVerbRegistry, read_roster
 
     return ModuleVerbRegistry(read_roster(adapters_under(T.DEFENDER)), grant, **kw)
 
@@ -46,7 +46,7 @@ def test_a_table_that_withholds_the_lead_projects_no_correlation_system(tmp_path
 
 def test_a_missing_table_refuses_rather_than_projecting_nothing(tmp_path):
     """An absent table is not a deny-all (#995's standing rule) — it raises, naming the file."""
-    vd = T.mod("runtime.verb_dispositions")
+    vd = T.mod("systems.verb_dispositions")
     settings = tmp_path / "empty" / "settings"
     settings.mkdir(parents=True)
     with pytest.raises(vd.DispositionError) as caught:
@@ -150,7 +150,7 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
 
 @pytest.mark.parametrize("inside", ["code tree", "runs base"])
 def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside):
-    rt = T.mod("runtime.run_tenant")
+    rt = T.mod("systems.run_tenant")
     defender_dir = tmp_path / "repo" / "defender"
     runs_base = tmp_path / "runs"
     defender_dir.mkdir(parents=True)

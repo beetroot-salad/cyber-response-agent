@@ -231,7 +231,7 @@ def _with_run_state(deps: Any) -> Any:
     from dataclasses import replace
 
     from defender.records import Run
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return replace(deps, run=Run.under(fixture_runs_base(deps.run_dir.parent), deps.run_dir.name),
                    run_state=RunState(deps.run_dir, "r-923"))
@@ -241,7 +241,7 @@ def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam — real compiled policy, real gate — with
     `companion` seeded as the run's `investigation.md`."""
     from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
+    from defender.investigation.agent_definition import bind
 
     # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run")
@@ -264,8 +264,8 @@ def close(deps: Any, disposition: str, *, stages: Any = _UNBOUND, forced: bool =
     """Drive the REAL close. `forced=True` is the HOST channel — the driver's retry-exhaustion
     limb is its only production caller — and is what makes "any caller passing `forced` is the
     host" drivable as a rule rather than as a list of names."""
-    from defender.runtime import challenge_gate
-    from defender.runtime.close_tool import _close_investigation_async
+    from defender.investigation import challenge_gate
+    from defender.investigation.close_tool import _close_investigation_async
     from defender.tests.support.runtime.permissions import _review_bundle
 
     if stages is _UNBOUND:
@@ -283,7 +283,7 @@ def ab3_deps(tmp_path: Path) -> tuple[Any, Path]:
     refused by the invented-identifier guard and fails the review as unreadable instead of
     routing on it."""
     from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
+    from defender.investigation.agent_definition import bind
 
     # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run")
@@ -297,8 +297,8 @@ def ab3_deps(tmp_path: Path) -> tuple[Any, Path]:
 
 def real_targets(deps: Any) -> list[str]:
     """Ids the investigation actually recorded."""
-    from defender.runtime.review.projector import parse_investigation
-    from defender.runtime.review.reply import citable_refs
+    from defender.investigation.review.projector import parse_investigation
+    from defender.investigation.review.reply import citable_refs
 
     inv = (deps.run_dir / "investigation.md").read_text(encoding="utf-8")
     return sorted(citable_refs(parse_investigation(inv)))
@@ -360,7 +360,7 @@ def drive_to_retry_exhaustion(deps: Any, *, review_stages: Any = None) -> tuple[
     `review_stages` is threaded so a scenario can observe that the forced close spent NO review
     — the fall-through this limb must not take is precisely one that dispatches review roles it
     was never given."""
-    from defender.runtime import challenge_gate, driver
+    from defender.investigation import challenge_gate, driver
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
 
     agent = build_main_agent(StuckModel(), review_stages=review_stages)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.run_common import run_env
+from defender.box import run_env
 from defender import box as box_mod
 from defender.box import BOX_ENV_ALLOWLIST, BoxRequest, BoxSpec, Mount
 from defender.tests.support.sandbox._spec1092 import (

@@ -286,7 +286,7 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
         seams["oracle"] = oracle.model
     if verifier is not None:
         seams["verifier"] = verifier.model
-    cli = S.mod(S.CLI)
+    cli = S.mod("cli.learning.branch")
     message = ""
     root = S.tenant_episodes(src.parent.parent.name)
     already = _names(root)
@@ -329,8 +329,8 @@ def _capture_row(src: Path, *, system: str, verb: str, params: Mapping[str, Any]
     its sidecar persisted, `error_class` and `payload_status` from the writer's own rules: a
     sentinel (`query_id` under the reserved prefix — nothing was sent) or a captured failure
     (`exit_code` non-zero). `T.capture_call` writes only successful captures."""
-    rq = S.mod("runtime.record_query")
-    breaker = S.mod("runtime.circuit_breaker")
+    rq = S.mod("investigation.record_query")
+    breaker = S.mod("systems.circuit_breaker")
     body = payload if payload is not None else {"error": "never reached a system"}
     text = json.dumps(body, sort_keys=True)
     rel = f"gather_raw/l-001/{seq}.json"

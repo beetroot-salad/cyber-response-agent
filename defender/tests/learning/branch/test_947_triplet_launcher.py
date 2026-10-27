@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender._io import bind
 from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -29,6 +29,11 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 def _cli():
     return T.mod("learning.branch.cli")
+
+
+def _entry():
+    """The command entry, whose `main` supplies the real preflight and page renderer."""
+    return T.mod("cli.learning.branch")
 
 
 def _verify_family(ep_dir, plant=T.arm_run_dir, **kw):
@@ -87,7 +92,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     src = invalid
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
-        _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                      *T.retired_continuation_argv()],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
@@ -95,7 +100,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
 
 
 def test_world_identities_are_independent_of_episode_and_label(tmp_path):
-    fam = T.mod("runtime.branch._family")
+    fam = T.mod("records._family")
     authored = T.declaration(S.family_v2())
     first, _ = fam.accept_family(authored)
     second, _ = fam.accept_family(authored)
@@ -114,7 +119,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
         agent = T.FakeAgent()
         prepare()
         with pytest.raises(SystemExit):
-            _cli().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
+            _entry().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
                          *T.retired_continuation_argv()],
                         spawn=T.FakeSpawn(), questioner=agent,
                         preflight=S.no_preflight, live_tree=T.source_capture())
@@ -135,7 +140,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     RunPaths(src).alert.symlink_to(secret)
     agent = T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
     with pytest.raises(T.refusals()) as refusal:
-        _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                      *T.retired_continuation_argv()],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
@@ -282,7 +287,7 @@ def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_re
 
     assert T.world_id(ep, "b") not in report["archived"]
     with bind(Path(ep)) as bound:
-        failed = outcome.failed_worlds(bound, {}, family=T.sym("runtime.branch._family", "parse_family")(T.family_doc()))
+        failed = outcome.failed_worlds(bound, {}, family=T.sym("records._family", "parse_family")(T.family_doc()))
     assert sorted(failed) == ["b"]
     assert failed["b"]["reason"] == outcome.NOT_ARCHIVED
 
@@ -486,7 +491,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
 
 
 def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
-    store_mod = T.mod("runtime.session_store")
+    store_mod = T.mod("records.session_store")
     import threading
 
     from defender.tests.support.storage import _session_store_705 as S

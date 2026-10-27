@@ -11,7 +11,8 @@ from typing import Any
 import pytest
 
 from defender.learning.branch import cli
-from defender.runtime import run_tenant
+from defender.cli.learning import branch as branch_entry
+from defender.systems import run_tenant
 from defender.integrations import elastic_adapter
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
@@ -71,7 +72,7 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
     argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
             *T.retired_continuation_argv()]
     try:
-        return cli.main(argv, **seams), None
+        return branch_entry.main(argv, **seams), None
     except SystemExit as refused:
         return None, refused
 

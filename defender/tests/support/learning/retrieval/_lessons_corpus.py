@@ -55,7 +55,7 @@ def _main_deps(tmp_path: Path):
     imports below stay lazy so this module costs nothing to import without the runtime extra.
     """
     from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
+    from defender.investigation.agent_definition import bind
 
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -84,7 +84,7 @@ def _run_copy_main_deps(tmp_path: Path):
 
     from defender.agents import MAIN_DEF
     from defender.records import Run
-    from defender.runtime.agent_definition import RunScope, bind
+    from defender.investigation.agent_definition import RunScope, bind
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
     run = tmp_path / fixture_uuid("run")

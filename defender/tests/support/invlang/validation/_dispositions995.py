@@ -9,7 +9,7 @@ from defender._paths import adapters_under
 from defender.tests.support.shared.contracts._repo import seed_repo
 
 try:
-    from defender.runtime.verb_dispositions import (  # type: ignore[import-not-found]
+    from defender.systems.verb_dispositions import (  # type: ignore[import-not-found]
         CensusGaps,
         Disposition,
         DispositionError,
@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover — the pre-implementation path
     def _not_yet_written(symbol: str):
         def _stub(*_a: Any, **_k: Any):
             raise AssertionError(
-                f"defender.runtime.verb_dispositions.{symbol} does not exist yet — "
+                f"defender.systems.verb_dispositions.{symbol} does not exist yet — "
                 "#995 is unimplemented at this commit."
             )
         return _stub

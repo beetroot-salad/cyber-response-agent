@@ -15,6 +15,7 @@ import pytest
 from defender.tenancy import _tenant
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+from defender.records._tenant_id import TenantId, TenantRefused
 
 #: The remedy every "no knowledge folder" refusal carries (DC2, N12 re-read): clone the tenant
 REMEDY_WORDS = ("clone", "tenant.py setup")
@@ -452,8 +453,8 @@ def test_1120_the_one_tenant_guard_admits_only_knowledge_beside_a_missing_row(
     before = H.tree_census(root)
     refused: BaseException | None = None
     try:
-        _tenant.refuse_foreign_data_root(fixture_data_root(root), _tenant.TenantId(H.TID))
-    except _tenant.TenantRefused as exc:
+        _tenant.refuse_foreign_data_root(fixture_data_root(root), TenantId(H.TID))
+    except TenantRefused as exc:
         refused = exc
     assert H.census_diff(before, H.tree_census(root)) == [], "the guard wrote into the root"
     if foreign is None:

@@ -7,7 +7,7 @@ from typing import Any, ClassVar, Protocol
 
 from defender._text import is_content_less
 from defender.box._output import BoxOutputLimitExceeded
-from defender.runtime.exception_groups import carried
+from defender._exception_groups import carried
 from defender.learning.core.config import (
     FatalConfigError,
     RunUnprocessable,
@@ -15,10 +15,11 @@ from defender.learning.core.config import (
     StageContext,
     StageWiring,
 )
-from defender.runtime import observe, providers
+from defender.investigation import observe
+from defender import providers
 from defender._agent_role import AgentRole
 from defender._model_view import ModelView
-from defender.runtime.driver import MakeModel, build_agent_core
+from defender.investigation.driver import MakeModel, build_agent_core
 
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
@@ -49,12 +50,12 @@ def build_stage_agent(
     verbs: Any = None,
     workspace: ModelView | None = None,
 ) -> Agent[Any, str]:
-    from defender.agents import AGENTS
+    from defender.learning.roles import LEARNING_AGENTS
 
     overrides: dict[str, Any] = {"model": lambda: wiring.model, "effort": wiring.effort}
     if tools is not None:
         overrides["tools"] = tools
-    defn = replace(AGENTS[deps_type.role], **overrides)
+    defn = replace(LEARNING_AGENTS[deps_type.role], **overrides)
     instructions = read_text_utf8(wiring.prompt_path)
     if workspace is not None:
         instructions += (
@@ -113,7 +114,7 @@ def run_stage(
     """Drive one in-process stage. `wiring` is how the stage is configured, `ctx` is what
     this spawn is about."""
     label = wiring.label
-    from defender.runtime.tools import AgentDeps
+    from defender.investigation.tools import AgentDeps
 
     # Under `wire_logs/`, never the run dir root: the trace is the stage's whole context
     # verbatim, learning run dirs are shared, and readers of the root are not shape-filtered.

@@ -15,6 +15,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
+from defender.records._tenant_id import TenantId
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
@@ -91,10 +92,9 @@ def test_1187_o2_episode_id_rule_asks_for_no_room_for_a_label():
 
 
 def _address_fields() -> dict[str, object]:
-    from defender.tenancy import _tenant
     from defender.records import RunId
 
-    return {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(S.SAMPLE_UUID)}
+    return {"tenant_id": TenantId(H.T_ID), "run_id": RunId.parse(S.SAMPLE_UUID)}
 
 
 def test_1187_o2_run_address_admits_canonical_uuid_run_and_episode_ids():
@@ -138,7 +138,7 @@ def _family_doc_for(episode_id: str, *labels: str) -> dict:
 @pytest.mark.parametrize("label", ["b", LONG_LABEL, "w" * 220, "w" * 1000, "a-b"],
                          ids=["short", "200-bytes", "220-bytes", "1000-bytes", "invalid"])
 def test_1187_o3_labels_follow_their_own_rule(label):
-    from defender.runtime.branch import _family
+    from defender.records import _family
 
     doc = _family_doc_for(S.new_id(), label)
     if label == "a-b":
@@ -163,7 +163,7 @@ def _attribute(obj: object, name: str) -> tuple[str, object]:
 
 def test_1187_o1_a_resumed_world_never_composes_its_arm_id(tmp_path):
     from defender.records import RunId
-    from defender.runtime.branch import _family
+    from defender.records import _family
 
     episode_id = S.new_id()
     family = _family.parse_family(_family_doc_for(episode_id, "b"))
@@ -185,7 +185,7 @@ def test_1187_o1_a_resumed_world_never_composes_its_arm_id(tmp_path):
 
 
 def test_1187_o1_the_episode_layout_spells_no_sibling_run_dir():
-    from defender.episodes import _episode_paths
+    from defender.records import _episode_paths
 
     for owner in (_episode_paths.EpisodeLayout, _episode_paths.LAYOUT):
         assert not hasattr(owner, "sibling_run_dir"), (

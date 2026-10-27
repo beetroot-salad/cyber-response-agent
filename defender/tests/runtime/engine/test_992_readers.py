@@ -6,8 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from defender.runtime.challenge_gate import REVIEW_ROLES
-from defender.runtime.close_tool import (
+from defender.investigation.challenge_gate import REVIEW_ROLES
+from defender.investigation.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_NOT_REVIEWED,
     CAUSE_TURN_BUDGET_SPENT,

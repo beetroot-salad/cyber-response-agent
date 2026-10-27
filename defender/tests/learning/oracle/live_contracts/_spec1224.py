@@ -47,7 +47,7 @@ ORACLE = "learning.branch.estate.oracle"          # NEW (coined)
 LIMITER = "learning.branch.estate.limiter"        # NEW (coined)
 REGISTRY = "learning.branch.estate.registry"
 LEDGER = "learning.branch.ledger"
-FAMILY = "runtime.branch._family"
+FAMILY = "records._family"
 CLI = "learning.branch.cli"
 EPISODE = "learning.branch.episode"
 STEPS = "learning.branch.steps"
@@ -58,8 +58,8 @@ JUDGE_RENDER = "learning.judge.render"
 JUDGE_ENQUEUE = "learning.judge.enqueue"
 VOCAB = "_vocab"
 RUN = "run"
-QUERY_TOOL = "runtime.query_tool"
-VERBS = "runtime.verbs"
+QUERY_TOOL = "investigation.query_tool"
+VERBS = "systems.verbs"
 AGENT_ROLE = "_agent_role"
 VISUALIZE = "presentation.visualize_episode"
 SERIALIZE = "learning.frontend.serialize"
@@ -1076,8 +1076,8 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     whose `call_id` is `None` gets no table row. Calls are filed under lead `l-001`, in ledger
     order; a decision other than `passthrough`/`oracle` is a non-zero exit. The payload sidecar
     each row names is written beside it."""
-    rq = mod("runtime.record_query")
-    breaker = mod("runtime.circuit_breaker")
+    rq = mod("investigation.record_query")
+    breaker = mod("systems.circuit_breaker")
     world = Path(ep) / "worlds" / T.world_id(ep, label)
     token = _episode_world_id(ep, label)
     lines: list[str] = []
@@ -1198,14 +1198,14 @@ def load_world(ep: Path, label: str) -> Any:
     if not (ep / T.ROSTER_NAME).is_file():
         T.plant_roster(ep)
     arm_ids = {name: RunId.parse(arm) for name, arm in T.read_roster(ep).items()}
-    with mod("episodes._episode_handle").Episode.create(ep) as handle:
+    with mod("records._episode_handle").Episode.create(ep) as handle:
         family = fam.load_family(handle.view(), expected_episode_id=ep.name)
     return fam.resume_world_from(family, label, ep, arm_ids=arm_ids)
 
 
 def world_ledger(ep: Path, label: str) -> Any:
     """`Ledger.for_world(...).declare()` over the primed base — as the sibling builds it."""
-    episode = mod("episodes._episode_handle").Episode.create(Path(ep))
+    episode = mod("records._episode_handle").Episode.create(Path(ep))
     with contextlib.suppress(FileExistsError):
         episode.served_base.create("")
     return sym(LEDGER, "Ledger").for_world(episode, _episode_world_id(ep, label)).declare()
@@ -1297,7 +1297,7 @@ def run_state(run_dir: Path, run_id: str = RUN_ID) -> Any:
     """A fresh run's `RunState` (#1235 round 2) — what a direct registry call's context carries
     when the scenario needs the investigator's clock to pause and resume (a context with no run
     state pauses none). Imported lazily: the module is new in round 2."""
-    return sym("runtime.run_state", "RunState")(Path(run_dir), run_id)
+    return sym("investigation.run_state", "RunState")(Path(run_dir), run_id)
 
 
 def tap_run_states(registry: Any) -> list[Any]:
@@ -1541,8 +1541,8 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
     branch message `T.runs_base` already seeded (R-01). `_frontier.leads_at` dates a lead by
     that pair's return: past `BRANCH_MESSAGE_ID`, so the lead is not inherited. Only scenarios
     with a post-branch call get the pair; every other launch keeps `runs_base`'s session as is."""
-    from defender.runtime import session_store as ss
-    from defender.runtime.branch._frontier import session_for_run
+    from defender.records import session_store as ss
+    from defender.investigation.branch._frontier import session_for_run
     from defender.tests.support.storage import _session_store_705 as SS
     from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
@@ -1592,7 +1592,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         seams["oracle"] = oracle.model
     if verifier is not None:
         seams["verifier"] = verifier.model
-    cli = mod(CLI)
+    cli = mod("cli.learning.branch")
     message = ""
     # #1187 (O9): the episode lands under the launching tenant's own `<T>/episodes/`, no
     # configured root; the launcher mints its id, so it is found as the ONE new folder there.

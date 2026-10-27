@@ -74,19 +74,21 @@ def _alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    stat = Path(f"/proc/{pid}/stat").read_text() if Path(f"/proc/{pid}/stat").exists() else "Z"
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except (FileNotFoundError, ProcessLookupError):  # reaped between the kill(0) and the read
+        return False
     return stat[stat.rindex(")") + 2] != "Z"
 
 
-def _outlives(pid: int, grace: float = 5.0) -> bool:
-    """Still alive after `grace` seconds. A killed process closes its pipes (which is what ends
-    the launch's wait) before the kernel marks it dead, so an immediate look can catch it mid-exit.
-    The grace stays far below the grandchild's own 25 s sleep: an unkilled one still fails."""
-    deadline = time.monotonic() + grace
+def _outlives(pid: int, within: float = 2.0) -> bool:
+    """Still alive after `within` seconds? A SIGKILL is delivered asynchronously: the launch
+    returns once the group's pipes close, which can be a moment before the grandchild's exit."""
+    deadline = time.monotonic() + within
     while _alive(pid):
-        if time.monotonic() >= deadline:
+        if time.monotonic() > deadline:
             return True
-        time.sleep(0.05)
+        time.sleep(0.02)
     return False
 
 

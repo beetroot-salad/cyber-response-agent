@@ -7,8 +7,8 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import pytest
 
-from defender.runtime import branch
-from defender.runtime.run_state import RunState
+from defender.investigation import branch
+from defender.investigation.run_state import RunState
 from defender.tests.support.runtime.records._1165_flows import RecordIO, drive_run, run_handle
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.branch._branch_947 import GOLDEN_INVESTIGATION, planted_source, spec_at

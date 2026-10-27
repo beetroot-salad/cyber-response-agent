@@ -15,8 +15,8 @@ pytest.importorskip("pydantic_ai")
 
 from defender._frontmatter import parse_frontmatter  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime import circuit_breaker  # noqa: E402
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
+from defender.investigation.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.integrations import (  # noqa: E402
     change_mgmt_adapter,
     cmdb_adapter,

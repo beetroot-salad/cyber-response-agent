@@ -1,5 +1,5 @@
 # Gather dispatch for the large-dump reliability arm. The harness renders this
-# into the gather subagent's prompt (defender/runtime/tools._gather_prompt shape)
+# into the gather subagent's prompt (defender/investigation/tools._gather_prompt shape)
 # and serves gather_raw/0.json as the (faked) adapter result.
 lead_id: l-001
 system: elastic

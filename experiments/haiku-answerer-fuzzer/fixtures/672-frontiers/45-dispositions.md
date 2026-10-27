@@ -38,7 +38,7 @@ not re-decide. Marker count computed by grep over this file's own content.
   trip" as settled mechanism has been rewritten to the resolved shape and marked `revised-by-§7`. Phase E must
   read the revised assertions; the pre-seam text survives only inside the fork blocks' verbatim relay, which is
   history, not contract.
-- **F4's "seam-only mirror" note is stale and must be rewritten in the graph, never cited.** `runtime/query_tool.py`
+- **F4's "seam-only mirror" note is stale and must be rewritten in the graph, never cited.** `investigation/query_tool.py`
   is now the mirror target for capture, truncation, and breaker machinery alike. Any phase-E test that reaches for
   F4's wording will re-import the rejected contract.
 - **Two forks reversed their own recommendations (B, E).** The classifier recommended record-free+truncation and
@@ -278,7 +278,7 @@ assertion stable.
 **Resolved (§7) — the recommendation was REJECTED.** Not record-free: **mirror the query tool FULLY.** An
 oversized payload or result set yields a **recorded capture row** in the queries table AND a **bounded inline
 view carrying a truncation note**. d0 loses `provisional: true` and asserts both. Consequences the suite must
-carry: an audit trail of judge ticket reads now exists and is test-visible; `runtime/query_tool.py`'s
+carry: an audit trail of judge ticket reads now exists and is test-visible; `investigation/query_tool.py`'s
 capture/truncation machinery is the mirror target; **F4's "seam-only mirror / no queries row" framing is
 superseded — it needs rewriting in the graph, not citing.** This flip is the reason this whole pass exists.
 

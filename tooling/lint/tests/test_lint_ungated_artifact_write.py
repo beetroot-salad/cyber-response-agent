@@ -57,7 +57,7 @@ _INJECTED_VALIDATOR = (
 #: Routed through the permission gate, which applies the schema on the caller's behalf.
 _THROUGH_THE_GATE = (
     "from defender._io import write_guarded\n"
-    "from defender.runtime import permission\n"
+    "from defender.investigation import permission\n"
     "\n"
     "def write_file(deps, p, content):\n"
     "    if not permission.decide_write(deps.policy, p, content).allowed:\n"
@@ -89,11 +89,11 @@ def test_the_two_shipped_defects_are_both_flagged(tmp_path):
     """#964's shape and a report-side sibling, each reduced to the code that made it a bug:
     a write of one of the two artifacts with no schema in the frame."""
     tree = tmp_path / "scope"
-    _pyfile(tree, "runtime/lead_zero.py", _UNGATED_SEED)
-    _pyfile(tree, "runtime/close_tool.py", _ALIASED_WRITE)
+    _pyfile(tree, "investigation/lead_zero.py", _UNGATED_SEED)
+    _pyfile(tree, "investigation/close_tool.py", _ALIASED_WRITE)
 
     assert _names(_GATE._scan(tree)) == {
-        "runtime/lead_zero.py:seed", "runtime/close_tool.py:commit",
+        "investigation/lead_zero.py:seed", "investigation/close_tool.py:commit",
     }
     assert _GATE.main([], scope=tree, baseline_path=tmp_path / "empty.json") == 1
 

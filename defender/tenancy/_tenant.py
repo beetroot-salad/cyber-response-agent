@@ -6,23 +6,23 @@ import json
 import os
 import re
 import stat
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import ValidationError
-from pydantic_core import core_schema
 
 from defender.records._locations import (
     DataRoot, TenantRoot, TenantRecord, RunsBase, SessionsRoot, EpisodesRoot, LearningRoot, WorktreesRoot, ExportsRoot, DraftsRoot, KnowledgeLock, CommitRecord, LegacyRunsRoot, LegacyEpisodesRoot, _unwrap_data_root, _unwrap_tenant_root, _unwrap_runs_base, _unwrap_episodes_root,
 )
 from defender.records import _alert_input
-from defender.records._run_id import mint_uuid, uuid_id_fault
+from defender.records._held import RecordTenant
+from defender.records._tenant_id import TenantId, TenantRefused
 from defender import _io as _real_io
 from defender import _paths
 from defender._model import model
-from defender._shown import escaped, quoted, shown
+from defender._shown import quoted, shown
 from defender.tenancy._tenants import (
     AGENT_HALF,
     REQUIRED_SETTINGS,
@@ -32,10 +32,10 @@ from defender.tenancy._tenants import (
 )
 
 if TYPE_CHECKING:
-    from defender.learning.core.config import LoopPaths
     from defender.records._lookup import RunsRepository
 
 _R = TypeVar("_R")
+_P = TypeVar("_P")
 
 #: The tenant's row, inside its own folder under the data root.
 ROW_NAME = "tenant.json"
@@ -46,49 +46,6 @@ _ROW_FIELDS = ("tenant_id", "created_at")
 #: module (J05 — a public `str` here is an import-refused "record name" under
 #: `lint_run_records`'s import arm).
 _DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
-
-
-class TenantRefused(Exception):
-    """The one refusal shape (#0, F0/J29) for every tenant owner — this module (acceptance
-    and its knowledge-folder rules included) and the run's grants (`run_tenant`): the
-    message names the value that was refused, and every entry catches THIS and surfaces it
-    verbatim. An `Exception`, not a `ValueError` (#1067's `_model.py` convention): pydantic
-    wraps a `ValueError` raised inside a validator into its own `ValidationError`, where an
-    `except TenantRefused` would silently miss it."""
-
-    def __init__(self, message: object = "") -> None:
-        # Escaped where it is built, as `RunRefused` is: a path or a value read off disk can
-        # carry a control character, and no raising site has to remember to escape it.
-        super().__init__(escaped(message))
-
-
-class TenantId(str):
-    """An opaque tenant id in canonical lowercase UUID text — the ONE place it is checked. Constructing one
-    is the check: `TenantId(raw)` returns the id or raises `TenantRefused` naming `raw`, and a
-    `TenantId` handed back in is returned as-is. It IS a `str` (paths, JSON, argv and log lines
-    take it unchanged, and its repr is the string's), but a function that declares `TenantId`
-    tells mypy a plain, unchecked `str` does not belong there. Entry points build one from the
-    request; records and rows build one as they parse."""
-
-    __slots__ = ()
-
-    def __new__(cls, raw: object) -> TenantId:
-        if isinstance(raw, TenantId):
-            return raw
-        fault = uuid_id_fault(raw, "tenant")
-        if fault is not None:
-            raise TenantRefused(fault)
-        assert isinstance(raw, str)
-        return super().__new__(cls, raw)
-
-    @classmethod
-    def mint(cls) -> TenantId:
-        """Mint a tenant UUID without creating a tenant or writing any state."""
-        return cls(mint_uuid())
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source: Any, _handler: Any) -> Any:
-        return core_schema.no_info_after_validator_function(cls, core_schema.str_schema())
 
 
 @model(frozen=True)
@@ -278,7 +235,7 @@ _ACCEPTED = object()
 
 
 @dataclasses.dataclass(frozen=True)
-class Tenant:
+class Tenant(RecordTenant):
     """One accepted tenant: its id, the data root it was accepted under, and its row — built
     ONLY by `accept_tenant`, and frozen. Record locations are opaque values; knowledge
     content paths remain ordinary paths.
@@ -405,7 +362,7 @@ class Tenant:
         return {**_paths.root_spellings(_unwrap_data_root(self.data_root), "<data root>"),
                 **_paths.root_spellings(_unwrap_tenant_root(self.tenant_root), "<tenant folder>")}
 
-    def runs_repository(self) -> RunsRepository:
+    def runs_repository(self) -> RunsRepository[Tenant]:
         """This tenant's runs repository (#1105 PR 2, decision C): bound to this tenant, and
         below it everything is ids. Only an accepted `Tenant` exists, so this is the one way a
         repository is built. The package is imported here, lazily: it imports this module."""
@@ -418,7 +375,7 @@ class Tenant:
         without one no drain has run or can run (only `tenant.py setup` creates it)."""
         return self._layout.learning.is_symlink() or self._layout.learning.exists()
 
-    def learning_paths(self, paths_type: type[LoopPaths], *, repo_root: Path) -> LoopPaths:
+    def learning_paths(self, paths_type: Callable[..., _P], *, repo_root: Path) -> _P:
         """Build learning configuration where the tenant's record root is owned."""
         return paths_type(repo_root=repo_root, state_dir=self.learning, tenant=self)
 
@@ -487,8 +444,8 @@ def box_mounted_arm_container(data_root: DataRoot, raw_id: object, episode_id: s
     link planted there is seen). The episode id is judged first (`EpisodeRefused`), the root and
     the id as every pre-acceptance site judges them (`TenantRefused`). A join: nothing is read
     or made."""
-    from defender.episodes._episode_handle import refuse_bad_episode_id
-    from defender.episodes._episode_paths import LAYOUT
+    from defender.records._episode_handle import refuse_bad_episode_id
+    from defender.records._episode_paths import LAYOUT
 
     episode_id = refuse_bad_episode_id(episode_id)
     return RunsBase(_unwrap_episodes_root(box_mounted_episodes(data_root, raw_id)) / episode_id / LAYOUT.runs)
@@ -524,16 +481,11 @@ def accept_placed_knowledge(
     return paths.settings, has_row
 
 
-def provision_learning(
-    data_root: DataRoot, tenant_id: TenantId, source: Path | None, *, repo_root: Path,
-    create_row: bool,
-) -> None:
-    """Execute setup's learning plan, publishing a missing row only after plan validation."""
-    from defender.learning.core.state import LearningAdoption
-
-    adoption = LearningAdoption(LearningRoot(_TenantPaths(data_root, tenant_id).learning), source,
-                                tenant_id=tenant_id, data_root=data_root, repo_root=repo_root)
-    adoption.run(before_move=(lambda: create_tenant(data_root, tenant_id)) if create_row else None)
+def learning_root_for_setup(data_root: DataRoot, tenant_id: TenantId) -> LearningRoot:
+    """The learning root of a tenant that may not be accepted yet: setup builds its learning
+    state before the row exists. For setup's use only; every run-time reader goes through an
+    accepted `Tenant`."""
+    return LearningRoot(_TenantPaths(data_root, tenant_id).learning)
 
 
 def _accept_knowledge(

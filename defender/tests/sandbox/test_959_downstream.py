@@ -23,13 +23,13 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.execution.box_codec import BoxResult  # noqa: E402
-from defender.runtime.tools import _tool_bash  # noqa: E402
+from defender.investigation.tools import _tool_bash  # noqa: E402
 from defender.cli import policy_cli  # noqa: E402
 from defender.knowledge import _query_rules  # noqa: E402
-from defender.runtime import record_query  # noqa: E402
+from defender.investigation import record_query  # noqa: E402
 from defender.tests.support.sandbox import _baseline_959 as base
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
@@ -80,7 +80,7 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     # The run's state, as the driver starts it and hands it to gather deps (#1235): the
     # shim-failure row's seq and its `system=` attribution are read from it, and this folder
     # went through no driver.
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     box = Box(result)
     deps = dataclasses.replace(

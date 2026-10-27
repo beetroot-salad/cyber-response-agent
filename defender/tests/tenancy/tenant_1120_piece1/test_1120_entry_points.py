@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base, location_path
 
-from defender.runtime import session_store
-from defender.runtime import run_tenant as run_tenant_mod
+from defender.records import session_store
+from defender.systems import run_tenant as run_tenant_mod
 from defender.tests.support.learning.core import _state1135
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
 
@@ -19,9 +19,10 @@ from typing import Any
 import pytest
 
 from defender.tenancy import _tenant
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
+from defender.cli.learning import branch as branch_entry
 from defender.cli import policy_cli
 from defender.cli import tenant as tenant_py
 from defender.skills.connect import validate_scaffold
@@ -30,6 +31,7 @@ from defender.tests.support.shared.contracts import _spec1077 as S1077
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as P
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+from defender.records._tenant_id import TenantId
 
 #: The launcher's episodes knob (J44; the refusal stays until D12).
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
@@ -59,12 +61,13 @@ def _owner_in_checkout(checkout: Path, root: Path, tenant_id: str = H.TID) -> st
         "from pathlib import Path\n"
         "sys.path.insert(0, sys.argv[1])\n"
         "from defender.tenancy import _tenant\n"
+        "from defender.records._tenant_id import TenantRefused\n"
         "assert Path(_tenant.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()), "
         "_tenant.__file__\n"
         "try:\n"
         "    _tenant.accept_tenant(_tenant.data_root_from_path(Path(sys.argv[2])), sys.argv[3],\n"
         "                          defender_dir=Path(sys.argv[1]) / 'defender', box_mounted=())\n"
-        "except _tenant.TenantRefused as refused:\n"
+        "except TenantRefused as refused:\n"
         "    print(refused, end='')\n"
         "    raise SystemExit(0)\n"
         "raise SystemExit('ACCEPTED')\n")
@@ -108,7 +111,7 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     seams.setdefault("preflight", T.no_preflight)
     requested = source.parent.parent.name if tenant_id is None else tenant_id
     try:
-        return branch_cli.main(
+        return branch_entry.main(
             ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID),
              *T.retired_continuation_argv()],
             spawn=spawn, **seams)
@@ -202,7 +205,7 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
             # #1105 PR 2: the launcher's id comes from the request (`--tenant`), refused by
             # the one grammar, TenantId, before the source is read.
             src = _source_under(root)
-            return _Cell(root, "A", str(H.refusal(_tenant, _tenant.TenantId, "A")), source=src)
+            return _Cell(root, "A", str(H.refusal(_tenant, TenantId, "A")), source=src)
         return _Cell(root, "A", _owner(root, "A"))
     if cell == "no-row":
         H.place_knowledge(root)
@@ -332,7 +335,7 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
         data_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     H.adopted(data_root)
     episode = T.episode(tmp_path, root=tmp_path / "episodes")
-    argv = branch_cli.sibling_argv(episode.name, "a", tenant_id=_tenant.TenantId(H.TID))
+    argv = branch_cli.sibling_argv(episode.name, "a", tenant_id=TenantId(H.TID))
     at = argv.index("--tenant")
     assert argv[at + 1] == H.TID, argv
     assert str(data_root) not in " ".join(argv), argv
@@ -342,7 +345,7 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
     spawn = T.FakeSpawn()
     # #1133 (merged into this branch, PR #1157): start_family takes the held Episode.
     with Episode.open(episode) as held:
-        branch_cli.start_family(held, [T.world_id(episode, "a")], spawn=spawn, tenant_id=_tenant.TenantId(H.TID))
+        branch_cli.start_family(held, [T.world_id(episode, "a")], spawn=spawn, tenant_id=TenantId(H.TID))
     assert len(spawn.launches) == 1, spawn.launches
     child_argv, child_env = spawn.launches[0]["argv"], spawn.launches[0]["env"]
     assert child_env.get(H.DATA_ROOT_ENV) == str(data_root), (
@@ -370,7 +373,7 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
 def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data_root_before_reading(
         tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)  # a relative root, if anything followed it, lands in tmp
-    tid = _tenant.TenantId(H.TID)
+    tid = TenantId(H.TID)
     relative = Path("relative-spec1120") / "data"
     inside = _never_created_root()
     for root in (relative, inside):
@@ -531,7 +534,7 @@ def test_legacy_names_are_refused_at_every_tenant_taking_entrypoint(
     base = tmp_path / "legacy"
     cell = _build_cell(entry, "bad-id", base, monkeypatch)
     cell.tenant_id = legacy
-    cell.expected = str(H.refusal(_tenant, _tenant.TenantId, legacy))
+    cell.expected = str(H.refusal(_tenant, TenantId, legacy))
     before = H.tree_census(cell.root)
     refused, text, spent = _drive(entry, cell, base, monkeypatch, capsys)
     monkeypatch.delenv(H.LEARNING_STATE_ENV, raising=False)

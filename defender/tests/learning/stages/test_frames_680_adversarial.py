@@ -8,9 +8,9 @@ from defender.tests.support.runtime.state._1255_view import model_path
 from pydantic_ai.exceptions import ModelRetry
 
 from defender.agents import LEAD_AUTHOR_DEF, MAIN_DEF
-from defender.learning.author.lesson_read import _tool_lesson_read
+from defender.investigation.tools.lesson_read import _tool_lesson_read
 from defender.box import BoxResult
-from defender.runtime.tools import _format_bash_result, _tool_bash, _tool_read_file
+from defender.investigation.tools import _format_bash_result, _tool_bash, _tool_read_file
 from defender.tests.support.learning.curation._frames680 import (
     STAGE_SALT,
     ROOT,
@@ -78,7 +78,7 @@ def test_learning_role_reads_an_attacker_controlled_non_run_file(tmp_path):
 
 def test_stage_body_is_authored_after_its_reader_token_was_disclosed(tmp_path):
     """One CORPUS_AUTHOR invocation denies a post-disclosure authored lesson through both its lesson-read and Bash lanes while a pre-authored lesson remains readable."""
-    from defender.runtime.tools import _tool_write_file
+    from defender.investigation.tools import _tool_write_file
 
     deps, corpus, command = _corpus_author_deps_scene(
         tmp_path, BoxResult(0, b"pre-authored", b"")
@@ -99,7 +99,7 @@ def test_corpus_author_reopens_a_lesson_it_authored_after_learning_the_stage_sal
     tmp_path,
 ):
     """One actual CORPUS_AUTHOR lifetime can read/cat a preexisting lesson but denies both `_tool_lesson_read` and Bash for a lesson it writes after learning its salt."""
-    from defender.runtime.tools import _tool_write_file
+    from defender.investigation.tools import _tool_write_file
 
     deps, corpus, command = _corpus_author_deps_scene(
         tmp_path, BoxResult(0, b"preexisting", b"")

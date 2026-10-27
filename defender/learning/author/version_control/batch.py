@@ -11,6 +11,7 @@ from defender.tenancy._exports import remove_entry as _remove_entry
 from defender.tenancy._tenant import Tenant
 from defender import box
 from defender._model_view import ModelView
+from defender.investigation.permission.grant import path_operands
 
 from .commits import CommitMaker, _Line
 from .exports import TenantExport, agent_blobs
@@ -71,6 +72,7 @@ class Batch:
             require_sandbox=True,
             env={"DEFENDER_AGENT_DIR": view.to_model(agent)},
             view=view,
+            path_operands=path_operands,
         )
 
     def change_set(self) -> ChangeSet:

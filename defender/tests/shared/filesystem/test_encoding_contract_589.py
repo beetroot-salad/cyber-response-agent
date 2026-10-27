@@ -131,7 +131,7 @@ def test_the_real_invlang_shim_prints_corpus_text_under_a_c_locale(tmp_path):
 
 
 def _curator_deps(tmp_path: Path):
-    """A real `AgentDeps` for the corpus-author agent — enough to drive `runtime/tools.py`'s
+    """A real `AgentDeps` for the corpus-author agent — enough to drive `investigation/tools.py`'s
     write/read tools directly, gate and all. Mirrors `test_lesson_read_tool.py`'s scene. Imported
     by the C-locale subprocess below too, so both processes build the same scene."""
     from defender.learning.author.curator_engine import CuratorDeps
@@ -157,7 +157,7 @@ def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_pat
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
         "import locale\n"
         "from pathlib import Path\n"
-        "from defender.runtime import tools\n"
+        "from defender.investigation import tools\n"
         "from defender.knowledge._corpus import iter_lessons\n"
         "from defender.tests.shared.filesystem.test_encoding_contract_589 import _curator_deps\n"
         "print('enc=' + locale.getencoding())\n"
@@ -178,7 +178,7 @@ def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_pat
 def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import tools
+    from defender.investigation import tools
 
     deps, corpus = _curator_deps(tmp_path)
     (corpus / "corrupt.md").write_bytes(b"---\nname: x\ndescription: \xff\xfe\n---\nbody\n")
@@ -191,7 +191,7 @@ def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
 def test_an_unreadable_file_is_a_model_retry_too_not_a_stage_kill(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import tools
+    from defender.investigation import tools
 
     deps, corpus = _curator_deps(tmp_path)
     unreadable = corpus / "locked.md"
@@ -226,7 +226,7 @@ def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
 def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     """The gather ingestion boundary, re-pointed at the TRANSPORT (#611)."""
     from defender.integrations import _stub_transport as transport
-    from defender.runtime.verbs import VerbContext
+    from defender.systems.verbs import VerbContext
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
     fake_bin = tmp_path / "bin"

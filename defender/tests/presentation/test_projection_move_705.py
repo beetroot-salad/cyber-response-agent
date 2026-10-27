@@ -156,7 +156,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
 
 def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second_write(tmp_path):
     """`tool_trace.jsonl` is written at most once per `run_id`: a second write under the"""
-    observe_mod = __import__("defender.runtime.observe", fromlist=["write_trace"])
+    observe_mod = __import__("defender.investigation.observe", fromlist=["write_trace"])
     run_dir, store, _replay = _driven_run(tmp_path, run_id="trace-once")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
     first = (run_dir / "tool_trace.jsonl").read_text()

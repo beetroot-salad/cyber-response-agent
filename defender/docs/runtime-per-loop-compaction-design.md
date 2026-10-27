@@ -75,7 +75,7 @@ Instead: compact **only at loop increments, then freeze**. Within a loop
 we're back to today's append-only shape — which already caches well — and
 we pay the rewrite (one cache-creation) once per loop.
 
-`ProcessHistory` / `before_model_request` hook in `runtime/driver.py`
+`ProcessHistory` / `before_model_request` hook in `investigation/driver.py`
 (the `agent.iter()` seam, `driver.py:7-9`) holds:
 
 - `_frozen_prefix` — the synthetic compacted preamble (see §Kept/Dropped),
@@ -118,7 +118,7 @@ it would be — §Failure).
 Dropped (absorbed, not re-emitted): resolved-loop gather Task-return
 summaries and superseded predict/analyze turns. The invlang validator
 enforces **append-only** on `investigation.md`
-(`runtime/permission.py` via `validate_companion`), so the file at loop N already contains the
+(`investigation/permission.py` via `validate_companion`), so the file at loop N already contains the
 full accumulated frontier of loops 1..N — committed vertices, edges,
 hypothesis transitions (`:T`), authz verdicts. We re-read the whole file;
 no per-loop stitching, and committed state can never be lost across loops.
@@ -130,7 +130,7 @@ it isn't.
 ## Recovery — persist gather summaries to disk
 
 Today gather's prose summary lives **only** in the message history
-(`runtime/tools.py:327,384`); the on-disk artifacts (`gather_raw/`) are
+(`investigation/tools.py:327,384`); the on-disk artifacts (`gather_raw/`) are
 walled off from the main loop by `block_main_loop_raw_access.py`, whose
 own remedy is "re-dispatch gather." Re-dispatch is an expensive recovery
 path for a detail dropped by compaction.
@@ -146,7 +146,7 @@ recovered with a cheap `Read`, not a re-dispatch.
 > `claude -p` runtime, and there is no PostToolUse hook layer to extend. Its
 > one live symbol, `wrap()`, is now `runtime/untrusted.py`. Whoever implements
 > this should hang the persist step off the in-process gather return in
-> `runtime/tools_gather.py`, which is where the summary is wrapped today. The
+> `investigation/tools_gather.py`, which is where the summary is wrapped today. The
 > rest of the design is unaffected; only the attachment point moved.
 
 - **Location:** outside `gather_raw/`, so the block hook (keyed on the
@@ -291,7 +291,7 @@ same invocation.
    Validates the mechanism on real histories and yields a first *mechanical*
    savings number at zero cost. It cannot show trajectory divergence (the
    agent may behave differently with compacted context) — that's step 1.
-   Implemented: `tooling/testing/compaction_dryrun.py` over `runtime/compaction.py`.
+   Implemented: `tooling/testing/compaction_dryrun.py` over `investigation/compaction.py`.
 
    **Step-0 result (5 recorded Phase-A runs, each 1–2 loop boundaries):**
    message-history payload **−35% to −55%**; estimated total prompt tokens
@@ -495,7 +495,7 @@ fix; (b) accept it as a cheap one-time re-read per freeze; (c) a frontier nudge
 need.
 
 **FIXED (fix a, landed pre-run):** the raw alert and the invlang grammar SKILL
-are now inlined into the orientation (message 0) in `runtime/orient.py` —
+are now inlined into the orientation (message 0) in `investigation/orient.py` —
 `_raw_alert` (wrapped in the run's salted untrusted tag, identical to the
 `read_file` path, so injected text stays inert) and `_invlang_grammar`
 (frontmatter stripped). Because `_compact_messages` preserves `messages[0]`
@@ -579,7 +579,7 @@ gather computes the answer server-side, so the aggregation result IS the summary
 
 Built and tested (branch `worktree-per-loop-compaction`):
 
-- **Pure core** — `runtime/compaction.py`: `detect_loop`, freeze-per-loop
+- **Pure core** — `investigation/compaction.py`: `detect_loop`, freeze-per-loop
   `compact()` (passthrough / froze / reused / fallback), size accounting,
   `apply_writes`. Unit tests: `tests/runtime/engine/test_compaction.py`.
 - **Loop-completion marker (`:T close`)** — the fold trigger
@@ -595,7 +595,7 @@ Built and tested (branch `worktree-per-loop-compaction`):
   regression; the next live A/B exercises the marker path.
 - **Offline harness** — `tooling/testing/compaction_dryrun.py` (validation ladder
   step 0; results above).
-- **Persistent-context (handoff packet)** — `runtime/orient.py` inlines the
+- **Persistent-context (handoff packet)** — `investigation/orient.py` inlines the
   raw alert (`_raw_alert`, salted untrusted wrap) and the invlang grammar
   (`_invlang_grammar`) into the orientation (message 0), which the fold
   preserves verbatim; `driver._user_prompt` threads the run `salt` through.

@@ -120,7 +120,7 @@ the shape above.
 
 Gather runs each query through the typed `query` tool —
 `query(system=…, verb=…, params={…}, query_id=…)` — and the runtime captures it
-transparently (the capture capability in `runtime/query_tool.py`). There is no adapter
+transparently (the capture capability in `investigation/query_tool.py`). There is no adapter
 command, no shim, and no wrapper to invoke: bash cannot reach a data source at all.
 Capture persists the raw payload by-ref to `{run_dir}/gather_raw/{lead_id}/{seq}.json`
 and appends one row to `executed_queries.jsonl` (the queries table, FK `lead_id`);

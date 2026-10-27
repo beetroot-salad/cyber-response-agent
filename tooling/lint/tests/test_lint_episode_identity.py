@@ -80,7 +80,7 @@ def test_id_census_syntax_partitions(tmp_path, name, source, expected):
     import textwrap
 
     prefix = ("from defender._run_id import mint_run_id as m\n"
-              "from defender.runtime.branch import _family as family_model\n"
+              "from defender.records import _family as family_model\n"
               "from defender import _run_id\nfrom defender.records import RunId\n"
               "def episode_id_for(src):\n    return src\n"
               "def compose(eid, label):\n    joined = eid\n    return f'{joined}-{label}'\n")
@@ -131,7 +131,7 @@ def test_a_folder_made_by_its_path_in_the_walk_owner_is_found_and_a_held_root_is
 def test_the_rosters_name_is_found_outside_its_owner_and_not_in_a_docstring(tmp_path):
     planted = tmp_path / "planted"
     files = {
-        "episodes/_episode_paths.py": f'ARM_ROSTER_NAME = "{_GATE.ROSTER_NAME}"\n',
+        "records/_episode_paths.py": f'ARM_ROSTER_NAME = "{_GATE.ROSTER_NAME}"\n',
         "records/_lookup.py": f'ROSTER = "{_GATE.ROSTER_NAME}"\n',
         "presentation/page.py": (
             f'def roster(ep):\n    """Reads {_GATE.ROSTER_NAME}."""\n'
@@ -149,8 +149,7 @@ def test_the_rules_report_under_their_own_names(tmp_path):
     (tmp_path / "records").mkdir()
     (tmp_path / "records" / "_lookup.py").write_text(
         "import os\ndef claim(p):\n    os.makedirs(p)\n", encoding="utf-8")
-    (tmp_path / "episodes").mkdir()
-    (tmp_path / "episodes" / "_episode_paths.py").write_text("X = 1\n", encoding="utf-8")
+    (tmp_path / "records" / "_episode_paths.py").write_text("X = 1\n", encoding="utf-8")
     (tmp_path / "presentation.py").write_text(
         "R = 'arms.json'\ndef f(episode_id, label):\n    return f'{episode_id}-{label}'\n",
         encoding="utf-8")

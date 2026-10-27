@@ -358,7 +358,7 @@ def test_k1_the_file_check_tells_a_clock_written_once_from_one_that_follows(spel
 
 def _role(name: str) -> tuple[Any, str]:
     """The role's definition as a run binds it, and its agent id."""
-    from defender.runtime.driver import MAIN_DEF
+    from defender.investigation.driver import MAIN_DEF
     from defender.tests.support.tenancy import _tenants1106
 
     return (MAIN_DEF, "main") if name == "main" else (
@@ -377,11 +377,11 @@ def _answers_at_the_tool_boundary(defn: Any, agent_id: str, run_dir: Path,
     from pydantic_ai.usage import UsageLimits
 
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.runtime import driver, observe
-    from defender.runtime.agent_definition import bind, effective_tools_for
+    from defender.investigation import driver, observe
+    from defender.investigation.agent_definition import bind, effective_tools_for
     from defender.execution.box_codec import BoxResult
-    from defender.runtime.providers import BuiltModel
-    from defender.runtime.run_state import RunState
+    from defender.providers import BuiltModel
+    from defender.investigation.run_state import RunState
     from defender.tests.e2e._replay_harness import Turn
     from defender.tests.sandbox.test_959_downstream import Box
 

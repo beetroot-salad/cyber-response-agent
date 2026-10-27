@@ -23,7 +23,7 @@ def is_valid_run_id(run_id: str) -> bool:
 
 
 #: The shape a session store's case (lineage) id must have to name its `.db` file. Lives here
-#: so `refuse_bad_case_id` needs no store import; `runtime.session_store` re-exports it.
+#: so `refuse_bad_case_id` needs no store import; `records.session_store` re-exports it.
 CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
@@ -89,3 +89,6 @@ def refuse_bad_case_id(case_id: object) -> None:
 def _not_case_stable(some_id: str) -> str:
     return (f"{some_id!r} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
             f"{some_id.casefold()!r}")
+
+#: A full git object id (SHA-1 or SHA-256).
+OID = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")

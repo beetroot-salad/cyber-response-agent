@@ -15,7 +15,7 @@ from defender.tests.support.runtime.engine._declared869 import _hand_tree_to_nob
 
 # THE SURFACE UNDER TEST — the roster primitive (#1035), re-exported so the suite and its
 # substrate name one symbol.
-from defender.runtime.verbs import read_roster  # noqa: F401 — re-exported to the suite
+from defender.systems.verbs import read_roster  # noqa: F401 — re-exported to the suite
 
 #: The child's exit codes. Distinct on purpose: a red run must say WHAT happened in the child,
 #: and "raised something other than the expected class" is this issue's own defect, not a

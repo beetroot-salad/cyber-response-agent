@@ -594,7 +594,7 @@ def test_p1_the_anthropic_builder_makes_one_wire_attempt(monkeypatch: pytest.Mon
 def test_p1_the_openai_compatible_builder_makes_one_wire_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     """P1: the OpenAI-compatible provider builder's client does not retry — a 503 reaches the
     fake provider exactly once (the client's own default is 3, C1)."""
-    cls = P.sym("runtime.providers.openai_compat", "OpenAICompatProvider")
+    cls = P.sym("providers.openai_compat", "OpenAICompatProvider")
     with P.FakeProvider([P.WireAnswer(503, {"error": {"message": "overloaded"}})]) as fake:
         monkeypatch.setenv("T1243_API_KEY", "k-1243")
         provider = cls(id="t1243", base_url=f"{fake.url}/v1", api_key_var="T1243_API_KEY",
@@ -608,9 +608,9 @@ def test_p1_the_openai_compatible_builder_makes_one_wire_attempt(monkeypatch: py
 @pytest.mark.parametrize("which", ["DEFAULT_MODEL", "DEFAULT_GATHER_MODEL"])
 def test_p1_the_shared_builder_retries_the_default_openai_compatible_models(
         which: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    name = P.sym("runtime.driver", which)
+    name = P.sym("investigation.driver", which)
     provider = P.providers().provider_for(name)
-    assert isinstance(provider, P.sym("runtime.providers.openai_compat", "OpenAICompatProvider")), (
+    assert isinstance(provider, P.sym("providers.openai_compat", "OpenAICompatProvider")), (
         f"{which}={name!r} is no longer an OpenAI-compatible model; this test is about that path")
     monkeypatch.setenv(provider.api_key_var, "k-1243")
     with P.RefusingProxy() as proxy:
@@ -629,7 +629,7 @@ def test_p1_the_shared_builder_retries_the_default_openai_compatible_models(
 
 def test_p1_the_retrier_recovers_an_openai_compatible_request_on_the_wire(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    cls = P.sym("runtime.providers.openai_compat", "OpenAICompatProvider")
+    cls = P.sym("providers.openai_compat", "OpenAICompatProvider")
     overloaded = P.WireAnswer(503, {"error": {"message": "overloaded"}})
     with P.FakeProvider([overloaded, overloaded, P.WireAnswer(200, P.OPENAI_OK)]) as fake:
         monkeypatch.setenv("T1243_API_KEY", "k-1243")

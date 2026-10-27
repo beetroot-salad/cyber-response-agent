@@ -80,7 +80,7 @@ def render_page(run: Run, *, update_ticket: bool = False) -> str:
     session store, but a run dir copied without its store pointer would otherwise render a
     complete-looking page for a run whose record cannot be found. It fails before a page exists.
     """
-    from defender.runtime import session_store as ss
+    from defender.records import session_store as ss
 
     ss.open_store_for_read(ss.resolve_store_path(run)).connection.close()
     return render_runtime_page(run.run_dir, update_ticket=update_ticket)
@@ -352,7 +352,7 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
 def _render_policy_denials_section(run_dir: Path) -> str:
     """Policy denials in their own section: folding them into another filtered stream is how
     they go unrendered. A real section, not an HTML comment, so scrapers see it too."""
-    from defender.runtime import observe
+    from defender.investigation import observe
 
     path = RunPaths(run_dir).policy_denials
     if not path.is_file():

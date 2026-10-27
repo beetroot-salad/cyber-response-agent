@@ -5,8 +5,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, validate_params  # noqa: E402
+from defender.systems.verb_grant import DENY_ALL  # noqa: E402
+from defender.systems.verbs import ModuleVerbRegistry, VerbContext, validate_params  # noqa: E402
 from defender.kit.verbs import model_facing_params
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -19,7 +19,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     q,
     run_gather,
 )
-from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

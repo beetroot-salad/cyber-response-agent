@@ -5,8 +5,8 @@ import json
 import os
 from pathlib import Path
 
-from defender.runtime import observe
-from defender.runtime.close_tool import (
+from defender.investigation import observe
+from defender.investigation.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_REVIEW_INCOMPLETE,
     CHALLENGED,
@@ -14,8 +14,8 @@ from defender.runtime.close_tool import (
     STANDS,
     UNREADABLE,
 )
-from defender.runtime.review import role_prompt
-from defender.runtime.review.projector import _COMPOSER_ASK
+from defender.investigation.review import role_prompt
+from defender.investigation.review.projector import _COMPOSER_ASK
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.runtime.engine import _spec923
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
@@ -101,7 +101,7 @@ class _LiveRecorder:
 
 def _live_close(tmp_path: Path, disposition: str, composer: str, companion: str):
     """The real close over the REAL production bundle (`live_review_stages`), with the agent builder swapped at..."""
-    from defender.runtime.review_roles import live_review_stages
+    from defender.investigation.review_roles import live_review_stages
 
     deps, run_dir = deps_over(tmp_path, companion)
     rec = _LiveRecorder(composer)

@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -405,7 +405,7 @@ def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, hos
 @pytest.mark.parametrize("state", ["absent", "symlink", "undecodable"])
 def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, host, via,
                                                                       state):
-    fam = mod("runtime.branch._family")
+    fam = mod("records._family")
     ep = _delta_episode(tmp_path)
     manifest = ep / LAYOUT.family
     good = manifest.read_bytes()
@@ -871,7 +871,7 @@ def test_r4_a_durable_append_into_a_missing_holding_folder_makes_nothing(tmp_pat
     pytest.param(T.fixture_world_id("b"), True, id="world-uuid"),
 ])
 def test_patch_the_minting_check_judges_the_whole_token(tmp_path, token, minted):
-    from defender.episodes._episode_paths import EpisodePaths
+    from defender.records._episode_paths import EpisodePaths
 
     paths = EpisodePaths(tmp_path)
     if minted:

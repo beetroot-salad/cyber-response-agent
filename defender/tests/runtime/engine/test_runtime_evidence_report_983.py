@@ -10,7 +10,7 @@ import datetime as dt
 import json
 
 from defender._frontmatter import split_frontmatter
-from defender.runtime import close_tool
+from defender.investigation import close_tool
 from defender.tests.support.shared.contracts import _tacit983 as scene
 from defender.tests.support.tenancy._tenants1106 import fixture_run_tenant
 
@@ -135,7 +135,7 @@ def test_runtime_evidence_consultation_lands_in_report_body():
 
 
 def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
 
     receipts = _receipts(BENIGN_DOC)
     report = close_tool.render_report(

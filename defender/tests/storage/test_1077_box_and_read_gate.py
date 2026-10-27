@@ -33,7 +33,7 @@ def worktree(tmp_path: Path) -> Path:
 def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
     """Every registered role's compiled policy — the enumeration picks the subjects."""
     from defender.agents import AGENTS
-    from defender.runtime.agent_definition import RunScope, compile_policy_for
+    from defender.investigation.agent_definition import RunScope, compile_policy_for
     from defender._agent_role import AgentRole
     from defender.tests.support.tenancy import _tenants1106
     # #1106 M4: gather binds with a RUN's grant (its definition carries none), as the driver does.
@@ -51,7 +51,7 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
 
 def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
     from defender.records import CASE_ANSWER_KEY_NAMES, RUN_LAYOUT
-    from defender.runtime import permission
+    from defender.investigation import permission
 
     owner = S.RunPaths(run_dir)
     subjects = {

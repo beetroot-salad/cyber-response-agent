@@ -15,7 +15,7 @@ runtime.
 
 The defender is **not a Claude Code plugin**. It is driven by
 `defender/run.py`, which runs the in-process PydanticAI driver
-(`runtime/driver/`) against `defender/SKILL.md`, with a gather subagent
+(`investigation/driver/`) against `defender/SKILL.md`, with a gather subagent
 dispatched per lead on a cheaper model.
 
 ## The two loops
@@ -56,7 +56,7 @@ proved out, and gates were added one at a time, each with a named reason. The
 *ordering* was the principle, not the absence of gates — so "should we add a
 gate?" is now an ordinary design question. What runs today, and why:
 
-- **The permission gate** (`runtime/permission/`) — one in-process,
+- **The permission gate** (`investigation/permission/`) — one in-process,
   deny-by-default gate over bash and file reads/writes, per agent. Not a
   reliability gate: it is what makes it safe for a model to hold a shell at
   all. See `defender/docs/runtime-gates.md`.
@@ -67,7 +67,7 @@ gate?" is now an ordinary design question. What runs today, and why:
   Claude Code hooks) and are not safety gates. See
   `content/runtime-loop.md` §Reliability gates.
 - **The write-time review gate** on every confident close
-  (`runtime/challenge_gate.py`) — the one semantic gate. A confident
+  (`investigation/challenge_gate.py`) — the one semantic gate. A confident
   disposition is the output nothing downstream re-checks in time to matter,
   and the learning loop's own signal is only as good as the dispositions it
   trains on. Scoped to the close, and fails closed. See

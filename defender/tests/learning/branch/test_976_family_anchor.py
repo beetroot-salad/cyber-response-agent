@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
@@ -28,6 +28,11 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 def _cli():
     return T.mod("learning.branch.cli")
+
+
+def _entry():
+    """The command entry, whose `main` supplies the real preflight and page renderer."""
+    return T.mod("cli.learning.branch")
 
 
 def _tenant_paths():
@@ -86,7 +91,7 @@ class Launch:
 
     def run(self, *argv_extra: str) -> int:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id.
-        self.rc = _cli().main(
+        self.rc = _entry().main(
             ["--tenant", self.src.parent.parent.name, self.src.name, str(T.BRANCH_MESSAGE_ID),
              *T.retired_continuation_argv(), *argv_extra],
             spawn=self.spawn, questioner=self.questioner, judge=self.judge,
@@ -395,7 +400,7 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
     _restamp(launch.src, dirty=True)
     stamp = _accepted(launch, "--allow-dirty")
     assert stamp["source"]["dirty"] is True
-    assert stamp["source"]["dirty_paths"] == ["defender/runtime/driver/__init__.py"]
+    assert stamp["source"]["dirty_paths"] == ["defender/investigation/driver/__init__.py"]
     assert stamp["source"]["dirty_path_count"] == 1
     assert stamp["allow_dirty"] is True
     assert stamp["agreed"]["commit"] == stamp["source"]["commit"] == "deadbee"

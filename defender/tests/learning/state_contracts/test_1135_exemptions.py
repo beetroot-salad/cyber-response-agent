@@ -23,7 +23,7 @@ from defender.records import case_ref
 from defender.learning.branch import cli as branch_cli
 from defender.learning.core import config
 from defender.learning.core.config import FatalConfigError, LoopPaths
-from defender.learning.frontend import build as frontend_build
+from defender.presentation import lessons_page as frontend_build
 from defender.learning.frontend import serialize_queues
 from defender.learning.leads import _lead_spine, pitfalls_curator
 from defender.box import _scrub as scrub_mod
@@ -361,7 +361,7 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
     assert findings == os.path.join(view["state_root"], "_pending", "findings.jsonl"), \
         f"the page's state_root {view['state_root']!r} is not the root describe names"
     assert view["state_root"] in frontend_build.render_queues(view), \
-        "frontend/build.py does not render the page's state_root"
+        "lessons_page does not render the page's state_root"
 
 
 def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default_root(

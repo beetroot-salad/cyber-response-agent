@@ -23,8 +23,8 @@ from defender.learning.leads.path_validation import (  # noqa: E402
     _is_schema_md,
     _is_system_execution_md,
 )
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import RunScope, bind  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 
 #: The draft's repo-relative skills spelling after P4 (OD6).
@@ -88,7 +88,7 @@ def _gate(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS):
 # 1. The two `SKILL.md` files that are agent system prompts.
 
 def test_the_lane_cannot_write_gathers_system_prompt(tmp_path: Path):
-    """`defender/skills/gather/SKILL.md` is not a system's skill doc — it is the whole of gather's `instructions=` (`runtime/driver._gather_instructions`), loaded on every dispatch."""
+    """`defender/skills/gather/SKILL.md` is not a system's skill doc — it is the whole of gather's `instructions=` (`investigation/driver._gather_instructions`), loaded on every dispatch."""
     admits, _ = _gate(tmp_path)
     assert not admits("gather/SKILL.md")
     assert not admits.product("gather/SKILL.md")
@@ -96,7 +96,7 @@ def test_the_lane_cannot_write_gathers_system_prompt(tmp_path: Path):
 
 
 def test_the_lane_cannot_write_the_invlang_grammar_main_is_handed(tmp_path: Path):
-    """`skills/invlang/SKILL.md` is read by `runtime/orient._invlang_grammar` and inlined verbatim into MAIN's ORIENT message, under a heading that calls it *authoritative* and tells the agent not to Read the file because it is reproduced there."""
+    """`skills/invlang/SKILL.md` is read by `investigation/orient._invlang_grammar` and inlined verbatim into MAIN's ORIENT message, under a heading that calls it *authoritative* and tells the agent not to Read the file because it is reproduced there."""
     admits, _ = _gate(tmp_path)
     assert not admits("invlang/SKILL.md")
     assert not admits.product("invlang/SKILL.md")

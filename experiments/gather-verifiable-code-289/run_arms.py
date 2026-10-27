@@ -51,7 +51,7 @@ from pydantic_ai.models.anthropic import AnthropicModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 
-from defender.runtime import driver, observe, tools  # noqa: E402
+from defender.investigation import driver, observe, tools  # noqa: E402
 from defender.hooks.inject_system_skill_description import read_description  # noqa: E402
 
 FIXTURES = _EXP_DIR / "fixtures"

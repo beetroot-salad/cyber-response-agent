@@ -6,10 +6,10 @@ from pathlib import Path, PurePosixPath
 
 
 from defender.agents import MAIN_DEF
-from defender.runtime.agent_definition import RunScope, bind
+from defender.investigation.agent_definition import RunScope, bind
 from defender.box import BoxResult
-from defender.runtime.permission.files import _decide_report_write
-from defender.runtime.tools import (
+from defender.investigation.permission.files import _decide_report_write
+from defender.investigation.tools import (
     _format_bash_result,
     _tool_bash,
     _tool_read_file,
@@ -63,21 +63,21 @@ def test_main_uses_shared_bash_after_learning_stage_bash_protection_changes(tmp_
 def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
     """A synthetic future non-runtime role registered with read+Bash inherits both framing paths
     by construction; an enum allowlist cannot satisfy this case."""
-    from defender.runtime.agent_definition import (
+    from defender.investigation.agent_definition import (
         AgentDefinition,
         ResolvedRoots,
         ToolSet,
         build_registry,
     )
     from defender._agent_role import AgentRole
-    from defender.runtime.permission.grant import (
+    from defender.investigation.permission.grant import (
         Grant,
         PathShapes,
         TREE,
         program_shape,
         under,
     )
-    from defender.runtime.tools import AgentDeps
+    from defender.investigation.tools import AgentDeps
 
     future_role = object.__new__(AgentRole)
     future_role._name_, future_role._value_ = "FUTURE", "future"

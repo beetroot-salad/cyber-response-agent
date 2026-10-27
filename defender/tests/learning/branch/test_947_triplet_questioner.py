@@ -9,7 +9,7 @@ import re
 import pytest
 import yaml
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
@@ -19,7 +19,7 @@ def _questioner():
 
 
 def _family_mod():
-    return T.mod("runtime.branch._family")
+    return T.mod("records._family")
 
 
 # registration, and everything that moves with it
@@ -29,7 +29,7 @@ def test_947_questioner_definition_grants_no_tool_and_no_verb(tmp_path):
     QUESTIONER_DEF = _questioner().QUESTIONER_DEF
     assert tuple(QUESTIONER_DEF.tools) == ()
     assert QUESTIONER_DEF.verb_grant.entries == ()
-    compile_policy_for = T.sym("runtime.permission", "compile_policy_for")
+    compile_policy_for = T.sym("investigation.permission", "compile_policy_for")
     run_dir, defender_dir = tmp_path / "run", tmp_path / "defender"
     run_dir.mkdir()
     defender_dir.mkdir()
@@ -42,7 +42,7 @@ def test_947_questioner_definition_grants_no_tool_and_no_verb(tmp_path):
 def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(tmp_path,
                                                                                 monkeypatch):
     """The role-model preflight runs at family level, before the questioner is paid for, AND again inside each sibling process — the family-level pass is..."""
-    cli = T.mod("learning.branch.cli")
+    entry = T.mod("cli.learning.branch")
     seen: list[str] = []
     base, src = location_path(T.runs_base)(tmp_path, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
@@ -51,7 +51,7 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     spawn = T.FakeSpawn()
     worlds = [T.base_world(), T.world_doc("b", facts=[]), T.world_doc("c", facts=[])]
     questioner = T.FakeAgent(T.declaration(T.family_doc(worlds=worlds)), *[T.declaration(w) for w in worlds[1:]])
-    rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+    rc = entry.main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                    *T.retired_continuation_argv()],
                   preflight=lambda model, **_kw: seen.append("family") or 0,
                   spawn=spawn, live_tree=T.source_capture(), questioner=questioner)

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.learning.branch import _triplet_947 as P
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV, current_data_root
@@ -138,7 +138,7 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
     try:
         # #1105 PR 2 (declared change 1): the request names the tenant whose location
         # `<root>/<T>/runs/<run id>` the source sits at, and the source by its id.
-        outcome = T.mod("learning.branch.cli").main(
+        outcome = T.mod("cli.learning.branch").main(
             ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID),
              *P.retired_continuation_argv()],
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
@@ -307,7 +307,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     P.source_stamp(src, tenant_id=fixture_uuid("tenant:acme"))
     spawn = SpawnRecorder()
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
-        T.mod("learning.branch.cli").main(
+        T.mod("cli.learning.branch").main(
             ["--tenant", fixture_uuid("tenant:acme"), src.name, str(P.BRANCH_MESSAGE_ID),
              *P.retired_continuation_argv()],
             spawn=spawn, questioner=questioner,

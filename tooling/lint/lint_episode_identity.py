@@ -13,7 +13,7 @@ Three rules over production source, all static (nothing is imported):
   PATH (`os.makedirs`, `os.mkdir` without `dir_fd`, `Path(...).mkdir`); it goes through a held
   root.
 * `roster-name`. The arm roster's file name is spelled only in the episode layout
-  (`episodes/_episode_paths.py`), never as a string literal elsewhere (docstrings aside).
+  (`records/_episode_paths.py`), never as a string literal elsewhere (docstrings aside).
 
 There is no baseline and no inline suppression. A file that does not parse or decode is ScanBlind
 (exit 2), never skipped.
@@ -37,7 +37,7 @@ DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 #: The arm roster's file name, and the one module that may spell it.
 ROSTER_NAME = "arms.json"
-ROSTER_OWNER = "episodes/_episode_paths.py"
+ROSTER_OWNER = "records/_episode_paths.py"
 
 #: Functions production must neither call nor pass around (C1 of the design): the stamp-label
 #: minter, the `-n<message>` episode-id deriver, the held-out folder-name matcher, and #1257's
@@ -267,7 +267,7 @@ def roster_name_spellings(root: Path) -> list[str]:
     """Find arms.json string literals outside docstrings in production source."""
     hits: list[str] = []
     for rel in _astlib.source_files(root, (".venv", "__pycache__", "node_modules", "tests")):
-        if rel == "episodes/_episode_paths.py":
+        if rel == "records/_episode_paths.py":
             continue
         _text, tree = _astlib.read_and_parse(root / rel, rel)
         with _astlib.scan_guard(rel):

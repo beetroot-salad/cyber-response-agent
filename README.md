@@ -19,7 +19,7 @@ The idea is to give the agent a structured way to identify its runtime mistakes 
 
 ## Runtime Loop
 
-A single agent — driven by the in-process PydanticAI runtime (`defender/runtime/driver/`) with `defender/SKILL.md` as its system prompt — works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
+A single agent — driven by the in-process PydanticAI runtime (`defender/investigation/driver/`) with `defender/SKILL.md` as its system prompt — works one alert through explicit phases. The common case is a few iterations of `PLAN → GATHER → ANALYZE` before `REPORT`; ANALYZE loops back to PLAN only when the next move is genuinely undecided.
 
 A **confident** close is not committed on the agent's say-so: it passes a write-time **review gate** first (hexagons are in-process LLM roles, as in the learning-loop diagram below). The gate is not a phase — the investigator never occupies it, and it can hand the close back for another loop.
 
@@ -45,7 +45,7 @@ flowchart LR
     GATE -->|gap, or the review broke| RI[["REPORT — forced inconclusive"]]
 ```
 
-Both lenses are **blind**: they read the investigation's observations (`:V`/`:E`/`:R`/`:H`/`:L`) with the belief movement (`:T`) pruned out, so they reconstruct what the evidence supports rather than agreeing with the write-up. The ablation is the support lens re-asked with one load-bearing edge withheld, which measures how much the close rests on a single edge. A review that cannot run **fails closed** — the confident disposition is recorded `inconclusive`. See `defender/runtime/challenge_gate.py` and `defender/runtime/review/`.
+Both lenses are **blind**: they read the investigation's observations (`:V`/`:E`/`:R`/`:H`/`:L`) with the belief movement (`:T`) pruned out, so they reconstruct what the evidence supports rather than agreeing with the write-up. The ablation is the support lens re-asked with one load-bearing edge withheld, which measures how much the close rests on a single edge. A review that cannot run **fails closed** — the confident disposition is recorded `inconclusive`. See `defender/investigation/challenge_gate.py` and `defender/investigation/review/`.
 
 `GATHER` is dispatched to a cheap subagent per lead (single-agent ES|QL, GLM 5.3 Flash by default); the main agent works from the summary and reads raw payloads on demand. The run emits `investigation.md` (the dense audit log, written in **invlang** — the project's structured investigation notation; see `defender/skills/invlang/`), `report.md` (disposition + one paragraph), and two live append-only tables the learning loop consumes: the leads table (`gather_raw/{lead_id}.lead.json`) and the queries table (`executed_queries.jsonl`), both written by the harness as the agent dispatches gather — no post-run projection.
 
@@ -161,7 +161,7 @@ Notes:
 
 - run dirs are created under `$DEFENDER_DATA_ROOT/<tenant>/runs/{run_id}/` (`<T>/runs`), outside the repo
 - pass `--no-learn` to skip the catalog-curation enqueue, the one automatic post-step, while iterating on the runtime loop only
-- the learning loop runs off-process and is operator-initiated: fork a finished run with `python3 defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>`, then fold the queued findings with `python3 defender/learning/loop.py --tenant <T> --author-drain` (`--lead-author-drain` serves the catalog-curation queue)
+- the learning loop runs off-process and is operator-initiated: fork a finished run with `python3 defender/cli/learning/branch.py --tenant <T> <run_id> <branch_message_id>`, then fold the queued findings with `python3 defender/learning/loop.py --tenant <T> --author-drain` (`--lead-author-drain` serves the catalog-curation queue)
 
 Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `executed_queries.jsonl`, `tool_trace.jsonl`, `runtime.html`, an `wire_logs/` directory holding the run's wire log (`llm_requests.jsonl`), and a `gather_raw/` directory of lead sidecars + per-query payloads.
 
@@ -170,7 +170,7 @@ Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `e
 A read-only posture view of the loop's current output:
 
 ```bash
-python3 defender/learning/frontend/build.py --tenant <T>
+python3 defender/cli/learning/lessons_page.py --tenant <T>
 ```
 
 Nicer reading experience.

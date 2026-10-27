@@ -23,9 +23,10 @@ from defender.tests.e2e._replay_harness import (
 )
 from defender.records import RunPaths
 from defender.agents import MAIN_DEF
-from defender.runtime import circuit_breaker, tools as runtime_tools
-from defender.runtime.agent_definition import bind
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+from defender.systems import circuit_breaker
+from defender.investigation import tools as runtime_tools
+from defender.investigation.agent_definition import bind
+from defender.investigation.lead_zero import RESERVED_LEAD_IDS
 from defender.kit.faults import TransportFault
 from defender.skills.invlang.validate import validate_companion
 
@@ -58,7 +59,7 @@ def test_request_limit_writes_partial_trace(tmp_path):
     model = NeverEndsModel(run_dir)
     result = drive(run_dir, run_id=run_id, main=model)
 
-    from defender.runtime import challenge_gate
+    from defender.investigation import challenge_gate
 
     raised_limit = challenge_gate.raised_request_limit(challenge_gate.default_bounds())
     assert model.calls == raised_limit  # #774/RS7: the ceiling is raised by the gate's cap

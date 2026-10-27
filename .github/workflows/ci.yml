@@ -549,9 +549,10 @@ jobs:
       # checked, so a waiver cannot outlive the defect it waives — which is what lets
       # this be a gate rather than a permanent red.
       #
-      # It lives in `lint` rather than `code-smells` for a dependency reason: it imports
-      # `controls` -> `elastic_adapter` -> `defender.runtime.verbs`, and only this job
-      # syncs `--extra runtime`. Run WITHOUT `--quiet` on purpose — the coverage report
+      # It lives in `lint` rather than `code-smells`: it imports `controls` ->
+      # `elastic_adapter`, and only this job syncs `--extra runtime`. (No adapter imports
+      # the runtime, so the old reason, a `runtime.verbs` import, was stale; the step
+      # stays where it is.) Run WITHOUT `--quiet` on purpose — the coverage report
       # it prints (dead control windows, zero-byte payloads, cases excluded as defective)
       # is the instrument's own limits, and a log that hides them invites a reader to
       # assume they are zero.

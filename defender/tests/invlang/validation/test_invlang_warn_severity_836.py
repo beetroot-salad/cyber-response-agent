@@ -47,7 +47,7 @@ def _diagnose(text: str, current: str | None = None) -> list:
 
 def _rendered_warning(tmp_path: Path, doc: str) -> str:
     """The warning as the MODEL sees it, taken off the accept path's own return value."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, _run = main_deps(tmp_path)
     return _tool_append_block(deps, doc)
@@ -78,7 +78,7 @@ def test_append_block_mixes_warn_and_error_defects(tmp_path):
     """One `append_block` whose text carries BOTH a warn-family row and an error-family defect is refused IN FULL and writes nothing — M2 narrows only the warn path."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     mixed = PROLOGUE + attr_block(WARN_ROW, "l-001|v-002|dept|a|b")
@@ -139,8 +139,8 @@ def test_validate_companion_drops_warnings():
 
 def test_the_write_gate_applies_the_validators_warn_severity(tmp_path):
     from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.permission.files import decide_write
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.permission.files import decide_write
 
     run = tmp_path / "run"
     run.mkdir()

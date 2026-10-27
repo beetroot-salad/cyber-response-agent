@@ -7,16 +7,16 @@ import inspect
 import pytest
 from pydantic import ValidationError
 
-from defender.runtime.circuit_breaker import (
+from defender.systems.circuit_breaker import (
     AGENT_FIXABLE_ERROR_CLASS,
     INFRA_ERROR_CLASS,
     error_class_for_exit,
 )
 from defender.knowledge import _query_rules
-from defender.runtime import record_query as rq
+from defender.investigation import record_query as rq
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.runtime.record_query import (  # noqa: E402
+from defender.investigation.record_query import (  # noqa: E402
     REJECTION_BUDGET,
     REJECTION_BUDGET_ESCAPE,
     RejectionBudgetTrip,

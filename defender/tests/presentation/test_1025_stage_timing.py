@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
-from defender.episodes._episode_paths import LAYOUT, EpisodePaths
+from defender.records._episode_handle import Episode
+from defender.records._episode_paths import LAYOUT, EpisodePaths
 
 from defender._clock import now_iso, parse_iso_utc
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -38,6 +38,11 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 def _cli():
     return T.mod("learning.branch.cli")
+
+
+def _entry():
+    """The command entry, whose `main` supplies the real preflight and page renderer."""
+    return T.mod("cli.learning.branch")
 
 
 def _tenant_paths():
@@ -170,7 +175,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     seams.setdefault("roster", est.roster())
     before = now_iso()
     # #1105 PR 2 (declared change 1): the tenant and the source run by id.
-    rc = _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+    rc = _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                       *T.retired_continuation_argv()],
                      spawn=spawn, judge=judge, oracle=oracle.model, verifier=verifier.model,
                      **seams)

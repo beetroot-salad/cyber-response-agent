@@ -32,7 +32,7 @@ def _preflight() -> Any:
 
 
 def _providers() -> Any:
-    return S.mod("runtime.providers")
+    return S.mod("providers")
 
 
 def _credentialed(monkeypatch: Any, tmp_path: Path) -> None:

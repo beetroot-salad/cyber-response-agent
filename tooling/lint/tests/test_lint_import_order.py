@@ -15,7 +15,7 @@ _GATE = load_lint_gate("lint_import_order")
 def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
     root = tmp_path / "defender"
     for rel, text in {"kit/__init__.py": "", "records/__init__.py": "",
-                      "runtime/__init__.py": "", **files}.items():
+                      "investigation/__init__.py": "", **files}.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -28,7 +28,7 @@ def _prints(found) -> list[str]:
 
 def test_downward_imports_are_clean(tmp_path):
     root = _tree(tmp_path, {
-        "runtime/engine.py": "from defender.records import store\nfrom defender.kit import faults\n",
+        "investigation/engine.py": "from defender.records import store\nfrom defender.kit import faults\n",
         "records/store.py": "from defender import _io\n",
         "_io.py": "",
         "kit/faults.py": "",
@@ -37,25 +37,63 @@ def test_downward_imports_are_clean(tmp_path):
 
 
 @pytest.mark.parametrize("src", [
-    "from defender.runtime import engine\n",
-    "def f():\n    from defender.runtime import engine\n",
-    "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from defender.runtime import engine\n",
-    "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    from defender.runtime import engine\n",
-    "import defender.runtime.engine\n",
-    "from ..runtime import engine\n",
+    "from defender.investigation import engine\n",
+    "def f():\n    from defender.investigation import engine\n",
+    "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from defender.investigation import engine\n",
+    "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n    from defender.investigation import engine\n",
+    "import defender.investigation.engine\n",
+    "from ..investigation import engine\n",
 ])
 def test_an_upward_import_is_found_however_it_is_spelled(tmp_path, src):
-    root = _tree(tmp_path, {"records/store.py": src, "runtime/engine.py": ""})
-    assert _prints(_GATE.scan(root)) == ["records/store.py:defender.runtime.engine"]
+    root = _tree(tmp_path, {"records/store.py": src, "investigation/engine.py": ""})
+    assert _prints(_GATE.scan(root)) == ["records/store.py:defender.investigation.engine"]
+
+
+def test_the_systems_package_reads_run_state_through_its_own_interface(tmp_path):
+    """#1308: `systems` sits below `investigation`, so it cannot import the run's live state (the old
+    `verbs` / `circuit_breaker` / `system_status` edges); it names the slice it needs itself."""
+    old = _tree(tmp_path / "old", {
+        "systems/__init__.py": "",
+        "systems/circuit_breaker.py": "from defender.investigation import run_state\n",
+        "investigation/run_state.py": "",
+    })
+    assert _prints(_GATE.scan(old)) == [
+        "systems/circuit_breaker.py:defender.investigation.run_state"]
+    new = _tree(tmp_path / "new", {
+        "systems/__init__.py": "",
+        "systems/_state.py": "from typing import Protocol\n",
+        "systems/circuit_breaker.py": "from defender.systems import _state\n",
+        "investigation/run_state.py": "from defender.systems import _state\n",
+    })
+    assert _GATE.scan(new) == []
+
+
+@pytest.mark.parametrize("importer, imported", [
+    ("integrations/adapter.py", "systems"),       # the adapters stay below the access rules
+    ("knowledge/rules.py", "systems"),
+    ("records/store.py", "systems"),
+    ("systems/verbs.py", "investigation"),
+    ("providers/base.py", "records"),             # the model clients sit at the bottom
+])
+def test_the_systems_and_providers_packages_sit_where_the_placement_put_them(
+        tmp_path, importer, imported):
+    package = importer.split("/")[0]
+    root = _tree(tmp_path, {
+        importer: f"from defender import {imported}\n",
+        f"{imported}/__init__.py": "",
+        f"{package}/__init__.py": "",
+    })
+    found = _GATE.scan(root)
+    assert any(f.fingerprint.startswith(f"{importer}:defender.{imported}") for f in found), found
 
 
 def test_the_fingerprint_is_the_resolved_module_not_the_package(tmp_path):
     root = _tree(tmp_path, {
-        "records/store.py": "from defender.runtime import engine, CONSTANT\n",
-        "runtime/engine.py": "",
+        "records/store.py": "from defender.investigation import engine, CONSTANT\n",
+        "investigation/engine.py": "",
     })
     assert _prints(_GATE.scan(root)) == [
-        "records/store.py:defender.runtime", "records/store.py:defender.runtime.engine"]
+        "records/store.py:defender.investigation", "records/store.py:defender.investigation.engine"]
 
 
 def test_flat_modules_are_one_node_and_entry_modules_their_own(tmp_path):
@@ -126,14 +164,14 @@ def _write_baseline(path: Path, entries: dict[str, str]) -> Path:
 
 
 def _upward(tmp_path: Path) -> Path:
-    return _tree(tmp_path, {"records/store.py": "from defender.runtime import engine\n",
-                            "runtime/engine.py": ""})
+    return _tree(tmp_path, {"records/store.py": "from defender.investigation import engine\n",
+                            "investigation/engine.py": ""})
 
 
 def test_a_listed_upward_import_with_an_owner_passes(tmp_path):
     root = _upward(tmp_path)
     baseline = _write_baseline(tmp_path / "b.json",
-                               {"records/store.py:defender.runtime.engine": "#1309 (a): why"})
+                               {"records/store.py:defender.investigation.engine": "#1309 (a): why"})
     assert _GATE.main(["--root", str(root), "--baseline", str(baseline)]) == 0
 
 
@@ -146,15 +184,15 @@ def test_an_unlisted_upward_import_fails(tmp_path):
 def test_an_entry_without_an_owner_issue_fails(tmp_path, capsys):
     root = _upward(tmp_path)
     baseline = _write_baseline(tmp_path / "b.json",
-                               {"records/store.py:defender.runtime.engine": "accepted for now"})
+                               {"records/store.py:defender.investigation.engine": "accepted for now"})
     assert _GATE.main(["--root", str(root), "--baseline", str(baseline)]) == 1
     assert "ownerless" in capsys.readouterr().out
 
 
 def test_a_stale_entry_fails(tmp_path, capsys):
-    root = _tree(tmp_path, {"runtime/engine.py": ""})
+    root = _tree(tmp_path, {"investigation/engine.py": ""})
     baseline = _write_baseline(tmp_path / "b.json",
-                               {"records/store.py:defender.runtime.engine": "#1309 (a): why"})
+                               {"records/store.py:defender.investigation.engine": "#1309 (a): why"})
     assert _GATE.main(["--root", str(root), "--baseline", str(baseline)]) == 1
     assert "stale" in capsys.readouterr().out
 

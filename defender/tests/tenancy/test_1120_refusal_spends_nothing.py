@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.learning.branch import cli as branch_cli
+from defender.cli.learning import branch as branch_entry
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
@@ -27,7 +27,7 @@ def test_the_launcher_refuses_before_its_role_preflight(tmp_path: Path, monkeypa
 
     source = root / H.TID / "runs" / T.SOURCE_RUN_ID
     try:
-        got: object = branch_cli.main(
+        got: object = branch_entry.main(
             [str(source), str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
             spawn=T.FakeSpawn(), preflight=recording_preflight)
     except SystemExit as refused:

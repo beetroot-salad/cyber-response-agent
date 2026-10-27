@@ -7,12 +7,12 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run
 import json
 
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
-from defender.runtime.payload_view import render
-from defender.runtime.record_query import _next_seq
+from defender.investigation.payload_view import render
+from defender.investigation.record_query import _next_seq
 
 
 def test_next_seq_counts_rows_not_files(tmp_path):
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     state = RunState(tmp_path, "r-next-seq")
     assert _next_seq(state, "l-001") == 0

@@ -109,22 +109,22 @@
   "link-outside, tree variable unset [\"--tags\"]": {
    "rc": 1,
    "out": "",
-   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+   "err": "<PY>: Error while finding module specification for 'defender.investigation.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "link-outside, tree variable unset []": {
    "rc": 1,
    "out": "",
-   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+   "err": "<PY>: Error while finding module specification for 'defender.investigation.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "copy-outside, tree variable unset [\"--tags\"]": {
    "rc": 1,
    "out": "",
-   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+   "err": "<PY>: Error while finding module specification for 'defender.investigation.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "copy-outside, tree variable unset []": {
    "rc": 1,
    "out": "",
-   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+   "err": "<PY>: Error while finding module specification for 'defender.investigation.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
   },
   "link-outside, tree variable set [\"--tags\"]": {
    "rc": 0,

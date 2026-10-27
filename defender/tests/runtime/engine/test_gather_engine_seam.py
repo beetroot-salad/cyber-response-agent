@@ -17,9 +17,9 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 
-from defender.runtime import tools  # noqa: E402
-from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation import tools  # noqa: E402
+from defender.investigation.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 
@@ -64,7 +64,7 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
     is the prompt-cache lane key the composition root hands the provider."""
     import asyncio
 
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
     from pydantic_ai.exceptions import ModelRetry
 
     run_dir, deps = _seam_deps(tmp_path)
@@ -112,7 +112,7 @@ class _StopAfterDispatch:
 def _with_run_state(deps: tools.AgentDeps) -> tools.AgentDeps:
     """MAIN's deps carrying the run's one `RunState` (#1235 round 2), as the driver hands them:
     an admitted dispatch's breaker screen reads it."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return replace(deps, run_state=RunState(deps.run_dir, "r-seam"))
 
@@ -131,7 +131,7 @@ def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_pat
     """#855 F-12, the reachable half."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
 
@@ -169,7 +169,7 @@ def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
     `lead_id`, whatever happened to the first attempt."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
     runs: list[str] = []
@@ -197,7 +197,7 @@ def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
 
 def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp_path):
     """#880 F-19's residue, closed at the seam rather than by two literals agreeing."""
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
     handed: list[int] = []
@@ -222,7 +222,7 @@ def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp
 
 
 def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path):
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
     prompts: list[str] = []
@@ -268,7 +268,7 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
 def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 
     from defender.hooks.record_lead import NOT_CLAIMED
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
 
@@ -291,7 +291,7 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 def test_an_overlong_lead_id_never_reaches_the_claim(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
 

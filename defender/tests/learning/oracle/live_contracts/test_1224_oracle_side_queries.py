@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from defender import _yaml
-from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
+from defender.systems.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.kit import faults
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
@@ -218,7 +218,7 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
     _base, src = S.source_run(tmp_path, est, calls=list(calls))
     before()
     spawn = S.FakeSpawn()
-    cli = S.mod(S.CLI)
+    cli = S.mod("cli.learning.branch")
     message = ""
     root = S.tenant_episodes(src.parent.parent.name)
     already = {p.name for p in root.iterdir()} if root.is_dir() else set()
@@ -600,7 +600,7 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     fields = {f.name: getattr(rt.grants, f.name) for f in dataclasses.fields(rt.grants)}
     grantless = dataclasses.replace(rt, grants=types.SimpleNamespace(**{**fields, "gather": None}))
     preflight_replay = S.sym(S.CLI, S.COINED["fn.preflight"])
-    grant_error = S.sym("runtime.verb_grant", "GrantError")
+    grant_error = S.sym("systems.verb_grant", "GrantError")
 
     # Review-3 F32 ruling (#1187 S-iso): pre-flight takes the walked view's held episode
     # (`preflight_replay(view.episode, ...)`), never a path.

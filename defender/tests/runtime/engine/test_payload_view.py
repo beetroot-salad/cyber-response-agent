@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from defender.runtime import payload_view as pv
+from defender.investigation import payload_view as pv
 
 RUN = "gather_raw/l-001/0.json"
 

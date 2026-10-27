@@ -42,7 +42,7 @@ def in_process_publish(scratch: Path | None = None,
 
     def publish(tenant_id: str, *, data_root: Any, **_kw: Any) -> str:
         from defender.learning.author.version_control import DeliveryRefused, LockBusy
-        from defender.tenancy._tenant import TenantRefused
+        from defender.records._tenant_id import TenantRefused
         from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
         root = Path(str(data_root))

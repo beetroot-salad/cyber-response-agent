@@ -17,7 +17,7 @@ whereas a bare ``X.verbs(system)`` reads the roster for validation or descriptio
 What it does not flag:
   - a module that installs a pydantic-ai capability catch-all (a ``ClassDef`` based on
     ``AbstractCapability``, or a ``wrap_tool_execute`` method): its tool bodies are guarded
-    by the hook's ``except BaseException`` one seam out (``runtime/query_tool.py``). The whole
+    by the hook's ``except BaseException`` one seam out (``investigation/query_tool.py``). The whole
     module is exempt.
   - a dispatch in a nested function is judged by its own function's ``try`` state; an outer
     ``try`` does not dynamically guard a callee.

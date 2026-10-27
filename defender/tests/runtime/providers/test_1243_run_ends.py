@@ -132,7 +132,7 @@ def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) ->
     assert main.first_at - began < stall_s, "MAIN started only after the stalled backoff finished"
     assert d.raised is None, d.raised
     assert (d.summary or {}).get("truncated_by") != P.PROVIDER_DOWN, d.summary
-    timed_out = P.sym("runtime.run_end", "TRUNCATED_BY_TIMED_OUT")
+    timed_out = P.sym("records.run_end", "TRUNCATED_BY_TIMED_OUT")
     assert location_path(P.sessions)(_store(stores)).get(P.gather_agent(L3)) == timed_out, (
         "the correlation lead cut mid-backoff is not stamped timed out")
 
@@ -192,7 +192,7 @@ def _review_run(tmp_path: Path, stages: Any, events: list[str]) -> S.Drive:
 
 
 def _assert_round_marked_incomplete(d: S.Drive) -> None:
-    for role in P.sym("runtime.challenge_gate", "REVIEW_ROLES"):
+    for role in P.sym("investigation.challenge_gate", "REVIEW_ROLES"):
         rows = P.trace_rows(d.folder, role)
         assert any(r.get("incomplete") is True for r in rows), (
             f"the {role} trace is not marked incomplete for the round the provider ended: {rows}")
@@ -207,7 +207,7 @@ def test_o3_d5_a_review_stage_down_ends_the_run_after_its_sibling_settles(tmp_pa
     support = _Lens(exc=P.provider_down_fault("review"), events=events, name="support",
                     raised=failed)
     ablation = _Lens(delay=SIBLING_HOLD_S, events=events, name="ablation", after=failed)
-    stages = P.sym("runtime.review_roles", "ReviewStages")(
+    stages = P.sym("investigation.review_roles", "ReviewStages")(
         support=support, ablation=ablation, composer=RB.stage(RB.composer_reply("holds")))
     d = _review_run(tmp_path, stages, events)
     assert support.started >= 1, "the review gate never dispatched the support lens"
@@ -232,7 +232,7 @@ def test_o3_d5_the_composer_down_ends_the_run(tmp_path: Path) -> None:
     events: list[str] = []
     composer = _Lens(exc=P.provider_down_fault("review"), events=events, name="composer")
     support, ablation = _Lens(events=events, name="support"), _Lens(events=events, name="ablation")
-    stages = P.sym("runtime.review_roles", "ReviewStages")(
+    stages = P.sym("investigation.review_roles", "ReviewStages")(
         support=support, ablation=ablation, composer=composer)
     d = _review_run(tmp_path, stages, events)
     assert support.finished >= 1, "the lenses never answered — the composer was never reached"
@@ -244,7 +244,7 @@ def test_o3_d5_the_composer_down_ends_the_run(tmp_path: Path) -> None:
 def test_o3_d5_a_review_stage_failing_otherwise_still_fails_the_review_closed(tmp_path: Path) -> None:
     stores: list = []
     support = _Lens(exc=lambda: RuntimeError("lens broke"))
-    stages = P.sym("runtime.review_roles", "ReviewStages")(
+    stages = P.sym("investigation.review_roles", "ReviewStages")(
         support=support, ablation=_Lens(), composer=RB.stage(RB.composer_reply("holds")))
     main = S.MainScript(S.closing_main_turns("inconclusive"))
     d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]}, review_stages=stages,
@@ -285,7 +285,7 @@ def test_o5_a_provider_down_run_hands_its_class_to_the_post_steps_and_renders(tm
 
 def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
 
     assert P.PROVIDER_DOWN_EXIT not in P.TAKEN_EXITS
     assert P.sym("run", "UNSERVABLE_EXIT") != P.PROVIDER_DOWN_EXIT
@@ -305,14 +305,14 @@ def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
 
 @pytest.mark.parametrize(("kill", "member"), [
     (lambda: P.sym("hooks.budget_enforcer", "BudgetKill")("run budget spent"), "TRUNCATED_BY_BUDGET"),
-    (lambda: P.sym("runtime.circuit_breaker", "RunAborted")(5, ["cmdb"]), "TRUNCATED_BY_ABORTED"),
+    (lambda: P.sym("systems.circuit_breaker", "RunAborted")(5, ["cmdb"]), "TRUNCATED_BY_ABORTED"),
 ], ids=["budget", "aborted"])
 def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: str) -> None:
     main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=kill))
     d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]})
     assert main.requests == 1, f"MAIN made {main.requests} requests; the kill is on its first"
     assert d.raised is None, d.raised
-    assert (d.summary or {}).get("truncated_by") == P.sym("runtime.run_end", member), d.summary
+    assert (d.summary or {}).get("truncated_by") == P.sym("records.run_end", member), d.summary
     assert d.rc == 0, f"a run ended {member} exited {d.rc}; only provider-down exits 4"
 
 

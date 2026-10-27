@@ -11,7 +11,7 @@ import pytest
 
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime.permission.files import build_write_allow
+from defender.investigation.permission.files import build_write_allow
 from defender.learning.core.lane_trees import DrainTrees
 from defender.tests.support.learning.core._declared870 import (
     DELETING_SHAPES,

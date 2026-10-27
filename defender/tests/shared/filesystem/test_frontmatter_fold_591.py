@@ -7,9 +7,9 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender.tests.support.shared.contracts._by_path import DEFENDER, load_module
 from evaluations.held_out import predicted_disposition
 from defender._vocab import DISPOSITION_ENUM
-from defender.runtime.verb_grant import VerbGrant
+from defender.systems.verb_grant import VerbGrant
 from defender.presentation import visualize_primitives as vp
-from defender.runtime.verbs import read_roster
+from defender.systems.verbs import read_roster
 from defender.tests.support.shared.contracts import _system_index_1256 as SI
 
 

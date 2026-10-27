@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 
 T_ID = H.VALID_ID
 X = fixture_uuid("case-x")
@@ -113,7 +113,7 @@ def test_o4_materialize_layout(tmp_path, tenant_root):
 def test_o4_run_store_location(tmp_path, tenant_root):
     run_dir = Path(_materialize(_golden_alert(tmp_path), T_ID))
     _replay(run_dir)
-    store = H.mod("runtime.session_store").resolve_store_path(_run_handle_1165(run_dir))
+    store = H.mod("records.session_store").resolve_store_path(_run_handle_1165(run_dir))
     assert store.parent == tenant_root / T_ID / "sessions", f"the store is at {store}"
     assert store.suffix == ".db"
     assert store.is_file()

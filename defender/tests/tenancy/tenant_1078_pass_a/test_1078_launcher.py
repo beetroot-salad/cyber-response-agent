@@ -62,7 +62,7 @@ def _launch_id(source_run_id: str, *, tenant_id: str = TID, **over):
     argv = ["--tenant", tenant_id, source_run_id, str(T.BRANCH_MESSAGE_ID),
             *T.retired_continuation_argv()]
     try:
-        result = H.branch_cli().main(argv, spawn=spawn, **seams)
+        result = H.branch_entry().main(argv, spawn=spawn, **seams)
     except SystemExit as refused:
         result = refused
     return result, spawn, seams["questioner"]
@@ -73,7 +73,7 @@ def _repository_refusal(root: Path, run_id: str, tenant_id: str = TID) -> BaseEx
     source `run_id` — what the launcher opens its source through and passes through verbatim
     (#1105 PR 2). The replacement for `tenant_of_run_dir`'s location refusal (F-13): a run that
     is not at `<root>/<T>/runs/<run_id>` is not T's to fork."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     from defender.records import RunId, RunRefused
 
     with pytest.raises((RunRefused, TenantRefused)) as refused:
@@ -316,7 +316,7 @@ def _accepted(root: Path):
 def _sibling_state(sib: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
     """A fresh run state for the sibling at `sib`, which seeding takes as its third argument
     (#1235 round 2, where it was the sibling's run dir)."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(sib, sib.name)
 
@@ -327,7 +327,7 @@ def test_o4_fork_store_location(tmp_path, data_root):
     base = H.runs_dir(data_root, TID)
     base.mkdir(parents=True)
     src = H.source_run(base)
-    br = H.mod("runtime.branch")
+    br = H.mod("investigation.branch")
     store = br.open_source_store(src, source_run=_run_handle_1165(src))
     try:
         as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))

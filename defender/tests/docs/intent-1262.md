@@ -84,7 +84,7 @@ claims:
   - id: C1
     kind: referential
     claim: "At the grounding base, learning authors anchor relative paths on the worktree."
-    probe: "Read runtime/agent_definition.py bind and the two learning author definitions."
+    probe: "Read investigation/agent_definition.py bind and the two learning author definitions."
     probe_kind: read
     observed: "Both author definitions set anchors_on_tree; bind selects defender_dir.parent."
     verdict: holds

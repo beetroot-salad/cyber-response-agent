@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.records import RunPaths
@@ -221,7 +221,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
     ep = _episode(tmp_path, src)
     built: list[str] = []
 
-    class Watching(T.mod("runtime.verbs").ModuleVerbRegistry):
+    class Watching(T.mod("systems.verbs").ModuleVerbRegistry):
         def __init__(self, *a, **kw):
             built.append("production")
             super().__init__(*a, **kw)

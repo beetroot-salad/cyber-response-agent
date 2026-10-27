@@ -65,13 +65,13 @@ def _routed_passing(*answers: tuple[dict, Any]) -> Any:
 
 def _closing_comment() -> dict:
     """Build the source agent’s tagged closing comment."""
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     return {"comment_id": "c-2", "author": "defender",
             "body": f"{case_ticket.agent_comment_tag(S24.SOURCE_RUN_ID)}\n{CLOSING_MARKER}"}
 
 
 def _closing_tag() -> str:
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     return case_ticket.agent_comment_tag(S24.SOURCE_RUN_ID)
 
 
@@ -170,7 +170,7 @@ def test_1255_an_answer_the_source_received_is_served_with_the_sources_own_bytes
 
     ep = S24.episode_v2(tmp_path / "branch")
     (ep / "served" / "base.jsonl").unlink()  # the episode is primed from the source, once
-    episode_cls = S24.sym("episodes._episode_handle", "Episode")
+    episode_cls = S24.sym("records._episode_handle", "Episode")
     with episode_cls.open(ep) as handle:
         S24.sym("learning.branch.capture", "prime_base")(source_dir, handle)
     reads_before = len(est.calls("idp", "query"))
@@ -325,7 +325,7 @@ def test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork
 
     ep = S24.episode_v2(tmp_path / "branch")
     (ep / "served" / "base.jsonl").unlink()  # the episode is primed from the source, once
-    with S24.sym("episodes._episode_handle", "Episode").open(ep) as handle:
+    with S24.sym("records._episode_handle", "Episode").open(ep) as handle:
         report = S24.sym("learning.branch.capture", "prime_base")(source_dir, handle)
     assert getattr(report, skip) == 1, f"fixture: the real primer did not skip it as {skip}"
     base = S24.read_jsonl(ep / "served" / "base.jsonl")
@@ -466,7 +466,7 @@ def test_1255_a_control_world_whose_oracle_cannot_serve_never_falls_back_to_a_li
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
 def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
         tmp_path: Path, label: str) -> None:
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -499,7 +499,7 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
 def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_posted(
         tmp_path: Path, label: str, post: str) -> None:
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 

@@ -36,7 +36,7 @@ soc-playground exec <bastion> curl http://…` transport and each `### Config`
 named the adapter's env vars. That is the #261 shape exactly, sitting in the
 file the orchestrator reads to route. The uniformity is also what lets gather
 be told the path unconditionally instead of probing for it
-(`runtime/tools_gather.py::_execution_surface`).
+(`investigation/tools_gather.py::_execution_surface`).
 
 ## Visibility surface — four fields
 

@@ -16,6 +16,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender.knowledge._knowledge import AGENT_REL, LESSONS
 from defender.learning.core.cli import command_line_paths
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
+from defender.records._tenant_id import TenantRefused
 
 _logger = logging.getLogger(__name__)
 
@@ -49,14 +50,13 @@ def _revert_unlocked(
     lesson_name: str, *, tenant, client, identity, issuer_config: Path | None, issuer_transport,
 ) -> int:
     from defender.learning.author import version_control as vc
-    from defender.tenancy import _tenant
 
     try:
         with vc.opened_delivery(tenant, defender_dir=_DEFENDER_DIR, client=client,
                                 identity=identity, issuer_config=issuer_config,
                                 issuer_transport=issuer_transport) as delivery:
             delivered = delivery.revert(lesson_path(lesson_name), lesson_name)
-    except (vc.DeliveryRefused, vc.ForgejoAuthError, _tenant.TenantRefused) as refused:
+    except (vc.DeliveryRefused, vc.ForgejoAuthError, TenantRefused) as refused:
         _logger.critical(f"revert of {lesson_name} refused: {refused}")
         return 2
     if delivered.status in (vc.DeliveryStatus.OPENED, vc.DeliveryStatus.OPEN):

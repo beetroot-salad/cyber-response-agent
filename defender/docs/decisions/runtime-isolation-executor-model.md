@@ -121,13 +121,13 @@ query(system, verb, query_id, params) -> payload_ref
 is not *denied* — it is *unexpressible*.
 
 **The typed surface already exists; it just points backwards.** Those four fields
-are exactly the queries-table columns (`defender/runtime/record_query.py`),
+are exactly the queries-table columns (`defender/investigation/record_query.py`),
 and today `parse_params` / `_derive_verb` **reverse-engineer** them out of a
 model-authored argv string. The change is to invert that arrow: the model supplies
 the fields, we construct the command. The reverse-engineering helpers then have no
 job. The dispatch seam exists too — `permission/command_shape.py` already
 classifies adapter vs non-adapter commands and `_capture_adapter`
-(`runtime/tools_gather.py`, re-exported from `tools.py`) already services the
+(`investigation/tools_gather.py`, re-exported from `tools.py`) already services the
 adapter stage in-process. What changes is that recognizing an adapter call stops
 being a *filter on a string the model wrote* and becomes *the only way the model
 can express the call*.

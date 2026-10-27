@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
+from defender.records._tenant_id import TenantRefused
 
 if TYPE_CHECKING:
     from defender.tenancy._tenant import Tenant
@@ -26,7 +27,7 @@ and open a PR.
 WHERE THE FINDINGS COME FROM (#922). Until the cutover this file also carried the LEARN stage
 — `loop.py <run_dir>` and `--learn-drain` — which ran a four-role pipeline over one finished
 run and appended its verdicts to the findings queue. That pipeline is deleted. Findings now
-come from a BRANCHED EPISODE: `defender/learning/branch/cli.py` forks a finished run at a
+come from a BRANCHED EPISODE: `defender/cli/learning/branch.py` forks a finished run at a
 chosen message, runs a family of worlds from it, and its judge appends the graded rows to the
 same `_pending/findings.jsonl` this drain reads. The queue and both stages below are unchanged;
 only the producer moved.
@@ -72,7 +73,7 @@ def command_line_tenant(parser: argparse.ArgumentParser, raw_tenant: str) -> Ten
 
     try:
         return _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         parser.error(str(refused))
 
 

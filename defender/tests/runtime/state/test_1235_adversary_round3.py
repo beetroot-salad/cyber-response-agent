@@ -17,12 +17,12 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
-from defender.runtime import driver, observe  # noqa: E402
-from defender.runtime.agent_definition import bind, effective_tools_for  # noqa: E402
+from defender.investigation import driver, observe  # noqa: E402
+from defender.investigation.agent_definition import bind, effective_tools_for  # noqa: E402
 from defender.execution.box_codec import BoxResult  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
-from defender.runtime.run_state import RunState  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.runtime.state._1255_view import model_path  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
@@ -130,7 +130,7 @@ def _store_down(case_id: str, run_dir: Path):  # noqa: ARG001
 @pytest.mark.parametrize("other", ["folder", "run-id"])
 def test_a_mismatched_state_is_refused_even_when_the_store_cannot_open(tmp_path, other):
     """O6."""
-    from defender.runtime import session_store
+    from defender.records import session_store
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, driver_summary, materialize
 
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='adv3-k5')

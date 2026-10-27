@@ -5,7 +5,7 @@ is a reference overview; the authoring spec is
 `defender/skills/invlang/SKILL.md`, and the dense block-tag grammar is
 `defender/docs/dense-investigation-format.md`. The structural validator
 (`skills/invlang/validate.py`) runs on every `investigation.md` write, through
-`runtime/permission/files.py`.
+`investigation/permission/files.py`.
 
 ## What it is
 

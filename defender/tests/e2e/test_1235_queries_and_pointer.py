@@ -13,9 +13,9 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime import branch  # noqa: E402
-from defender.runtime import session_store  # noqa: E402
-from defender.runtime.record_query import REJECTION_BUDGET  # noqa: E402
+from defender.investigation import branch  # noqa: E402
+from defender.records import session_store  # noqa: E402
+from defender.investigation.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN,

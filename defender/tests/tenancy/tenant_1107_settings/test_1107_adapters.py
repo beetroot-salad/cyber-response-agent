@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime import circuit_breaker
-from defender.runtime.circuit_breaker import RunAborted
+from defender.systems import circuit_breaker
+from defender.systems.circuit_breaker import RunAborted
 from defender.integrations import _stub_transport as transport
 from defender.integrations import (
     change_mgmt_adapter,
@@ -81,7 +81,7 @@ def _max_time(argv: list[str]) -> str | None:
 def _run_state(run_dir: Path):
     """A run's state over `run_dir` (#1235 round 2): the breaker lives on the run's one
     `RunState`, no longer in a table keyed by the folder."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(run_dir, "t1107")
 
@@ -476,7 +476,7 @@ def _replay(tmp_path: Path, tenant_root: Path, verbs, calls: list[tuple[str, str
 
 def _own_rows(run_dir: Path) -> list[dict]:
     from defender._io import read_jsonl_rows
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    from defender.investigation.lead_zero import RESERVED_LEAD_IDS
 
     return [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl")
             if r.get("lead_id") not in RESERVED_LEAD_IDS]

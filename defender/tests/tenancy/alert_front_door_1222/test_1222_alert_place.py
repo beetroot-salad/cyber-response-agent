@@ -825,7 +825,7 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     # #1187 (O9, declared change 5): the episode lives under its tenant, `<T>/episodes/<uuid>/`.
     ep = T.episode(tmp_path, root=planted.root / planted.tenant_id / "episodes",
                    doc=T.family_doc(source_run_dir=str(src), source_run_id=src.name))
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
     with Episode.open(ep) as episode:
         T.episode_view(episode, tenant=planted.accept()).close()
     copy = S.plant_episode_copy(ep, alert=fresh["alert"], record=S.read_record(src))
@@ -859,7 +859,7 @@ def test_p155_reap_scan_and_archive_walk_a_former_mountpoint(tmp_path):
     scrub = S.mod("box._scrub")
     scrub.scrub(d.run_dir)
     assert scrub.tree_verified(d.run_dir), "the reap scan did not verify the run folder"
-    episode_cls = S.sym("episodes._episode_handle", "Episode")
+    episode_cls = S.sym("records._episode_handle", "Episode")
     ep = T.episode(tmp_path / "archive")
     world_id = T.world_id(ep, "b")
     with episode_cls.open(ep) as episode:
@@ -956,7 +956,7 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     planted = _tenant()
     src = _branchable_source(tmp_path, planted)
     assert src.run_dir is not None
-    store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
+    store = S.sym("investigation.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
     # #1255 (D1, C7): a branch point is a MAIN response that called tools, and the arm resumes
     # with no continuation prompt — the source's third one (its `echo`), after the capture.
     point = tool_calling_responses(store)[2]

@@ -18,8 +18,8 @@ from typing import Any
 
 from defender import _yaml
 
-from defender.episodes._episode_handle import Episode as _EpisodeHandle
-from defender.episodes._episode_paths import EpisodePaths
+from defender.records._episode_handle import Episode as _EpisodeHandle
+from defender.records._episode_paths import EpisodePaths
 from defender._io import bind, write_guarded
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T

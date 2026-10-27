@@ -730,7 +730,7 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
         leads={S.L3: corr, "l-009": [S.query(system, verb, params), S.text("L9 captured.")]})
     _run_with_turns(src)
     assert src.run_dir is not None
-    store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
+    store = S.sym("investigation.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
     ss = SS.store_mod()
     path = ss.path_row_ids(store, ss.main_session_id(store))
     point = S1255.tool_calling_responses(store)[2]  # the `echo` call

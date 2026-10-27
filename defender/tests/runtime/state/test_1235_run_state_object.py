@@ -19,9 +19,9 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.hooks import budget_enforcer as be  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime import circuit_breaker as cb  # noqa: E402
-from defender.runtime.run_state import RunState  # noqa: E402
-from defender.runtime import record_query as rq  # noqa: E402
+from defender.systems import circuit_breaker as cb  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
+from defender.investigation import record_query as rq  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
 
 LEAD = "l-001"
@@ -161,8 +161,8 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
     import asyncio
     from dataclasses import replace
 
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.query_tool import QueryCapture
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.query_tool import QueryCapture
     from defender.tests.support.tenancy import _tenants1106
     from defender.tests.e2e._spec771 import DEFENDER
 

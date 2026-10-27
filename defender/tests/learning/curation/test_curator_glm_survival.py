@@ -280,7 +280,7 @@ def test_trace_per_spawn_distinct(tmp_path: Path):
     assert any("batch-C" in n for n in seen)
     assert any("batch-D" in n for n in seen)
 
-    from defender.runtime import observe
+    from defender.investigation import observe
 
     c = rd / "batch-C.7.trace.jsonl"
     d = rd / "batch-D.7.trace.jsonl"

@@ -69,7 +69,7 @@ def test_o8_corpus_is_own_runs_base(tmp_path, monkeypatch):
     run_dir, prior, _planted = _plant_corpus_layout(root)
     assert run_dir.parent == H.runs_dir(root, TENANT), f"the fresh run landed at {run_dir}"
     assert run_dir != H.runs_dir(root, TENANT) / R1
-    env = H.run_common().run_env(H.DEFENDER, run_dir)
+    env = H.box().run_env(H.DEFENDER, run_dir)
     assert Path(env["DEFENDER_RUNS_BASE"]) == H.runs_dir(root, TENANT)
     assert prior.resolve() in _corpus_paths(env["DEFENDER_RUNS_BASE"]), (
         "the prior run of the same tenant is missing from the fresh run's corpus")
@@ -84,7 +84,7 @@ def test_o8_episode_runs_absent(tmp_path, monkeypatch):
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     run_dir, prior, planted = _plant_corpus_layout(root)
-    env = H.run_common().run_env(H.DEFENDER, run_dir)
+    env = H.box().run_env(H.DEFENDER, run_dir)
     corpus_root = Path(env["DEFENDER_RUNS_BASE"]).resolve()
     assert corpus_root not in {root.resolve(), (root / TENANT).resolve(),
                                (root / TENANT / "episodes").resolve()}, (
@@ -99,7 +99,7 @@ def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     run_dir = _fresh_run(root)
-    env = H.run_common().run_env(H.DEFENDER, run_dir)
+    env = H.box().run_env(H.DEFENDER, run_dir)
     child = subprocess.run(  # noqa: S603 — the test's own interpreter
         [sys.executable, "-c",
          "import json, os; print(json.dumps({k: os.environ.get(k) for k in "
@@ -120,7 +120,7 @@ def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
     run_dir.mkdir(parents=True)
     plant_alert(run_dir)
     box = H.mod("box")
-    assert H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == \
+    assert H.box().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == \
         str(run_dir.parent)
     argv = box._create_argv("defender-r1", run_dir, H.DEFENDER, H.mod("box._spec").DEFAULT_SPEC, lane=box._run_lane_mounts(run_dir, H.DEFENDER, None)).argv
     exported = [a for a in argv if a.startswith("DEFENDER_RUNS_BASE=")]

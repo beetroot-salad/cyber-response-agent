@@ -11,7 +11,7 @@ def _load(tmp_lessons: Path):
     """A FRESH module per call. The corpus is the one the `corpus` fixture's agent root names
     (#1108 P4, O2: a lessons tool reads `$DEFENDER_AGENT_DIR/lessons` and no other corpus)."""
     assert tmp_lessons.parent.name == "agent", "fixture: the corpus sits in an agent root"
-    return load_module(DEFENDER / "runtime" / "lessons_engine" / "lessons_fm.py")
+    return load_module(DEFENDER / "investigation" / "lessons_engine" / "lessons_fm.py")
 
 
 def _write(d: Path, name: str, fm: str, body: str = "body text") -> None:

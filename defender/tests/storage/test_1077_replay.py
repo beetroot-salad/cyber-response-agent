@@ -226,7 +226,7 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     run_dir = materialize(tmp_path, GOLDEN, run_id='writerid-1077')
     drive(run_dir, run_id="writerid-1077", main=ReplayFn(_closing_turns()))
 
-    from defender.runtime.observe import POLICY_DENIAL_EVENT_TYPE
+    from defender.investigation.observe import POLICY_DENIAL_EVENT_TYPE
     rows = _read_rows(S.RunPaths(run_dir).wire_log)
     assert rows, "the replay produced no wire-log records"
     # Every AGENT-produced record: a message, a budget refusal. A policy denial is the host's

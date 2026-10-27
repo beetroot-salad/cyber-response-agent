@@ -16,7 +16,7 @@ from defender._io import ENTRY_DIR, ENTRY_FILE, Held
 from defender._tree_listing import entry_kind
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.path_validation import CATALOG_FOLDER
-from defender.runtime.verbs import body_param_for, engine_for
+from defender.systems.verbs import body_param_for, engine_for
 
 if TYPE_CHECKING:
     from defender.learning.leads.lead_extraction import ExecutedLead

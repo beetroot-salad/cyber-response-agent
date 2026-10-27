@@ -1,7 +1,6 @@
 """The tenant-scoped runs repository (#1105 PR 2, decision C) and run lookup (#1105 D2)."""
 from __future__ import annotations
 
-from defender.records._locations import DataRoot
 
 from defender.records._locations import (RunsBase, _unwrap_episodes_root, _unwrap_runs_base)
 
@@ -13,18 +12,18 @@ import json
 import stat
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Generic, TypeVar, cast
 
 from defender import _io
-from defender.episodes._episode_handle import Episode, EpisodeRefused, refuse_bad_episode_id
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_handle import Episode, refuse_bad_episode_id
+from defender.records._episode_paths import LAYOUT
 from defender.records._run_id import mint_uuid, uuid_id_fault
-from defender._shown import escaped, quoted
-from defender.tenancy._tenant import Tenant, TenantId, TenantRefused
+from defender._shown import quoted
+from defender.records._tenant_id import TenantId, TenantRefused
 from defender.records._errors import RunAbsent, RunRefused, RunUnreachable
 from defender.records._handle import Run
 from defender.records._held import (
-    RetirePlan, hold_level, listing, plan_retire, refuse_sidecar_id, require_accepted_tenant,
+    RecordTenant, RetirePlan, hold_level, listing, plan_retire, refuse_sidecar_id, require_accepted_tenant,
     require_run_id, tenant_levels, walk_from_tenant,
 )
 from defender.records._id import RunId
@@ -206,17 +205,20 @@ class RunAddress:
 # -- the repository ------------------------------------------------------------------------------
 
 
-class RunsRepository:
+_T = TypeVar("_T", bound=RecordTenant)
+
+
+class RunsRepository(Generic[_T]):
     """The runs of ONE accepted tenant, by id — built only by `Tenant.runs_repository()` (the
     constructor is gated outside the package; anything but an accepted `Tenant` is a
     `TypeError`). It holds that tenant and reads no environment; see the module docstring."""
 
-    def __init__(self, tenant: Tenant, *, io: Any = _io) -> None:
+    def __init__(self, tenant: _T, *, io: Any = _io) -> None:
         self._tenant = require_accepted_tenant(tenant)
         self._io = io
 
     @property
-    def tenant(self) -> Tenant:
+    def tenant(self) -> _T:
         """The accepted identity this repository carries, including its data-root layout."""
         return self._tenant
 
@@ -361,7 +363,7 @@ class _EpisodeWalk:
     followed — with `exclusive`, ONE mkdir that refuses any entry already there
     (`FileExistsError`), adopting nothing. A folder outside `<T>` is `ValueError`."""
 
-    def __init__(self, tenant: Tenant, io: Any) -> None:
+    def __init__(self, tenant: RecordTenant, io: Any) -> None:
         self._tenant = tenant
         self._io = io
 
@@ -441,7 +443,7 @@ class EpisodeRuns:
     `unreadable` (and then `unreadable_reason`). A context manager: leaving it closes the
     episode handle when the view opened it (an adopted handle stays its owner's to close)."""
 
-    def __init__(self, tenant: Tenant, episode_id: str, episode: Episode, *, owns: bool,
+    def __init__(self, tenant: RecordTenant, episode_id: str, episode: Episode, *, owns: bool,
                  require_roster: bool, io: Any) -> None:
         self._tenant = tenant
         self._io = io
@@ -583,7 +585,7 @@ class EpisodeRuns:
         must then exactly match this episode's validated manifest: no partial or foreign arm
         mapping can be used. Descriptive labels never participate in roster identity.
         """
-        from defender.runtime.branch._family import manifest_world_ids
+        from defender.records._family import manifest_world_ids
 
         arms = self._roster_document()
         if arms is None:
@@ -617,7 +619,7 @@ class EpisodeRuns:
         Then make `runs/` no-follow and publish the roster complete-or-absent; a crash between
         those steps leaves no roster. Labels are resolved at operator-facing boundaries.
         """
-        from defender.runtime.branch._family import manifest_world_ids
+        from defender.records._family import manifest_world_ids
 
         world_ids = builtins.list(world_ids)
         check_arm_roster_capacity(len(world_ids))
@@ -686,29 +688,3 @@ class EpisodeRuns:
             raise TenantRefused(f"the arm container {_unwrap_runs_base(self._folder)} is absent — RUNS makes it "
                                 "before the roster") from None
         return Run.under(self._folder, arm_id, io=self._io, tenant_id=self._tenant.id)
-
-
-# -- a command line's request --------------------------------------------------------------------
-
-
-def open_requested_run(data_root: DataRoot, raw_tenant: str, raw_run_id: str, *,
-                       episode_id: str | None = None) -> tuple[Tenant, Run] | str:
-    """The run a command line's `--tenant T [--episode E] <run_id>` names, beside T as accepted
-    — T accepted under `data_root` (the root its entry point resolved), then the run opened by
-    id through T's repository: `runs.open`, or with `episode_id` the episode view's `open` (an
-    arm). Neither follows a link at any level below the tenant's folder. The caller gets the
-    accepted `Tenant` too, so it never accepts T again (#1279 A4)."""
-    from defender.tenancy._tenant import requested_tenant
-
-    try:
-        tenant = requested_tenant(data_root, raw_tenant)
-        runs = tenant.runs_repository()
-        run_id = RunId.parse(raw_run_id)
-        if episode_id is None:
-            return tenant, runs.open(run_id)
-        with runs.episode(episode_id) as view:
-            return tenant, view.open(run_id)
-    except (TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
-        where = f" of episode {quoted(episode_id)}" if episode_id is not None else ""
-        return (f"run {quoted(raw_run_id)}{where} of tenant {quoted(raw_tenant)} cannot be "
-                f"opened: {escaped(refused)}")

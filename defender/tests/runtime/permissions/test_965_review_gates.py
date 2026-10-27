@@ -76,7 +76,7 @@ def test_an_id_carrying_upper_case_is_not(run_id: str) -> None:
 
 def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
     """At the MINT, where every id rule belongs"""
-    from defender.runtime.branch import _family
+    from defender.records import _family
 
     doc = {
         "label": "Alpha", "world_id": T.fixture_world_id("alpha"),
@@ -105,7 +105,7 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
 
 def test_an_episode_id_carrying_upper_case_is_refused() -> None:
     """The same rule, because the two are joined into one run id and an episode id names the one directory holding the family's capture."""
-    from defender.episodes._episode_handle import EpisodeRefused, refuse_bad_episode_id
+    from defender.records._episode_handle import EpisodeRefused, refuse_bad_episode_id
 
     with pytest.raises(EpisodeRefused):
         refuse_bad_episode_id("Ep1")

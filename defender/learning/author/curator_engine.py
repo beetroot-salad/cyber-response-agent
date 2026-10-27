@@ -19,19 +19,19 @@ from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning._pydantic_stage import run_stage
 from defender.learning._prompt import stage_user_message
-from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
+from defender import providers
+from defender.investigation.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender._agent_role import AgentRole
-from defender.runtime.driver import MakeModel
-from defender.runtime.permission import build_scoped_write_allow
-from defender.runtime.permission.grant import (
+from defender.investigation.driver import MakeModel
+from defender.investigation.permission import build_scoped_write_allow
+from defender.investigation.permission.grant import (
     TREE,
     Grant,
     PathShapes,
     program_shape,
     under,
 )
-from defender.runtime.tools import AgentDeps
+from defender.investigation.tools import AgentDeps
 from defender._model_view import MODEL_WORKSPACE
 
 AuthorError = _shared.AuthorError

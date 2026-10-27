@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime import system_status
-from defender.runtime.verb_grant import GrantError
-from defender.runtime.verbs import read_roster
+from defender.systems import system_status
+from defender.systems.verb_grant import GrantError
+from defender.systems.verbs import read_roster
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 _TABLE = """\

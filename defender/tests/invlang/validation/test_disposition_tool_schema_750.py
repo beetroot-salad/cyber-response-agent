@@ -18,13 +18,13 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._vocab import DISPOSITION_VALUES  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.runtime import challenge_gate  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.close_tool import (  # noqa: E402
+from defender.investigation import challenge_gate  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.investigation.close_tool import (  # noqa: E402
     close_investigation,
     register_close_tool,
 )
-from defender.runtime.tools import AgentDeps  # noqa: E402
+from defender.investigation.tools import AgentDeps  # noqa: E402
 from defender.tests.support.runtime.permissions._review_bundle import bundle, composer_reply  # noqa: E402
 from defender.tests.e2e._replay_harness import ToolRoster, Turn  # noqa: E402
 

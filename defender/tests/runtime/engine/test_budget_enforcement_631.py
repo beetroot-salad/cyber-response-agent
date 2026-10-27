@@ -22,7 +22,7 @@ from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize
 
 def _start(run_dir: Path, run_id: str):
     """A run's state as `run_investigation` starts it (#1235 round 2: one `RunState` per run; imported here..."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(run_dir, run_id)
 

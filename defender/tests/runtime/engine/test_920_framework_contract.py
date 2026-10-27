@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import branch  # noqa: E402
+from defender.investigation import branch  # noqa: E402
 from defender.tests.support.storage._session_store_705 import (  # noqa: E402
     complete_pair,
     text_response,

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.records import RunPaths
-from defender.runtime import orient
+from defender.investigation import orient
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 
@@ -234,10 +234,10 @@ def box_lane_env(root: Path, tmp: Path) -> dict[str, str]:
 
 
 def host_lane_env(root: Path, run_dir: Path, tmp: Path) -> dict[str, str]:
-    """The host bash lane's environment (`run_common.run_env`, the real one)."""
-    from defender import run_common
+    """The host bash lane's environment (`box_mod.run_env`, the real one)."""
+    from defender import box as box_mod
 
-    env = dict(run_common.run_env(root / "defender", run_dir, tenant_agent=agent_root(root)))
+    env = dict(box_mod.run_env(root / "defender", run_dir, tenant_agent=agent_root(root)))
     env["PATH"] = _after_bin(env["PATH"], tmp)
     env["COLUMNS"] = "80"
     env["LANG"] = "C.UTF-8"

@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from defender.runtime import case_ticket
-from defender.runtime.payload_view import LEAF_MAX_CHARS, PASSTHROUGH_MAX_BYTES_DEFAULT
+from defender.tenancy import case_ticket
+from defender.investigation.payload_view import LEAF_MAX_CHARS, PASSTHROUGH_MAX_BYTES_DEFAULT
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.runtime.engine._spec767 import (
     COMMENTS_SUFFIX,

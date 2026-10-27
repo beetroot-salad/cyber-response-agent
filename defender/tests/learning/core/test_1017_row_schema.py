@@ -16,8 +16,8 @@ from defender._io import append_jsonl, read_jsonl_rows
 from defender.records import RunPaths
 from defender.learning import lead_repository
 from defender.learning.lead_repository import QueryRow, load_queries
-from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
-from defender.runtime.record_query import (
+from defender.systems.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
+from defender.investigation.record_query import (
     QUERY_ROW_COLUMNS,
     in_rejection_domain,
     rejection_trip,
@@ -72,7 +72,7 @@ def _inherited_state(source: Path):  # noqa: ANN202 — a `RunState` (#1235: not
     """A branch sibling's run state after seeding inherited `source`'s table for `LEAD` — the
     one way a run's state holds rows it did not write (#1235 round 2)."""
     from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     sibling = source / fixture_uuid("sibling")
     sibling.mkdir()

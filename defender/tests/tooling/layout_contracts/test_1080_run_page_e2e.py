@@ -45,7 +45,7 @@ def _lesson_fixture(tmp_path: Path):
 
 
 def _site_lessons_push(tmp_path: Path) -> Callable[[], dict[str, Any]]:
-    from defender.runtime import lessons_push
+    from defender.investigation import lessons_push
 
     deps, doc = _lesson_fixture(tmp_path / "site-push")
 
@@ -59,7 +59,7 @@ def _site_lessons_push(tmp_path: Path) -> Callable[[], dict[str, Any]]:
 
 
 def _site_document_tool(tmp_path: Path) -> Callable[[], dict[str, Any]]:
-    from defender.runtime.tools import _frontier_recall
+    from defender.investigation.tools import _frontier_recall
 
     deps, doc = _lesson_fixture(tmp_path / "site-document")
 

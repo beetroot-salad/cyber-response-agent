@@ -23,14 +23,14 @@ from defender.tests.e2e._replay_harness import (
 )
 from defender._io import read_jsonl_rows
 from defender.records import RunPaths
-from defender.runtime import permission, tools as runtime_tools
-from defender.runtime.agent_definition import compile_policy_for
-from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF
+from defender.investigation import permission, tools as runtime_tools
+from defender.investigation.agent_definition import compile_policy_for
+from defender.investigation.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
+from defender.investigation.driver import GATHER_DEF, MAIN_DEF
 from defender.tests.support.tenancy import _tenants1106
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS
-from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX
-from defender.runtime.run_end import sidecar_path
+from defender.investigation.lead_zero import RESERVED_LEAD_IDS
+from defender.investigation.review_roles import REVIEW_AGENT_ID_PREFIX
+from defender.records.run_end import sidecar_path
 from defender.skills.invlang.validate import validate_companion
 from defender.tests.support.runtime.permissions import _review_bundle
 

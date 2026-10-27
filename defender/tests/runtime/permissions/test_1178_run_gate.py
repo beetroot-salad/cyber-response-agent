@@ -24,7 +24,7 @@ from defender.learning.author.shared import AuthorError
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender import box as box_mod
-from defender.runtime.agent_definition import bind
+from defender.investigation.agent_definition import bind
 from defender.box import AliasBanNotInForce, BoxFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.sandbox import _box1195 as X
