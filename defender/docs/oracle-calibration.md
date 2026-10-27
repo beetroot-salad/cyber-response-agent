@@ -455,7 +455,7 @@ number.
 Two more traps that are not the environment's fault:
 
 - A **zero-byte** `hidden/observed/**.json` is an **errored** query, not an empty
-  result (`runtime/query_tool.py` writes `""` on non-zero exit). The hidden tree does not
+  result (`investigation/query_tool.py` writes `""` on non-zero exit). The hidden tree does not
   carry the `payload_status` that says so — check the source run's
   `executed_queries.jsonl`.
 - The oracle never receives a **schema exemplar** in this environment:

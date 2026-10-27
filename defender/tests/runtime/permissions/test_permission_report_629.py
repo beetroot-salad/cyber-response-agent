@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from defender._frontmatter import split_frontmatter
-from defender.runtime import permission
+from defender.investigation import permission
 
 # The resolved bounds (70-resolutions.md), all UTF-8 bytes.
 FM_BOUND = 512

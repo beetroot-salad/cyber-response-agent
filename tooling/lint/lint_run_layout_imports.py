@@ -82,33 +82,34 @@ _VE = "presentation/visualize_episode.py"
 #: module in no row gets no exemption.
 CATEGORIES: Mapping[str, Sequence[str]] = {
     # And every file of the runs repository (`_astlib.run_repository_files`, `_row_of`).
-    "owners": ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py"),
+    "owners": ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py"),
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
         "hooks/record_lead.py",
-        "runtime/close_tool.py",
-        "runtime/driver/__init__.py", "runtime/driver/_build.py",
-        "runtime/lead_zero/__init__.py", "runtime/lead_zero/_capture.py", "runtime/observe.py",
-        "runtime/permission/files.py", "runtime/permission/policies/_common.py",
-        "runtime/run_end.py", "box/_scrub.py", "runtime/session_store/_write.py",
-        "runtime/tools/_document.py", "runtime/tools/_files.py",
-        "runtime/toon_gate.py", "box/_lifecycle.py",
-        "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
-        "runtime/branch/_spec.py",
-        "runtime/record_query.py", "skills/invlang/corpus.py",
+        "investigation/close_tool.py",
+        "investigation/driver/__init__.py", "investigation/driver/_build.py",
+        "investigation/lead_zero/__init__.py", "investigation/lead_zero/_capture.py", "investigation/observe.py",
+        "investigation/permission/files.py", "investigation/permission/policies/_common.py",
+        "records/run_end.py", "box/_scrub.py", "records/session_store/_write.py",
+        "investigation/tools/_document.py", "investigation/tools/_files.py",
+        "investigation/toon_gate.py", "box/_lifecycle.py", "box/_host_env.py",
+        "investigation/branch/__init__.py", "investigation/branch/_frontier.py", "investigation/branch/_seed.py",
+        "records/_seeded.py",
+        "investigation/branch/_spec.py",
+        "investigation/record_query.py", "skills/invlang/corpus.py",
         # #1105 PR 2 (row 26): `infra_env` takes `DEFENDER_RUNS_BASE` from the run folder's
         # own hand-out (`RunPaths.runs_base_export`).
         "box/_docker.py",
     ),
     # A `/` join onto a layout value here is `lint_run_records` arm (b)'s finding, not this one.
     "names-only": (
-        "records/_report.py", "records/_artifact_schema.py", "runtime/compaction.py", "learning/branch/seams.py",
+        "records/_report.py", "records/_artifact_schema.py", "investigation/compaction.py", "learning/branch/seams.py",
         # F-09 (#1105 PR 2): learning/judge/render.py left this row (J3 took its last name).
         "learning/judge/__init__.py",
         "learning/core/config.py",
-        "runtime/workspace_map.py", "api/demo.py",
+        "investigation/workspace_map.py", "api/demo.py",
     ),
-    "run-lifecycle": ("run.py", "run_common.py", "runtime/ticket_writer.py"),
+    "run-lifecycle": ("run.py", "run_common.py", "investigation/ticket_writer.py"),
     "path-taking-readers": (
         "learning/lead_repository.py", "presentation/visualize_run.py",
         "presentation/visualize_runtime.py", "presentation/visualize_messages.py",
@@ -143,9 +144,9 @@ ALLOW_LIST: Sequence[tuple[str, str, str, int]] = ()
 
 
 #: Owner classes and their gated members, by canonical origin.
-_EPISODE = "defender.episodes._episode_handle.Episode"
-_EPISODE_PATHS = "defender.episodes._episode_paths.EpisodePaths"
-_EPISODE_LAYOUT = "defender.episodes._episode_paths.EpisodeLayout"
+_EPISODE = "defender.records._episode_handle.Episode"
+_EPISODE_PATHS = "defender.records._episode_paths.EpisodePaths"
+_EPISODE_LAYOUT = "defender.records._episode_paths.EpisodeLayout"
 _TENANT = "defender.tenancy._tenant.Tenant"
 _RUN = f"{_DOOR}.Run"
 _ARCHIVED = f"{_DOOR}.ArchivedWorld"
@@ -164,7 +165,7 @@ _GATED_MEMBERS: dict[str, frozenset[str]] = {
 _CONSTRUCTORS = frozenset({_RUN, _ARCHIVED, _REPOSITORY, _EPISODE_VIEW})
 _RUNS_DIRNAME = "RUNS_DIRNAME"
 #: Star imports of these modules bind gated names wholesale.
-_STAR_SOURCES = frozenset({_DOOR, "defender.episodes._episode_paths", "defender.episodes._episode_handle",
+_STAR_SOURCES = frozenset({_DOOR, "defender.records._episode_paths", "defender.records._episode_handle",
                            "defender.tenancy._tenant"})
 
 _OPTIONAL = frozenset({"Optional"})

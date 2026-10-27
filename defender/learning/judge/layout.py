@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple, TypeVar
 
-from defender.episodes._episode_paths import WORLD_LEAVES
+from defender.records._episode_paths import WORLD_LEAVES
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import host_heading, stage_user_message
 from defender.learning.branch.ledger import ORACLE, normalized_source

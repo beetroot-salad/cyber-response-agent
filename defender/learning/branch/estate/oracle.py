@@ -20,7 +20,7 @@ from defender.learning.core.config import (
     OracleSettings,
     oracle_settings,
 )
-from defender.runtime.agent_definition import AgentDefinition
+from defender.investigation.agent_definition import AgentDefinition
 from defender._agent_role import AgentRole
 from defender.execution.bash_exec import Pipeline, Stage
 from defender.box._oracle import (
@@ -28,7 +28,7 @@ from defender.box._oracle import (
     start_oracle_box,
     start_process_oracle_box,
 )
-from defender.runtime.verbs import ServingAbort
+from defender.systems.verbs import ServingAbort
 
 from .checks import (
     Checked,

@@ -19,10 +19,10 @@ from defender._io import (  # noqa: E402
     read_jsonl_rows,
 )
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime import session_store  # noqa: E402
-from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.records import session_store  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.knowledge import _query_rules  # noqa: E402
-from defender.runtime import record_query as rq  # noqa: E402
+from defender.investigation import record_query as rq  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     DONE,
     LEAD,

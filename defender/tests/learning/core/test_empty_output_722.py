@@ -25,8 +25,8 @@ from defender.learning._pydantic_stage import (  # noqa: E402
 )
 from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
-from defender.runtime import observe  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.investigation import observe  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
 

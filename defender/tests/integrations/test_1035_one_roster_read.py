@@ -1,4 +1,4 @@
-"""#1035 — one roster read: `runtime.verbs.read_roster`, and the four readers that consume it."""
+"""#1035 — one roster read: `systems.verbs.read_roster`, and the four readers that consume it."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -18,10 +18,10 @@ from defender.learning.core.config import LoopPaths
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime import verbs
-from defender.runtime.verb_grant import DENY_ALL
-from defender.runtime.verb_roster import RosterError, audit_read_surfaces
-from defender.runtime.verbs import ModuleVerbRegistry, RegistryError
+from defender.systems import verbs
+from defender.systems.verb_grant import DENY_ALL
+from defender.systems.verb_roster import RosterError, audit_read_surfaces
+from defender.systems.verbs import ModuleVerbRegistry, RegistryError
 from defender.skills.invlang.validate import _gating
 from defender.tests.support.runtime.engine._declared869 import (
     ADAPTER_BODY,
@@ -318,7 +318,7 @@ def test_the_nothing_to_try_gate_never_answers_without_a_held_roster(tmp_path):
 
 def _run_start():
     pytest.importorskip("pydantic_ai")
-    from defender.runtime.driver import _adapters_at_run_start
+    from defender.investigation.driver import _adapters_at_run_start
 
     return _adapters_at_run_start
 
@@ -565,7 +565,7 @@ def test_an_adapter_that_does_not_parse_is_recorded_on_the_roster_not_raised_or_
         assert roster.declared_verbs(name) == frozenset()
         assert "SyntaxError" in roster.unparsed[name], roster.unparsed[name]
 
-    from defender.runtime.verb_grant import GrantError, VerbGrant
+    from defender.systems.verb_grant import GrantError, VerbGrant
 
     with pytest.raises(GrantError) as exc:
         ModuleVerbRegistry(roster, VerbGrant(role="gather", entries=(("latin", "query", "r"),)))

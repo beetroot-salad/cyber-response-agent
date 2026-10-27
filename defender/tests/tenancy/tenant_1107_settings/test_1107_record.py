@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime import run_tenant
+from defender.systems import run_tenant
 from defender.integrations import _stub_transport as transport
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant

@@ -58,7 +58,7 @@ def tenants() -> Any:
 
 def run_grants(settings_dir: Path) -> Any:
     """The per-run grants projected from `settings_dir`'s table (M4)."""
-    return mod("runtime.verb_dispositions").run_grants(Path(settings_dir))
+    return mod("systems.verb_dispositions").run_grants(Path(settings_dir))
 
 
 def fixture_tenant(tenant_id: str | None = None) -> Any:
@@ -86,7 +86,7 @@ def fixture_gather_def() -> Any:
     After M4 the definition carries NO table-projected grant (it would be one fixed per
     process), and `compile_policy` refuses a verb-bearing tool bit over an empty grant (K4). A
     suite that binds gather therefore binds it with a RUN's grant, exactly as the driver does."""
-    gather_def = mod("runtime.driver").GATHER_DEF
+    gather_def = mod("investigation.driver").GATHER_DEF
     return dataclasses.replace(gather_def, verb_grant=fixture_grants().gather)
 
 
@@ -119,7 +119,7 @@ def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
     there is no pre-P4 fallback (OD13). `defender_dir` is kept only so existing callers keep
     their call shape; the catalog no longer comes from it (O1: the checkout holds none)."""
     del defender_dir
-    rt = mod("runtime.run_tenant")
+    rt = mod("systems.run_tenant")
     root = Path(agent_root) if agent_root is not None else Path(tenant.agent)
     settings = Path(settings_root) if settings_root is not None else Path(tenant.settings)
     ready = rt.resolve_run_tenant(
@@ -148,7 +148,7 @@ def verb_context(defender_dir: Path, run_dir: Path, env: Any, *,
         else:
             knowledge = Path(settings_dir).parent
             tenant = run_tenant(accept(knowledge.parent.parent, knowledge.parent.name))
-    return mod("runtime.verbs").VerbContext(
+    return mod("systems.verbs").VerbContext(
         defender_dir=Path(defender_dir), run_dir=Path(run_dir), env=env, tenant=tenant, **kw)
 
 

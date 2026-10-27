@@ -1,8 +1,8 @@
-"""Integration tests for the compaction glue that survives in runtime/driver.py."""
+"""Integration tests for the compaction glue that survives in investigation/driver.py."""
 
 from __future__ import annotations
 
-from defender.runtime import driver
+from defender.investigation import driver
 
 
 def test_summary_pointers_lists_persisted_summaries(tmp_path):

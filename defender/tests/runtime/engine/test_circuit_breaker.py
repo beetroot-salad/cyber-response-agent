@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.runtime import circuit_breaker as cb
+from defender.systems import circuit_breaker as cb
 
 
 @pytest.mark.parametrize(("exit_code", "counts"), [
@@ -19,7 +19,7 @@ def test_is_infra_failure_keys_on_exit_code_only(exit_code, counts):
 
 def _state(run_dir):
     """A run's state (#1235 round 2): the breaker lives on the run's one `RunState`."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(run_dir, "run-cb")
 
@@ -89,8 +89,8 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
 
 
 def test_the_breakers_causes_are_reachability_not_configuration(tmp_path):
-    from defender.runtime.case_ticket import ESCALATION_COMMENT_BODY
-    from defender.runtime.lead_zero import (
+    from defender.tenancy.case_ticket import ESCALATION_COMMENT_BODY
+    from defender.investigation.lead_zero import (
         ENDING_TRIPPED_BREAKER,
         CorrelationOutcome,
         render_correlation_section,

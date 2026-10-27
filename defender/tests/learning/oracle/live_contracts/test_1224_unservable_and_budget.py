@@ -211,7 +211,7 @@ def _sibling_episode(tmp_path: Path, monkeypatch: Any, est: S.Estate) -> Path:
     """A v2 episode whose source is a finished run on the fixture tenant (a sibling resumes
     from it). Called BEFORE a scenario scripts its own answers: the source run answers the
     default captured calls."""
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
 
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     _base, src = S.source_run(tmp_path, est)

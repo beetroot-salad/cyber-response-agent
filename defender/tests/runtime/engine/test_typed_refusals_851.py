@@ -13,10 +13,10 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.runtime import orient, permission  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.investigation import orient, permission  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.box import BoxResult  # noqa: E402
-from defender.runtime.tools import _tool_bash, _tool_edit_file, _tool_write_file  # noqa: E402
+from defender.investigation.tools import _tool_bash, _tool_edit_file, _tool_write_file  # noqa: E402
 
 from defender.tests.support.learning.curation._curator_691_harness import (  # noqa: E402
     corpus as corpus_dir,
@@ -77,7 +77,7 @@ def test_f10_a_nul_in_an_opens_nothing_argv_is_denied_by_the_gate(command, tmp_p
 def test_f10_the_cat_lane_still_denies_a_nul_operand(tmp_path):
     """Regression guard on the one lane that already refused (`test_grant_gate_575.py`'s a9):
     the new whole-string check must not have moved that deny somewhere it can be lost."""
-    from defender.runtime.permission import bash as bash_gate
+    from defender.investigation.permission import bash as bash_gate
 
     deps, run, _box = _box_scene(tmp_path, MAIN_DEF)
     command = "cat inv\x00.md"

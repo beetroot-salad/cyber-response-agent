@@ -6,7 +6,7 @@ from defender._git import GitError
 from defender.learning.core.config import FatalConfigError, StageAbort
 from defender.learning.core.state import StateRefused
 from defender import box as box_mod
-from defender.runtime.verbs import RegistryError
+from defender.systems.verbs import RegistryError
 
 
 # Faults no single item caused, which must never be dead-lettered as one item's failure.

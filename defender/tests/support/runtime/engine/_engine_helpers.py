@@ -4,7 +4,7 @@ from __future__ import annotations
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
-from defender.runtime.providers import BuiltModel
+from defender.providers import BuiltModel
 
 
 def fake_model(fn):
@@ -83,7 +83,7 @@ def assert_stage_tools(deps_cls, *, label: str, effort: str, expected: list[str]
 
     from defender.learning.core.config import StageWiring
     from defender.learning import _pydantic_stage
-    from defender.runtime import observe
+    from defender.investigation import observe
 
     logger = observe.RequestLogger(Path(f"/tmp/does-not-need-to-exist-{label}-tools.jsonl"))
     try:

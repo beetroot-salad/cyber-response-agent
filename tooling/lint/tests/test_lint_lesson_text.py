@@ -32,7 +32,7 @@ def test_raw_reads_are_fm_anywhere_and_raw_or_body_on_a_lesson(src, want):
 def test_the_shipped_tree_is_clean_and_the_loader_is_exempt():
     """Positive control for the scan: today's tree has raw reads, every one annotated."""
     assert _GATE.OWNER == "defender/knowledge/_corpus.py"
-    frontier = _GATE.DEFENDER / "runtime" / "lessons_engine" / "lessons_frontier.py"
+    frontier = _GATE.DEFENDER / "investigation" / "lessons_engine" / "lessons_frontier.py"
     reads = _GATE.raw_reads(ast.parse(frontier.read_text(encoding="utf-8")))
     assert [n.attr for n in reads] == ["fm", "frontmatter"], "control: the scan sees the annotated reads"
     assert _GATE._scan() == []

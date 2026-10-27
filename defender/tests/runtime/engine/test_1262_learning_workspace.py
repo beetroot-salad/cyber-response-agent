@@ -10,11 +10,12 @@ from pydantic_ai.exceptions import ModelRetry
 from defender.box import BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender.box._lifecycle import _host_fallback_env, _render_argv
 from defender.box._spec import _HostTransport
+from defender.investigation.permission.grant import path_operands
 from defender.learning.author.curator_engine import CuratorDeps, SHIPPED_LESSON_CORPORA
-from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
+from defender.investigation.agent_definition import AgentDefinition, RunScope, ToolSet, bind
 from defender._agent_role import AgentRole
 from defender._model_view import ModelView
-from defender.runtime.tools import AgentDeps, _tool_bash, _tool_edit_file, _tool_read_file, _tool_write_file
+from defender.investigation.tools import AgentDeps, _tool_bash, _tool_edit_file, _tool_read_file, _tool_write_file
 from defender.tests.support.runtime.engine._engine_helpers import fake_model, replay_once
 
 
@@ -24,7 +25,7 @@ def _curator(base: Path):
     for name in SHIPPED_LESSON_CORPORA:
         (repo / "defender" / name).mkdir(parents=True)
     view = ModelView.for_learning(run, repo)
-    executor = BoxExecutor(transport=_HostTransport({}, view))
+    executor = BoxExecutor(transport=_HostTransport({}, view, path_operands))
     return CuratorDeps.for_run(run, repo, repo / "defender/lessons", box=executor)
 
 

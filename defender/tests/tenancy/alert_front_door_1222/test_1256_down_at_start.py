@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from defender._paths import adapters_under
-from defender.runtime.verbs import read_roster
+from defender.systems.verbs import read_roster
 from defender.cli import policy_cli
 from defender.cli import tenant as tenant_py
 from defender.tests.support.tenancy import _tenants1106 as T6
@@ -118,7 +118,7 @@ def _assert_names_not_configured(d: S.Drive, control: S.Drive, what: str,
 
 def test_o6_down_at_start_has_its_own_ending_constant() -> None:
     """The lead-zero vocabulary carries ONE new ending for a system down at run start, distinct from every ending A2 already lists (it is neither 'tripped breaker' nor 'every call failed')."""
-    spec = importlib.import_module("defender.runtime.lead_zero._spec")
+    spec = importlib.import_module("defender.investigation.lead_zero._spec")
     others = {name: value for name, value in vars(spec).items()
               if name.startswith("ENDING_") and name != ENDING_NAME}
     assert {"ENDING_TRIPPED_BREAKER", "ENDING_EVERY_CALL_FAILED", "ENDING_WITHHELD"} <= set(

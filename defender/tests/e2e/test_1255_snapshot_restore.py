@@ -12,14 +12,14 @@ pytest.importorskip("pydantic_ai")
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime import challenge_gate  # noqa: E402
-from defender.runtime import session_store  # noqa: E402
-from defender.runtime.close_tool import (  # noqa: E402
+from defender.investigation import challenge_gate  # noqa: E402
+from defender.records import session_store  # noqa: E402
+from defender.investigation.close_tool import (  # noqa: E402
     CAUSE_NOTHING_LEFT_TO_ASK,
     CAUSE_TURN_BUDGET_SPENT,
 )
-from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import VerbRegistry  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import VerbRegistry  # noqa: E402
 from defender.kit.faults import TransportFault  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.runtime.permissions import _review_bundle
@@ -188,7 +188,7 @@ BREAKER_SCRIPT = (S.append(CHUNKS[0]), S.dispatch("l-001"), S.echo("after"), S.d
 
 
 def test_d2_the_circuit_breaker_is_restored(tmp_path):
-    from defender.runtime import circuit_breaker
+    from defender.systems import circuit_breaker
 
     failed = Turn(text="the backend did not answer")
     source = S.drive_source(tmp_path, BREAKER_SCRIPT,

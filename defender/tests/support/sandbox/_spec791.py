@@ -154,7 +154,7 @@ def satisfy_entrypoint_keys(monkeypatch, tmp_path: Path) -> None:
     Every provider's var is set before the preflight runs, so the key the preflight sources
     out of the repo's `.env` into `os.environ` is restored at teardown rather than leaking
     into the rest of the session (setenv, the sanctioned env seam — never setattr)."""
-    from defender.runtime import providers
+    from defender import providers
 
     for var in providers.api_key_vars():
         monkeypatch.setenv(var, "spec791-not-used")

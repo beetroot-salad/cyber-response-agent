@@ -25,13 +25,13 @@ from defender.agents import (  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CuratorDeps,
 )
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import (  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import (  # noqa: E402
     RunScope,
     bind,
     compile_policy_for,
 )
-from defender.runtime.permission import (  # noqa: E402
+from defender.investigation.permission import (  # noqa: E402
     OPENS_NOTHING,
     PROGRAMS,
     Grant,

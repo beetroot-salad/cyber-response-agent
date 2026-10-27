@@ -1,8 +1,8 @@
-"""Unit tests for the pure per-loop compaction core (runtime/compaction.py)."""
+"""Unit tests for the pure per-loop compaction core (investigation/compaction.py)."""
 
 from __future__ import annotations
 
-from defender.runtime import compaction as C
+from defender.investigation import compaction as C
 
 
 _LH = ":L findings [id|loop|name|target|tests|system|window]"

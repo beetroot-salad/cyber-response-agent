@@ -14,7 +14,7 @@ NAME_LITERAL = "executed_queries.jsonl"
 def test_gate_flags_a_record_name_literal_outside_the_owners(tmp_path: Path):
     """A record name spelled as a string constant, an f-string piece or a glob argument outside
     the owner modules is reported as a finding."""
-    found = S.gate_findings(tmp_path, "runtime/spells.py", f'''
+    found = S.gate_findings(tmp_path, "investigation/spells.py", f'''
 from pathlib import Path
 
 def constant(run_dir: Path) -> Path:
@@ -53,12 +53,12 @@ def test_gate_admits_a_quoted_name_only_under_an_inline_suppression(tmp_path: Pa
     """A record name quoted inside a message string is reported unless the line carries the
     inline `# lint-…: ok — reason` suppression."""
     unsuppressed = S.gate_findings(
-        tmp_path / "a", "runtime/msg.py",
+        tmp_path / "a", "investigation/msg.py",
         f'def explain():\n    raise ValueError("no {NAME_LITERAL} here")\n')
     assert unsuppressed, "a name quoted in a message is a finding without the escape"
 
     suppressed = S.gate_findings(
-        tmp_path / "b", "runtime/msg.py",
+        tmp_path / "b", "investigation/msg.py",
         f'def explain():\n'
         f'    raise ValueError("no {NAME_LITERAL} here")'
         f'  # lint-run-records: ok — a diagnostic naming the record for the operator\n')
@@ -70,7 +70,7 @@ def test_gate_admits_a_quoted_name_only_under_an_inline_suppression(tmp_path: Pa
 def test_gate_suppression_comment_missing_reason(tmp_path: Path):
     for comment in ("# lint-run-records: ok", "# lint-run-records: ok —", "# lint-run-records:"):
         found = S.gate_findings(
-            tmp_path / comment.replace(" ", "_").replace(":", ""), "runtime/msg.py",
+            tmp_path / comment.replace(" ", "_").replace(":", ""), "investigation/msg.py",
             f'def explain():\n    raise ValueError("no {NAME_LITERAL}")  {comment}\n')
         assert found, (
             f"{comment!r} carries the marker with no reason after it and must not suppress; "
@@ -78,14 +78,14 @@ def test_gate_suppression_comment_missing_reason(tmp_path: Path):
             "diagnostic is demanded (§7 non-material item 6)")
     # Positive control: the well-formed suppression still admits the line (demand d5).
     ok = S.gate_findings(
-        tmp_path / "wellformed", "runtime/msg.py",
+        tmp_path / "wellformed", "investigation/msg.py",
         f'def explain():\n    raise ValueError("no {NAME_LITERAL}")'
         f'  # lint-run-records: ok — the operator needs the name\n')
     assert ok == []
 
 
 def test_a_record_name_that_reaches_a_path_without_ever_being_a_literal(tmp_path: Path):
-    found = S.gate_findings(tmp_path / "nonliteral", "runtime/indirect.py", '''
+    found = S.gate_findings(tmp_path / "nonliteral", "investigation/indirect.py", '''
 import os
 from pathlib import Path
 
@@ -105,7 +105,7 @@ def from_a_data_file(run_dir: Path, names: list[str]) -> Path:
         f"the gate reported a non-literal composition it is structurally blind to: "
         f"{S.displays(found)} — claiming coverage it does not have is worse than the gap")
     literal = S.gate_findings(
-        tmp_path / "literal", "runtime/direct.py",
+        tmp_path / "literal", "investigation/direct.py",
         f'def f(d):\n    return d / "{NAME_LITERAL}"\n')
     assert literal, "positive control: a name that IS a literal is reported"
 
@@ -115,7 +115,7 @@ def from_a_data_file(run_dir: Path, names: list[str]) -> Path:
 def test_gate_flags_a_literal_free_join_onto_an_owner_derived_value(tmp_path: Path):
     """A join onto a value the accessor pass traced back to an owner —
     `RunPaths(run_dir).gather_raw / lead_id` — is reported even though it carries no literal."""
-    found = S.gate_findings(tmp_path, "runtime/record_query.py", '''
+    found = S.gate_findings(tmp_path, "investigation/record_query.py", '''
 from pathlib import Path
 
 from defender.records import RunPaths
@@ -167,8 +167,8 @@ def from_an_unannotated_parameter(p) -> object:
 def test_the_gate_reports_a_finding_for_a_source_file_it_cannot_parse(tmp_path: Path):
     """A swept Python file the gate cannot parse is reported as a finding, never skipped and
     never a crash of the whole sweep."""
-    S.plant(tmp_path, "runtime/broken.py", "def f(:\n    pass\n")
-    S.plant(tmp_path, "runtime/spells.py", f'def g(d):\n    return d / "{NAME_LITERAL}"\n')
+    S.plant(tmp_path, "investigation/broken.py", "def f(:\n    pass\n")
+    S.plant(tmp_path, "investigation/spells.py", f'def g(d):\n    return d / "{NAME_LITERAL}"\n')
     found = S.gate_findings(tmp_path)
     displays = S.displays(found)
     assert "broken.py" in displays, (

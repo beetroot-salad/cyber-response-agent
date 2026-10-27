@@ -13,16 +13,17 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  # noqa: E402
 
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
-from defender.runtime import circuit_breaker, tools_gather  # noqa: E402
-from defender.runtime import session_store  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.tools_gather import GatherRequest  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
+from defender.investigation import tools_gather  # noqa: E402
+from defender.records import session_store  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.investigation.tools_gather import GatherRequest  # noqa: E402
 from defender.kit.faults import UpstreamFault  # noqa: E402
-from defender.runtime.tools import DeadEnd  # noqa: E402
-from defender.runtime.record_query import REPEAT_THRESHOLD  # noqa: E402
+from defender.investigation.tools import DeadEnd  # noqa: E402
+from defender.investigation.record_query import REPEAT_THRESHOLD  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -64,7 +65,7 @@ class _Res:
         the rows THIS test's own dispatched lead wrote, not lead-0's unconditional
         pre-ORIENT resolution against `GOLDEN_AB3`'s alert (mirrors
         `test_query_tool_611._Run.own_rows`)."""
-        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     def summary(self, lead: str = LEAD) -> str:
@@ -115,7 +116,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         # the run's state, as the driver's do (#1235).
         from dataclasses import replace
 
-        from defender.runtime.run_state import RunState
+        from defender.investigation.run_state import RunState
 
         return replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(run_dir)),
                        run_state=RunState(run_dir, "d826-terminators"),

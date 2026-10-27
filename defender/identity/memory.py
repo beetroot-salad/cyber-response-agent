@@ -13,7 +13,7 @@ from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from defender.tenancy._tenant import TenantId
+from defender.records._tenant_id import TenantId
 
 from .errors import DataRuleViolation
 from .rows import Membership, MembershipStatus, Session, User, UserStatus

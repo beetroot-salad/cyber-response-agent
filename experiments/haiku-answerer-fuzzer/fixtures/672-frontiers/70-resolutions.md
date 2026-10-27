@@ -32,7 +32,7 @@ by the close; skills/ticket/SKILL.md advertises two statuses the server never ha
   note, and two-way breaker participation. Every phase-C consensus entry that cited F4's "no queries row,
   no breaker trip" as settled mechanism is now answering against a rejected contract.
 - Fork B's chosen arm re-entangles what the design deliberately scoped out. The author must treat the
-  query tool's capture/truncation/breaker machinery (`runtime/query_tool.py`) as the mirror target, and
+  query tool's capture/truncation/breaker machinery (`investigation/query_tool.py`) as the mirror target, and
   F4's "seam-only mirror" note in the graph is now stale — it needs rewriting, not citing.
 - Two teaching surfaces are wrong TODAY, independent of this change (probe side findings). They are
   design corrections, not new obligations; both were folded into the M6 rewrite scope below.

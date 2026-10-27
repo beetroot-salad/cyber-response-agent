@@ -20,7 +20,7 @@ GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
 def _main_deps(tmp_path: Path):
     """MAIN's deps through the REAL `bind` seam — the real compiled policy, the real gate."""
     from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
+    from defender.investigation.agent_definition import bind
 
     run_dir = tmp_path / fixture_uuid("797-run")
     (run_dir / "gather_raw").mkdir(parents=True)
@@ -35,13 +35,13 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     says on disk that the MACHINERY is what failed."""
     pytest.importorskip("pydantic_ai")
     from defender._frontmatter import split_frontmatter
-    from defender.runtime.close_tool import (
+    from defender.investigation.close_tool import (
         CAUSE_REVIEW_INCOMPLETE,
         FORCED_INCONCLUSIVE,
         STAGE_ERROR,
         close_investigation,
     )
-    from defender.runtime.review_roles import ReviewStages
+    from defender.investigation.review_roles import ReviewStages
 
     deps, run_dir = _main_deps(tmp_path)
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())

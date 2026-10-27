@@ -24,12 +24,12 @@ from pydantic_ai.usage import UsageLimits  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
-from defender.runtime import driver, observe, permission  # noqa: E402
-from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
-from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import VerbRegistry  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.investigation import driver, observe, permission  # noqa: E402
+from defender.investigation.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import VerbRegistry  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams_631 import ScriptedModel, drive_agent  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
@@ -92,7 +92,7 @@ def test_model_cannot_disable_enforcement(tmp_path):
         assert not decision.allow, f"the bash lane admitted {command!r}"
 
     for target in ("../.env", ".env", "/proc/self/environ",
-                   str(DEFENDER / "runtime" / "driver.py"),
+                   str(DEFENDER / "investigation" / "driver.py"),
                    str(DEFENDER / "configuration/_env.py")):
         decision = permission.decide_write(Path(run_dir / target), "x", run_dir=run_dir,
                                            defender_dir=DEFENDER, policy=policy)
@@ -145,7 +145,7 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
                                        defender_dir=DEFENDER, policy=policy)
     assert not decision.allow, "report.md is no longer model-writable after R1"
 
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     drive_agent(MAIN_DEF, run_dir,
                 [[("append_block", {"text": inv_text})]],
@@ -235,7 +235,7 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
     )
     # #1235 round 2: the query tool's writer and guards read the run's `RunState` its deps
     # carry; this agent is driven outside a run, so it carries the state a started run would.
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     deps = replace(_with_live_run_1165(bind(gather_def, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
                    lead_id="l-001", run_state=RunState(run_dir, "r"))

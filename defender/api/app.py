@@ -16,7 +16,7 @@ from fastapi.responses import RedirectResponse
 from defender import identity as _identity
 from defender.identity import Authenticated, IdentityService
 from defender.identity.service import SESSION_LIFETIME
-from defender.tenancy._tenant import TenantId
+from defender.records._tenant_id import TenantId
 
 from .models import (
     RECORD_ID_PATTERN,

@@ -12,7 +12,7 @@ from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.runtime import verbs
+from defender.systems import verbs
 from defender.tests.support.runtime.engine._declared869 import (
     ADAPTERS_REL,
     AGENT_NESTED_MARKER_RELS,

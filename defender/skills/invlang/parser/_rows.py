@@ -615,7 +615,7 @@ def _extend_by_id(dest: list[Any], rows: list[Any]) -> None:
     """Append the rows whose id the destination does not already carry.
 
     Authors often re-emit a whole table with one new row appended; a blind `extend` would
-    duplicate rows, and some readers (e.g. `runtime/review/projector.py`) use the raw list
+    duplicate rows, and some readers (e.g. `investigation/review/projector.py`) use the raw list
     without deduping. First declaration wins. A row with no id is always appended.
     """
     seen = {r["id"] for r in dest if isinstance(r, dict) and r.get("id")}

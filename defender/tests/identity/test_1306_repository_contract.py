@@ -17,7 +17,7 @@ from collections.abc import Iterator
 import pytest
 
 from defender.identity import DataRuleViolation, InMemoryIdentityRepository
-from defender.tenancy._tenant import TenantId
+from defender.records._tenant_id import TenantId
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DSN_ENV = "DEFENDER_TEST_POSTGRES_DSN"

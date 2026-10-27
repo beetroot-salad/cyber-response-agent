@@ -26,4 +26,4 @@ ROOT="$(cd -P -- "$DEFENDER" 2>/dev/null && cd .. && pwd)" || {
     exit 2
 }
 PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-    exec "$PY" -P -m defender.runtime.sql_engine.sql "$@"
+    exec "$PY" -P -m defender.investigation.sql_engine.sql "$@"

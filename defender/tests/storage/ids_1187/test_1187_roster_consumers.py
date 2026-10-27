@@ -113,7 +113,7 @@ def _loadable(which: str, episode_id: str) -> dict:
 @pytest.mark.parametrize("door", ["load_family", "load_manifest_document"])
 def test_manifest_loaders_require_the_complete_folder_identity(tmp_path, which, named, door):
     from defender._io import bind
-    from defender.runtime.branch import _family
+    from defender.records import _family
 
     folder_id = R.new_id()
     manifest_id = (folder_id if named == "same" else R.new_id() if named == "another_uuid"
@@ -133,7 +133,7 @@ def test_manifest_loaders_require_the_complete_folder_identity(tmp_path, which, 
 
 def test_r5_the_expected_episode_id_is_a_required_keyword(tmp_path):
     from defender._io import bind
-    from defender.runtime.branch._family import load_family, load_manifest_document
+    from defender.records._family import load_family, load_manifest_document
 
     episode_id = R.new_id()
     ep = tmp_path / "episodes" / episode_id
@@ -337,7 +337,7 @@ def test_page_shows_a_refused_roster_as_the_arms_state_and_renders_the_rest(data
     page = E.read_page(ep)
     assert R.ROSTER_NAME not in page.text, "the control still shows a roster refusal"
     for wid, arm_id in good.items():
-        label = T.mod("runtime.branch._family").label_for_world_id(_manifest_of(ep), wid)
+        label = T.mod("records._family").label_for_world_id(_manifest_of(ep), wid)
         assert f"runs/{arm_id}/runtime.html" in page.anchors_in(f"world-{label}"), label
 
 
@@ -769,7 +769,7 @@ def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name(tmp_
 # S-red — the redaction set is the roster's
 
 def _family(episode_id: str) -> Any:
-    return T.sym("runtime.branch._family", "parse_family")(_doc(episode_id))
+    return T.sym("records._family", "parse_family")(_doc(episode_id))
 
 
 def _arm_ids(roster: dict[str, str]) -> dict[str, Any]:
@@ -779,7 +779,7 @@ def _arm_ids(roster: dict[str, str]) -> dict[str, Any]:
 
 
 def test_family_identities_is_the_episode_its_tokens_and_every_roster_arm_id():
-    from defender.runtime.branch._family import family_identities
+    from defender.records._family import family_identities
 
     episode_id = R.new_id()
     roster = {T.fixture_world_id(label): R.new_id() for label in LABELS}
@@ -791,7 +791,7 @@ def test_family_identities_is_the_episode_its_tokens_and_every_roster_arm_id():
 
 
 def test_family_identities_requires_the_arm_ids():
-    from defender.runtime.branch._family import family_identities
+    from defender.records._family import family_identities
 
     family = _family(R.new_id())
     assert isinstance(R.raised(family_identities, family), TypeError), (
@@ -800,7 +800,7 @@ def test_family_identities_requires_the_arm_ids():
 
 def test_a_roster_arm_id_is_redacted_and_an_unrelated_uuid_is_not():
     from defender._redaction import redact_model_visible
-    from defender.runtime.branch._family import family_identities
+    from defender.records._family import family_identities
 
     episode_id = R.new_id()
     roster = {T.fixture_world_id(label): R.new_id() for label in LABELS}
@@ -812,7 +812,7 @@ def test_a_roster_arm_id_is_redacted_and_an_unrelated_uuid_is_not():
 
 
 def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
-    from defender.runtime.branch._family import FamilyError
+    from defender.records._family import FamilyError
 
     ep, episode_id, roster = _episode(data_root)
     _outcome(ep)

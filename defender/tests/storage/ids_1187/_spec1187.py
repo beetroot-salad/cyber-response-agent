@@ -15,7 +15,7 @@ from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape as
 tree = H5.tree_state
 
 #: The arm roster's file name in the episode folder (pinned by the contract; the production
-#: owner is `defender.episodes._episode_paths.ARM_ROSTER_NAME`).
+#: owner is `defender.records._episode_paths.ARM_ROSTER_NAME`).
 ROSTER_NAME = "arms.json"
 #: The manifest's file name (`_episode_paths.FAMILY_NAME` today, unchanged).
 MANIFEST_NAME = "family.yaml"

@@ -225,7 +225,7 @@ class RecordingBundle:
         return call
 
     def bundle(self) -> Any:
-        from defender.runtime.review_roles import ReviewStages
+        from defender.investigation.review_roles import ReviewStages
 
         stages = {
             "support": self._stage("support", self.lens),
@@ -275,13 +275,13 @@ def refusal(deps: Any, disposition: str, stages: Any, **kw: Any) -> str:
 
 
 def bounds(**kw: Any) -> Any:
-    from defender.runtime import challenge_gate
+    from defender.investigation import challenge_gate
 
     return challenge_gate.Bounds(**kw)
 
 
 def review_state(deps: Any) -> Any:
-    from defender.runtime import challenge_gate
+    from defender.investigation import challenge_gate
 
     return challenge_gate.ReviewState.of(deps)
 
@@ -298,7 +298,7 @@ def trace_rows(run_dir: Path, role: str) -> list[dict]:
 
 def trace_files(run_dir: Path) -> list[str]:
     from defender.records import RunPaths
-    from defender.runtime.challenge_gate import REVIEW_ROLES
+    from defender.investigation.challenge_gate import REVIEW_ROLES
 
     return [role for role in REVIEW_ROLES if RunPaths(run_dir).review_trace(role).is_file()]
 
@@ -341,15 +341,15 @@ def receipt_note_lines(body: str) -> list[str]:
 def priced_block(companion_text: str) -> str:
     """What the price gate's own parse of `companion_text` renders as the frontmatter receipt
     block — the bytes M4 must carry onto the reviewed commit."""
-    from defender.runtime.review.projector import parse_investigation
+    from defender.investigation.review.projector import parse_investigation
     from defender.skills.invlang.validate import ceiling_test_block, conclude_ceiling_test_rows
 
     return ceiling_test_block(conclude_ceiling_test_rows(parse_investigation(companion_text)))
 
 
 def citable(companion_text: str) -> frozenset[str]:
-    from defender.runtime.review.projector import parse_investigation
-    from defender.runtime.review.reply import citable_refs
+    from defender.investigation.review.projector import parse_investigation
+    from defender.investigation.review.reply import citable_refs
 
     return citable_refs(parse_investigation(companion_text))
 
@@ -464,7 +464,7 @@ def receipts_at_block_cap() -> int:
     """The largest number of distinct `ref=` receipts the price gate's FRONTMATTER block cap
     admits (`_MAX_CEILING_FRONTMATTER_BYTES` over the rendered block) — computed against the
     real renderer, never assumed."""
-    from defender.runtime.review.projector import parse_investigation
+    from defender.investigation.review.projector import parse_investigation
     from defender.skills.invlang.validate import ceiling_test_block, conclude_ceiling_test_rows
     from defender.skills.invlang.validate._gating import _MAX_CEILING_FRONTMATTER_BYTES
 

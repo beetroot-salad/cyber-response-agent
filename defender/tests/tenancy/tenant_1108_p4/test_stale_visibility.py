@@ -304,7 +304,7 @@ def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
         tmp_path, monkeypatch, branch, kind):
     """O-WARN: fresh and pinned runs carry no sentence: each branch posts exactly the comment it
     posts today (the shipped host sentences / the mapping's verdict rendering)."""
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
 
     use_mapping(monkeypatch, tmp_path / "dfn")
     body, _ = _posted(tmp_path, branch, knowledge_source(kind), label=kind)
@@ -378,7 +378,7 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     `lifecycle`/`preflight`/`enqueue` recorders."""
     from functools import partial
 
-    from defender.runtime import ticket_writer
+    from defender.investigation import ticket_writer
     from defender.records import RunPaths
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
@@ -464,7 +464,7 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     naming no commit and using neither kind's words."""
     from functools import partial
 
-    from defender.runtime import ticket_writer
+    from defender.investigation import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
     from defender import run as run_py
@@ -509,7 +509,7 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
     from functools import partial
 
     from defender import run as run_py
-    from defender.runtime import ticket_writer
+    from defender.investigation import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
@@ -613,7 +613,7 @@ def _client(*investigations: Any) -> Any:
     from defender.api.ports import ApiDeps
     from defender.identity import (Bootstrap, IdentityService, InMemoryIdentityRepository,
                                    register_tenant)
-    from defender.tenancy._tenant import TenantId
+    from defender.records._tenant_id import TenantId
 
     store = InMemoryStore(lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC))
     for inv in investigations:

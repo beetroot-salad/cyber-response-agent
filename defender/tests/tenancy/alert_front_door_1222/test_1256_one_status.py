@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from defender._paths import adapters_under
-from defender.runtime.verbs import read_roster
+from defender.systems.verbs import read_roster
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.tenancy.alert_front_door_1222.test_1222_correlation_endings import (

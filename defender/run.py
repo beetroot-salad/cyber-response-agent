@@ -2,7 +2,7 @@
 """Defender entrypoint — investigate one alert end-to-end.
 
 The investigation is driven by the in-process PydanticAI driver
-(`runtime/driver.py`): materialize the run dir → run → cross-check the two live
+(`investigation/driver.py`): materialize the run dir → run → cross-check the two live
 tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
 via `run_common.py`.
 
@@ -58,25 +58,25 @@ from defender._paths import adapters_under  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.tenancy import _tenant  # noqa: E402
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
-from defender.runtime import driver  # noqa: E402
-from defender.runtime import providers  # noqa: E402
-from defender.runtime import run_end  # noqa: E402
-from defender.runtime import run_knowledge  # noqa: E402
-from defender.runtime import system_status  # noqa: E402
+from defender.investigation import driver  # noqa: E402
+from defender import providers  # noqa: E402
+from defender.records import run_end  # noqa: E402
+from defender.tenancy import run_knowledge  # noqa: E402
+from defender.systems import system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.run_tenant import RunTenant  # noqa: E402
-from defender.runtime.system_status import RunSystems  # noqa: E402
-from defender.runtime.verb_grant import GrantError  # noqa: E402
-from defender.runtime.verbs import (  # noqa: E402
+from defender.systems.run_tenant import RunTenant  # noqa: E402
+from defender.systems.system_status import RunSystems  # noqa: E402
+from defender.systems.verb_grant import GrantError  # noqa: E402
+from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     RegistryError,
     RosterRead,
     ServingAbort,
     read_roster,
 )
-from defender.runtime import ticket_writer as _default_ticket_writer  # noqa: E402
+from defender.investigation import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -85,6 +85,7 @@ from defender._first_party_key import (  # noqa: E402,F401
     _read_env_key,
     resolve_first_party_key,
 )
+from defender.records._tenant_id import TenantRefused
 
 _logger = logging.getLogger(__name__)
 
@@ -336,7 +337,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             prebranch_calls,
         )
         from defender.learning.branch.ledger import Ledger
-        from defender.runtime import branch as branch_mod
+        from defender.investigation import branch as branch_mod
 
         family = world.family
         # Declared up front: a world that serves nothing must still leave a ledger.
@@ -473,7 +474,7 @@ def _resolve_run_tenant(
     `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
     lead. Without `copy` (a direct caller), the record is resolved over the tenant's own
     folder. `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
-    from defender.runtime import run_tenant as run_tenant_mod
+    from defender.systems import run_tenant as run_tenant_mod
 
     del defender_dir
     roots = ({} if copy is None else
@@ -488,13 +489,13 @@ def _resolve_run_tenant(
 
 def _family_pin(ns: argparse.Namespace, pin: str | None, episode: Any) -> str | None:
     """The commit a sibling (`--episode`) reads: its family's knowledge pin, read from the
-    episode, where only its launcher writes (`episodes._knowledge_pin`), so a sibling started or
+    episode, where only its launcher writes (`records._knowledge_pin`), so a sibling started or
     resumed by hand reads its family's knowledge, never a newer `current`. A `--knowledge-commit`
     naming another commit refuses. An episode with no pin (launched before the pin was
     recorded) keeps `pin` as given, as before. An ordinary run's `pin` is kept."""
     if episode is None:
         return pin
-    from defender.episodes._knowledge_pin import PinUnreadable, read_pin
+    from defender.records._knowledge_pin import PinUnreadable, read_pin
 
     try:
         family = read_pin(episode.view())
@@ -540,7 +541,7 @@ def _publish_report(
 
 def _default_publish() -> Callable[..., object]:
     """The real launch-time publish: a separate child process (O-BUDGET, P-3)."""
-    from defender.runtime.publish_launch import launch_publish as real
+    from defender.investigation.publish_launch import launch_publish as real
 
     return real
 
@@ -572,7 +573,7 @@ def _copy_knowledge(tenant: _tenant.Tenant, source: run_knowledge.KnowledgeSourc
         sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
     try:
         _tenant.check_run_settings(copy.settings)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         copy.remove()
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     return copy
@@ -590,7 +591,7 @@ def _early_run(ns: argparse.Namespace, accepted: _tenant.Tenant, world: Any,
         if world is not None:
             return episode_runs.create(episode_runs.arm_id(world.world_id))
         return accepted.runs_repository().create()
-    except (RunRefused, _tenant.TenantRefused) as refused:
+    except (RunRefused, TenantRefused) as refused:
         where = f"--episode {ns.episode}: " if world is not None else ""
         sys.exit(f"[run.py] {where}{refused}")
 
@@ -667,7 +668,7 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
     primed recording and depends on nothing the manifest does not say. The manifest records
     its served systems, so no tenant is resolved to read it: `tenant` is never called here.
     """
-    from defender.runtime.branch import _family
+    from defender.records import _family
 
     del tenant  # the manifest is the whole record; see the docstring
     family = _family.load_family(episode.view(), expected_episode_id=episode.dir.name)
@@ -718,7 +719,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
         # run on as an ordinary investigation.
         sys.exit(f"[run.py] --episode {ns.episode}: no episode is held for it")
     from defender.records import RunRefused
-    from defender.runtime.branch._family import FamilyError
+    from defender.records._family import FamilyError
 
     if ns.update_ticket:
         sys.exit(
@@ -747,7 +748,7 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     try:
         run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
                                    settings=settings, knowledge=knowledge)
-    except _tenant.TenantRefused as refusal:
+    except TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
 
@@ -758,7 +759,7 @@ def _request_data_root(ns: argparse.Namespace) -> DataRoot:
     try:
         _tenant.requested_tenant_id(ns.tenant)
         return _tenant.resolve_data_root()
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
@@ -778,7 +779,7 @@ def _accept_request_tenant(
         return _tenant.accept_tenant(
             data_root, tenant_id, defender_dir=DEFENDER_DIR, box_mounted=box_mounted,
             clone_tree=False)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
@@ -790,11 +791,11 @@ def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> tuple[R
     read."""
     if ns.episode is None:
         return ()
-    from defender.episodes._episode_handle import EpisodeRefused
+    from defender.records._episode_handle import EpisodeRefused
 
     try:
         return (_tenant.box_mounted_arm_container(data_root, ns.tenant, ns.episode),)
-    except (EpisodeRefused, _tenant.TenantRefused) as refused:
+    except (EpisodeRefused, TenantRefused) as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
 
 
@@ -807,12 +808,12 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
     ordinary run."""
     if ns.episode is None:
         return None
-    from defender.episodes._episode_handle import EpisodeRefused
+    from defender.records._episode_handle import EpisodeRefused
     from defender.records import RunRefused
 
     try:
         return accepted.runs_repository().episode(ns.episode, require_roster=True)
-    except (_tenant.TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
+    except (TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
 
@@ -922,7 +923,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
             # adapters' own settings checks over those settings — a start at which no granted
             # system is usable refused here (O-8, a sibling's own start too) — and handed to the
             # lifecycle whole, so the investigation reads that roster and does not judge again.
-            from defender.runtime.branch._family import family_identities
+            from defender.records._family import family_identities
 
             known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
             systems = _judge_start(
@@ -962,7 +963,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                 if ns.update_ticket:
                     ticket_writer.open_case_ticket(
                         run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
+                        env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
 
                 _logger.info(f"run_dir={run_dir} model={model}")
                 _announce_provenance(run_dir)
@@ -1014,7 +1015,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                     # Both inputs come from the driver's summary, not from a possibly stale sidecar.
                     ticket_writer.record_case_ticket(
                         run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
+                        env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
                         closed_before_cut=summary.get("closed_before_cut") is True)
 
                 # A sibling's evidence was staged on purpose, so it must never feed the catalog.

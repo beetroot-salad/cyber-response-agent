@@ -3,7 +3,7 @@
 Method: for each premise, tried to exhibit two implementations both consistent with the
 design doc + the shipped handoff record that diverge observably on exactly the premise's
 situation, and to show the judge's citation fails to exclude one. Grounded against the
-shipped code (hooks/budget_enforcer.py, runtime/driver.py, _env.py at base 483b5809) where
+shipped code (hooks/budget_enforcer.py, investigation/driver.py, _env.py at base 483b5809) where
 a mechanism claim was load-bearing.
 
 ---

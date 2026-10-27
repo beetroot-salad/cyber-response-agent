@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
+from defender.records._tenant_id import TenantRefused
 
 if TYPE_CHECKING:
     from defender.tenancy._tenant import Tenant
@@ -72,7 +73,7 @@ def command_line_tenant(parser: argparse.ArgumentParser, raw_tenant: str) -> Ten
 
     try:
         return _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         parser.error(str(refused))
 
 

@@ -79,7 +79,7 @@ def test_the_canonical_module_and_tests_are_exempt(tmp_path):
     assert _GATE._scan(tree) == []
 
     # ...but a parser.py somewhere else is not the canonical one.
-    _pyfile(tree, "runtime/parser.py", _IMPORT_ALIASED)
+    _pyfile(tree, "investigation/parser.py", _IMPORT_ALIASED)
     assert _kinds(_GATE._scan(tree)) == {"import"}
 
 

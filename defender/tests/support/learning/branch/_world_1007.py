@@ -158,7 +158,7 @@ def write_outcome(episode_dir: Path, *, outcome: str = "accepted", reason: str =
     through the production writer (`learning/branch/outcome.py::write_outcome`). An `accepted`
     family also gets `verify_family`'s family stamp unless `family_stamp=False` (PR #1232
     round 7: only a stamped family is graded)."""
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome as _write
     from defender.tests.support.learning.judge._judge_921 import comparable_family_stamp
 
@@ -305,7 +305,7 @@ def elastic_ctx(tmp_path: Path, *, response: dict | None = None):
     constructs a `VerbContext(defender_dir=…, run_dir=…, env=…)` and the transport forks into
     exactly that env — so nothing here patches a module attribute.
     """
-    verbs = mod("runtime.verbs")
+    verbs = mod("systems.verbs")
     bindir = tmp_path / "bin"
     bindir.mkdir(parents=True, exist_ok=True)
     shim = bindir / "docker"

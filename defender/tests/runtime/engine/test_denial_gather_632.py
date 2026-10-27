@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import circuit_breaker  # noqa: E402
-from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
+from defender.systems.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.knowledge._query_rules import DENIED_QUERY_ID
 from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
@@ -25,7 +25,7 @@ from defender.tests.support.learning.curation._verb_authorization_632 import (  
     run_gather,
 )
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
-from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
 from defender.tests.support.shared.contracts._after_start_1256 import AfterStart, Relink  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -320,8 +320,8 @@ def test_a_denial_does_not_move_the_circuit_breaker(tmp_path: Path):
 
 def test_a_denials_sentinel_row_is_a_sentinel_to_every_reader(tmp_path: Path):
     from defender.learning.lead_repository import joined
-    from defender.runtime.query_tool import resolve_query_id
-    from defender.runtime.record_query import (
+    from defender.investigation.query_tool import resolve_query_id
+    from defender.investigation.record_query import (
         in_rejection_domain,
         rejection_budget_trip,
         repeat_trip,
@@ -369,7 +369,7 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
                     "raise ImportError('boom')\n"
                     "VERBS = {'get-host': None, 'list-hosts': None}\n")
 
-    from defender.runtime.verbs import ModuleVerbRegistry
+    from defender.systems.verbs import ModuleVerbRegistry
 
     grant = grant_of("gather", (("elastic", "query"), ("cmdb", "get-host")))
     reg = ModuleVerbRegistry(read_roster(adapters), grant)

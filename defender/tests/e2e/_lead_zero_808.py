@@ -17,7 +17,7 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.integrations.elastic_adapter import search_envelope  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import breaker_doc  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -31,8 +31,8 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 
 # the names this spec mints on the production side
 # `schema.md`, "Coin ids from the code's name": a private synonym does not cost a config
-# entry, it costs the check. Spell these exactly in `defender/runtime/lead_zero.py`.
-LEAD_ZERO_MODULE = "defender.runtime.lead_zero"
+# entry, it costs the check. Spell these exactly in `defender/investigation/lead_zero.py`.
+LEAD_ZERO_MODULE = "defender.investigation.lead_zero"
 L0 = "l-000"          # item 1's reserved id (F5)
 L3 = "l-00c"          # item 3's reserved id (F5)
 CORRELATION_REQUEST_LIMIT = 8      # F6 — `d21`'s "strictly below 40" was vacuous at 39

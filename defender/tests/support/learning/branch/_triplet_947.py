@@ -380,7 +380,7 @@ RETIRED_FAMILY_FIELDS = ("continuation_prompt",)
 def _declared_family_fields() -> set[str]:
     import dataclasses
 
-    return {f.name for f in dataclasses.fields(sym("runtime.branch._family", "Family"))}
+    return {f.name for f in dataclasses.fields(sym("records._family", "Family"))}
 
 
 def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs/source",
@@ -501,7 +501,7 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
 def _plant_source_input(ep: Path, source_run_dir: str | None, source_run_id: str | None = None) -> None:
     """The source run's alert and record, as a launch copies them into the episode (#1222 A1):
     the source run's own when it holds them, else a plain one."""
-    from defender.episodes._episode_paths import EpisodePaths
+    from defender.records._episode_paths import EpisodePaths
     from defender.records import RunPaths
     from defender.tests.support.storage._alert_plant import plant_alert
 
@@ -659,7 +659,7 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
     """Give the source run the session store a branch is actually taken from."""
     from defender.records import RunPaths, SessionPaths
 
-    ss = mod("runtime.session_store")
+    ss = mod("records.session_store")
     # #1235: the case pointer is a host-only sidecar beside the run dir, not a file in it.
     if RunPaths(src).session_pointer().exists():
         return
@@ -699,8 +699,8 @@ def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
                  params: dict | None = None, payload: Any = None, lead: str = "l-001",
                  seq: int = 0) -> dict:
     """Land ONE captured call in a source run: the queries-table row and the sidecar it names."""
-    rq = mod("runtime.record_query")
-    breaker = mod("runtime.circuit_breaker")
+    rq = mod("investigation.record_query")
+    breaker = mod("systems.circuit_breaker")
     p = dict(params or {"index": EVENTS_PATTERN})
     body = payload if payload is not None else {"hits": [{"_id": "d1"}]}
     text = json.dumps(body, sort_keys=True)
@@ -798,7 +798,7 @@ def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = Fa
     elif knowledge is not NO_KNOWLEDGE_KEY:
         doc["knowledge"] = knowledge
     if dirty:
-        doc["dirty_paths"] = ["defender/runtime/driver/__init__.py"]
+        doc["dirty_paths"] = ["defender/investigation/driver/__init__.py"]
         doc["dirty_path_count"] = 1
     # #1106 M2: the stamp every run materialised since #1077 carries its tenant, and a branched
     # episode seeds its siblings' tenant record FROM the SOURCE's. `None` (the default, so the
@@ -1195,14 +1195,14 @@ def refusals() -> tuple[type[BaseException], ...]:
     """
     from defender.learning.branch.estate.registry import EstateError
     from defender.learning.branch.ledger import LedgerError
-    from defender.runtime.branch import BranchError
+    from defender.investigation.branch import BranchError
     from defender.integrations.confinement import ConfinementFault
     from defender.kit.faults import AdapterFault
     out: list[type[BaseException]] = [
         SystemExit, EstateError, LedgerError, BranchError, ConfinementFault,
         AdapterFault, ValueError,
     ]
-    for dotted, name in (("runtime.branch._family", "FamilyError"),
+    for dotted, name in (("records._family", "FamilyError"),
                          ("learning.judge", "JudgeRefused")):
         out.append(sym(dotted, name))
     return tuple(out)

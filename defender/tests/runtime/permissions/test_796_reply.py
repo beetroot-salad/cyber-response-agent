@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime.review import role_prompt
-from defender.runtime.review.projector import parse_investigation
-from defender.runtime.review.reply import (
+from defender.investigation.review import role_prompt
+from defender.investigation.review.projector import parse_investigation
+from defender.investigation.review.reply import (
     ASK_PROSE_MAX,
     GAP,
     HOLDS,

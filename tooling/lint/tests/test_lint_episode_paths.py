@@ -141,8 +141,8 @@ def _calls(src: str):
 
 
 @pytest.mark.parametrize("src", [
-    "from defender.episodes import EpisodePaths\ndef f(e):\n    return EpisodePaths(e)\n",
-    "from defender.episodes import EpisodePaths as EP\ndef f(e):\n    return EP(e)\n",
+    "from defender.records import EpisodePaths\ndef f(e):\n    return EpisodePaths(e)\n",
+    "from defender.records import EpisodePaths as EP\ndef f(e):\n    return EP(e)\n",
     "def f(p):\n    return p.base_file()\n",
     "def f(p):\n    return p.staged_path('x')\n",
 ])
@@ -170,15 +170,15 @@ def _doors(src: str):
 
 
 @pytest.mark.parametrize(("src", "verb"), [
-    ("from defender.episodes._episode_handle import Episode\ndef f(p):\n    return Episode.open(p)\n",
+    ("from defender.records._episode_handle import Episode\ndef f(p):\n    return Episode.open(p)\n",
      "open"),
-    ("from defender.episodes._episode_handle import Episode\ndef f(p):\n    return Episode.create(p)\n",
+    ("from defender.records._episode_handle import Episode\ndef f(p):\n    return Episode.create(p)\n",
      "create"),
-    ("from defender.episodes._episode_handle import Episode\nE = Episode\ndef f(p):\n    return E.open(p)\n",
+    ("from defender.records._episode_handle import Episode\nE = Episode\ndef f(p):\n    return E.open(p)\n",
      "open"),
-    ("from defender.episodes._episode_handle import Episode\nopener = Episode.open\n", "open"),
+    ("from defender.records._episode_handle import Episode\nopener = Episode.open\n", "open"),
     ("def f(ep, p):\n    return type(ep).open(p)\n", "open"),
-    ("from defender.episodes._episode_handle import Episode\ndef f():\n    return getattr(Episode, 'open')\n",
+    ("from defender.records._episode_handle import Episode\ndef f():\n    return getattr(Episode, 'open')\n",
      "getattr"),
 ])
 def test_a_door_is_found_however_it_is_reached(src, verb):
@@ -186,7 +186,7 @@ def test_a_door_is_found_however_it_is_reached(src, verb):
 
 
 def test_naming_the_class_alone_is_not_a_door():
-    assert _doors("from defender.episodes._episode_handle import Episode\ndef f(e: Episode): ...\n") == set()
+    assert _doors("from defender.records._episode_handle import Episode\ndef f(e: Episode): ...\n") == set()
 
 
 def test_a_door_in_a_listed_module_is_a_violation_when_no_door_is_allowed():
@@ -244,7 +244,7 @@ def test_a_root_that_is_not_a_directory_is_blind(tmp_path):
 # Shared owner definitions make wrapper propagation observable in each independent caller.
 OWNER_PROGRAMS = {
     "records/_lookup.py": """from pathlib import Path
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender._io import bind
 def walk(episode_dir):
     return Episode.open(episode_dir), bind(Path(episode_dir))
@@ -257,14 +257,14 @@ class Opener:
     def make(folder):
         return Episode.create(folder)
     def take(self, folder):
-        from defender.episodes._episode_handle import Episode as Door
+        from defender.records._episode_handle import Episode as Door
         return Door.open(folder)
 class EpisodeRuns:
     def __init__(self, tenant, episode_id):
         self.episode = Episode.open(tenant.dir / episode_id)
 """,
     "records/_held.py": """from pathlib import Path
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.records._lookup import open_at
 def create_at(path):
     return Episode.create(path, exclusive=True)
@@ -277,8 +277,8 @@ def derived(episode_id):
 }
 CALLER_IMPORTS = """import importlib
 from pathlib import Path
-from defender.episodes._episode_handle import Episode
-from defender.episodes import _episode_handle as EH
+from defender.records._episode_handle import Episode
+from defender.records import _episode_handle as EH
 from defender import _io
 from defender._io import bind, hold
 from defender.records._lookup import EpisodeRuns, Opener, helper, open_at
@@ -291,7 +291,7 @@ OPENER_CASES = [
     with bind(Path(episode_dir)) as one, bind(episode_dir) as two:
         return a, b, _io.bind(view.episode.dir), one, two
 def local(folder):
-    from defender.episodes._episode_handle import Episode as Door
+    from defender.records._episode_handle import Episode as Door
     return Door.open(folder)
 """, {"door": 3, "rebind": 3}),
     ("pkg/laundry.py", """def launder(episode_dir):
@@ -300,7 +300,7 @@ def local(folder):
         pass
     a = open_at(d)
     b = __import__('defender.records._lookup', fromlist=['x'])
-    c = importlib.import_module('defender.episodes._episode_handle')
+    c = importlib.import_module('defender.records._episode_handle')
     e = chained(d)
     f = Opener.make(d)
     g = Opener().take(d)
@@ -339,7 +339,7 @@ def test_opener_census_syntax_partitions(tmp_path, rel, body, expected):
 def test_a_production_file_under_tests_is_not_swept(tmp_path):
     path = tmp_path / "tests" / "t.py"
     path.parent.mkdir()
-    path.write_text("from defender.episodes._episode_handle import Episode\n"
+    path.write_text("from defender.records._episode_handle import Episode\n"
                     "def f(p):\n    return Episode.open(p)\n", encoding="utf-8")
     assert _GATE.opener_census(tmp_path) == []
 

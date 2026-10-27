@@ -21,7 +21,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from defender.tenancy._tenant import TenantId
+from defender.records._tenant_id import TenantId
 
 from .errors import DataRuleViolation
 from .memory import TOUCH_AFTER, check_membership_fields, session_hash

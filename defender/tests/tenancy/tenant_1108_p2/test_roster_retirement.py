@@ -1,7 +1,7 @@
 """verb_roster audit: model-read surface enumeration and withheld-verb detection."""
 from __future__ import annotations
 
-from defender.runtime import verb_roster
+from defender.systems import verb_roster
 
 
 def test_model_surface_enumeration_and_withheld_verb_audit_survive(tmp_path):

@@ -188,7 +188,7 @@ def test_safe_id_segment_anchors_at_the_end_of_the_string():
 def _stub_verbs():
     """A verb roster standing in for a system's adapter, so a minted draft can be run through
     the SAME rule the loop's commit gate and CI run it through."""
-    from defender.runtime.verbs import VerbContext
+    from defender.systems.verbs import VerbContext
     from defender.kit.verbs import verb
 
     @verb()

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.branch import _triplet_947 as T

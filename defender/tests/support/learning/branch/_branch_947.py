@@ -56,8 +56,8 @@ DERIVE = object()
 
 
 def branch_mod():
-    """`defender.runtime.branch`, imported per test."""
-    return importlib.import_module("defender.runtime.branch")
+    """`defender.investigation.branch`, imported per test."""
+    return importlib.import_module("defender.investigation.branch")
 
 
 #: The field #1255 (D1, P4) removes from `BranchSpec`: an arm is told nothing on arrival.

@@ -286,7 +286,7 @@ Adapters run under `defender/.venv/bin/python3`; `uv.lock` is committed.
 There is no `bin/` shim and no allowlist edit — dropping the
 `{system}_adapter.py` module with its `VERBS` mapping under
 `integrations/` **is** the registration. The verb registry
-(`runtime/verbs.py`) discovers every `*_adapter.py` in that directory by glob and
+(`systems/verbs.py`) discovers every `*_adapter.py` in that directory by glob and
 reads its `VERBS` at prompt-build time. A module that exposes no `VERBS`
 mapping is discovered but *unreachable* (its verb set is empty and the tool
 rejects it), not unfiltered — so an incomplete adapter fails closed.

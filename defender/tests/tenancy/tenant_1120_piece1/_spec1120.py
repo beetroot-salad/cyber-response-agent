@@ -66,7 +66,7 @@ FIXTURE_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 #: run — its grants load, gather holds a query verb (`require_gather_query`), and the lead-zero
 #: agreement. doc-1120 "Key flows / Run" step 3 names it; setup must reach THIS function, never
 #: a hand-copied rule list. A COINED address: renamed HERE if the implementer moves it.
-RUN_READINESS = "defender.runtime.run_tenant.resolve_run_tenant"
+RUN_READINESS = "defender.systems.run_tenant.resolve_run_tenant"
 
 #: `tenant.py`'s setup subcommand's function (today's `setup(tenant_id)`) — the census's start.
 SETUP_FUNCTION = "defender.cli.tenant.setup"

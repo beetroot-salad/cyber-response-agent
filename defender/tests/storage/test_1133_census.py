@@ -10,7 +10,7 @@ import inspect
 
 
 def test_o5_the_episodes_only_constructors_are_its_two_doors():
-    handle_mod = importlib.import_module("defender.episodes._episode_handle")
+    handle_mod = importlib.import_module("defender.records._episode_handle")
     episode = handle_mod.Episode
     constructors = {
         n for n in dir(episode) if not n.startswith("_")

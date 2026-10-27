@@ -16,7 +16,8 @@ from pathlib import Path
 import pytest
 
 from defender._io import READ_LIMIT
-from defender.tenancy._tenant import TenantId, tenant_id_file_text
+from defender.tenancy._tenant import tenant_id_file_text
+from defender.records._tenant_id import TenantId
 from defender.execution import bash_exec
 from defender import box as box_mod
 from defender.box._image import HASH_INPUTS

@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.tests.support.runtime.engine._spec767 import CLOSED_STATUS, shipped_comment_author  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     DONE,

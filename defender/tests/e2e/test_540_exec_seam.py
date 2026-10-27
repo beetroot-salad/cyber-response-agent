@@ -20,10 +20,10 @@ from pydantic_ai import ModelRetry  # noqa: E402
 
 from defender.execution import bash_exec
 from defender import box
-from defender.runtime import permission
-from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation import permission
+from defender.investigation import tools as runtime_tools  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

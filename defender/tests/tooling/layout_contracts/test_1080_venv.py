@@ -547,11 +547,11 @@ def test_guard_keyed_on_a_module_name_prefix_meets_code_whose_prefix_changed(tmp
     helper = S.dotted(helper_home())
     seen = _child_modules(tmp_path, f"import {helper}\n")["modules"]
     assert helper in seen
-    assert [m for m in seen if m.startswith(("defender.runtime", "defender.learning"))] == []
+    assert S.api_forbidden(seen) == []
 
     pricing = S.dotted(S.home_of("usage_cost", home=S.PRICING))
-    seen = _child_modules(tmp_path, f"import defender.runtime.providers\nimport {pricing}\n")
-    assert {"defender.runtime.providers", pricing} <= set(seen["modules"]), seen
+    seen = _child_modules(tmp_path, f"import defender.providers\nimport {pricing}\n")
+    assert {"defender.providers", pricing} <= set(seen["modules"]), seen
     assert [m for m in seen["modules"] if m.split(".")[0] in LLM_STACK] == [], seen
 
     allowed = T1096._ALLOWED
@@ -567,4 +567,4 @@ def test_guard_keyed_on_a_module_name_prefix_meets_code_whose_prefix_changed(tmp
         f"sys.argv = [{str(serve)!r}, '--help']\n"
         f"runpy.run_path({str(serve)!r}, run_name='spec1080')\n"))["modules"]
     assert {"defender.api.app", helper} <= set(seen), seen
-    assert [m for m in seen if m.startswith(("defender.runtime", "defender.learning"))] == [], seen
+    assert S.api_forbidden(seen) == [], seen

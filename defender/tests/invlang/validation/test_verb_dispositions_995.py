@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from defender._paths import PATHS, adapters_under
-from defender.runtime.verb_grant import VerbGrant
-from defender.runtime.verbs import ModuleVerbRegistry, read_roster
+from defender.systems.verb_grant import VerbGrant
+from defender.systems.verbs import ModuleVerbRegistry, read_roster
 from defender.tests.support.invlang.validation._dispositions995 import (
     GATHER_CENSUS,
     DispositionError,

@@ -7,7 +7,7 @@ reduce `kimi-k2.6`'s input tokens *without* degrading its ability to read a cell
 payload?
 
 This is #834's ask 4 ("establish the accuracy oracle before the cost one") asked of the model that
-actually reads these payloads. `DEFAULT_GATHER_MODEL = "kimi-k2.6"` (`runtime/driver.py:74`) —
+actually reads these payloads. `DEFAULT_GATHER_MODEL = "kimi-k2.6"` (`investigation/driver.py:74`) —
 gather is the role ES|QL payloads land in. All published TOON benchmarks measure GPT and Claude
 tiers; none measures Kimi, and none uses a columnar baseline.
 

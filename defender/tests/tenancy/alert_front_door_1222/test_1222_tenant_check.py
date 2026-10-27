@@ -140,7 +140,7 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
         w.source_run = src
         w.episode = T.episode(w.tmp, root=w.planted.root / w.planted.tenant_id / "episodes",
                               doc=T.family_doc(source_run_dir=str(src)))
-        with S.sym("episodes._episode_handle", "Episode").open(w.episode) as episode:
+        with S.sym("records._episode_handle", "Episode").open(w.episode) as episode:
             T.episode_view(episode, tenant=w.planted.accept())
     return w
 
@@ -548,7 +548,7 @@ def test_r7_run_start_never_carries_a_faulted_case_mapping_into_a_started_run(
     ok = verdicts(w, sites)
     for v in ok.values():
         assert_passed(v)
-    kept_fault = S.sym("runtime.case_ticket", "CaseTicketError")
+    kept_fault = S.sym("tenancy.case_ticket", "CaseTicketError")
     carried = ok["run-start"].detail.lifecycle_calls[0]["tenant"].ticket_mapping
     assert not isinstance(carried, kept_fault), f"the run carried a kept fault: {carried!r}"
     try:

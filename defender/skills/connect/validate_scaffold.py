@@ -22,20 +22,21 @@ from defender.knowledge._scaffold_rules import (  # noqa: E402
     check_system_skill,
     check_template,
 )
-from defender.runtime.tenant_settings import assignments  # noqa: E402
+from defender.tenancy.tenant_settings import assignments  # noqa: E402
 from defender.kit.settings import is_blank  # noqa: E402
-from defender.runtime.system_status import (  # noqa: E402
+from defender.systems.system_status import (  # noqa: E402
     ReasonScope,
     cause_text,
     judge_adapter,
 )
-from defender.runtime.verbs import (  # noqa: E402
+from defender.systems.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     VerbContext,
     fresh_adapter_module,
     read_roster,
 )
 from defender.kit.verbs import VerbContext as AdapterContext, engine_of  # noqa: E402
+from defender.records._tenant_id import TenantRefused
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
@@ -312,7 +313,7 @@ def main() -> None:
         requested = _tenant.requested_tenant_id(args.tenant)
         settings_dir = _tenant.accept_tenant(
             _tenant.resolve_data_root(), requested, defender_dir=defender).settings
-    except _tenant.TenantRefused as refusal:
+    except TenantRefused as refusal:
         report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
                          f"resolved: {refusal}")
     else:

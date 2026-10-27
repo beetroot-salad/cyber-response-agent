@@ -31,7 +31,7 @@ def _pay_inconclusive_price(deps) -> None:
     """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a source or capability), unrelated to anything this module tests — the warn-severity repair window."""
     from pathlib import Path
 
-    from defender.runtime.tools import flagged_diagnostics
+    from defender.investigation.tools import flagged_diagnostics
 
     if flagged_diagnostics(deps):
         return
@@ -44,8 +44,8 @@ def _pay_inconclusive_price(deps) -> None:
 
 
 def _close(deps, disposition, *, stages=None, bounds=None):
-    from defender.runtime import challenge_gate
-    from defender.runtime.close_tool import close_investigation
+    from defender.investigation import challenge_gate
+    from defender.investigation.close_tool import close_investigation
     from defender.tests.support.runtime.permissions import _review_bundle
 
     if disposition == "inconclusive":
@@ -112,7 +112,7 @@ def test_every_gate_flags_the_same_row_set(tmp_path):
     """All three derivation sites compute ONE function over ONE on-disk text, so they agree."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     seed_investigation(run, TWO_WARN_DOC)
@@ -131,7 +131,7 @@ def test_every_gate_flags_the_same_row_set(tmp_path):
 def test_window_is_recomputed_after_each_fix_row(tmp_path):
     """The window is re-derived from disk after every repair — there is no cached set to
     invalidate, which is M3's whole reason for being derived."""
-    from defender.runtime.tools import _tool_fix_row
+    from defender.investigation.tools import _tool_fix_row
 
     deps, run = main_deps(tmp_path)
     inv = seed_investigation(run, TWO_WARN_DOC)
@@ -148,7 +148,7 @@ def test_window_is_recomputed_after_each_fix_row(tmp_path):
 def test_partial_repair_leaves_other_row_flagged(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block, _tool_fix_row
+    from defender.investigation.tools import _tool_append_block, _tool_fix_row
 
     deps, run = main_deps(tmp_path)
     seed_investigation(run, TWO_WARN_DOC)
@@ -164,7 +164,7 @@ def test_partial_repair_leaves_other_row_flagged(tmp_path):
 def test_window_reopens_after_a_later_unrelated_defect(tmp_path):
     """A fully-repaired earlier episode leaves NO residue, because there is no stored state
     to leave any: a fresh window opens exactly as the first one did."""
-    from defender.runtime.tools import _tool_append_block, _tool_fix_row
+    from defender.investigation.tools import _tool_append_block, _tool_fix_row
 
     deps, run = main_deps(tmp_path)
     seed_investigation(run, WARN_DOC)
@@ -181,7 +181,7 @@ def test_window_derivation_failure_does_not_wedge_the_run(tmp_path):
     """H7: when the window CANNOT be derived, every one of the three paths fails OPEN."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     (run / "investigation.md").write_bytes(b"```invlang\n:R attr\xff\xfe updates\n```\n")
@@ -209,7 +209,7 @@ def test_window_derivation_failure_does_not_wedge_the_run(tmp_path):
 
 def test_a_warn_family_defect_lands_and_returns_a_warning(tmp_path):
     """O1, the cost lever: a block whose only defect is warn-family LANDS, and the model is handed the warning instead of having to re-emit the whole block."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
 
@@ -223,7 +223,7 @@ def test_a_warn_family_defect_lands_and_returns_a_warning(tmp_path):
 def test_the_accept_path_derives_its_warning_after_the_gate_returned_none(tmp_path):
     """F-E option (i), and the two-passes-per-accepted-append correction to the Scale note."""
     from defender.records._artifact_schema import validate_investigation
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, _run = main_deps(tmp_path)
 
@@ -240,7 +240,7 @@ def test_append_block_refused_while_a_row_is_flagged(tmp_path):
     """M5 on the write side:"""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     seed_investigation(run, WARN_DOC)
@@ -311,7 +311,7 @@ def test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives(tmp_path
     """Both gate refusals hand the model the row AND the corrections it can paste back."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     seed_investigation(run, WARN_DOC)
@@ -333,7 +333,7 @@ def test_a_gated_refusal_leaves_both_artifacts_byte_identical(tmp_path):
     """The negative the refusal's own prose is claiming:"""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     inv = seed_investigation(run, WARN_DOC)
@@ -360,7 +360,7 @@ def test_a_landed_warn_row_refires_on_the_next_append(tmp_path):
     """The gate is FORCED, not chosen:"""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     _tool_append_block(deps, WARN_DOC)
@@ -377,7 +377,7 @@ def _drive_to_retry_exhaustion(deps):
     """Run the REAL agent loop with a model that never stops retrying a refused call, so pydantic-ai exhausts `DEFAULT_TOOL_RETRIES` (10, well inside the 62-request ceiling) and the driver's own forced-close limb runs."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
-    from defender.runtime import challenge_gate, driver
+    from defender.investigation import challenge_gate, driver
 
     class _Stuck:
         __name__ = "Stuck"

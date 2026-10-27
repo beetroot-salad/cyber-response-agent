@@ -16,9 +16,9 @@ from defender.tests.support.runtime.state._1255_view import model_path
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender import _untrusted  # noqa: E402
-from defender.runtime import permission, tools, tools_gather  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation import permission, tools, tools_gather  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 _DEFENDER = Path(__file__).resolve().parents[3]
@@ -67,7 +67,7 @@ the change there is no field to mint. They carry the run's one `RunState` (#1235
 as the driver hands them: the dispatch's breaker screen reads it."""
     from dataclasses import replace
 
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     return run_dir, replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)),

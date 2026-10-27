@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.agents import MAIN_DEF
-from defender.runtime.agent_definition import compile_policy_for
+from defender.investigation.agent_definition import compile_policy_for
 
 RUN = Path("/run")
 DFN = Path("/dfn")

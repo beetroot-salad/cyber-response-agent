@@ -20,7 +20,7 @@ from defender.learning.core import config as _loop_config
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
-from defender.runtime.verbs import engine_for
+from defender.systems.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_PREFIX,

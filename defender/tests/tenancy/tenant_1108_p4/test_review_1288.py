@@ -119,7 +119,7 @@ def test_the_child_reports_and_records_running_out_of_its_network_budget(child_t
 
 
 def test_the_launcher_hands_the_child_a_budget_inside_its_own(tmp_path):
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
     from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
 
     spawn = _RecordingSpawn()
@@ -136,7 +136,7 @@ def test_the_launcher_hands_the_child_a_budget_inside_its_own(tmp_path):
     "print('not a report')",
 ])
 def test_the_launcher_records_a_child_that_reports_nothing_valid(p4_tenant, child):
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
 
     line = publish_launch.launch_publish(
         p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
@@ -150,7 +150,7 @@ def test_the_launcher_records_a_child_that_reports_nothing_valid(p4_tenant, chil
 
 
 def test_control_a_child_that_reports_validly_is_not_recorded_by_the_launcher(p4_tenant):
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
 
     line = publish_launch.launch_publish(
         p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
@@ -218,7 +218,7 @@ def test_a_zero_budget_is_already_out_not_unbounded(child_tenant, tmp_path):
 
 @pytest.mark.parametrize("budget", [0.0, -1.0])
 def test_the_launcher_refuses_a_budget_that_is_not_positive_and_records_it(p4_tenant, budget):
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
     from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
 
     spawn = _RecordingSpawn()
@@ -233,7 +233,7 @@ def test_the_launcher_refuses_a_budget_that_is_not_positive_and_records_it(p4_te
 
 
 def test_the_launcher_and_run_start_build_one_failed_child_line():
-    from defender.runtime import run_knowledge
+    from defender.tenancy import run_knowledge
 
     line = run_knowledge.failed_line("it printed no report line")
     report = run_knowledge.read_publish_report(line)
@@ -295,10 +295,10 @@ def test_the_template_ships_the_reducer_pitfalls_page_the_curator_edits():
 
 
 def test_a_gather_dispatch_names_the_run_copys_reducer_pitfalls_page():
-    from defender.runtime import tools as tools_mod
-    from defender.runtime.agent_definition import compile_policy_for
-    from defender.runtime.driver import MAIN_DEF
-    from defender.runtime.tools_gather import GatherRequest, _gather_prompt
+    from defender.investigation import tools as tools_mod
+    from defender.investigation.agent_definition import compile_policy_for
+    from defender.investigation.driver import MAIN_DEF
+    from defender.investigation.tools_gather import GatherRequest, _gather_prompt
     from defender.tests.support.tenancy import _tenants1106 as T1106
 
     defender_dir = Path(__file__).resolve().parents[3]
@@ -360,7 +360,7 @@ def test_a_child_that_finishes_after_the_stop_is_reported_as_it_said(p4_tenant):
     """The launcher's wait runs out and it asks the child to stop; the child (on the lock, so
     it ignores the request) finishes and reports `fresh`. That report is the outcome, and the
     launcher records nothing over it."""
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
 
     commit = p4_tenant.commit
     child = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
@@ -379,7 +379,7 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
     the launcher kills the group, so nothing it started outlives the publish."""
     import os
 
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
 
     pid_file = tmp_path / "left.pid"
     child = ("import subprocess, sys; "
@@ -408,7 +408,8 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
 # --- third round: the binding is judged once, when read ----------------------------------------
 
 def test_an_issuer_role_that_is_not_a_plain_name_is_a_refused_binding(p4_tenant):
-    from defender.tenancy._tenant import TenantRefused, read_forge_binding
+    from defender.tenancy._tenant import read_forge_binding
+    from defender.records._tenant_id import TenantRefused
 
     bind_forge(p4_tenant, issuer_role="tenant role!")
     with pytest.raises(TenantRefused, match="issuer_role"):
@@ -486,7 +487,7 @@ class _Episode:
 
 
 def _pinned_episode(tmp_path: Path, commit: str | None) -> _Episode:
-    from defender.episodes._knowledge_pin import pin_text
+    from defender.records._knowledge_pin import pin_text
 
     folder = tmp_path / "episode"
     folder.mkdir(parents=True)
@@ -524,7 +525,7 @@ def test_a_sibling_of_an_episode_launched_before_pins_keeps_its_flag(tmp_path):
 def test_the_judge_reads_lesson_bodies_at_the_familys_pin_not_a_siblings_stamp(tmp_path):
     import json
 
-    from defender.episodes._episode_paths import LAYOUT
+    from defender.records._episode_paths import LAYOUT
     from defender.learning.judge import _pass_knowledge
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 

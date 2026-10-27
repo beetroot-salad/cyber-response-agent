@@ -21,7 +21,8 @@ from pydantic_ai.messages import (  # noqa: E402
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime import challenge_gate, circuit_breaker, driver  # noqa: E402
+from defender.investigation import challenge_gate, driver  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
 from defender.tests.support.storage._session_store_705 import (
     CLOSED_LOOP_INVLANG,
     FaultStore,

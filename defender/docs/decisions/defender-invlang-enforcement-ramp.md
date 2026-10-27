@@ -425,7 +425,7 @@ error rather than letting the write through. Scope is anchored to
    second reason not to arm this clause: it has the same shape, refusing
    a row for which lead FOLLOWS it. What blocks it is that warn severity
    here is not an advisory: locus-less warn diagnostics are dropped by
-   `runtime/tools._addressable` and do nothing, and a warn WITH a locus
+   `investigation/tools._addressable` and do nothing, and a warn WITH a locus
    flags that row and blocks every later write until `fix_row` rewrites
    it. Neither candidate row may be rewritten — the follower's
    `:L findings` row is a committed lead declaration the warn family has
@@ -1027,7 +1027,7 @@ findable without reading the rule entries:
   deferral) contradicts the refutation. Not fixed in v2.22 on purpose:
   the honest fix is the fold itself, which needs a parser-level row
   sequence and has eight readers across `validate.py`, `queries.py`,
-  `compare.py` and `runtime/review/projector.py`. Routing a second rule
+  `compare.py` and `investigation/review/projector.py`. Routing a second rule
   around it would make three readings of "the weight" in one module,
   which is how this defect was built.
 
@@ -1043,7 +1043,7 @@ findable without reading the rule entries:
   `vocab.SLOTS` by #933 — that is the teaching; the arming is not.
 - **A warn channel that can point at a row without making it
   rewritable.** Rule 16's route-compliance clause needs one and there is
-  none: a locus-less warn is dropped by `runtime/tools._addressable`,
+  none: a locus-less warn is dropped by `investigation/tools._addressable`,
   and a warn with a locus lets `fix_row` rewrite that row. Either that
   channel, or a deliberate decision to widen `fix_row`'s scope past
   `:R attr_updates`.

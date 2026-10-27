@@ -104,7 +104,7 @@
   },
   "shim, the same tree unmarked": {
    "rc": 0,
-   "out": "EXEC\tmounted-venv\t<TMP>/tree/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\t--tags\n",
+   "out": "EXEC\tmounted-venv\t<TMP>/tree/defender/.venv/bin/python3\t-P\t-m\tdefender.investigation.lessons_engine.lessons_fm\t--tags\n",
    "err": ""
   }
  },
@@ -228,10 +228,10 @@
    "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/learning/frontend/serialize.py\t--alpha\ttwo words"
   ],
   "bin/defender-lessons, unset": [
-   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.investigation.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, unset": [
-   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.investigation.sql_engine.sql\tSELECT 1"
   ],
   "helper, empty": {
    "rc": 0,
@@ -248,10 +248,10 @@
    "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/learning/frontend/serialize.py\t--alpha\ttwo words"
   ],
   "bin/defender-lessons, empty": [
-   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.investigation.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, empty": [
-   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.investigation.sql_engine.sql\tSELECT 1"
   ],
   "helper, 0": {
    "rc": 0,
@@ -262,10 +262,10 @@
   "frontend build, 0": [],
   "frontend serializer, 0": [],
   "bin/defender-lessons, 0": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.investigation.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, 0": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.investigation.sql_engine.sql\tSELECT 1"
   ],
   "helper, false": {
    "rc": 0,
@@ -276,10 +276,10 @@
   "frontend build, false": [],
   "frontend serializer, false": [],
   "bin/defender-lessons, false": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.investigation.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, false": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.investigation.sql_engine.sql\tSELECT 1"
   ],
   "helper, 1": {
    "rc": 0,
@@ -290,10 +290,10 @@
   "frontend build, 1": [],
   "frontend serializer, 1": [],
   "bin/defender-lessons, 1": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.investigation.lessons_engine.lessons_fm\tSELECT 1"
   ],
   "bin/defender-sql, 1": [
-   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.investigation.sql_engine.sql\tSELECT 1"
   ],
   "sql engine without duckdb, unset": {
    "rc": 69,

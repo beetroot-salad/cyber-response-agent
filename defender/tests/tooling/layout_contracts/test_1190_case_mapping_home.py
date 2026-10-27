@@ -1,4 +1,4 @@
-"""The case-mapping reader (`runtime/case_ticket.py`): file states, wrong shapes, run-start read.
+"""The case-mapping reader (`tenancy/case_ticket.py`): file states, wrong shapes, run-start read.
 Goldens: `goldens/tenants.json`."""
 from __future__ import annotations
 
@@ -29,20 +29,20 @@ TENANT = D9_TENANT_ID
 
 
 def _case_module() -> Any:
-    """The case-mapping module: the one module under `defender/runtime/` defining
+    """The case-mapping module: the one module under `defender/tenancy/` defining
     `load_case_mapping` (the base module under `SPEC1080_AT_BASE`)."""
-    return S.moved_module("load_case_mapping", home=S.RUNTIME)
+    return S.moved_module("load_case_mapping", home=S.TENANCY)
 
 
 def _moved(name: str) -> Any:
-    """A case-mapping name from its home under `defender/runtime/`."""
-    return S.moved(name, home=S.RUNTIME)
+    """A case-mapping name from its home under `defender/tenancy/`."""
+    return S.moved(name, home=S.TENANCY)
 
 
 def _writer_home() -> str:
     """The write-back module's path, wherever it lives: `record_case_ticket`'s one home outside
     `defender/scripts/` once #1165 has moved it (the locator's one-home rule decides), else its
-    one definition under `scripts/` — `runtime/ticket_writer.py`, which #1190 leaves in
+    one definition under `scripts/` — `investigation/ticket_writer.py`, which #1190 leaves in
     place. Decided by the definitions, never by catching the locator's failure (that would also
     swallow a duplicate home)."""
     defs = S.definitions("record_case_ticket")
@@ -105,7 +105,7 @@ def _tenant(mapping: str | bytes | None = MAPPING) -> tuple[Path, Path]:
 def _record(root: Path) -> Any:
     """The run's record, resolved the way run start resolves it (`run_tenant.resolve_tenant`,
     unmoved)."""
-    from defender.runtime import run_tenant
+    from defender.systems import run_tenant
 
     return run_tenant.resolve_tenant(fixture_data_root(root), TENANT, defender_dir=S.DEFENDER,
                                      dispatches_lead_zero=False)

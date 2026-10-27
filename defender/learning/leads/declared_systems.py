@@ -14,7 +14,8 @@ from collections.abc import Mapping
 from defender._paths import DefenderPaths
 from defender.learning.leads._errors import LeadAuthorError
 from defender.learning.leads.path_validation import SKILLS_PREFIX
-from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, read_roster
+from defender.systems.verbs import RegistryError, RosterRead, read_roster
+from defender.kit.verbs import is_system_name
 
 #: From `DefenderPaths` rather than re-spelled, so the resolver and the gates agree on where
 #: adapters live.

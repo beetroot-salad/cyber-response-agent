@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from defender._model import model
-from defender.tenancy._tenant import TenantId, TenantRefused
+from defender.records._tenant_id import TenantId, TenantRefused
 
 from . import audit
 from .bootstrap import Bootstrap

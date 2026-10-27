@@ -40,8 +40,8 @@ def _pay_inconclusive_price(deps) -> None:
 
 
 def _close(deps, disposition, **kw):
-    from defender.runtime import challenge_gate
-    from defender.runtime.close_tool import close_investigation
+    from defender.investigation import challenge_gate
+    from defender.investigation.close_tool import close_investigation
     from defender.tests.support.runtime.permissions import _review_bundle
 
     if disposition == "inconclusive" and not kw.get("forced"):
@@ -102,8 +102,8 @@ def test_the_frameworks_forced_close_is_exempt(tmp_path):
     seed_investigation(run, _ERROR_DOC)
 
     from defender._vocab import HOST_ONLY_DISPOSITION
-    from defender.runtime import challenge_gate
-    from defender.runtime.close_tool import _close_investigation_async
+    from defender.investigation import challenge_gate
+    from defender.investigation.close_tool import _close_investigation_async
     from defender.tests.support.runtime.permissions import _review_bundle
     import asyncio
 
@@ -121,7 +121,7 @@ def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_pat
     """H7's condition, and the line the close has to keep straight."""
     import os
     from defender._vocab import HOST_ONLY_DISPOSITION
-    from defender.runtime.close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR
+    from defender.investigation.close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR
     from defender.tests.support.runtime.engine._spec992 import frontmatter, record
 
     def plant_undecodable(path):
@@ -154,7 +154,7 @@ def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_pat
 
 
 def test_an_io_fault_reading_the_companion_is_refused_not_overruled(tmp_path):
-    from defender.runtime.tools import read_companion
+    from defender.investigation.tools import read_companion
     from defender.tests.support.integrations._roster1035 import EXIT_RAISED_EXPECTED, handed_to_nobody, run_as_nobody
     from defender.tests.support.runtime.engine._spec992 import record_files, trace_files
     from pydantic_ai.exceptions import ModelRetry
@@ -198,7 +198,7 @@ def test_one_read_answers_every_gate(tmp_path):
     import signal
 
     from defender._io import ALIAS_READ_REFUSAL
-    from defender.runtime.tools import (
+    from defender.investigation.tools import (
         committed_document_refusal, flagged_in, read_companion,
     )
 
@@ -247,7 +247,7 @@ def test_one_read_answers_every_gate(tmp_path):
 
 def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
     from defender._io import ALIAS_READ_REFUSAL
-    from defender.runtime.tools import _tool_append_block, _tool_fix_row
+    from defender.investigation.tools import _tool_append_block, _tool_fix_row
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -288,7 +288,7 @@ def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):
 
 def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
     """The close names `fix_row`, so `fix_row` has to be able to reach what the close refused."""
-    from defender.runtime.tools import (
+    from defender.investigation.tools import (
         _tool_fix_row, committed_document_refusal, flagged_diagnostics, read_companion,
         repairable_diagnostics,
     )
@@ -314,7 +314,7 @@ def test_the_repair_set_is_widened_by_severity_and_not_by_scope(tmp_path):
     widening safe."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_fix_row, repairable_diagnostics
+    from defender.investigation.tools import _tool_fix_row, repairable_diagnostics
 
     bad_vertex = "v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical|extra"
     doc = (
@@ -342,7 +342,7 @@ def test_the_repair_set_is_widened_by_severity_and_not_by_scope(tmp_path):
 
 def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
     """The set is the rows `fix_row` can ADDRESS, and one nobody can quote back is not one."""
-    from defender.runtime.tools import repairable_diagnostics
+    from defender.investigation.tools import repairable_diagnostics
     from defender.tests.support.invlang.validation._invlang_amendment_954 import VERTICES, findings_block
 
     deps, run = main_deps(tmp_path)
@@ -375,7 +375,7 @@ def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, caps
 def test_the_harness_seed_lands_when_it_validates(tmp_path):
     """The ordinary path, asserted first so the refusal test below cannot pass by the seed
     never working at all."""
-    from defender.runtime.lead_zero import _declare_l_finding
+    from defender.investigation.lead_zero import _declare_l_finding
 
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
@@ -387,7 +387,7 @@ def test_the_harness_seed_lands_when_it_validates(tmp_path):
 
 def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
     """The decision #964 asks for, not just the check."""
-    from defender.runtime.lead_zero import _declare_l_finding
+    from defender.investigation.lead_zero import _declare_l_finding
 
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
@@ -401,7 +401,7 @@ def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
 
 
 def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
-    from defender.runtime.lead_zero import _declare_l_finding
+    from defender.investigation.lead_zero import _declare_l_finding
 
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
@@ -411,7 +411,7 @@ def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
 
 
 def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_making():
-    from defender.runtime.lead_zero import L3
+    from defender.investigation.lead_zero import L3
     from defender.skills.invlang.validate import diagnose
 
     cited = f"```invlang\n:R attr_updates [resolved_by|target|key|value]\n{L3}|v-1|class|x\n```"

@@ -101,7 +101,7 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
                        gather=gather, verbs=verbs, resume=resume, source_run=source_run,
                        defender_dir=defender_dir, tenant=accepted, run_state=state)
 
-    with S.mod("episodes._episode_handle").Episode.open(ep) as episode:
+    with S.mod("records._episode_handle").Episode.open(ep) as episode:
         summary = run_py._drive_investigation(
             alert_path=RunPaths(sibling_dir).alert,
             run=Run.under(fixture_runs_base(sibling_dir.parent), sibling_dir.name),

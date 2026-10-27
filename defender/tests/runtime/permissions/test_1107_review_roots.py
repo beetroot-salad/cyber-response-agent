@@ -81,7 +81,7 @@ def test_settings_faults_name_no_host_path(tmp_path):
     }
     # The unreadable case-history mapping is no longer a stored fault: the one tenant check
     # refuses the folder (#1222 A5), naming the file by its settings-relative path.
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
 
     bad_root, bad_folder = _tenant(tmp_path, "pth2")
     S.mapping_path(bad_folder).write_text("- not\n- a mapping\n", encoding="utf-8")
@@ -98,7 +98,7 @@ def test_settings_faults_name_no_host_path(tmp_path):
 def test_lone_cr_line_endings_parse_as_lines(tmp_path):
     """A config.env written with lone-CR line endings parses line by line, the way the connect
     validator (universal newlines) reads it."""
-    from defender.runtime.tenant_settings import parse_env
+    from defender.tenancy.tenant_settings import parse_env
 
     assert parse_env("A=1\rB=2\r\nC=3\n") == {"A": "1", "B": "2", "C": "3"}
     assert parse_env("A=x\x0cy\n") == {"A": "x\x0cy"}, "only CR/LF end a line, as in the validator"
@@ -124,7 +124,7 @@ def test_oversized_config_is_that_system_down_not_a_crash(tmp_path):
 
 @pytest.mark.parametrize("alias", ["hard link", "symlink"])
 def test_the_config_reader_refuses_an_aliased_file(tmp_path, alias):
-    from defender.runtime import tenant_settings
+    from defender.tenancy import tenant_settings
 
     other = tmp_path / "other.env"
     other.write_text("CMDB_URL_BASE=http://elsewhere\n", encoding="utf-8")
@@ -138,7 +138,7 @@ def test_the_config_reader_refuses_an_aliased_file(tmp_path, alias):
 
 
 def test_an_opened_file_renamed_over_still_reads(tmp_path):
-    from defender.runtime import tenant_settings
+    from defender.tenancy import tenant_settings
 
     path = tmp_path / "config.env"
     path.write_text("A=1\n", encoding="utf-8")
@@ -152,7 +152,7 @@ def test_an_opened_file_renamed_over_still_reads(tmp_path):
 
 
 def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_path):
-    from defender.runtime import ticket_writer
+    from defender.investigation import ticket_writer
     from defender.presentation import visualize_run
 
     # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
@@ -263,7 +263,7 @@ def _two_systems(tmp_path: Path) -> Path:
 
 
 def test_an_unlistable_systems_folder_configures_no_system(tmp_path, monkeypatch, caplog):
-    from defender.runtime import tenant_settings as ts
+    from defender.tenancy import tenant_settings as ts
 
     settings = _two_systems(tmp_path)
     real = Path.iterdir
@@ -284,7 +284,7 @@ def test_an_unlistable_systems_folder_configures_no_system(tmp_path, monkeypatch
 def test_an_unexaminable_system_folder_is_that_system_down(tmp_path, monkeypatch):
     """A system folder that cannot be examined (search permission lost on `systems/`) is that
     system's ConfigFault; the other systems still resolve."""
-    from defender.runtime import tenant_settings as ts
+    from defender.tenancy import tenant_settings as ts
 
     settings = _two_systems(tmp_path)
     real = Path.is_dir

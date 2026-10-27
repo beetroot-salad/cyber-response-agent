@@ -8,10 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from defender import run_common
+from defender import box as box_mod
 from defender.records import RunPaths
-from defender.runtime import run_end, run_tenant
-from defender.runtime import ticket_writer
+from defender.records import run_end
+from defender.systems import run_tenant
+from defender.investigation import ticket_writer
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -131,7 +132,7 @@ def test_d_writer_context_from_run(tmp_path, monkeypatch):
     assert calls, "the record step reached no docker child at all"
     for call in calls:
         env = call["env"]
-        # run_common.run_env(defender_dir, run_dir) exports both — run.py's values, whatever the
+        # box_mod.run_env(defender_dir, run_dir) exports both — run.py's values, whatever the
         # process's own DEFENDER_DIR and cwd say (G29).
         assert env.get("DEFENDER_DIR") == str(S.DEFENDER), (
             f"the writer's child names DEFENDER_DIR={env.get('DEFENDER_DIR')!r}, not run.py's "
@@ -552,9 +553,9 @@ def test_s7_f6_run_env_handed_to_the_ticket_writer(tmp_path, monkeypatch):
     assert rc == 0, f"rc={rc} refused={refused}"
     calls = shim.calls()
     assert calls, "the writer reached no docker child"
-    # run_common.run_env's copy, as run.py builds it for THIS run (G29): the marker and the two
+    # box_mod.run_env's copy, as run.py builds it for THIS run (G29): the marker and the two
     # run-scoped variables are what the writer's child must be handed.
-    run_envs = run_common.run_env(S.DEFENDER, run_dir)
+    run_envs = box_mod.run_env(S.DEFENDER, run_dir)
     wanted = {k: run_envs.get(k) for k in (marker_var, "DEFENDER_DIR", "DEFENDER_RUN_DIR")}
     assert wanted[marker_var] == marker_value, f"the run env lost the marker: {wanted}"
     for call in calls:

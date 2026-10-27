@@ -16,8 +16,8 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import RunScope, compile_policy_for  # noqa: E402
 
 
 # Fixtures: a per-run run dir + corpus, and the two per-run policies built off  #
@@ -287,7 +287,7 @@ def test_corpus_md_named_secret_denied(env):
 @pytest.mark.parametrize("axis", ["substring", "dir"])
 def test_denylist_parity_bash_matches_decide_read(env, axis):
     """For every configured denylist entry, an OTHERWISE-IN-SCOPE operand carrying it denies on BOTH the bash lane and decide_read."""
-    from defender.runtime import bash_policy
+    from defender.investigation import bash_policy
     if axis == "substring":
         for sub in bash_policy.read_deny_substrings():
             p = f"{env.run}/{sub}xyz"                     # denied substring in an in-shape basename
@@ -302,7 +302,7 @@ def test_denylist_parity_bash_matches_decide_read(env, axis):
 
 def test_empty_denylist_cannot_brick_the_reader_lane(env, monkeypatch):
     """The empty-denylist footgun, closed BY CONSTRUCTION."""
-    from defender.runtime import bash_policy
+    from defender.investigation import bash_policy
     for pol in (env.main, env.gather):
         for shape in [s for g in pol.bash_allow for s in g.scope] + list(pol.read_allow):
             assert "(?!" not in shape.pattern, shape.pattern

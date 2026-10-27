@@ -16,7 +16,7 @@ from defender.records._run_id import refuse_bad_case_id
 # with no third-party package installed.
 
 
-#: The run's one wire log and its subdirectory. Defined here (not in `runtime.observe`) so the
+#: The run's one wire log and its subdirectory. Defined here (not in `investigation.observe`) so the
 #: visualizers can import it without pydantic-ai. Every log that carries a wire body verbatim
 #: lives under `WIRE_LOG_DIR` — the investigation's `llm_requests.jsonl`, each learning stage's
 #: `<stage>.trace.jsonl`, and `review_{role}_trace.jsonl` (raw lens replies MAIN must never see).
@@ -35,13 +35,13 @@ from defender.records._run_id import refuse_bad_case_id
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
-#: The run's provenance stamp. Shared with `runtime/workspace_map`, which hides it from the
+#: The run's provenance stamp. Shared with `investigation/workspace_map`, which hides it from the
 #: model-facing directory view; an independent spelling would stop hiding it after a rename.
 PROVENANCE = "provenance.json"
 
 #: The `tool-return` metadata key under which the TOON view gate keeps the tool's original
 #: JSON. Here so the visualizer can read it without importing pydantic-ai via
-#: `runtime.toon_gate` (which re-exports it).
+#: `investigation.toon_gate` (which re-exports it).
 GATE_METADATA_KEY = "json"
 
 # ======================================================================================
@@ -61,7 +61,7 @@ EXECUTED_QUERIES = "executed_queries.jsonl"
 SOURCE_REFS = "source_refs.yaml"
 
 #: The by-ref gather payload directory and the ticket-read capture directory, imported by
-#: `runtime/permission/files.py`'s deny predicates.
+#: `investigation/permission/files.py`'s deny predicates.
 RAW_MARKER = "gather_raw"
 GATHER_SUMMARIES_DIRNAME = "gather_summaries"
 LEAD_AUTHOR_DIRNAME = "lead_author"
@@ -86,7 +86,7 @@ JSONL_EXT = ".jsonl"
 AGENT_TRACE_SUFFIX = "_trace.jsonl"
 AGENT_FRAMED_TRACE_SUFFIX = "_framed_trace.jsonl"
 #: The episode layout's `served/` prefix — here because the lint gate's part set is read off
-#: this module; `episodes/_episode_paths.py` imports it.
+#: this module; `records/_episode_paths.py` imports it.
 SERVED_PREFIX = "served/"
 
 #: Generic suffixes, not discriminating parts; the gate catches hand-rolled compositions of

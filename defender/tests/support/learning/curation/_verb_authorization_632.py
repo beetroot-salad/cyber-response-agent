@@ -12,13 +12,13 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime.verb_grant import (  # noqa: E402
+from defender.systems.verb_grant import (  # noqa: E402
     DENY_ALL,
     VERB_CLASSES,
     GrantError,
     VerbGrant,
 )
-from defender.runtime.verbs import (  # noqa: E402
+from defender.systems.verbs import (  # noqa: E402
     DENIED,
     GRANTED,
     UNDECLARED,
@@ -291,7 +291,7 @@ class _Run:
         """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
         the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
         pre-ORIENT resolution against the run's alert fixture."""
-        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     @property

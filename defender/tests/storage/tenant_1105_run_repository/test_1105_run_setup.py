@@ -11,10 +11,10 @@ from defender.tests.storage.ids_1187 import _spec1187 as S
 import os
 from pathlib import Path
 
-from defender.tenancy import _tenant
 from defender import run as run_py
 from defender import run_common
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+from defender.records._tenant_id import TenantRefused
 
 
 def _setup(alert: Path, t, **kw):
@@ -114,7 +114,7 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
     assert H.tree_state(outside) == {}, "run setup wrote through the linked runs folder"
     assert lifecycles == [], "the run went on past a refused runs folder"
     err = H.raised(_setup, alert, t)
-    assert isinstance(err, (_tenant.TenantRefused, RunRefused)), f"materialize_run raised {err!r}"
+    assert isinstance(err, (TenantRefused, RunRefused)), f"materialize_run raised {err!r}"
     assert H.tree_state(outside) == {}, "materialize_run wrote through the linked runs folder"
     os.unlink(location_path(t.runs))
 
@@ -146,7 +146,7 @@ def test_1105_run_setups_refusal_of_a_linked_runs_folder_is_one_stderr_line_nami
     assert _one_line_exit(err), f"the refusal is one stderr line: {err!r}"
     assert str(runs) in H.message(err), f"the refusal names {runs}: {H.message(err)!r}"
     plain = H.raised(_setup, alert, t)
-    assert isinstance(plain, (_tenant.TenantRefused, RunRefused)), (
+    assert isinstance(plain, (TenantRefused, RunRefused)), (
         f"the walk's refusal type (TenantRefused or RunRefused, declared change 8): {plain!r}")
 
 

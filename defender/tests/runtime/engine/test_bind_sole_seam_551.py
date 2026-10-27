@@ -15,16 +15,16 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.leads.lead_author_engine import LeadAuthorDeps  # noqa: E402
-from defender.runtime import permission  # noqa: E402
+from defender.investigation import permission  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.permission.grant import Grant  # noqa: E402
-from defender.runtime.permission.policies._common import reader_grants  # noqa: E402
-from defender.runtime.permission.policy import AgentPolicy  # noqa: E402
-from defender.runtime.tools import AgentDeps, _tool_write_file  # noqa: E402
+from defender.investigation.permission.grant import Grant  # noqa: E402
+from defender.investigation.permission.policies._common import reader_grants  # noqa: E402
+from defender.investigation.permission.policy import AgentPolicy  # noqa: E402
+from defender.investigation.tools import AgentDeps, _tool_write_file  # noqa: E402
 
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender.runtime.agent_definition import (  # noqa: E402
+from defender.investigation.agent_definition import (  # noqa: E402
     AgentDefinition,
     ResolvedRoots,
     RunScope,
@@ -369,7 +369,7 @@ def test_d6_writers_pass_roots(tmp_path):
     # RED@#551-HEAD: _tool_write_file called decide_write WITHOUT roots → guard dormant → allowed.
     with pytest.raises(ModelRetry):
         _tool_write_file(deps, str(escape / "x.md"), "content")
-    runtime = PATHS.repo_root / "defender" / "runtime" / "tools"
+    runtime = PATHS.repo_root / "defender" / "investigation" / "tools"
     tools_src = "\n".join(
         (runtime / name).read_text() for name in ("_files.py", "_document.py")
     )

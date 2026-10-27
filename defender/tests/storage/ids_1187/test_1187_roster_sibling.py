@@ -15,7 +15,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.records import RunId, RunRefused
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 
 A_ID = S.H5.T_ID
 B_ID = S.H5.U_ID
@@ -214,13 +214,13 @@ def test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical(data_r
 _START_RUNS_CHILD = """
 import errno, os, resource, signal, sys
 from pathlib import Path
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 from defender.records import RunRefused
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.records import RunId, RunRefused
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 root, tenant_id, episode_id, limit = Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
 runs = S.tenant(root, tenant_id).runs_repository()
 with runs.episode(episode_id) as view:
@@ -589,7 +589,7 @@ def test_a_refusal_quoting_a_callers_label_stays_one_bounded_line(data_root):
                          ["absent", "runs-without-roster", "invalid-world-key", "torn"])
 def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
         data_root, roster_state):
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
 
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()

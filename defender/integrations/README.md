@@ -8,7 +8,7 @@ knowledge an adapter is paired with.
 
 (Every file here is an adapter `*_adapter.py` or the shared `_stub_transport.py`
 they import. The gather pipe-tools, run-dir tooling, and analytics that used
-to share this dir now live under `runtime/`, `presentation/`,
+to share this dir now live under `investigation/`, `presentation/`,
 and the repo-root `scripts/` tree.)
 
 ## House conventions — what `/connect` conforms to

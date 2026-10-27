@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from defender.records import RunPaths
-from defender.runtime.challenge_gate import REVIEW_ROLES
+from defender.investigation.challenge_gate import REVIEW_ROLES
 from defender.presentation import visualize_data as d
 from defender.presentation.visualize_primitives import parse_report
 from defender.presentation.visualize_runtime import render_review_gate
@@ -36,7 +36,7 @@ def _write_report(run: Path, *, disposition: str, outcome: str, cause: str,
 def _trace_row(run: Path, role: str, round_no: int, row: dict, reply: str | None = None) -> None:
     """Append through the gate's OWN writer, so the on-disk shape under test is the shape
     production writes — including its decision about where a framed reply may live."""
-    from defender.runtime.challenge_gate import _write_trace_row
+    from defender.investigation.challenge_gate import _write_trace_row
 
     _write_trace_row(fixture_run(run), role, round_no, row, raw_reply=reply)
 

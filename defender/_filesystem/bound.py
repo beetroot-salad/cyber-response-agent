@@ -767,7 +767,7 @@ def stat_entries(bound: Bound) -> StatsRead:
 
 
 
-def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelated `bind` (an AgentDeps builder) already lives at runtime/agent_definition.py:294; the shared word names two unrelated concepts, not one contract split in two
+def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelated `bind` (an AgentDeps builder) already lives at investigation/agent_definition.py:294; the shared word names two unrelated concepts, not one contract split in two
     """Open `root` once (following a symlinked root spelling, the operator's own; nothing below
     it is followed) and return a `Bound` that owns the handle: `with bind(root) as bound:`.
 

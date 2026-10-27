@@ -29,7 +29,7 @@ if TYPE_CHECKING:
         RunId,
     )
     from defender.records._lookup import (
-        RunsRepository, EpisodeRuns, Listed, RunAddress, open_requested_run, check_arm_roster_capacity,
+        RunsRepository, EpisodeRuns, Listed, RunAddress, check_arm_roster_capacity,
     )
     from defender.records._errors import (
         RunRefused, RunAbsent, RunUnreachable,
@@ -59,7 +59,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest",), "_handle"),
     **dict.fromkeys(("RunId",), "_id"),
     **dict.fromkeys(("RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
-                     "open_requested_run", "check_arm_roster_capacity",), "_lookup"),
+                     "check_arm_roster_capacity",), "_lookup"),
     **dict.fromkeys(("RunRefused", "RunAbsent", "RunUnreachable",), "_errors"),
     **dict.fromkeys(("hold_runs_folder", "run_name_fault", "sidecar_names",), "_held"),
 }
@@ -79,12 +79,12 @@ __all__ = [
     "is_case_answer_key", "gather_summaries_shape", "alert_input_shape", "artifact_file", "plain_file", "artifact_dir",
     "contained_payload", "Run", "RunRecord", "ArchivedWorld",
     "RecordHandle", "case_ref", "case_ref_of_digest", "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
-    "open_requested_run", "check_arm_roster_capacity", "RunRefused", "RunAbsent", "RunUnreachable", "hold_runs_folder",
+    "check_arm_roster_capacity", "RunRefused", "RunAbsent", "RunUnreachable", "hold_runs_folder",
     "run_name_fault", "sidecar_names",
 ]
 
 
-def __getattr__(name: str) -> Any:  # lint-dup: ok — a PEP 562 module hook, a name Python fixes; runtime/permission's serves its own package
+def __getattr__(name: str) -> Any:  # lint-dup: ok — a PEP 562 module hook, a name Python fixes; investigation/permission's serves its own package
     home = _HOMES.get(name)
     if home is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

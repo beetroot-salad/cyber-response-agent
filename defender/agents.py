@@ -5,10 +5,10 @@ from defender.learning.branch.estate.oracle import ORACLE_CHECK_DEF, ORACLE_DEF
 from defender.learning.branch.questioner import QUESTIONER_DEF
 from defender.learning.judge_role import JUDGE_DEF
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
-from defender.runtime.agent_definition import AgentDefinition, build_registry
+from defender.investigation.agent_definition import AgentDefinition, build_registry
 from defender._agent_role import AgentRole
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF
-from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
+from defender.investigation.driver import GATHER_DEF, MAIN_DEF
+from defender.investigation.review_roles import COMPOSER_DEF, SUPPORT_DEF
 
 # A definition here compiles a role's policy, so a registered role with no caller is a compiled
 # grant nothing claims — retire the definition with the stage. One definition may serve several

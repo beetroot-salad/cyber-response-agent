@@ -78,10 +78,10 @@ Diff, in prose (the build is not written yet):
 
 ```
 defender/skills/clerk/SKILL.md          the role prompt: compile prose → invlang, emit rows only
-defender/runtime/review_roles.py        +CLERK_DEF (zero-grant, deps_cls carries role)
-defender/runtime/tools/_document.py     +_tool_record: prose verbatim, clerk, validated append, retry
-defender/runtime/driver/_build.py       MAIN_DEF variant: ToolSet(append=False, record=True)
-defender/runtime/orient.py              grammar block omitted for the clerk arm; catalog kept
+defender/investigation/review_roles.py        +CLERK_DEF (zero-grant, deps_cls carries role)
+defender/investigation/tools/_document.py     +_tool_record: prose verbatim, clerk, validated append, retry
+defender/investigation/driver/_build.py       MAIN_DEF variant: ToolSet(append=False, record=True)
+defender/investigation/orient.py              grammar block omitted for the clerk arm; catalog kept
 defender/SKILL.md → variants/C-clerk/   syntax sections stripped (79 of 702 lines reference
                                         row syntax; the concepts stay)
 ```

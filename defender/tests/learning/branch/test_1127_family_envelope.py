@@ -13,8 +13,8 @@ import pytest
 import yaml
 
 from defender import _yaml
-from defender.episodes._episode_handle import Episode
-from defender.runtime.branch._family import FamilyError, load_family, parse_family, write_family
+from defender.records._episode_handle import Episode
+from defender.records._family import FamilyError, load_family, parse_family, write_family
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.shared.filesystem.test_1127_params_nesting_limit import raised
 
@@ -202,8 +202,8 @@ from pathlib import Path
 
 import yaml
 
-from defender.episodes._episode_handle import Episode
-from defender.runtime.branch._family import FamilyError, load_family
+from defender.records._episode_handle import Episode
+from defender.records._family import FamilyError, load_family
 
 start = time.monotonic()
 try:
@@ -382,7 +382,7 @@ def test_a_questioner_reply_carrying_a_yaml_alias_is_refused_naming_call_1(tmp_p
     err = raised(lambda: _author(tmp_path, agent))
 
     assert err is not None, "an aliased questioner reply was accepted"
-    assert isinstance(err, T.sym("runtime.branch", "BranchError")), \
+    assert isinstance(err, T.sym("investigation.branch", "BranchError")), \
         f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
     assert "call 1" in str(err)
     assert isinstance(err.__cause__, yaml.YAMLError), \
@@ -405,7 +405,7 @@ def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tm
 
     err = raised(lambda: _author(tmp_path, agent))
 
-    assert isinstance(err, T.sym("runtime.branch", "BranchError")), \
+    assert isinstance(err, T.sym("investigation.branch", "BranchError")), \
         f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
     assert "call 1" in str(err)
     assert isinstance(err.__cause__, _yaml.AliasRefused)
@@ -437,7 +437,7 @@ def test_a_seat_reply_carrying_a_yaml_alias_is_refused_naming_the_seat(tmp_path,
     err = raised(lambda: _author(tmp_path, agent))
 
     assert err is not None, "an aliased seat reply was accepted"
-    assert isinstance(err, T.sym("runtime.branch", "BranchError")), \
+    assert isinstance(err, T.sym("investigation.branch", "BranchError")), \
         f"refused with {type(err).__name__}, not BranchError: {str(err)[:200]}"
     assert "seat B" in str(err), f"the refusal does not name seat B: {str(err)[:200]}"
     assert isinstance(err.__cause__, yaml.YAMLError), \

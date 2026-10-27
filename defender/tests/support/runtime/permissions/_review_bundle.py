@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from defender.runtime.review_roles import ReviewStages
+from defender.investigation.review_roles import ReviewStages
 
 __all__ = ["LENS_READING", "bundle", "composer_reply", "stage"]
 

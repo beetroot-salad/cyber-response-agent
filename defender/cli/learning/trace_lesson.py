@@ -57,6 +57,7 @@ from defender.records._report import UNKNOWN_DISPOSITION, read_report
 from defender.knowledge._knowledge import KnowledgePaths
 from defender._text import one_line
 from defender.records import Run, RunPaths
+from defender.records._tenant_id import TenantRefused
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -185,7 +186,6 @@ def _print_index(lessons_dir: Path, runs: list[Run]) -> None:
 def _scanned_runs(raw_tenant: str) -> list[Run] | None:
     """`tenant_runs`, or `None` with the refusal on stderr (one line, naming a stray entry
     or the refused tenant)."""
-    from defender.tenancy import _tenant
     from defender.records import RunRefused
 
     try:
@@ -196,7 +196,7 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
             print(f"warn: {len(unrecorded)} run folder(s) with no run record skipped: "
                   f"{', '.join(one_line(str(run.id)) for run in unrecorded)}", file=sys.stderr)
         return [run for run in runs if run not in unrecorded]
-    except (_tenant.TenantRefused, RunRefused) as refused:
+    except (TenantRefused, RunRefused) as refused:
         print(f"error: the runs of tenant {one_line(raw_tenant)} cannot be scanned: "
               f"{one_line(str(refused))}", file=sys.stderr)
         return None
@@ -204,12 +204,11 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
 
 def _published_or_none(raw_tenant: str) -> Path | None:
     """`published_lessons_dir`, or `None` with the refusal on stderr (one line)."""
-    from defender.tenancy import _tenant
     from defender.tenancy._exports import DeliveryRefused
 
     try:
         return published_lessons_dir(raw_tenant)
-    except (_tenant.TenantRefused, DeliveryRefused) as refused:
+    except (TenantRefused, DeliveryRefused) as refused:
         print(f"error: the lessons of tenant {one_line(raw_tenant)} cannot be found: "
               f"{one_line(str(refused))}", file=sys.stderr)
         return None

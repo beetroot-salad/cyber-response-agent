@@ -125,7 +125,7 @@ def test_confined_curator_binding_keeps_tenant_knowledge_outside_its_read_scope(
     """D4: the existing confined learning role retains its own corpus, without a global lift."""
     from defender.learning.author.curator_engine import CuratorDeps
     from defender import box as box_mod
-    from defender.runtime import permission
+    from defender.investigation import permission
 
     tenant, run_dir = read_scene
     repo = tmp_path / 'curator-worktree'

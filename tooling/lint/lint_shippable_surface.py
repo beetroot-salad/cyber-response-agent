@@ -54,7 +54,7 @@ EXCLUDED_PREFIXES = (
     # The record's settings parts (#1107): the ONE module that reads each system's `config.env`
     # into the run's record, so that no other platform module interprets them (the census test
     # `d4_elastic_keys_one_place` holds that for the corpus engine's keys). A file, not a directory: the carve-out is this module and nothing beside it.
-    "defender/runtime/tenant_settings.py",
+    "defender/tenancy/tenant_settings.py",
 )
 
 EXCLUDED_FILES = {

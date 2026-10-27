@@ -74,8 +74,22 @@ def _alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    stat = Path(f"/proc/{pid}/stat").read_text() if Path(f"/proc/{pid}/stat").exists() else "Z"
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except (FileNotFoundError, ProcessLookupError):  # reaped between the kill(0) and the read
+        return False
     return stat[stat.rindex(")") + 2] != "Z"
+
+
+def _outlives(pid: int, within: float = 2.0) -> bool:
+    """Still alive after `within` seconds? A SIGKILL is delivered asynchronously: the launch
+    returns once the group's pipes close, which can be a moment before the grandchild's exit."""
+    deadline = time.monotonic() + within
+    while _alive(pid):
+        if time.monotonic() > deadline:
+            return True
+        time.sleep(0.02)
+    return False
 
 
 def test_r6_a_killed_child_takes_its_grandchildren_and_the_launch_does_not_wait_on_them(tmp_path):
@@ -88,7 +102,7 @@ def test_r6_a_killed_child_takes_its_grandchildren_and_the_launch_does_not_wait_
         grandchild = int(pidfile.read_text())
         assert B.outcome_class(line) == "stale:transient", line
         assert elapsed < 15, f"the launch waited {elapsed:.1f}s on a grandchild holding its pipes"
-        assert not _alive(grandchild), "the child's grandchild outlived the kill"
+        assert not _outlives(grandchild), "the child's grandchild outlived the kill"
     finally:
         if pidfile.exists():
             with contextlib.suppress(ProcessLookupError):

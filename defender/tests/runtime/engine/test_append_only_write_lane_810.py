@@ -15,7 +15,7 @@ from defender.records._artifact_schema import (  # noqa: E402
     UNCHANGED_NOTICE,
     validate_investigation,
 )
-from defender.runtime.tools import _tail_chars  # noqa: E402
+from defender.investigation.tools import _tail_chars  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402
 
 _BAD_ATTR_KEY = """```invlang
@@ -113,7 +113,7 @@ def test_every_refusing_branch_states_the_file_is_unchanged(kind, text, current)
 
 def test_the_refusal_carries_the_row_and_the_correction_to_the_model():
     """The rendered refusal, which is the `ModelRetry` body verbatim. The row and both legal forms have to reach..."""
-    from defender.runtime.tools import flagged_write_refusal
+    from defender.investigation.tools import flagged_write_refusal
     from defender.skills.invlang.validate import warn_diagnostics
 
     reason = flagged_write_refusal("append_block", warn_diagnostics(_BAD_ATTR_KEY))
@@ -205,7 +205,7 @@ def test_tail_of_a_real_investigation_is_a_fraction_of_the_whole():
 def _main_deps(tmp_path):
     """MAIN deps through the real `bind` seam — real compiled policy, real gate."""
     from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
+    from defender.investigation.agent_definition import bind
 
     run = tmp_path / "run"
     run.mkdir()
@@ -216,7 +216,7 @@ def _main_deps(tmp_path):
 
 def test_append_creates_then_grows_the_transcript(tmp_path):
     """Creation is an append onto nothing, which is why `write_file` was redundant for MAIN rather than merely..."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
     inv = run / "investigation.md"
@@ -230,7 +230,7 @@ def test_append_creates_then_grows_the_transcript(tmp_path):
 
 def test_append_separates_when_the_document_does_not_end_in_a_newline(tmp_path):
     """A separator is inserted rather than the previous content being tidied — existing bytes are never..."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
 
@@ -242,7 +242,7 @@ def test_append_separates_when_the_document_does_not_end_in_a_newline(tmp_path):
 
 def test_a_repeating_last_line_is_not_an_obstacle(tmp_path):
     """The anchor failure this verb exists to delete. `edit_file` needed a unique `old_string`, so appending..."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
     repeated = "Dispatching all three in parallel.\n"
@@ -256,7 +256,7 @@ def test_a_repeating_last_line_is_not_an_obstacle(tmp_path):
 
 def test_an_empty_append_changes_nothing(tmp_path):
     """The separator is computed before `text` is looked at, so an empty append used to add a newline the model..."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
     _tool_append_block(deps, "+ no trailing newline")
@@ -269,7 +269,7 @@ def test_an_empty_append_changes_nothing(tmp_path):
 
 def test_the_reported_count_is_utf8_bytes_not_characters(tmp_path):
     """The SKILL tells the model this return IS a byte count, and the 65,536 cap it must stay under is measured..."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, _run = _main_deps(tmp_path)
     text = "+ v-001 ⟂ v-002 → v-003\n"
@@ -284,7 +284,7 @@ def test_a_refused_append_leaves_no_residue(tmp_path):
     """The property the refusal text is claiming. If a denied append left a partial write, the notice would be a..."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
     inv = run / "investigation.md"
@@ -299,7 +299,7 @@ def test_a_refused_append_leaves_no_residue(tmp_path):
 
 def test_a_duplicate_append_is_accepted_so_the_refusal_must_be_believed(tmp_path):
     """The finding that makes the truthful refusal load-bearing rather than cosmetic."""
-    from defender.runtime.tools import _tool_append_block, _tail_chars
+    from defender.investigation.tools import _tool_append_block, _tail_chars
 
     deps, run = _main_deps(tmp_path)
     block = ("```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"

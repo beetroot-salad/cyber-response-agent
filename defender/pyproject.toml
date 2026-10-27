@@ -42,7 +42,7 @@ runtime = [
     # platform-specific binary like duckdb, not a pure-Python drop-in.
     "toons>=0.7,<0.8",
     # duckdb — the engine behind the `defender-sql` shim
-    # (runtime/sql_engine/sql.py), the gather subagent's aggregation
+    # (investigation/sql_engine/sql.py), the gather subagent's aggregation
     # fallback for filter-only sources (no server-side aggregation of their
     # own): it pipes an adapter's rows through SQL the model already
     # knows, instead of a bespoke reducer (see skills/connect/adapter.md
@@ -178,7 +178,7 @@ files = ["defender", "evaluations"]
 # defender/ is a namespace tree: no top-level package, modules invoked by path,
 # tests sys.path.insert("..") (so imports resolve as `defender.*`). mypy_path +
 # explicit_package_bases + namespace_packages give every file a unique dotted
-# module name (`defender.runtime.driver`, …), dodging the duplicate-module crash
+# module name (`defender.investigation.driver`, …), dodging the duplicate-module crash
 # a bare run hits on the repeated leaf names (conftest.py, _cli.py, __init__-less
 # dirs).
 mypy_path = "."
@@ -234,6 +234,6 @@ max-args = 8
 max-statements = 60
 
 [[tool.mypy.overrides]]
-module = ["defender.records._locations", "defender.learning.author.version_control.exports", "defender.learning.author.version_control.record", "defender.runtime.session_store._write"]
+module = ["defender.records._locations", "defender.learning.author.version_control.exports", "defender.learning.author.version_control.record", "defender.records.session_store._write"]
 disallow_untyped_defs = true
 warn_return_any = true

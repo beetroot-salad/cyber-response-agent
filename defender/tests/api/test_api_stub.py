@@ -39,6 +39,7 @@ from defender.api.models import (  # noqa: E402
     SystemPut,
     SystemSettings,
 )
+from defender.tests.tooling.layout_contracts._spec1080 import api_forbidden  # noqa: E402
 from defender.api.ports import (  # noqa: E402
     ApiDeps,
     Conflict,
@@ -52,7 +53,7 @@ from defender.identity import (  # noqa: E402
     InMemoryIdentityRepository,
     register_tenant,
 )
-from defender.tenancy._tenant import TenantId, TenantRefused  # noqa: E402
+from defender.records._tenant_id import TenantId, TenantRefused  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -315,28 +316,25 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
     probe = (
         "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
         "import defender.identity; "
-        "print(json.dumps(sorted(m for m in sys.modules "
-        "if m.startswith(('defender.runtime', 'defender.learning')))))"
+        "print(json.dumps(sorted(sys.modules)))"
     )
     out = subprocess.run(
         [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
         encoding="utf-8", check=True,
     )
-    assert json.loads(out.stdout) == []
+    assert api_forbidden(json.loads(out.stdout)) == []
 
 
 def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
-    """A4: `defender.identity` imports nothing from `api`, `runtime` or `learning`."""
-    probe = (
-        "import json, sys; import defender.identity; "
-        "print(json.dumps(sorted(m for m in sys.modules "
-        "if m.startswith(('defender.api', 'defender.runtime', 'defender.learning')))))"
-    )
+    """A4: `defender.identity` imports nothing from `api`, nor anything the API must never load
+    (the learning loop and what was `defender.runtime` before #1308 placed it by layer)."""
+    probe = "import json, sys; import defender.identity; print(json.dumps(sorted(sys.modules)))"
     out = subprocess.run(
         [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
         encoding="utf-8", check=True,
     )
-    assert json.loads(out.stdout) == []
+    loaded = json.loads(out.stdout)
+    assert [m for m in loaded if m.startswith("defender.api")] + api_forbidden(loaded) == []
 
 
 def test_the_tenancy_package_loads_no_identity_module() -> None:

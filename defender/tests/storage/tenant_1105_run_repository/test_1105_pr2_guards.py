@@ -147,7 +147,7 @@ def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its
     src, ep = P.sibling_scene(tmp_path)
     secret = tmp_path / "secret.json"
     secret.write_text('{"secret": "outside the source run"}\n', encoding="utf-8")
-    from defender.episodes._episode_paths import EpisodePaths
+    from defender.records._episode_paths import EpisodePaths
     alert = EpisodePaths(ep).source_alert
     plain = alert.read_bytes()
     alert.unlink()

@@ -8,7 +8,7 @@ import json
 import pytest
 from defender.tests.support.storage._alert_plant import plant_alert
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.shared.filesystem import _spec1047 as S
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -257,7 +257,7 @@ def test_run_end_write_happens_even_for_a_run_that_ended_cleanly(tmp_path):
 
 def test_the_driver_records_whether_the_model_had_already_closed_when_the_exit_was_stamped(
         tmp_path):
-    from defender.runtime import challenge_gate
+    from defender.investigation import challenge_gate
     from defender.tests.support.runtime.engine import _spec923
 
     closed_deps, closed_run = _deps(tmp_path / "closed")

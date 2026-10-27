@@ -53,7 +53,7 @@ defender/.venv/bin/mypy --config-file defender/pyproject.toml
 
 The launch baseline was `Found 78 errors in 21 files (checked 98 source files)`
 (dev-only, the gate condition; 84 with the `runtime` extra synced — the extra 6
-are `runtime/driver.py` pydantic-ai generics, invisible to the dev-only gate).
+are `investigation/driver.py` pydantic-ai generics, invisible to the dev-only gate).
 All were cleared in the promotion PR; the gate now reports
 `Success: no issues found in 98 source files` under **both** conditions. For the
 record, the launch errors concentrated:
@@ -63,7 +63,7 @@ record, the launch errors concentrated:
 | `integrations/*_cli.py` (6 files) | 38 | `union-attr` |
 | `learning/{eval_secondary,_loop_orchestrate,replay_actor,…}.py` | ~20 | `union-attr`, `arg-type` |
 | `presentation/*.py` | ~8 | `arg-type`, `union-attr` |
-| the rest (`run.py`, `runtime/observe.py`, `skills/invlang/queries.py`, …) | ~12 | mixed |
+| the rest (`run.py`, `investigation/observe.py`, `skills/invlang/queries.py`, …) | ~12 | mixed |
 
 By code: `union-attr` 47, `arg-type` 15, then a long tail
 (`unused-ignore` 3, `assignment` 3, `name-defined` 2, `index` 2, …).
@@ -117,7 +117,7 @@ the obvious first batch.
 - ~~**#410 — unify `RunDeps`/`GatherDeps` modeling.**~~ **Done.** Main-vs-gather
   was split across an `is_main_session` bool *and* a subclass. `is_main_session`
   is now a derived `@property` (single source of truth: the deps type), and the
-  capture path in `runtime/tools.py` narrows with `isinstance(deps, GatherDeps)`
+  capture path in `investigation/tools.py` narrows with `isinstance(deps, GatherDeps)`
   — so the `assert isinstance(...)` band-aid is gone and the redundant bool can
   no longer drift out of sync with the subclass.
 

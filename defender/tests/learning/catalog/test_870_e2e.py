@@ -14,8 +14,8 @@ from defender.learning.core import persist  # noqa: E402
 from defender.learning.core.config import LoopPaths  # noqa: E402
 from defender.learning.leads import pitfalls_curator  # noqa: E402
 from defender.learning.leads.lead_extraction import collect_general_failures  # noqa: E402
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import RunScope, compile_policy_for  # noqa: E402
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests.support.learning.core._declared870 import (  # noqa: E402
     BINDER,

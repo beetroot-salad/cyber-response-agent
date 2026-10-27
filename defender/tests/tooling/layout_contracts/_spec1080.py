@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 import tomllib
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -40,8 +40,9 @@ AT_BASE = os.environ.get("SPEC1080_AT_BASE") == "1"
 
 REPORTS = "defender/reports"
 #: Pinned by demand text.
-RUNTIME = "defender/runtime"
-VERBS = "defender/runtime/verbs.py"
+RUNTIME = "defender/investigation"
+TENANCY = "defender/tenancy"
+VERBS = "defender/systems/verbs.py"
 #: The flat tier: a module directly under `defender/` whose name starts with `_`.
 FLAT_TIER = "defender/_*.py"
 #: The price table and process bootstrap keep dependency-free package initializers; neither
@@ -55,6 +56,21 @@ QUERY_RULES = "defender/knowledge/_query_rules.py"
 #: one place every file of this suite reads a rule's spelling from, so a later rename is made
 #: HERE.
 QUERY_RULE_PUBLIC = {"_json_safe_params": "_json_safe_params", "_request_key": "_request_key"}
+
+#: What the API program must never load: the learning loop and everything that was
+#: `defender.runtime` before #1308 placed it by layer. A package covers its submodules.
+API_FORBIDDEN = (
+    "defender.learning", "defender.investigation", "defender.systems", "defender.providers",
+    "defender.records.session_store", "defender.records.selection", "defender.records._wire",
+    "defender.records.run_end", "defender.tenancy.case_ticket", "defender.tenancy.run_knowledge",
+    "defender.tenancy.tenant_settings", "defender.records._family", "defender._exception_groups",
+)
+
+
+def api_forbidden(modules: Iterable[str]) -> list[str]:
+    """The `API_FORBIDDEN` modules among `modules`."""
+    return [m for m in modules
+            if m in API_FORBIDDEN or m.startswith(tuple(f + "." for f in API_FORBIDDEN))]
 
 #: Directory names no census, locator or scan descends into: tool output, caches, virtualenvs,
 #: VCS metadata (s154). A directory holding its own `.git` (a nested checkout) is skipped too.
@@ -196,7 +212,7 @@ def definitions(name: str, root: Path = REPO_ROOT) -> tuple[str, ...]:
 #: Where each symbol the locator is asked about lives at the BASE outside `defender/scripts/`
 #: (the exit-code vocabulary moves out of the circuit breaker, m1). `SPEC1080_AT_BASE` accepts
 #: these; nothing else does.
-_BASE_HOMES_OUTSIDE_SCRIPTS = ("defender/runtime/circuit_breaker.py",)
+_BASE_HOMES_OUTSIDE_SCRIPTS = ("defender/systems/circuit_breaker.py",)
 
 
 def home_of(name: str, *, home: str | None = None, root: Path = REPO_ROOT) -> str:

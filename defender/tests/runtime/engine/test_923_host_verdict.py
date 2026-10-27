@@ -6,8 +6,8 @@ import asyncio
 import pytest
 
 from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
-from defender.runtime import challenge_gate
-from defender.runtime.close_tool import (
+from defender.investigation import challenge_gate
+from defender.investigation.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_NOTHING_LEFT_TO_ASK,
     CAUSE_REVIEW_INCOMPLETE,
@@ -125,7 +125,7 @@ def _slow_stage(seconds: float):
 
 def test_a_review_that_timed_out_raised_or_was_unreadable_emits_the_new_state(tmp_path):
     """`challenge_gate._fail` — reached when a review stage times out, raises, returns text outside its own output contract, or has no reviewer bound to..."""
-    from defender.runtime.review_roles import ReviewStages
+    from defender.investigation.review_roles import ReviewStages
 
     lens = _review_bundle.LENS_READING
     cases = {
@@ -185,7 +185,7 @@ def test_a_model_authored_new_state_close_is_refused_without_spending_a_review(t
     """A close tool call supplying `unresolved` is refused, nothing is committed, and no review stage is dispatched — the model is OFFERED the member by..."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.close_tool import DispositionArg
+    from defender.investigation.close_tool import DispositionArg
 
     advertised = DispositionArg.__metadata__[0].json_schema_extra["enum"]
     assert MEMBER in advertised, "the schema half of the divergence is gone"

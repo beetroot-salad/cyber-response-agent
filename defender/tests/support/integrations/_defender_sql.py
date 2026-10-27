@@ -1,4 +1,4 @@
-"""One spawn of the sql engine (`runtime/sql_engine/sql.py`), for every test that runs it as a
+"""One spawn of the sql engine (`investigation/sql_engine/sql.py`), for every test that runs it as a
 PROCESS."""
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ import pytest
 from defender.tests.support.shared.contracts._by_path import DEFENDER
 
 #: The engine's source file (read as text by the census tests, loaded by `_sql_warm`).
-SQL_PY: Path = DEFENDER / "runtime" / "sql_engine" / "sql.py"
+SQL_PY: Path = DEFENDER / "investigation" / "sql_engine" / "sql.py"
 #: How the shim starts it: as a module, the working directory kept off `sys.path`.
-SQL_ARGV: tuple[str, ...] = (sys.executable, "-P", "-m", "defender.runtime.sql_engine.sql")
+SQL_ARGV: tuple[str, ...] = (sys.executable, "-P", "-m", "defender.investigation.sql_engine.sql")
 
 
 def sql_env(env: dict[str, str] | None = None) -> dict[str, str]:

@@ -22,14 +22,14 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS, BudgetKill  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime import circuit_breaker as cb  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.systems import circuit_breaker as cb  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.execution.box_codec import BoxResult  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.query_tool import QueryCapture  # noqa: E402
-from defender.runtime.run_state import RunState  # noqa: E402
-from defender.runtime.tools import _tool_bash  # noqa: E402
-from defender.runtime import record_query as rq  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.query_tool import QueryCapture  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
+from defender.investigation.tools import _tool_bash  # noqa: E402
+from defender.investigation import record_query as rq  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402

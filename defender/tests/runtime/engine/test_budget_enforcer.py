@@ -9,7 +9,7 @@ from defender.hooks.budget_enforcer import (
 
 
 def _state(run_dir):
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(run_dir, run_dir.name)
 

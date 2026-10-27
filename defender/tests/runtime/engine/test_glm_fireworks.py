@@ -21,11 +21,12 @@ if str(_DEFENDER) not in sys.path:
 import run  # noqa: E402
 from defender import agents  # noqa: E402
 from defender.configuration._pricing import UnknownModel  # noqa: E402
-from defender.runtime import driver, providers  # noqa: E402
+from defender.investigation import driver  # noqa: E402
+from defender import providers  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
-from defender.runtime import review_roles  # noqa: E402
-from defender.runtime.driver import _prompts  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
+from defender.investigation import review_roles  # noqa: E402
+from defender.investigation.driver import _prompts  # noqa: E402
 from defender.configuration import _pricing as pricing  # noqa: E402
 
 _GLM_ID = "accounts/fireworks/models/glm-5p3"

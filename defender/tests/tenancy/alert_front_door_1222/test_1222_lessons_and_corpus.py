@@ -488,7 +488,7 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
         (corpus / f"{name}.md").write_text(text, encoding="utf-8")
         corpora[spelling] = corpus
 
-    match_lessons = S.sym("runtime.lessons_engine.lessons_frontier", "match_lessons")
+    match_lessons = S.sym("investigation.lessons_engine.lessons_frontier", "match_lessons")
     hits = {spelling: match_lessons(_frontier(), corpus) for spelling, corpus in corpora.items()}
     for spelling, found in hits.items():
         assert [h.name for h in found] == [name], f"match_lessons over the {spelling} lesson: {found}"

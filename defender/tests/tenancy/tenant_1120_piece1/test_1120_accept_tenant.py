@@ -15,6 +15,7 @@ import pytest
 from defender.tenancy import _tenant
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+from defender.records._tenant_id import TenantRefused
 
 
 #: O3's refused ids plus a control-character id (N16), with the gate's address tokens as the
@@ -613,7 +614,7 @@ def test_1120_accept_tenant_refuses_a_fifo_socket_or_device_inside_either_half_w
     H.adopted(root)
     planted = plant(H.knowledge_dir(root) / half)
     value, exc = _accept_within(_tenant, root, fifo=planted if planted.suffix == ".fifo" else None)
-    assert isinstance(exc, _tenant.TenantRefused), (
+    assert isinstance(exc, TenantRefused), (
         f"a {planted.suffix} in {half}/ was not refused as TenantRefused: {value!r} / {exc!r}")
     assert str(planted) in str(exc), f"the refusal does not name the entry: {exc}"
 
@@ -704,7 +705,7 @@ def test_1120_s5_link_walk_meets_a_symlink_cycle(tmp_path: Path) -> None:
     loop = H.agent_dir(root) / "loop"
     loop.symlink_to(H.agent_dir(root), target_is_directory=True)
     value, exc = _accept_within(_tenant, root)
-    assert isinstance(exc, _tenant.TenantRefused), f"the cycle was not refused: {value!r} {exc!r}"
+    assert isinstance(exc, TenantRefused), f"the cycle was not refused: {value!r} {exc!r}"
     assert str(loop) in str(exc), f"the refusal does not name the cycle's link: {exc}"
 
 

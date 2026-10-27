@@ -85,7 +85,7 @@ def box_surfaces() -> list[Path]:
     extension-less command shims it calls (`bin/defender-*`, `defender-lessons` among them),
     the bash policy, and the box image's Dockerfile."""
     surfaces = [*sorted((DEFENDER / "bin").glob("defender-*")),
-                DEFENDER / "runtime" / "bash_policy.json", DEFENDER / "box.Dockerfile"]
+                DEFENDER / "investigation" / "bash_policy.json", DEFENDER / "box.Dockerfile"]
     missing = [str(p) for p in surfaces if not p.is_file()]
     assert not missing, f"box surfaces moved; update this scan: {missing}"
     assert len(surfaces) > 2, surfaces
@@ -175,7 +175,7 @@ def test_the_workspace_map_names_knowledge_through_the_run_copy(tmp_path):
     """O-TEXT / O2 (orient's view mapping): with a run view whose agent tree is the run copy,
     the workspace map's system-skill and query-template sections name the agent tree's model
     paths and list the run copy's content — never the product tree's, which holds none."""
-    from defender.runtime.workspace_map import workspace_map
+    from defender.investigation.workspace_map import workspace_map
     from defender._model_view import ModelView
 
     product = tmp_path / "product" / "defender"

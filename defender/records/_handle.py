@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from defender.records import _alert_input
 from defender.records import _artifact_schema
-from defender.episodes import _episode_paths
+from defender.records import _episode_paths
 from defender.records import _provenance
 from defender.records import _report
 from defender import _io as _real_io
@@ -133,7 +133,7 @@ class RecordHandle:
         self._on_partial_failure = on_partial_failure
         self._prepare_write = prepare_write
         if member == "session_db":
-            from defender.runtime import session_store
+            from defender.records import session_store
 
             self.open_store = session_store.open_store
             self._lineage_id, self._sessions_runs_base = session_args or (None, None)
@@ -213,7 +213,7 @@ class RecordHandle:
         self._mutate(rows if isinstance(rows, bytes) else _jsonl_text(rows), "replace")
 
     def _do_seed(self, text: str) -> None:
-        from defender.runtime.branch._seed import refuse_seeded_run_dir
+        from defender.records._seeded import refuse_seeded_run_dir
 
         root, _name = self._address()
         refuse_seeded_run_dir(root)
@@ -564,7 +564,7 @@ class Run:
         return prov
 
     def _exit_class(self, owner: RunPaths, faults: list[str]) -> str | None:
-        from defender.runtime import run_end as run_end_mod
+        from defender.records import run_end as run_end_mod
 
         assert self.runs_base is not None
         sidecar_text, _reason = self._io.rooted_read(

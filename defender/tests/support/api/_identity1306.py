@@ -33,7 +33,7 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     VerifiedSignIn,
     register_tenant,
 )
-from defender.tenancy._tenant import TenantId
+from defender.records._tenant_id import TenantId
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 T0 = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
