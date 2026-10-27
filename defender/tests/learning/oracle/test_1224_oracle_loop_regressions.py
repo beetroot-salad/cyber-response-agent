@@ -562,11 +562,11 @@ def test_the_python_box_is_stopped_when_the_attempt_that_used_it_ends(tmp_path):
 def test_a_deadline_abandoned_python_frame_does_not_share_the_next_attempts_box(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    box, log = _python_box_factory(tmp_path, slow_first=1.5)
+    box, log = _python_box_factory(tmp_path, slow_first=5.0)
     o = S.oracle(S.python("import time; time.sleep(60)"), S.python("print(2)"),
                  S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=box,
-                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=0.4)
+                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=3.0)
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
 
@@ -578,7 +578,8 @@ def test_a_deadline_abandoned_python_frame_does_not_share_the_next_attempts_box(
 class _GatedLimiter:
     """A limiter double. The thread that acquired first (attempt 1's host check, abandoned
     mid-check) blocks on its next `acquire` until another thread's wait (the next attempt's
-    own) releases it 0.2 s in; that wait then goes on for 1 s more."""
+    own) releases it 0.2 s in; that wait then goes on for 4 s more, past the next attempt's
+    whole deadline."""
 
     def __init__(self) -> None:
         self.first: int | None = None
@@ -599,7 +600,7 @@ class _GatedLimiter:
         self.abandoned_waiting.wait(10)
         time.sleep(0.2)
         self.release_abandoned.set()
-        time.sleep(1.0)
+        time.sleep(4.0)
         self.next_attempt_waited = True
         return time.monotonic() - began
 
@@ -617,7 +618,7 @@ def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clo
                  S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
     limiter = _GatedLimiter()
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, limiter=limiter,
-                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=0.5)
+                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=3.0)
     door = reg.oracle.door
     real_context = door.context
     slowed: list[bool] = []
@@ -627,7 +628,7 @@ def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clo
         # abandoned and goes on into the second side query's limiter wait.
         if not slowed:
             slowed.append(True)
-            time.sleep(0.9)
+            time.sleep(4.0)
         return real_context()
 
     door.context = slow_once
