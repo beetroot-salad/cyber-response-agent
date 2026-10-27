@@ -26,17 +26,6 @@ from defender.records._tenant_id import TenantId
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 
 
-def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
-    """A data root holding `tenant_id`, its runs folder and a real run folder per id."""
-    root = tmp_path / "data"
-    root.mkdir(parents=True, exist_ok=True)
-    t = H.tenant(root, tenant_id)
-    H.runs_folder(t)
-    for rid in run_ids:
-        H.make_run(location_path(t.runs), rid)
-    return root, t
-
-
 def _ids(answer) -> list[str]:
     return [str(i) for i in answer]
 
@@ -55,18 +44,6 @@ def _container_refusal(name: str, err: object) -> bool:
 def _uuids(n: int) -> list[str]:
     """`n` fresh uuid4 run ids, sorted as the listing sorts them."""
     return sorted(str(uuid.uuid4()) for _ in range(n))
-
-
-def _fresh(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
-    """A data root holding `tenant_id`, a real `tenant.runs` (no `_tenant.json`) and a real run
-    folder per id in it."""
-    root = tmp_path / "data"
-    root.mkdir(parents=True, exist_ok=True)
-    t = H.tenant(root, tenant_id)
-    Path(location_path(t.runs)).mkdir(parents=True, exist_ok=True)
-    for rid in run_ids:
-        H.make_run(location_path(t.runs), rid)
-    return root, t
 
 
 def _repository_calls(t, run_id: str):
@@ -132,7 +109,7 @@ def test_1105_open_run_returns_the_tenants_run_under_tenant_runs(tmp_path):
     from defender.records import Run, RunId, RunsRepository
 
     rid = str(uuid.uuid4())
-    root, t = _fresh(tmp_path, rid)
+    root, t = H.tenant_with_runs(tmp_path, rid)
     before = H.tree_state(root)
     rec = H.RecordingIO()
     run = RunsRepository(t, io=rec).open(RunId.parse(rid))
@@ -198,7 +175,7 @@ def test_1105_the_repository_answers_from_the_tenant_it_is_handed_and_reads_no_e
     from defender.records import RunId
 
     r1, r2 = _uuids(2)
-    root, t = _fresh(tmp_path, r1, r2)
+    root, t = H.tenant_with_runs(tmp_path, r1, r2)
 
     def answers() -> dict:
         runs = t.runs_repository()
@@ -229,7 +206,7 @@ def test_1105_a_copied_or_pickled_tenant_is_served_like_the_original(tmp_path):
     from defender.records import RunId
 
     r1, r2 = _uuids(2)
-    _root, t = _fresh(tmp_path, r1, r2)
+    _root, t = H.tenant_with_runs(tmp_path, r1, r2)
 
     def answers(x):
         runs = x.runs_repository()
@@ -250,7 +227,7 @@ def test_1105_every_repository_function_takes_an_injected_io_like_the_handle(tmp
     from defender.records import RunId, RunsRepository
 
     rid = str(uuid.uuid4())
-    _root, t = _fresh(tmp_path, rid)
+    _root, t = H.tenant_with_runs(tmp_path, rid)
     params = inspect.signature(RunsRepository).parameters
     assert "io" in params, "RunsRepository takes no io= seam"
     assert params["io"].kind is inspect.Parameter.KEYWORD_ONLY, "RunsRepository: io= kind"
@@ -312,8 +289,7 @@ def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path)
         H.make_run(location_path(t.runs), name)
         err = opened(name)
         assert H.is_a(err, RunRefused), (
-            f"{name!r} is no run id under #1187 (only a canonical UUID is), yet runs.open gave "
-            f"{err!r}")
+            f"{name!r} is no run id (only a canonical UUID is), yet runs.open gave {err!r}")
 
 
 def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listings_refuse(
@@ -321,7 +297,7 @@ def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listi
     from defender.records import RunRefused
 
     rid = str(uuid.uuid4())
-    _root, t = _fresh(tmp_path, rid)
+    _root, t = H.tenant_with_runs(tmp_path, rid)
     for name in (f"{rid}.run-end.json", f"{rid}.run-end.json{H.STAGED_TAIL}"):
         os.mkdir(location_path(t.runs) / name)
         err = H.raised(t.runs_repository().list)
@@ -334,7 +310,7 @@ def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listi
         H.make_run(location_path(t.runs), name)
         err = H.raised(t.runs_repository().list)
         assert H.is_a(err, RunRefused), (
-            f"a directory {name!r} (no run id under #1187) did not refuse the listing: {err!r}")
+            f"a directory {name!r} (no run id) did not refuse the listing: {err!r}")
         assert name in H.message(err), f"the refusal does not name {name!r}: {H.message(err)}"
         shutil.rmtree(location_path(t.runs) / name)
     assert _ids(t.runs_repository().list()) == [rid], "without them the listing answers"
@@ -344,7 +320,7 @@ def test_1105_a_refused_name_is_never_probed_on_disk(tmp_path):
     from defender.records import RunId, RunRefused, RunsRepository
 
     rid = str(uuid.uuid4())
-    _root, t = _fresh(tmp_path, rid)
+    _root, t = H.tenant_with_runs(tmp_path, rid)
     rec = H.RecordingIO()
     err = H.raised(lambda: RunsRepository(t, io=rec).open(RunId.parse(f"{rid}.run-end.json")))
     assert H.is_a(err, RunRefused), f"a sidecar-suffixed id gave {err!r}"
@@ -362,7 +338,7 @@ def test_1105_every_listed_id_opens_with_open_run(tmp_path):
     """Beside sidecar files (a staged one included), every listed id opens to its real run
     directory."""
     ids = _uuids(3)
-    _root, t = _fresh(tmp_path, *ids)
+    _root, t = H.tenant_with_runs(tmp_path, *ids)
     H.plant_sidecars(location_path(t.runs), ids[0])
     H.plant_sidecars(location_path(t.runs), ids[1], staged=False)
     listed = t.runs_repository().list()
@@ -481,7 +457,7 @@ def test_1105_open_run_serves_a_real_directory_entry_and_refuses_an_absent_one_n
 
     base = str(uuid.uuid4())[:-1]
     absent, *neighbours = [base + c for c in "0123"]
-    root, t = _fresh(tmp_path, *neighbours)
+    root, t = H.tenant_with_runs(tmp_path, *neighbours)
     before = H.tree_state(root)
     err = H.raised(t.runs_repository().open, RunId.parse(absent))
     assert H.is_a(err, RunRefused), f"an absent id beside its near neighbours gave {err!r}"
@@ -499,7 +475,7 @@ def test_1105_a_held_run_is_not_rechecked_and_a_fresh_open_run_is(tmp_path):
     from defender.records import RunId
 
     rid = str(uuid.uuid4())
-    _root, t = _fresh(tmp_path, rid)
+    _root, t = H.tenant_with_runs(tmp_path, rid)
     run = t.runs_repository().open(RunId.parse(rid))
     assert (run.run_dir, run.tenant_id) == (location_path(t.runs) / rid, t.id), "the run was handed out"
     aside = tmp_path / "aside-runs"
@@ -587,7 +563,7 @@ def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_
     from defender.records import RunId, RunRefused
 
     rid = str(uuid.uuid4())
-    root, a = _fresh(tmp_path, rid)
+    root, a = H.tenant_with_runs(tmp_path, rid)
     b = H.tenant(root, H.U_ID)
     run_id = RunId.parse(rid)
     os.symlink(location_path(a.runs), location_path(b.runs))
@@ -609,7 +585,7 @@ def test_1105_a_box_writable_tenant_claim_neither_grants_nor_refuses_a_lookup(tm
     from defender.records import RunId, RunRefused
 
     r1, r2 = _uuids(2)
-    _root, t = _fresh(tmp_path, r1, r2)
+    _root, t = H.tenant_with_runs(tmp_path, r1, r2)
 
     def answers():
         return (str(t.runs_repository().open(RunId.parse(r1)).run_dir),
@@ -638,7 +614,7 @@ def test_1105_a_legacy_run_folder_named_off_the_rules_makes_the_listings_refuse_
     from defender.records import RunRefused
 
     ids = _uuids(2)
-    _root, t = _fresh(tmp_path, *ids)
+    _root, t = H.tenant_with_runs(tmp_path, *ids)
     assert _ids(t.runs_repository().list()) == ids, (
         f"the uuid runs list: {_ids(t.runs_repository().list())}")
     for legacy in ("Bad Name", "Run1", "r" + "1" * 205, "r" + "2" * 206,
@@ -705,7 +681,7 @@ def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_
     from defender.records import RunId, RunRefused
 
     r1, r2 = str(uuid.uuid4()), str(uuid.uuid4())
-    root, t = _fresh(tmp_path, r1)
+    root, t = H.tenant_with_runs(tmp_path, r1)
     u = H.tenant(root, H.U_ID)
     H.make_run(location_path(u.runs), r1, alert='{"alert_id": "u-secret"}\n')
     for target in (location_path(t.runs) / r1, location_path(u.runs) / r1):
@@ -723,8 +699,7 @@ def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_
     assert _ids(t.runs_repository().list()) == [r1], "without the link"
 
 
-def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_name_in_episodes(  # name kept: run_exists is gone
-        tmp_path):
+def test_1105_open_run_answers_beside_a_torn_record_and_a_stray_name_in_episodes(tmp_path):
     """`runs.open` judges only its own entry: a torn record and a stray file in `_episodes/`, or
     a 'Bad Name' folder beside the run, refuse the listing but not the open."""
     import uuid
@@ -790,7 +765,7 @@ def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
     """Sidecar files (a staged one included) list as their run; orphan sidecars of a run whose
     folder is gone are accepted too, and that id is not listed."""
     rid, gone = _uuids(2)
-    _root, t = _fresh(tmp_path, rid)
+    _root, t = H.tenant_with_runs(tmp_path, rid)
     H.plant_sidecars(location_path(t.runs), rid)
     H.plant_sidecars(location_path(t.runs), gone)
     assert _ids(t.runs_repository().list()) == [rid], (
@@ -803,7 +778,7 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
     from defender.records import RunId, RunRefused, RunsRepository
 
     rid, other, absent = (str(uuid.uuid4()) for _ in range(3))
-    _root, t = _fresh(tmp_path, rid)
+    _root, t = H.tenant_with_runs(tmp_path, rid)
 
     def delta(call):
         before = H.open_fd_count()
@@ -859,7 +834,7 @@ def test_1105_refusals_quoting_a_disk_read_entry_name_escape_it_and_stay_one_lin
     from defender.records import RunRefused
 
     rid = str(uuid.uuid4())
-    _root, t = _fresh(tmp_path, rid)
+    _root, t = H.tenant_with_runs(tmp_path, rid)
     hostile = (("a\n[run.py] forged", "[run.py] forged"), ("x\x1b[31m", "[31m"),
                ("n\n" + "c" * 253, "ccc"), ("d\x7f\x9b\u2028[c1] forged", "[c1] forged"))
     for name, visible in hostile:

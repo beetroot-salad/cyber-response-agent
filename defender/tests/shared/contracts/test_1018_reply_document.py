@@ -8,6 +8,11 @@ import pytest
 import yaml
 
 from defender._yaml import safe_load
+from defender.investigation.branch import BranchError
+from defender.learning.branch import questioner
+from defender.learning.core.validate import MalformedReply, reply_document_text
+from defender.learning.judge import JudgeRefused
+from defender.learning.judge import run as judge_run
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135
@@ -16,20 +21,7 @@ from defender.tests.support.learning.core import _state1135
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def _parse(text: str) -> str:
-    """`validate.reply_document_text`, resolved at call time so a missing name fails one test,
-    not collection."""
-    return J.sym("learning.core.validate", "reply_document_text")(text)
-
-
-def _malformed() -> type[BaseException]:
-    """`MalformedReply`, evaluated BEFORE the `raises` block opens, so a missing name fails the
-    test at the call rather than satisfying `pytest.raises(...)` with an `AttributeError`."""
-    return J.sym("learning.core.validate", "MalformedReply")
 
 
 DOCUMENT = (
@@ -88,26 +80,13 @@ def fenced(body: str, tag: str = "yaml", *, closer: str = "```") -> str:
     return f"```{tag}\n{body}\n{closer}"
 
 
-# The issue's thirteen shapes, by its numbering.
+# The issue's shapes, by its numbering.
 SHAPE_1_PLAIN = DOCUMENT + "\n"
 SHAPE_2_WHOLE_FENCE = fenced(DOCUMENT) + "\n"
 SHAPE_3_PROSE_THEN_FENCE = PROSE_BEFORE + fenced(DOCUMENT) + "\n"
 SHAPE_4_FENCE_THEN_PROSE = fenced(DOCUMENT) + PROSE_AFTER
-SHAPE_5_PROSE_FENCE_PROSE = PROSE_BEFORE + fenced(DOCUMENT) + PROSE_AFTER
 SHAPE_6_DRAFT_THEN_FINAL = (
     fenced(DRAFT) + "\n\nOn reflection that is wrong. Final answer:\n\n" + fenced(DOCUMENT) + "\n")
-SHAPE_7_FENCE_THEN_SCHEMA = (
-    fenced(DOCUMENT) + "\n\nFor reference the schema is:\n\n"
-    + fenced("episode_outcome: <word>\nfindings: <list>") + "\n")
-SHAPE_8_FENCE_THEN_EVIDENCE = (
-    fenced(DOCUMENT) + "\n\nThe evidence row I relied on:\n\n"
-    + fenced("srcip: 1.2.3.4\ndstip: 10.0.0.7", "") + "\n")
-SHAPE_9_JSON_THEN_VERDICT = (
-    fenced('{"lead": "l-001", "seq": 2, "system": "elastic"}', "json")
-    + "\n\nThat row is why:\n\n" + fenced(DOCUMENT) + "\n")
-SHAPE_10_LOG_THEN_PLAIN = (
-    fenced("Jul 28 17:00:01 web-1 sshd[411]: Accepted publickey for root from 10.0.0.7", "")
-    + "\n\n" + DOCUMENT + "\n")
 SHAPE_11_OUTER_WRAPS_INNER = "```\nHere is the grading:\n" + fenced(DOCUMENT) + "\n```\n"
 SHAPE_12_TRAILING_CLOSER = fenced(DOCUMENT, closer="```END") + "\n"
 SHAPE_13A_PRELUDE_THEN_PLAIN = PRELUDE + SHAPE_1_PLAIN
@@ -163,23 +142,11 @@ QUOTED_COLUMN_ZERO_THINK = (
 QUOTED_COLUMN_ZERO_THINK_NOTE = (
     "the evidence row said: </think> episode_outcome: discard correlations: [] scope_checks: [] "
     "derivations: [] findings: [] noise_floor_note: end")
-#: The same for a column-0 ``` inside a double-quoted scalar.
-QUOTED_COLUMN_ZERO_FENCE = (
-    "episode_outcome: caught\n"
-    'noise_floor_note: "the query was\n'
-    "```\n"
-    'FROM logs-* | LIMIT 5"\n'
-    "correlations: []\n"
-    "scope_checks: []\n"
-    "derivations: []\n"
-    "findings: []\n"
-)
-QUOTED_COLUMN_ZERO_FENCE_NOTE = "the query was ``` FROM logs-* | LIMIT 5"
 
 
 def _accepts(text: str, *, expected_text: str = DOCUMENT, expected_doc: dict = VERDICT) -> None:
     """The ACCEPT assertion, both halves."""
-    text_out = _parse(text)
+    text_out = reply_document_text(text)
     assert text_out == expected_text, f"the parser returned:\n{text_out!r}"
     assert safe_load(text_out) == expected_doc
 
@@ -200,8 +167,8 @@ def _refuses(text: str, shape: str) -> None:
     """The REFUSE assertion: `MalformedReply`, and its message names exactly this shape — the
     marker for `shape` present, every other marker absent."""
     assert shape in SHAPE_MARKERS, shape
-    with pytest.raises(_malformed()) as err:
-        _parse(text)
+    with pytest.raises(MalformedReply) as err:
+        reply_document_text(text)
     message = str(err.value)
     assert shape in message, f"the refusal does not name {SHAPE_MARKERS[shape]}: {message!r}"
     others = [m for m in SHAPE_MARKERS if m != shape and m in message]
@@ -258,7 +225,7 @@ def test_1018_e1_a_close_tag_quoted_inside_a_block_scalar_stays_in_the_document(
     inline = E1_QUOTED_THINK.replace(
         "noise_floor_note: |\n", "noise_floor_note: \"quoted </think> mid-line\"\n"
         "unused: |\n")
-    loaded = safe_load(_parse(inline))
+    loaded = safe_load(reply_document_text(inline))
     assert loaded["noise_floor_note"] == "quoted </think> mid-line"
     assert loaded["unused"] == E1_NOTE
 
@@ -293,7 +260,7 @@ def test_1018_an_indented_quoted_close_tag_cannot_end_a_prelude_on_an_unloadable
         "episode_outcome: caught\n", "episode_outcome: caught\nnote: one trial: no replicate\n")
     with pytest.raises(yaml.YAMLError):
         safe_load(unloadable)
-    assert _parse(unloadable) == unloadable.strip()
+    assert reply_document_text(unloadable) == unloadable.strip()
 
 
 def test_1018_a_close_tag_with_nothing_after_it_is_named_not_called_empty():
@@ -317,7 +284,7 @@ def test_1018_e3_trailing_spaces_on_the_opener_and_closer_lines_are_tolerated():
 def test_1018_e4_crlf_line_endings_are_normalised_before_the_shape_rule():
     crlf = (fenced(DOCUMENT) + "\n").replace("\n", "\r\n")
     _accepts(crlf)
-    assert "\r" not in _parse(crlf)
+    assert "\r" not in reply_document_text(crlf)
 
 
 def test_1018_e5_a_leading_bom_is_dropped():
@@ -353,7 +320,7 @@ def test_1018_whitespace_before_the_opener_is_stripped_before_the_fence_rule(lea
 def test_1018_the_prelude_ends_at_the_first_column_zero_close_tag_not_the_last():
     """Everything through the FIRST column-0 closing think tag is dropped, and no more."""
     text = PRELUDE + DRAFT + "\n</think>\n" + DOCUMENT + "\n"
-    out = _parse(text)
+    out = reply_document_text(text)
     assert out == (DRAFT + "\n</think>\n" + DOCUMENT), f"the parser returned:\n{out!r}"
     with pytest.raises(yaml.YAMLError):
         safe_load(out)
@@ -454,18 +421,16 @@ def test_1018_validate_reply_wraps_the_parser_refusal_in_judge_refused(tmp_path)
     """`validate_reply` on shape 4 raises `JudgeRefused` at world and family scope: the class
     NAMED, not `J.refusals()`, whose tuple includes `ValueError` and would pass on a bare parser
     error."""
-    run_mod = J.mod("learning.judge.run")
-    JudgeRefused = J.sym("learning.judge", "JudgeRefused")
-    assert run_mod.validate_reply(_bare_verdict()).bucket == "lead-set"
+    assert judge_run.validate_reply(_bare_verdict()).bucket == "lead-set"
     with pytest.raises(JudgeRefused):
-        run_mod.validate_reply(_fence_then_prose(_bare_verdict()))
+        judge_run.validate_reply(_fence_then_prose(_bare_verdict()))
     family_bare = _family_verdict()
     # A family reply carries family-scope world findings only, no bucket.
-    family_parsed = run_mod.validate_reply(family_bare, scope="family")
+    family_parsed = judge_run.validate_reply(family_bare, scope="family")
     assert family_parsed.bucket is None
     assert family_parsed.world_findings == []
     with pytest.raises(JudgeRefused):
-        run_mod.validate_reply(_fence_then_prose(family_bare), scope="family")
+        judge_run.validate_reply(_fence_then_prose(family_bare), scope="family")
 
 
 def _family_verdict() -> str:
@@ -494,23 +459,13 @@ def test_1018_judge_family_scope_fence_then_prose_costs_one_family_draw_not_the_
     assert _wire_row(ep, "family", 0)["reply"] == _fence_then_prose(_family_verdict())
 
 
-def _questioner():
-    return T.mod("learning.branch.questioner")
-
-
-def _branch_error() -> type[BaseException]:
-    """`BranchError` NAMED — `T.refusals()` includes `ValueError`, which a bare `MalformedReply`
-    would satisfy."""
-    return T.sym("investigation.branch", "BranchError")
-
-
 def _fenced_doc(doc: dict) -> str:
     """The questioner fixture's own fenced shape (`test_947`): closer last, no trailing newline."""
     return f"```yaml\n{yaml.safe_dump(doc, sort_keys=False)}```"
 
 
 def _author(tmp_path, agent):
-    return _questioner().author_family(
+    return questioner.author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
         invoke=agent, leads=[], alert={}, frontier="")
 
@@ -519,7 +474,7 @@ def test_1018_questioner_call_1_fence_then_prose_aborts_naming_call_1_before_any
         tmp_path):
     agent = T.FakeAgent(_fenced_doc(T.declaration(T.family_doc())) + PROSE_AFTER,
                         _fenced_doc(T.declaration(T.world_doc("b"))), _fenced_doc(T.declaration(T.world_doc("c"))))
-    with pytest.raises(_branch_error()) as err:
+    with pytest.raises(BranchError) as err:
         _author(tmp_path, agent)
     assert "call 1" in str(err.value)
     assert agent.calls == 1, "seat calls were paid against a family that was refused"
@@ -529,28 +484,7 @@ def test_1018_questioner_seat_call_fence_then_prose_aborts_naming_the_seat(tmp_p
     agent = T.FakeAgent(_fenced_doc(T.declaration(T.family_doc())),
                         _fenced_doc(T.declaration(T.world_doc("b"))) + PROSE_AFTER,
                         _fenced_doc(T.declaration(T.world_doc("c"))))
-    with pytest.raises(_branch_error()) as err:
+    with pytest.raises(BranchError) as err:
         _author(tmp_path, agent)
     assert "seat B" in str(err.value)
     assert agent.calls == 2
-
-
-SHAPE_PHRASE = "not inside a code fence, with nothing before or after it"
-#: Words that would turn the sentence into permission for a shape the parser refuses. None
-#: may appear in the sentence that carries the phrase.
-PERMISSIVE_WORDS = ("wrap", "you may", "commentary", "treated as", "before and after")
-#: The label on the two questioner examples, which still SHOW the document inside a fence.
-ILLUSTRATION_LABEL = "illustration, not part of the reply"
-
-
-def _says_bare(text: str) -> bool:
-    """The site states the accepted shape: the whole phrase, whitespace-normalised so a wrapped
-    markdown line counts, in a sentence that permits nothing the parser refuses."""
-    flat = " ".join(text.split())
-    at = flat.find(SHAPE_PHRASE)
-    if at < 0:
-        return False
-    start = max(flat.rfind(". ", 0, at), flat.rfind(": ", 0, at), 0)
-    end = flat.find(". ", at)
-    sentence = flat[start:end if end > 0 else None].lower()
-    return not any(word in sentence for word in PERMISSIVE_WORDS)

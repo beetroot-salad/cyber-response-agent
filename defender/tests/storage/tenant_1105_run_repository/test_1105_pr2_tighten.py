@@ -6,7 +6,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import contextlib
 import difflib
-import importlib
 import json
 import os
 import re
@@ -14,7 +13,6 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -36,15 +34,6 @@ def _launched(got: P.Launched) -> bool:
 
 def _refused(got: P.CliResult) -> bool:
     return got.rc not in (0, None) or got.raised is not None
-
-
-def _lint(name: str) -> ModuleType:
-    """A lint program, imported as `test_1105_layout_lint` imports it (its own directory on
-    `sys.path`, since the gates import `_astlib` by bare name)."""
-    lint_dir = H.WORKTREE / "tooling" / "lint"
-    if str(lint_dir) not in sys.path:
-        sys.path.insert(0, str(lint_dir))
-    return importlib.import_module(f"tooling.lint.{name}")
 
 
 _OPENED: list[str] = []

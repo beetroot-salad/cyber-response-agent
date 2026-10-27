@@ -109,26 +109,26 @@ def test_1105_run_end_keeps_todays_order_cross_check_ticket_curation_page(tmp_pa
     order, outcome, queued = _drive(tmp_path / "ok", monkeypatch)
     tail_steps = [s for s in order if s in (CROSS_CHECK, TICKET, ENQUEUE, PAGE)]
     assert tail_steps == [CROSS_CHECK, TICKET, ENQUEUE, PAGE], (
-        f"run end ran {order}, not cross-check -> ticket -> curation -> page (N-h)")
+        f"run end ran {order}, not cross-check -> ticket -> curation -> page")
     assert outcome == 0, f"a completing run exits 0: {outcome!r}"
-    assert queued, "the curation request was queued (RG-08-a)"
+    assert queued, "no curation request was queued"
     assert order.index("lifecycle") < order.index(CROSS_CHECK), "run end follows the lifecycle"
 
     order, outcome, queued = _drive(tmp_path / "ticket-fails", monkeypatch, fail=TICKET)
     assert isinstance(outcome, OSError), (
-        f"a raising ticket record propagates out of run.main today (RG-08-b): {outcome!r}")
+        f"a raising ticket record did not propagate out of run.main: {outcome!r}")
     assert outcome.errno == errno.EIO, f"the ticket store's own fault propagates: {outcome!r}"
     assert ENQUEUE not in order, f"the enqueue ran after a raising ticket record: {order}"
     assert PAGE not in order, f"the page ran after a raising ticket record: {order}"
-    assert queued == [], "no curation request after a raising ticket record (RG-08-b)"
+    assert queued == [], f"a curation request was queued after a raising ticket record: {queued}"
 
     order, outcome, queued = _drive(tmp_path / "enqueue-fails", monkeypatch, fail=ENQUEUE)
     assert isinstance(outcome, OSError), (
-        f"a raising enqueue propagates out of run.main today (RG-08-c): {outcome!r}")
+        f"a raising enqueue did not propagate out of run.main: {outcome!r}")
     assert outcome.errno == errno.ENOSPC, f"the enqueue's own fault propagates: {outcome!r}"
     assert PAGE not in order, f"the page ran after a raising enqueue: {order}"
 
     order, outcome, queued = _drive(tmp_path / "page-fails", monkeypatch, fail=PAGE)
-    assert outcome == 0, f"a page that was not saved still exits 0 (RG-08-d): {outcome!r}"
-    assert queued, "the curation request was queued before the page failed (RG-08-d)"
+    assert outcome == 0, f"a page that was not saved still exits 0: {outcome!r}"
+    assert queued, "no curation request was queued before the page failed"
     assert order[-1] == PAGE, f"the page is still the last step: {order}"

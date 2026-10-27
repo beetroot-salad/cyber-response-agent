@@ -15,7 +15,6 @@ import pytest
 from defender import _io
 from defender.records import RunPaths
 
-ITEM1_SYSTEM = "elastic"  # the breaker file's system key
 MiB = 1024 * 1024
 NAME = "rec.txt"
 ABSENT_TEXT = os.strerror(errno.ENOENT)
@@ -126,11 +125,11 @@ def read(reader: str, root: Path, name: str = NAME, os_: Any = os) -> tuple[str,
     return fn(root, name, os_, binary)
 
 
-def absent_reason(reader: str, root: Path, name: str = NAME) -> Any:
-    """What `reader` answers for a really missing `name` — the absent answer a read-phase
+def absent_reason(reader: str, root: Path) -> Any:
+    """What `reader` answers for a really missing `NAME` — the absent answer a read-phase
     refusal must not be mistaken for."""
-    assert not (root / name).exists()
-    kind, payload = read(reader, root, name)
+    assert not (root / NAME).exists()
+    kind, payload = read(reader, root, NAME)
     return payload if reader in FOLDS_ABSENCE else kind
 
 
@@ -723,13 +722,13 @@ class ShortWriteOs(FaultOs):
         return os.write(fd, bytes(data[:self._k]))
 
 
-def in_thread(fn: Callable[[], Any], *, deadline: float = 10.0) -> Any:
-    """`fn()` on a thread, or fail when it has not answered by `deadline` seconds."""
+def in_thread(fn: Callable[[], Any]) -> Any:
+    """`fn()` on a thread, or fail when it has not answered within 10 seconds."""
     out: list[Any] = []
     t = threading.Thread(target=lambda: out.append(fn()), daemon=True)
     t.start()
-    t.join(deadline)
-    assert not t.is_alive(), f"no answer within {deadline}s: the call hangs"
+    t.join(10.0)
+    assert not t.is_alive(), "no answer within 10s: the call hangs"
     return out[0]
 
 

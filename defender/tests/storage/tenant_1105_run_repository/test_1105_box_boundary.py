@@ -136,7 +136,7 @@ def _outside_run(state: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in state.items() if not k.startswith(f"{RUN_ID}/")}
 
 
-def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> dict[str, Any]:
+def _session(root: Path, runtime: str) -> dict[str, Any]:
     t = H.tenant(root, H.T_ID)
     runs = Path(location_path(t.runs))
     run_dir = H.make_run(runs, RUN_ID)
@@ -151,7 +151,7 @@ def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> di
     from defender.tests.support.tenancy._run_copy_stage import staged_agent
 
     agent, token = staged_agent(Path(t.agent), run_dir.parent.parent / "run-copies")
-    box = start_box(run_dir, defender_dir, spec=BoxSpec(runtime=runtime),
+    box = start_box(run_dir, H.DEFENDER, spec=BoxSpec(runtime=runtime),
                     tenant_agent=agent, tenant_id=t.id, staged_token=token)
     sandboxed, name = box.sandboxed, box.name
     try:
@@ -243,5 +243,4 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
     sidecar = f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}"
     assert (s["runs"] / sidecar).exists(), f"the host's runs folder holds {sidecar}"
     for name in ("_tenant.json", "_episodes"):
-        assert not os.path.lexists(s["runs"] / name), (
-            f"the host's runs folder holds {name}, which #1187 never plants")
+        assert not os.path.lexists(s["runs"] / name), f"the host's runs folder holds {name}"

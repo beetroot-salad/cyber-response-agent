@@ -18,29 +18,18 @@ from defender.records._tenant_id import TenantRefused
 R1, R2 = fixture_uuid("spec-holes-r1"), fixture_uuid("spec-holes-r2")
 
 
-def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
-    root = tmp_path / "data"
-    root.mkdir(parents=True, exist_ok=True)
-    t = H.tenant(root, tenant_id)
-    H.runs_folder(t)
-    for rid in run_ids:
-        H.make_run(location_path(t.runs), rid)
-    return t
-
-
-def _listings(t, run_id: str = R1):
+def _listings(t):
     """The repository methods that judge the whole runs folder's listing."""
     return [
         ("runs.list", lambda: t.runs_repository().list()),
     ]
 
 
-def _every_function(t, *, run_id: str = R1):
+def _every_function(t):
     """Every lookup over the natural container."""
     from defender.records import RunId
 
-    return [*_listings(t, run_id),
-            ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id)))]
+    return [*_listings(t), ("runs.open", lambda: t.runs_repository().open(RunId.parse(R1)))]
 
 
 # -- Run setup over a non-directory runs folder ----------------------------------------------
@@ -99,7 +88,7 @@ def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind)
 def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
     from defender.records import RunId, RunRefused
 
-    t = _good(tmp_path, R1)
+    _root, t = H.tenant_with_runs(tmp_path, R1)
     entry = Path(location_path(t.runs)) / R2
     if kind == "file":
         entry.write_text("x\n", encoding="utf-8")
@@ -121,7 +110,7 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
 def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tmp_path, name):
     from defender.records import RunRefused
 
-    t = _good(tmp_path, R1)
+    _root, t = H.tenant_with_runs(tmp_path, R1)
     (Path(location_path(t.runs)) / name).write_text("{}\n", encoding="utf-8")
     for fn, call in _listings(t):
         err = H.raised(call)
@@ -135,7 +124,7 @@ def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_pat
     listing, named (r1 is a UUID, so the refusal is the entry kind's, not the id rule's)."""
     from defender.records import RunRefused
 
-    t = _good(tmp_path, R1)
+    _root, t = H.tenant_with_runs(tmp_path, R1)
     entry = Path(location_path(t.runs)) / f"{R1}.run-end.json"
     if kind == "link":
         os.symlink(Path(location_path(t.runs)) / R1 / "alert.json", entry)

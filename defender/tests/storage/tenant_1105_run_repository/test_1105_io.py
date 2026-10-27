@@ -6,23 +6,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from defender import _io
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
 _LINK_REFUSAL = "refusing to create through a symlinked path component"
-
-
-def _require_keyword(fn: Any, *args: Any, keyword: str, **kwargs: Any) -> Any:
-    """`fn(*args, **kwargs)`; a `TypeError` naming `keyword` (one `fn` does not take) fails the
-    test instead of erroring it."""
-    try:
-        return fn(*args, **kwargs)
-    except TypeError as exc:
-        if keyword in str(exc):
-            pytest.fail(f"{getattr(fn, '__qualname__', fn)} takes no {keyword}= keyword: {exc}")
-        raise
 
 
 class _CountingOS:
@@ -106,7 +93,7 @@ def test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart(t
     absent = tmp_path / "absent"
     before = H.tree_state(tmp_path)
 
-    held = _require_keyword(_io.hold, real, keyword="follow", follow=False)
+    held = _io.hold(real, follow=False)
     with held:
         assert held.view().entries().dirs() == ["r1"], "a real directory is held and listed"
     with _io.hold(linked_ancestor / "runs", follow=False) as under_link:
@@ -127,7 +114,7 @@ def test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart(t
 
     with _io.hold(link) as followed:
         assert followed.view().entries().dirs() == ["b1"], (
-            "the default follow=True still follows a link root (R41-01)")
+            "the default follow=True still follows a link root")
 
 
 def test_1105_bound_read_max_bytes_reads_no_more_than_it_is_asked(tmp_path):
@@ -141,7 +128,7 @@ def test_1105_bound_read_max_bytes_reads_no_more_than_it_is_asked(tmp_path):
     counting = _CountingOS()
     with _io.hold(folder, os_=counting) as held:
         view = held.view()
-        rec = _require_keyword(view.read, "within.json", keyword="max_bytes", max_bytes=n)
+        rec = view.read("within.json", max_bytes=n)
         assert rec.text == contents["within.json"], f"a file within N - 1 bytes reads whole: {rec!r}"
         for name in ("at.json", "over.json"):
             counting.delivered = 0

@@ -38,16 +38,6 @@ def _rid(text: str):
 RID_R1 = fixture_uuid("pr2-rf-r1")
 
 
-def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
-    """A tenant under the configured data root, its natural runs folder as run setup leaves it
-    and a real run folder per id."""
-    t = H.tenant(location_path(P.data_root)(), tenant_id)
-    H.runs_folder(t)
-    for rid in run_ids:
-        H.make_run(location_path(t.runs), rid)
-    return t
-
-
 def _uuid_tenant(*run_ids: str, tenant_id: str = H.T_ID):
     """A tenant under the configured data root, its `<T>/runs` a real folder (no `_tenant.json`)
     and a run folder per id."""

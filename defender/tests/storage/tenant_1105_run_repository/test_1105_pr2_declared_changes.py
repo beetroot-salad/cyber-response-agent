@@ -388,18 +388,6 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
     assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1]
 
 
-def _lead_author_main():
-    from defender.learning.leads import lead_author
-
-    return lead_author.main
-
-
-def _workspace_map_main():
-    from defender.cli import workspace_map
-
-    return workspace_map.main
-
-
 def _lesson(lessons: Path, stem: str) -> None:
     lessons.mkdir(exist_ok=True)
     (lessons / f"{stem}.md").write_text(

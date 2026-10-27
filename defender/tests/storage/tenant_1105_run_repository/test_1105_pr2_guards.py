@@ -35,10 +35,9 @@ def _no_episode_made(before: set[str]) -> bool:
 # The launcher: refused before anything is spent; the control launches.
 # ==========================================================================================
 
-def test_g15_a_source_id_that_leaves_no_room_for_a_sibling_is_refused_before_anything_is_spent(
-        tmp_path, monkeypatch):
-    """Old name: a 201-byte non-UUID source id is refused before the questioner, with no episode
-    made (and not by the retired room-for-a-label rule); a UUID source launches."""
+def test_g15_a_non_uuid_source_id_is_refused_before_anything_is_spent(tmp_path, monkeypatch):
+    """A 201-byte non-UUID source id is refused before the questioner, with no episode made (and
+    not by the retired room-for-a-label rule); a UUID source launches."""
     import uuid
 
     long_id = ("2026" + "x" * 199)[:201]

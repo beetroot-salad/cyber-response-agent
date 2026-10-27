@@ -241,12 +241,12 @@ def plant_fifo(path: Path) -> Path:
 LONG_COMPONENT = "x" * 256 + ".md"
 
 
-def _closed(path: Path, content: bytes | str = "closed\n") -> Path:
+def _closed(path: Path) -> Path:
     """A mode-000 regular file — re-opened first when it is already there, so a shape planted
     twice under one root (one test walks the table under two spellings) works as non-root."""
     if path.exists():
         path.chmod(0o644)
-    write_bytes(path, content).chmod(0)
+    write_bytes(path, "closed\n").chmod(0)
     return path
 
 

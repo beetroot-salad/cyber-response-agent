@@ -38,10 +38,7 @@ def test_lone_surrogate_survives_the_disk_write_because_ensure_ascii_is_pinned(t
     response_line = next(r for r in lines if r["kind"] == "response")
     text_part = response_line["message"]["parts"][0]
     assert text_part["content"] == LONE_SURROGATE, (
-        "the on-disk record must recover the exact lone surrogate — a raw utf-8 encode "
-        "of this string raises UnicodeEncodeError, so recovery only works because the "
-        "disk write escapes it (ensure_ascii=True)"
-    )
+        f"the on-disk record did not recover the exact lone surrogate: {text_part['content']!r}")
     # The raw disk bytes never contain the literal surrogate: json.dumps(ensure_ascii=True)
     # escapes it as the ASCII sequence \ud800, which is what makes the utf-8 write safe.
     raw = (tmp_path / "surrogate.trace.jsonl").read_bytes()

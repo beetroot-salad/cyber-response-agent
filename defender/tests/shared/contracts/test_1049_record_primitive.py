@@ -297,21 +297,14 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
         return r, R.bind(root, os_=r).read(name)
 
     # a symlinked / dangling parent: the O_PATH step opens the LINK ITSELF, and its handle's
-    # own fstat says S_ISLNK — the alias refusal, with no further open
-    for shape in ("symlinked_parent", "dangling_parent"):
+    # own fstat says S_ISLNK — the alias refusal; a file or a fifo squatting a parent: the open
+    # succeeds, the fstat says not a directory. Either way, no further open.
+    not_a_dir = R.strerror(errno.ENOTDIR)
+    for shape, refusal in (("symlinked_parent", R.ALIAS), ("dangling_parent", R.ALIAS),
+                           ("parent_is_file", not_a_dir), ("parent_is_fifo", not_a_dir)):
         name = R.plant_shape(root, shape)
         r, got = walk(name)
-        assert R.refusal(got, name) == R.ALIAS, shape
-        opened = r.component_opens
-        assert len(opened) == 1, (shape, opened)
-        assert isinstance(opened[0][3], int), (shape, opened)
-        assert r.fstats == [opened[0][3]], shape
-        assert r.all_closed()
-    # a file or a fifo squatting a parent: the open succeeds, the fstat says not a directory
-    for shape in ("parent_is_file", "parent_is_fifo"):
-        name = R.plant_shape(root, shape)
-        r, got = walk(name)
-        assert R.refusal(got, name) == R.strerror(errno.ENOTDIR), shape
+        assert R.refusal(got, name) == refusal, shape
         opened = r.component_opens
         assert len(opened) == 1, (shape, opened)
         assert isinstance(opened[0][3], int), (shape, opened)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
-from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -13,21 +13,11 @@ from typing import Any
 
 from defender.tests.support.learning.judge._judge_921 import (  # noqa: F401 — re-exported vocabulary
     ALERT_ID,
-    EPISODE_ID,
-    EPISODES_BASE_ENV,
     FAMILY_AGENT_PREFIX,
-    RUNS_BASE_ENV,
-    STATE_DIR_ENV,
     accepted_episode,
-    archived_judge_world,
-    archived_world,
-    base_capture,
-    captured_row,
     episode,
     grade,
-    ledger_row,
     mod,
-    provenance_record,
     report_text,
     rows,
     runs_base,
@@ -35,15 +25,10 @@ from defender.tests.support.learning.judge._judge_921 import (  # noqa: F401 —
     sibling_run_dir,
     staged_row,
     sym,
-    word_of,
-    world_doc,
     world_id,
-    write_ledger,
 )
 from defender.tests.support.learning.core._state1135 import state_over
 from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 — re-exported vocabulary
-    DEFENDER,
-    WORLDS,
     refusals,
 )
 
@@ -195,16 +180,6 @@ def judge_calls_for(judge: Any, label: str, *, episode_dir: Path) -> list[str]:
     return [a for a in judge.agent_ids if str(a).startswith(prefix)]
 
 
-def world_facts(episode_dir: Path, label: str) -> Any:
-    """`read_world_facts` over one archived world — the judge's own reader, driven directly for
-    the premises that are about what a record READS AS rather than about the row it produces."""
-    from defender._io import bind
-
-    with bind(Path(episode_dir)) as bound:
-        return mod("learning.judge.family").read_world_facts(
-            bound, label, world_id=world_id(episode_dir, label), absent_ledger_ok=True)
-
-
 # --------------------------------------------------------------------------------------
 # The ticket lane.
 # --------------------------------------------------------------------------------------
@@ -317,10 +292,10 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     return fake
 
 
-def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> FakeTicketSystem:
+def open_ticket(run_dir: Path) -> FakeTicketSystem:
     """Drive the REAL `open_case_ticket` — the leg that establishes the ticket key's namespace,
     with no `report.md` anywhere on disk."""
-    fake = ticket or FakeTicketSystem()
+    fake = FakeTicketSystem()
     mod("investigation.ticket_writer").open_case_ticket(
         _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake))
     return fake
@@ -359,17 +334,13 @@ def receipt(run_dir: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bool = True,
-                   name: str = "2026-09-16t12-00-00z_case-1047-lotl-web1") -> Path:
+def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bool = True) -> Path:
     """A finished run dir as `run.py`'s tail meets it: an alert, and a committed `report.md`
-    unless `report=False`.
+    unless `report=False`. The folder is the run's id, so a test reads it as `run_dir.name`.
 
     `report=False` is the shape the three no-report exit classes leave, and a forced-close
-    exit whose own forced close failed.
-
-    `name` is a LABEL for the run, or its id: a canonical UUID names the folder as it is, any
-    other text names it `fixture_uuid(name)`, so a test reads the run's id as `run_dir.name`."""
-    run_dir = Path(tmp_path) / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
+    exit whose own forced close failed."""
+    run_dir = Path(tmp_path) / fixture_uuid("2026-09-16t12-00-00z_case-1047-lotl-web1")
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.tests.support.storage._alert_plant import plant_alert
 
@@ -404,21 +375,7 @@ def drive(deps: Any, model: Any, *, bounds: Any = None, store: Any = None) -> tu
     ))
 
 
-def killing_model(exc: BaseException) -> Any:
-    """A model function that raises `exc` from the model call, the seam real kills reach the
-    loop through. Pass only the real classes the driver's handlers name (`BudgetKill`,
-    `RunAborted`): what is under test is the driver's classification."""
-
-    class _Killed:
-        __name__ = "Killed"
-
-        def __call__(self, _messages: Any, _info: Any) -> Any:
-            raise exc
-
-    return _Killed()
-
-
-def clean_model(text: str = "done") -> Any:
+def clean_model() -> Any:
     """A model function that answers once and stops — a run that ends CLEANLY, with no exit
     class at all. The control for every cut-short arm: the sidecar write is unconditional, so
     a clean run writes `{"truncated_by": null}`."""
@@ -428,7 +385,7 @@ def clean_model(text: str = "done") -> Any:
         __name__ = "Clean"
 
         def __call__(self, _messages: Any, _info: Any) -> Any:
-            return ModelResponse(parts=[TextPart(content=text)])
+            return ModelResponse(parts=[TextPart(content="done")])
 
     return _Clean()
 
@@ -484,23 +441,16 @@ def salt_run_dir(run_dir: Path, value: str = "request-limit") -> list[Path]:
     return planted
 
 
-def plant_frontmatter(world_dir: Path, extra: str, *, disposition: str = "malicious",
-                      raw: str | bytes | None = None) -> Path:
+def plant_frontmatter(world_dir: Path, extra: str, *, raw: str | bytes | None = None) -> Path:
     """Rewrite an archived world's `report.md` with `extra` spliced into its frontmatter.
 
     `validate_report` accepts an unknown frontmatter key, and the judge reads the archived copy
     of a file the box could write: this is the forgery the design must make inert."""
     path = Path(world_dir) / "report.md"
     if raw is None:
-        path.write_text(report_text(disposition, extra=extra), encoding="utf-8")
+        path.write_text(report_text("malicious", extra=extra), encoding="utf-8")
     elif isinstance(raw, bytes):
         path.write_bytes(raw)
     else:
         path.write_text(raw, encoding="utf-8")
     return path
-
-
-def row_without_volatiles(row: dict) -> dict:
-    """One graded row, key-sorted, for asserting a forgery left the grade BYTE-IDENTICAL to the
-    control's (a bare `"request-limit" not in row` is also green on an empty row)."""
-    return {k: v for k, v in sorted(row.items())}

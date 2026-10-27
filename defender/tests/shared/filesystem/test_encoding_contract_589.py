@@ -68,9 +68,9 @@ def test_an_undecodable_investigation_is_skipped_not_raised(tmp_path):
     assert reason.startswith("read error:")
 
 
-def test_an_undecodable_alert_json_degrades_the_signature_it_does_not_sink_the_case(tmp_path):
-    """An alert with no readable signature leaves the case's `signature_id` None; the case still
-    loads."""
+def test_a_case_whose_alert_names_no_signature_loads_with_no_signature_id(tmp_path):
+    """The signature comes from the alert's record, so an alert naming none leaves the case's
+    `signature_id` None and the case still loads."""
     runs = tmp_path / "runs"
     _case(runs, "badalert", alert={"alert_id": "no-signature-here"})
 

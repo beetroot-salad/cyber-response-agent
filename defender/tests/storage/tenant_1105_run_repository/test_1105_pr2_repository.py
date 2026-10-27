@@ -35,18 +35,6 @@ def episodes(tmp_path, monkeypatch) -> Path:
     return root
 
 
-def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
-    """A data root holding `tenant_id`, its natural runs folder made as run setup leaves it and
-    a real run folder per id."""
-    root = tmp_path / "data"
-    root.mkdir(parents=True, exist_ok=True)
-    t = H.tenant(root, tenant_id)
-    H.runs_folder(t)
-    for rid in run_ids:
-        H.make_run(location_path(t.runs), rid)
-    return root, t
-
-
 def _rid(text: str):
     from defender.records import RunId
 
@@ -62,21 +50,6 @@ def _refusal_classes():
     from defender.records import RunRefused
 
     return (RunRefused, TenantRefused)
-
-
-def _uuid_container(tmp_path: Path, count: int, *, tenant_id: str = H.T_ID):
-    """A data root holding `tenant_id`, its `<T>/runs` a real folder (no `_tenant.json`) and
-    `count` real run folders named by fresh UUIDs. Returns `(root, tenant, sorted ids)`."""
-    import uuid
-
-    root = tmp_path / "data"
-    root.mkdir(parents=True, exist_ok=True)
-    t = H.tenant(root, tenant_id)
-    Path(location_path(t.runs)).mkdir(parents=True, exist_ok=True)
-    ids = sorted(str(uuid.uuid4()) for _ in range(count))
-    for rid in ids:
-        H.make_run(location_path(t.runs), rid)
-    return root, t, ids
 
 
 def _new_episode(root: Path, *, roster: bool = False) -> tuple[str, Path, dict[str, str] | None]:
@@ -97,7 +70,7 @@ def _new_episode(root: Path, *, roster: bool = False) -> tuple[str, Path, dict[s
 def test_the_accepted_tenant_hands_out_a_repository_that_opens_its_own_runs_by_id(tmp_path):
     """`open(run_id)` hands out the `Run` at `<T>/runs/<id>`, carrying T's id and reading the
     run's own records; a `Tenant` passed beside the id is a `TypeError`."""
-    _root, t = _good(tmp_path, R1, R2)
+    _root, t = H.tenant_with_runs(tmp_path, R1, R2)
     runs = t.runs_repository()
 
     run = runs.open(_rid(R1))
@@ -112,7 +85,7 @@ def test_the_accepted_tenant_hands_out_a_repository_that_opens_its_own_runs_by_i
 def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
     from defender.records import RunAbsent, RunRefused
 
-    _root, t = _good(tmp_path, R1)
+    _root, t = H.tenant_with_runs(tmp_path, R1)
     (Path(location_path(t.runs)) / AFILE).write_text("x\n", encoding="utf-8")
     os.symlink(Path(location_path(t.runs)) / R1, Path(location_path(t.runs)) / ALINK)
     runs = t.runs_repository()
@@ -228,7 +201,8 @@ def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_
 def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_path):
     from defender.records import RunAddress, RunId
 
-    root, t, (r1,) = _uuid_container(tmp_path, 1)
+    r1 = str(uuid.uuid4())
+    root, t = H.tenant_with_runs(tmp_path, r1)
     u = H.tenant(root, H.U_ID)
     H.make_run(location_path(u.runs), r1)
 
@@ -295,7 +269,7 @@ def test_an_arm_created_for_t_opens_for_t_through_its_episode_and_never_as_a_nat
         tmp_path, episodes):
     from defender.records import RunAbsent, RunId
 
-    root, t = _good(tmp_path, R1)
+    root, t = H.tenant_with_runs(tmp_path, R1)
     episode_id, ep, roster = _new_episode(root, roster=True)
     runs = t.runs_repository()
 
@@ -320,7 +294,7 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
 
     from defender.tests.support.learning.branch import _triplet_947 as T
 
-    root, t = _good(tmp_path)
+    root, t = H.tenant_with_runs(tmp_path)
     episode_id, ep, _ = _new_episode(root)
     view = t.runs_repository().episode(episode_id)
     stranger = _rid(str(uuid.uuid4()))
@@ -360,7 +334,7 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
 
     from defender.tests.support.learning.branch import _triplet_947 as T
 
-    root, t = _good(tmp_path)
+    root, t = H.tenant_with_runs(tmp_path)
     episode_id, ep, _ = _new_episode(root)
     target = tmp_path / "elsewhere"
     target.mkdir()
@@ -392,7 +366,7 @@ def test_episode_files_is_the_owners_handle_alone_and_creates_nothing(tmp_path, 
 
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
-    root, t = _good(tmp_path)
+    root, t = H.tenant_with_runs(tmp_path)
     episode_id, ep, _ = _new_episode(root, roster=True)
     runs = t.runs_repository()
     tenant_episodes = S.episodes_dir(root, H.T_ID)
@@ -413,11 +387,10 @@ def test_episode_files_is_the_owners_handle_alone_and_creates_nothing(tmp_path, 
     assert H.tree_state(tenant_episodes) == with_file, "a file at the episode's name was changed"
 
 
-def test_a_bad_episode_id_or_an_unset_episodes_base_is_refused_before_anything_is_read(
-        tmp_path, episodes, monkeypatch):
-    """Both episode doors refuse a bad id before anything is read or created. Old name: an
-    unset `DEFENDER_EPISODES_BASE` is no longer refused, since nothing reads it."""
-    root, t = _good(tmp_path)
+def test_a_bad_episode_id_is_refused_before_anything_is_read(tmp_path, episodes, monkeypatch):
+    """Both episode doors refuse a bad id before anything is read or created; with the retired
+    `DEFENDER_EPISODES_BASE` unset, the tenant's own episode still opens."""
+    root, t = H.tenant_with_runs(tmp_path)
     _new_episode(root, roster=True)
     runs = t.runs_repository()
     before = H.tree_state(tmp_path)

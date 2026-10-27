@@ -113,38 +113,31 @@ def consultation_row(
     )
 
 
-def lookup_hit_row(
-    *,
-    anchor_id: str = ENTRY_ID,
-    resolved_by: str = LEAD,
-    window: str = ENTRY_VALIDITY_WINDOW,
-    result: str = (
-        "hit: entry covers actor uid-0, host build-runner-*.prod, pattern "
-        "rewrite /etc/ssl/certs/ca-bundle.crt"
-    ),
-    reasoning: str = "tacit-knowledge.lookup returned one unexpired scope-matching entry",
-) -> str:
+def lookup_hit_row(*, resolved_by: str = LEAD) -> str:
     """The lead's own record of what `tacit-knowledge.lookup` came back with — a
     `:R consultations` row under the SAME anchor kind the contract is declared under."""
     return consultation_row(
-        anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id=anchor_id,
-        result=result, window=window, reasoning=reasoning, resolved_by=resolved_by,
+        anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id=ENTRY_ID,
+        result=(
+            "hit: entry covers actor uid-0, host build-runner-*.prod, pattern "
+            "rewrite /etc/ssl/certs/ca-bundle.crt"
+        ),
+        window=ENTRY_VALIDITY_WINDOW,
+        reasoning="tacit-knowledge.lookup returned one unexpired scope-matching entry",
+        resolved_by=resolved_by,
     )
 
 
 def lookup_miss_row(
-    *,
-    resolved_by: str = LEAD,
-    result: str = "miss: no unexpired entry covers actor uid-0 on build-runner-07.prod",
-    reasoning: str = "tacit-knowledge.lookup came back with no matching entry",
+    *, result: str = "miss: no unexpired entry covers actor uid-0 on build-runner-07.prod",
 ) -> str:
     """The same lead recording that the lookup came back EMPTY — no `anchor_id`, because a miss
     has no entry to name. The honest half of the pair, and the row a fabricated citation has to
     sit beside in `test_a_missed_lookup_cannot_be_cited_as_a_hit`."""
     return consultation_row(
         anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id="",
-        result=result, window=ENTRY_VALIDITY_WINDOW, reasoning=reasoning,
-        resolved_by=resolved_by,
+        result=result, window=ENTRY_VALIDITY_WINDOW,
+        reasoning="tacit-knowledge.lookup came back with no matching entry",
     )
 
 
@@ -343,22 +336,16 @@ def consult_block(*rows: str) -> str:
 
 def authorized_rows(
     *,
-    hit_id: str = ENTRY_ID,
     cited_id: str | None = None,
     hit_by: str = LEAD,
-    resolved_by: str = LEAD,
     baseline: bool = False,
     **authz_kwargs,
 ) -> str:
     """The rows a REAL registry hit writes: the lead's recorded lookup outcome, then the
     `:R authz` row that cites it."""
-    consultations = [lookup_hit_row(anchor_id=hit_id, resolved_by=hit_by)]
+    consultations = [lookup_hit_row(resolved_by=hit_by)]
     if baseline:
         consultations.append(consultation_row())
     return consult_block(*consultations) + authz_block(
-        authz_row(
-            anchor_id=hit_id if cited_id is None else cited_id,
-            resolved_by=resolved_by,
-            **authz_kwargs,
-        )
+        authz_row(anchor_id=ENTRY_ID if cited_id is None else cited_id, **authz_kwargs)
     )

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -229,14 +229,14 @@ def plant_leaf(record: Path, kind: str, *, host: Path, body: bytes = HOST_BYTES)
 
 
 def plant_folder(root: Path, rel: PurePosixPath, folder: PurePosixPath, kind: str, *,
-                 host: Path, body: bytes = HOST_BYTES) -> Planted:
+                 host: Path) -> Planted:
     """Plant `kind` at `folder`, one of `rel`'s holding folders. A link points at a folder
-    holding the rest of the record's name, with `body` in it, so a walk that followed the link
-    would find a real file there."""
+    holding the rest of the record's name, with `HOST_BYTES` in it, so a walk that followed the
+    link would find a real file there."""
     at = root / folder
     at.parent.mkdir(parents=True, exist_ok=True)
     if kind == "folder_file":
-        at.write_bytes(body)
+        at.write_bytes(HOST_BYTES)
         return Planted(kind, at)
     if kind == "folder_fifo":
         os.mkfifo(at)
@@ -244,7 +244,7 @@ def plant_folder(root: Path, rel: PurePosixPath, folder: PurePosixPath, kind: st
     elsewhere = (root if kind == "folder_link_inside" else host) / f"elsewhere-{folder.name}"
     reached = elsewhere / rel.relative_to(folder)
     reached.parent.mkdir(parents=True, exist_ok=True)
-    reached.write_bytes(body)
+    reached.write_bytes(HOST_BYTES)
     at.symlink_to(elsewhere, target_is_directory=True)
     return Planted(kind, at)
 
@@ -295,8 +295,7 @@ def in_time(fn: Callable[[], Any], *, fifo: Path | None = None) -> Any:
             with contextlib.suppress(OSError):
                 os.close(os.open(fifo, os.O_RDWR | os.O_NONBLOCK))
         worker.join(DEADLINE)
-        pytest.fail(f"the call did not return within {DEADLINE}s over a planted FIFO — O3: a "
-                    "special file at a record's address is refused without blocking")
+        pytest.fail(f"the call did not return within {DEADLINE}s over a planted FIFO")
     if "error" in outcome:
         raise outcome["error"]
     return outcome.get("value")
@@ -312,17 +311,15 @@ def raised_by(fn: Callable[[], Any], *, fifo: Path | None = None) -> BaseExcepti
 
 
 def assert_row(exc: BaseException | None, kind: str, *, where: str) -> None:
-    """`exc` is O6's row for a `kind` plant: its type, its errno, and its alias mark."""
+    """`exc` is the `O6_ROWS` row for a `kind` plant: its type, its errno, and its alias mark."""
     typ, code, marked = O6_ROWS[kind]
     assert exc is not None, f"{where}: the write into a {kind} plant was not refused"
-    want = f"O6's {typ.__name__} {errno.errorcode[code]}"
+    want = f"{typ.__name__} {errno.errorcode[code]}"
     assert isinstance(exc, typ), f"{where}: a {kind} plant raised {exc!r}, not {want}"
     assert getattr(exc, "errno", None) == code, (
         f"{where}: a {kind} plant raised {exc!r}, not {want}")
     assert bool(getattr(exc, "write_guarded_alias", False)) is marked, (
-        f"{where}: a {kind} plant's refusal is {'un' if marked else ''}marked as an alias; "
-        f"O6 says {'marked' if marked else 'unmarked'} (budget_enforcer's kill circuit keys "
-        "on it)")
+        f"{where}: a {kind} plant's refusal is {'un' if marked else ''}marked as an alias")
 
 
 def owner_refusal(h: Any) -> BaseException | None:
@@ -389,8 +386,9 @@ def seam_calls(rec: S.RecordingIo, mark: int) -> list[tuple[str, dict[str, Any]]
     return [(op, S.bound_arguments(op, a, kw)) for op, a, kw in rec.invocations[mark:]]
 
 
-def _read_cases():
-    for m in READABLE:
+def _plant_cases(members: Iterable[Member]):
+    """Every member with every leaf plant, and with every folder plant at each holding folder."""
+    for m in members:
         for kind in LEAF_PLANTS:
             yield pytest.param(m, kind, None, id=f"{m}-{kind}")
         for folder in m.folders:
@@ -398,7 +396,7 @@ def _read_cases():
                 yield pytest.param(m, kind, folder, id=f"{m}-{kind}@{folder}")
 
 
-@pytest.mark.parametrize(("m", "kind", "folder"), list(_read_cases()))
+@pytest.mark.parametrize(("m", "kind", "folder"), list(_plant_cases(READABLE)))
 def test_o1_o3_a_plant_at_a_records_address_reads_none_and_a_plain_file_there_reads_back(
         tree, m, kind, folder):
     planted = plant(tree, m, kind, folder)
@@ -504,16 +502,7 @@ def test_o1_the_schema_gated_writes_pre_read_does_not_read_through_a_plant(tree,
     assert census(tree.tmp) == before
 
 
-def _write_cases():
-    for m in WRITABLE:
-        for kind in LEAF_PLANTS:
-            yield pytest.param(m, kind, None, id=f"{m}-{kind}")
-        for folder in m.folders:
-            for kind in FOLDER_PLANTS:
-                yield pytest.param(m, kind, folder, id=f"{m}-{kind}@{folder}")
-
-
-@pytest.mark.parametrize(("m", "kind", "folder"), list(_write_cases()))
+@pytest.mark.parametrize(("m", "kind", "folder"), list(_plant_cases(WRITABLE)))
 def test_o2_o3_o6_o7_a_write_into_a_plant_is_refused_in_todays_shape_and_changes_nothing(
         tree, m, kind, folder):
     planted = plant(tree, m, kind, folder)
@@ -527,13 +516,13 @@ def test_o2_o3_o6_o7_a_write_into_a_plant_is_refused_in_todays_shape_and_changes
     if owner is not None:
         assert_same_refusal(raised, owner, where=str(m))
     elif folder is None and m.group == "observability" and m.verb == "append":
-        assert raised is None, f"O7: {m}'s refused leaf append raised {raised!r}"
+        assert raised is None, f"{m}'s refused leaf append raised {raised!r}"
         assert run.partial_failures == (f"{m.name}: append failed",), (
-            f"O7: {m}'s refused leaf append was not recorded: {run.partial_failures!r}")
+            f"{m}'s refused leaf append was not recorded: {run.partial_failures!r}")
     else:
         assert_row(raised, kind, where=f"{m}.{m.verb}")
         assert run.partial_failures == (), (
-            f"O7: a refused holding folder is not a partial failure: {run.partial_failures!r}")
+            f"a refused holding folder was recorded as a partial failure: {run.partial_failures!r}")
     assert census(tree.tmp) == before, f"{m}: a refused {m.verb} changed the tree"
 
     planted.remove()
@@ -595,8 +584,8 @@ def test_o6_an_occupied_staged_name_refuses_the_replace_as_a_marked_eexist(tree,
 
     refused = raised_by(lambda: tree.handle(m, io=_OccupiedStageIo()).write(document(m, "x")))
     assert isinstance(refused, OSError), f"{m}: an occupied staged name raised {refused!r}"
-    assert refused.errno == errno.EEXIST, f"{m}: {refused!r} is not O6's EEXIST"
-    assert getattr(refused, "write_guarded_alias", None) is True, "O6: the EEXIST is marked"
+    assert refused.errno == errno.EEXIST, f"{m}: {refused!r} is not EEXIST"
+    assert getattr(refused, "write_guarded_alias", None) is True, f"{m}: the EEXIST is not marked as an alias"
     assert census(tree.tmp) == before
 
     tree.handle(m).write(document(m, "after"))
@@ -694,9 +683,9 @@ class Scratch:
     root: Path
     host: Path
 
-    def real_folders(self, rel: PurePosixPath = DEEP) -> Path:
-        (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
-        return self.root / rel
+    def real_folders(self) -> Path:
+        (self.root / DEEP).parent.mkdir(parents=True, exist_ok=True)
+        return self.root / DEEP
 
 
 @pytest.fixture
@@ -1053,16 +1042,15 @@ def seam_op(s: Scratch, op: str, **kw: Any) -> Callable[[], Any]:
     raise AssertionError(f"no seam op {op!r}")
 
 
-def assert_seam_refused(op: str, kind: str, fn: Callable[[], Any], *,
-                        fifo: Path | None = None) -> None:
-    """A read answers `(None, reason)`; every write mode raises O6's row for `kind`.
+def assert_seam_refused(op: str, kind: str, fn: Callable[[], Any]) -> None:
+    """A read answers `(None, reason)`; every write mode raises the `O6_ROWS` row for `kind`.
     Promptly, either way."""
     if op.startswith("read"):
-        got = in_time(fn, fifo=fifo)
+        got = in_time(fn)
         assert got[0] is None, f"{op} of a {kind} leaf returned {got[0]!r}"
         assert isinstance(got[1], str), f"{op} of a {kind} leaf gave no reason: {got!r}"
     else:
-        assert_row(raised_by(fn, fifo=fifo), kind, where=f"{op} of a {kind} leaf")
+        assert_row(raised_by(fn), kind, where=f"{op} of a {kind} leaf")
 
 
 def assert_seam_lands(s: Scratch, op: str, **kw: Any) -> None:
@@ -1105,7 +1093,7 @@ def test_o1_o2_a_device_node_at_any_members_address_is_refused_through_the_handl
         h = tree.handle(m, run=run)
         raised = raised_by(verb_call(h, m, "refused"))
         if m.group == "observability" and m.verb == "append":
-            assert raised is None, f"O7: {m}'s refused leaf append raised {raised!r}"
+            assert raised is None, f"{m}'s refused leaf append raised {raised!r}"
             assert run.partial_failures == (f"{m.name}: append failed",)
         else:
             assert_row(raised, "char_device", where=f"{m}.{m.verb}")

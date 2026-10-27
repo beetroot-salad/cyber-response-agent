@@ -1,7 +1,4 @@
-"""`RunId`: built only by `parse`/`mint`, canonical UUID text only, a frozen value, unforgeable.
-
-Several names predate UUID ids and are kept because the archived spec graph cites them; their
-docstrings say what they pin now."""
+"""`RunId`: built only by `parse`/`mint`, canonical UUID text only, a frozen value, unforgeable."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
@@ -35,7 +32,7 @@ def _forged_pickle(rid: object, text: str, forged: str) -> bytes:
     old = text.encode("utf-8")
     new = forged.encode("utf-8")
     needle = b"X" + len(old).to_bytes(4, "little") + old
-    assert needle in blob, "the pickle carries the run id's text as a string (MF-02's rebuild)"
+    assert needle in blob, "precondition: the pickle does not carry the run id's text as a string"
     return blob.replace(needle, b"X" + len(new).to_bytes(4, "little") + new)
 
 
@@ -91,7 +88,7 @@ def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_
     assert sorted([c, a, b]) == [a, b, c]
     assert len({a, RunId.parse(U_A), b}) == 2
     assert (a == U_A) is False
-    assert (a == U_A) is False
+    assert (U_A == a) is False  # noqa: SIM300 — the reflected order is what is under test
     assert (a != U_A) is True
     keys = {a: 1, U_A: 2}
     assert len(keys) == 2
@@ -111,13 +108,12 @@ def test_1105_run_id_parse_refuses_what_refuse_bad_run_id_refuses_and_any_non_st
         err = H.raised(RunId.parse, bad)
         assert H.is_a(err, RunRefused), f"RunId.parse({bad!r}) raised {err!r}"
         assert not isinstance(err, (ValueError, AttributeError)), (
-            f"RunId.parse({bad!r}) raised {type(err).__name__}, which an except for "
-            "ValueError/AttributeError would catch — the one error type is RunRefused")
+            f"RunId.parse({bad!r}) raised a {type(err).__name__}")
 
 
-def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
-    """Old name: the 206-byte bound is gone, so ids of 206 and 207 bytes are both `RunRefused`
-    (neither is a UUID) and `_run_id` defines no bound constant."""
+def test_1105_run_id_parse_refuses_206_and_207_byte_ids_and_defines_no_bound():
+    """Ids of 206 and 207 bytes are both `RunRefused` (neither is a UUID) and `_run_id` defines
+    no bound constant."""
     from defender.records import _run_id
     from defender.records import RunId, RunRefused
 
@@ -127,8 +123,7 @@ def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
     assert not hasattr(_run_id, "RUN_ID_MAX_BYTES"), "the 206-byte bound's constant survives"
 
 
-def test_1105_run_id_mint_folds_then_bounds_the_id_and_never_truncates():
-    """Old name: `mint` takes no label, so a labelled mint is refused and a bare one is a UUID."""
+def test_1105_run_id_mint_refuses_a_label_and_mints_a_uuid():
     from defender.records import RunId
 
     for label in ("Alert-X", "a" * 189, "ß" * 94, "a" * 190, "ß" * 95):
@@ -136,9 +131,9 @@ def test_1105_run_id_mint_folds_then_bounds_the_id_and_never_truncates():
     assert S.is_canonical_uuid(str(RunId.mint()))
 
 
-def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
-    """Old name: a UUID with a sidecar suffix, or in the staged shape, is no `RunId`, only the
-    bare UUID is (the sidecar clause belongs to the repository's open and run setup)."""
+def test_1105_run_id_parse_refuses_a_sidecar_suffixed_id():
+    """A UUID with a sidecar suffix, or in the staged shape, is no `RunId`, only the bare UUID
+    is (the sidecar clause belongs to the repository's open and run setup)."""
     from defender.records import RunId, RunRefused
 
     run_id = S.new_id()

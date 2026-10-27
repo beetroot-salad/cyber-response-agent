@@ -70,7 +70,7 @@ def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
 
     assert isinstance(RunRefused, type), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
     assert issubclass(RunRefused, Exception), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
-    assert not issubclass(RunRefused, ValueError), "RunRefused must not be a ValueError (OP-5)"
+    assert not issubclass(RunRefused, ValueError), "RunRefused must not be a ValueError"
     assert not issubclass(RunRefused, TenantRefused), "RunRefused must not be a TenantRefused"
     assert not issubclass(TenantRefused, RunRefused), "TenantRefused must not be a RunRefused"
 
@@ -103,7 +103,7 @@ def test_1105_the_doors_all_its_type_checking_names_and_its_getattr_names_are_on
     assert len(declared_names) == len(set(declared_names)), "a TYPE_CHECKING name is duplicated"
     assert set(declared_names) == set(all_names), (
         f"TYPE_CHECKING declares {sorted(set(declared_names) ^ set(all_names))} differently "
-        "from __all__ (mypy would type an undeclared door name as Any, R4-30)")
+        "from __all__")
     # `annotations` is left out: the door's own `from __future__ import annotations` binds it.
     probes = set(all_names) | set(declared_names) | set(LAYOUT_IMPORTED) | set(PRIVATE_HELPERS)
     probes = (probes | {"NotAName", "Tenant", "hold"}) - {"annotations"}
@@ -134,17 +134,17 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
     assert proc.returncode == 0, f"the layout names do not import without pydantic: {_out(proc)}"
     seen = json.loads(proc.stdout.decode("utf-8"))
     assert seen["layout"], f"the layout submodule did not load: {seen}"
-    assert not seen["handle"], f"a layout name loaded more than the layout (R4-6): {seen}"
-    assert not seen["tenant"], f"a layout name loaded more than the layout (R4-6): {seen}"
-    assert not seen["pydantic"], f"a layout name loaded more than the layout (R4-6): {seen}"
+    assert not seen["handle"], f"a layout name loaded more than the layout: {seen}"
+    assert not seen["tenant"], f"a layout name loaded more than the layout: {seen}"
+    assert not seen["pydantic"], f"a layout name loaded more than the layout: {seen}"
     assert seen["alert"] == str(RUN_LAYOUT.alert) == "alert_input/alert.json", (
         f"the child's RUN_LAYOUT is not the door's: {seen}")
     assert seen["paths"] == RunPaths.__name__ == "RunPaths", f"the child's RunPaths: {seen}"
     rid = fixture_uuid("package-pydantic-free")
     proc = _child("from defender.records import RunId, RunRefused\n"
                   f"print(RunId.parse({rid!r}), RunRefused.__name__)\n", block=("pydantic*",))
-    assert proc.returncode == 0, f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
-    assert _out(proc).split()[:2] == [rid, "RunRefused"], f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
+    assert proc.returncode == 0, f"RunId and RunRefused do not import pydantic-free: {_out(proc)}"
+    assert _out(proc).split()[:2] == [rid, "RunRefused"], f"RunId and RunRefused do not import pydantic-free: {_out(proc)}"
     proc = _child("import defender.records as rr\n"
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")

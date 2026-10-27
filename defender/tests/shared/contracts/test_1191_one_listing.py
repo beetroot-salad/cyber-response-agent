@@ -326,7 +326,7 @@ def test_o8_the_census_sees_a_walk_planted_in_a_copied_lint(tmp_path):
     walk = "\n\ndef _planted_walk_1191(root):\n    return sorted(root.rglob('*.py'))\n"
     target = lint_dir / "lint_stage_prompt_frames.py"
     before = [w for w in _census(lint_dir) if w.startswith(f"{target.name}:")]
-    assert not before, f"precondition: {target.name} walks nothing today: {before}"
+    assert not before, f"precondition: {target.name} already walks: {before}"
     with target.open("a", encoding="utf-8") as fh:
         fh.write(walk)
     T._write(lint_dir / "sub_1191" / "helper_1191.py", walk)

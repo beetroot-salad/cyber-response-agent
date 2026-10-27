@@ -23,26 +23,25 @@ NOT_ROOT = R.NOT_ROOT
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
-def _episode(tmp_path: Path, *, labels: tuple[str, ...] = ("b", "c"), **kw) -> Path:
+def _episode(tmp_path: Path) -> Path:
     """An accepted, archived episode under a root spelled with `SECRET`: the control `a`
-    (benign) plus `labels` (malicious), every world archived, every non-control world
+    (benign) plus `b` and `c` (malicious), every world archived, every non-control world
     carrying one served row."""
     root = T.tenant_episodes(tmp_path / R.SECRET)
     return J.accepted_episode(
-        root, root=root, labels=("a", *labels),
-        dispositions={"a": "benign", **{label: "malicious" for label in labels}},
-        ledgers={label: [J.staged_row(label)] for label in labels}, **kw)
+        root, root=root, labels=("a", "b", "c"),
+        dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
+        ledgers={label: [J.staged_row(label)] for label in ("b", "c")})
 
 
 #: The judge double's reply for every draw: a valid world answer that grades nothing.
 _REPLY = J.as_reply_text(J.reply_doc(bucket="none", systems=[]))
 
 
-def _grade(ep: Path, tmp_path: Path):
+def _grade(ep: Path):
     """The real grading pass over `ep` (`grade_episode`), its model seam a `FakeJudge`. A
     record already on disk is removed first, so a scenario that re-plants a fault and grades
     again sees a fresh pass rather than the idempotent re-read of the earlier one."""
@@ -198,7 +197,7 @@ def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_
     assert not hasattr(family, "_without_path"), "the reader-side scrub is still there"
 
     R.plant_link(summary, ep / "family.yaml")
-    row = _rows(_grade(ep, tmp_path))["b"]
+    row = _rows(_grade(ep))["b"]
     assert row.get("ungradable"), row
     assert row.get("malformed") is True, row
     assert "gather_summaries" in row["ungradable_reason"], row
@@ -217,7 +216,7 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
     sound = {**manifest, "worlds": list(manifest["worlds"])}
     manifest["worlds"].append({**manifest["worlds"][1], "world_id": "../../elsewhere"})
     T.write_family(ep, manifest)
-    for read in (lambda: J.read_manifest_at(ep), lambda: _grade(ep, tmp_path)):
+    for read in (lambda: J.read_manifest_at(ep), lambda: _grade(ep)):
         with pytest.raises(refused, match="canonical lowercase UUID"):
             read()
     T.write_family(ep, sound)
@@ -304,9 +303,9 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     (world_dir / "investigation.md").write_text(doc, encoding="utf-8")
     bound = R.bind(ep)
     facts = family.read_investigation_facts(bound, world=T.world_id(ep, "b"))
-    assert nul in facts.resolutions_by_lead, "the fixture's NUL id did not parse (rg12)"
+    assert nul in facts.resolutions_by_lead, "the fixture's NUL id did not parse"
 
-    grade = _grade(ep, tmp_path)
+    grade = _grade(ep)
     row = _rows(grade)["b"]
     assert not row.get("ungradable"), row
     base, _src = location_path(J.runs_base)(tmp_path)

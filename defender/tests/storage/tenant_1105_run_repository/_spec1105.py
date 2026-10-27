@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
-import datetime as _dt
 import json
 import os
 import shutil
@@ -34,19 +33,6 @@ SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failure
 #: The staged-name tail a sidecar write creates first (`_io.staged_leaf`: `.staged-` plus 16
 #: lowercase hex digits).
 STAGED_TAIL = ".staged-0123456789abcdef"
-#: Relics of the free-form run id: its byte bound, the retired episode record's size cap, and a
-#: clock for the retired labelled `RunId.mint`.
-RUN_ID_BOUND = 206
-RECORD_CAP = 65536
-FIXED_NOW = _dt.datetime(2026, 10, 4, 12, 0, 0, tzinfo=_dt.UTC)
-
-
-def fixed_clock() -> _dt.datetime:
-    return FIXED_NOW
-
-
-#: What the labelled `RunId.mint` prefixed under `fixed_clock`.
-MINT_PREFIX = f"{FIXED_NOW.strftime('%Y%m%dT%H%M%SZ')}-".casefold()
 
 
 # ==========================================================================================
@@ -152,6 +138,18 @@ def make_run(runs: Path, run_id: str, *, alert: str = '{"alert": "seed"}\n') -> 
     return run_dir
 
 
+def tenant_with_runs(tmp_path: Path, *run_ids: str) -> tuple[Path, Any]:
+    """`(data root, tenant)`: `T_ID` set up under `<tmp_path>/data`, its runs folder as run setup
+    leaves it and a real run folder per id."""
+    root = Path(tmp_path) / "data"
+    root.mkdir(parents=True, exist_ok=True)
+    t = tenant(root, T_ID)
+    runs_folder(t)
+    for rid in run_ids:
+        make_run(location_path(t.runs), rid)
+    return root, t
+
+
 def plant_sidecars(runs: Path, run_id: str, *, staged: bool = True) -> list[Path]:
     """A regular file `<runs>/<run_id><suffix>` per `SIDECAR_SUFFIXES`, plus the staged one a
     sidecar write creates first (`<id>.run-end.json.staged-<16 hex>`)."""
@@ -181,29 +179,19 @@ def record_text(episode_id: str, tenant_id: str, source_run_id: str,
 
 
 def plant_record(runs: Path, episode_id: str, tenant_id: str, source_run_id: str,
-                 arms: Mapping[str, str], *, raw: str | bytes | None = None,
-                 name: str | None = None) -> Path:
-    """`<runs>/_episodes/<name or episode_id>.json`, written by hand (a host-written record):
-    `record_text(...)`, or `raw` verbatim. Makes `_episodes/`."""
+                 arms: Mapping[str, str]) -> Path:
+    """`<runs>/_episodes/<episode_id>.json` holding `record_text(...)`, written by hand (a
+    host-written record). Makes `_episodes/`."""
     folder = Path(runs) / "_episodes"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{name if name is not None else episode_id}.json"
-    body = record_text(episode_id, tenant_id, source_run_id, arms) if raw is None else raw
-    if isinstance(body, bytes):
-        path.write_bytes(body)
-    else:
-        path.write_text(body, encoding="utf-8")
+    path = folder / f"{episode_id}.json"
+    path.write_text(record_text(episode_id, tenant_id, source_run_id, arms), encoding="utf-8")
     return path
 
 
 def truncated(text: str) -> str:
     """A good record cut short: a torn write."""
     return text[: len(text) // 2]
-
-
-def deep_json(depth: int = 200_000) -> str:
-    """A JSON document nested `depth` levels deep."""
-    return "[" * depth + "]" * depth
 
 
 def alert_file(folder: Path, name: str = "alert.json") -> Path:

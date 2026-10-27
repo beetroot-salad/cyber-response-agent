@@ -1,4 +1,4 @@
-"""The throwaway git repo the author/curator suites build, and the two ways they read it."""
+"""The throwaway git repo the author/curator suites build."""
 from __future__ import annotations
 
 import atexit
@@ -48,10 +48,8 @@ def build_once_copy(key: str, build: Callable[[Path], object], dest: Path) -> Pa
     return dest
 
 
-def plant_named_dirs(
-    parent: Path, names: tuple[str, ...] = HOSTILE_NAMES, *, filename: str = "execution.md"
-) -> tuple[str, ...]:
-    """Create `parent/<name>/<filename>` for each name; return the names, for the assertion.
+def plant_named_dirs(parent: Path, names: tuple[str, ...] = HOSTILE_NAMES) -> tuple[str, ...]:
+    """Create `parent/<name>/execution.md` for each name; return the names, for the assertion.
 
     Returning the input is the point: the caller asserts against the names it PLANTED, never a
     second reading of the tree with the listing under test, an oracle that cannot disagree
@@ -60,7 +58,7 @@ def plant_named_dirs(
     for name in names:
         d = parent / name
         d.mkdir(parents=True, exist_ok=True)
-        (d / filename).write_text(f"# {name}\n", encoding="utf-8")
+        (d / "execution.md").write_text(f"# {name}\n", encoding="utf-8")
     return names
 
 
@@ -181,22 +179,3 @@ def _seed_skills_repo(repo: Path) -> Path:
         "---\nid: elastic.falco-na\nstatus: draft\n---\n# pending\n"
     )
     return seed_repo(repo, email="test@example.com", name="Test")
-
-
-def head_files(repo: Path) -> list[str]:
-    """Paths touched by HEAD (`git show --name-only`)."""
-    return _git.git(
-        ["show", "--name-only", "--pretty=format:", "HEAD"], cwd=repo
-    ).split()
-
-
-def head_message(repo: Path, *, path: str | None = None) -> str:
-    """HEAD's full commit message, or that of the last commit touching `path`.
-
-    The `path` form is not the same question: it answers "what did the commit that last
-    touched this file say", which is what the per-corpus provenance assertions need when
-    a run commits to more than one corpus.
-    """
-    args = ["log", "-1", "--pretty=%B"]
-    args += ["--", path] if path is not None else ["HEAD"]
-    return _git.git(args, cwd=repo)

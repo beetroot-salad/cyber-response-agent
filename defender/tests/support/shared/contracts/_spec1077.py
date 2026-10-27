@@ -1,7 +1,7 @@
 """Shared machinery for #1077's run-handle spec — NO test scripts."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -15,8 +15,6 @@ from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import pytest
-
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender import records as _records_door
 
@@ -26,11 +24,7 @@ sym = T.sym
 REPO_ROOT = Path(__file__).resolve().parents[5]
 DEFENDER = REPO_ROOT / "defender"
 KINDS_TSV = DEFENDER / "docs" / "run-records-kinds.tsv"
-SITES_TSV = DEFENDER / "docs" / "run-records.tsv"
 PAGE = DEFENDER / "docs" / "run-records.md"
-
-NOT_ROOT = pytest.mark.skipif(
-    os.geteuid() == 0, reason="root ignores permission bits — CI runs non-root (defender/CLAUDE.md)")
 
 
 # ======================================================================================
@@ -119,8 +113,6 @@ TENANT_RECORD_NAME = "_tenant.json"
 #: default, NOT an enforced constant.
 DEFAULT_TENANT_ID = fixture_uuid("tenant:playground")
 
-TENANT_FIELDS = ("tenant_id", "base_world_id", "created_at")
-
 #: Five group-named sub-collections, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
 
@@ -134,10 +126,6 @@ GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
         "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
     "session": ("session_db",),
 }
-
-#: Which group each member lives in, derived from `GROUP_MEMBERS`.
-GROUP_OF: dict[str, str] = {
-    name: group for group, names in GROUP_MEMBERS.items() for name in names}
 
 #: The owner accessor behind each member: what `RecordHandle.path` must equal and which seam the
 #: writer method must reach.
@@ -190,47 +178,25 @@ MEMBER_CAPABILITIES.update({
     "ticket_write": frozenset({"write", "delete"}),
 })
 VERBS = ("write", "append", "update", "open", "append_text", "start_stream", "create", "seed", "delete", "replace", "ensure_parent")
-READ_OPERATIONS = ("read", "read_result", "read_bytes", "read_rows")
-
-#: `observability` members written as locked JSON states (`_io.locked_for_rewrite`): none since
-#: the budget and circuit breaker became in-memory run state.
-LOCKED_STATE_MEMBERS: tuple[str, ...] = ()
-
-#: The twelve read-only descriptive fields of the `RunRecord` at `run.record`.
-RUN_RECORD_FIELDS = (
-    "tenant_id", "world_id", "commit", "dirty", "model", "run_id", "alert_ref",
-    "parent_run_id", "fork_turn", "exit_class", "disposition", "review_outcome")
 
 #: The archive's copied set, as `ArchivedWorld` accessor names.
 ARCHIVED_WORLD_MEMBERS = (
     "report", "investigation", "provenance", "scrub_verdict", "run_end", "lessons_loaded",
     "alert", "gather_summaries", "executed_queries", "gather_raw")
 
-#: The gate's composed-PART set: the five DISCRIMINATING fragments only, since a generic suffix
-#: such as `.json` matches over a thousand non-test literals.
-DISCRIMINATING_PARTS = (".lead.json", "review_record.", ".trace.jsonl", "_trace.jsonl", "served/")
-
-#: One fixture function name per path-composition idiom. The gate sees each when the record name
-#: is a whole literal (it keys on the `ast.Constant`), not when no whole part is.
-COMPOSITION_FORMS = ("concat", "percent", "formatted", "joined", "multi_arg")
-
-#: The three trees `lint_run_records` never enters, each holding live record-name use.
-UNSCANNED_TREES = ("defender/skills", "tooling", "experiments")
-
 
 # ======================================================================================
-# The kinds table: the walk reads each EXPECTED NAME off the TSV; this map says which accessor
-# owns each row (exactly one per row).
+# The kinds table: the walk reads each EXPECTED NAME off the TSV; this map says which run or
+# episode accessor owns each row.
 # ======================================================================================
 
 @dataclasses.dataclass(frozen=True)
 class Accessor:
     """One row of the kinds table and the single accessor that owns its name.
 
-    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`), "episode_arm" (an arm folder:
-    `EpisodePaths.runs` joined with the arm's roster id) or "tenant_row" (`_tenant._TenantPaths`);
-    `attr` is the accessor's name on that owner; `args` are the components a composing accessor
-    takes, in call order, as the concrete values this suite drives it with.
+    `owner` is "run" (`RunPaths`) or "episode" (`EpisodePaths`); `attr` is the accessor's name on
+    that owner; `args` are the components a composing accessor takes, in call order, as the
+    concrete values this suite drives it with.
     """
     kind: str
     owner: str
@@ -250,9 +216,8 @@ EPISODE_ID = "1d7e3c5b-2a4f-4b6c-9e8d-7f6a5b4c3d2e"
 LINEAGE_ID = "case-0011223344556677"
 WORLD_ID = fixture_uuid("world:overlay_a")
 #: The fixture run's id (a UUID, all `RunId` admits): the name `make_run_dir` gives a run folder
-#: by default. `ARM_ID` names the arm in the `episode_runs` row.
+#: by default.
 RUN_ID = "5e8f1a2b-3c4d-4e5f-a6b7-c8d9e0f1a2b3"
-ARM_ID = "7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d"
 
 
 def report_text(body: str) -> str:
@@ -300,13 +265,9 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("priming_lock", "episode", "priming_lock"),
     Accessor("stage_trace", "episode", "stage_trace", (STAGE,), composing=True),
     Accessor("learning_html", "episode", "learning_html"),
-    # An arm's folder is `runs/<arm id>`, the id the episode's roster holds: the layout owns the
-    # container, never an `<episode>-<label>` composition.
-    Accessor("episode_runs", "episode_arm", "runs", (ARM_ID,)),
     Accessor("archive_proj", "episode", "world_dir", (WORLD_ID,), composing=True),
     # The host-written arm roster, named by `_episode_paths.LAYOUT`.
     Accessor("arm_roster", "episode", "arm_roster"),
-    Accessor("tenant_row", "tenant_row", "row"),
 )
 
 #: The UPWARD accessors: their root is the runs base, not the run directory (`session_db`'s is
@@ -330,46 +291,18 @@ COMPOSING = tuple(a for a in ACCESSOR_FOR_KIND if a.composing) + (
     Accessor("gather_raw", "run", "payload_relpath", (LEAD_ID, SEQ), composing=True),
 )
 
-#: Values the anchored shape check must refuse at every composing accessor.
-HOSTILE_COMPONENTS = (
-    "",                       # collapses onto the parent directory
-    "..",                     # the traversal segment
-    "../../etc/passwd",       # a separator-bearing component
-    "a/b",                    # a separator inside one component
-    "/etc/passwd",            # `/` discards the left operand
-    "x" * 4096,               # oversized
-    "a\nb",                   # a control character the OS does NOT reject
-    "a\x00b",                 # the NUL byte
-)
-
-
-def kinds_rows(path: Path = KINDS_TSV) -> list[dict[str, str]]:
+def kinds_rows() -> list[dict[str, str]]:
     """The kinds table as dicts, read off the file the gate reads."""
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = KINDS_TSV.read_text(encoding="utf-8").splitlines()
     header = lines[0].split("\t")
     return [dict(zip(header, line.split("\t"), strict=False)) for line in lines[1:] if line.strip()]
 
 
-def appendix_only() -> frozenset[str]:
-    """`lint_run_records.APPENDIX_ONLY_KINDS`, imported rather than re-spelled."""
-    from defender.tests.support.shared.contracts._by_path import load_lint_gate
-    return frozenset(load_lint_gate("lint_run_records").APPENDIX_ONLY_KINDS)
-
-
 def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
-            episode_dir: Path | None = None, args: tuple[Any, ...] | None = None,
-            data_root: Path | None = None, tenant_id: str | None = None) -> Path:
-    """Drive ONE accessor and hand back the path it resolved.
-
-    Each owner is built through its own constructor every time, so walking the kinds table
-    drives every real accessor. `tenant_row` is `_tenant._TenantPaths(data_root, tenant_id).row`,
-    a data-root-and-tenant accessor rather than a runs-base one.
-    """
+            episode_dir: Path | None = None, args: tuple[Any, ...] | None = None) -> Path:
+    """Drive ONE accessor and hand back the path it resolved. Each owner is built through its
+    own constructor every time, so walking the kinds table drives every real accessor."""
     values = acc.args if args is None else args
-    if acc.owner == "tenant_row":
-        return tenant()._TenantPaths(fixture_data_root(data_root), tenant_id).row
-    if acc.owner == "episode_arm":
-        return getattr(EpisodePaths(episode_dir), acc.attr) / values[0]
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:
@@ -391,7 +324,7 @@ def member(run: Any, group: str, name: str, *args: Any) -> Any:
     return m(*args) if args else m
 
 
-def member_args(name: str, *, runs_base: Path | None = None) -> tuple[Any, ...]:
+def member_args(name: str) -> tuple[Any, ...]:
     """The components this suite drives one member with, in call order."""
     table: dict[str, tuple[Any, ...]] = {
         "leads": (LEAD_ID,), "payloads": (LEAD_ID, SEQ), "ticket_reads": (SEQ,),
@@ -413,8 +346,8 @@ def fixture_run(directory: Path) -> Any:
     return Run().under(fixture_runs_base(directory.parent), directory.name)
 
 
-def make_runs_base(tmp_path: Path, name: str = "runs") -> Path:
-    base = tmp_path / name
+def make_runs_base(tmp_path: Path) -> Path:
+    base = tmp_path / "runs"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -425,8 +358,8 @@ def make_run_dir(runs_base: Path, run_id: str = RUN_ID) -> Path:
     return d
 
 
-def make_episode_dir(tmp_path: Path, episode_id: str = EPISODE_ID) -> Path:
-    d = tmp_path / "episodes" / episode_id
+def make_episode_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "episodes" / EPISODE_ID
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -463,11 +396,6 @@ def plant_stamp(run_dir: Path, **fields: Any) -> Path:
     return path
 
 
-def alert_ref(alert: Path) -> str:
-    """A `case-<sha256 prefix>` key over the alert's bytes."""
-    return f"case-{hashlib.sha256(alert.read_bytes()).hexdigest()[:16]}"
-
-
 def seed_run_tree(run_dir: Path) -> Path:
     """The minimum a fixture run dir carries: an alert and the gather-raw directory."""
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
@@ -476,23 +404,19 @@ def seed_run_tree(run_dir: Path) -> Path:
 
 
 # ======================================================================================
-# The tree observer: two checks of one run directory against a captured baseline.
+# The tree observer: one run directory's name set against a captured baseline.
 #
-#   STRUCTURAL (strict) — `snapshot` / `tree_diff`: the SAME SET OF NAMES, each with its kind
-#   (and a symlink's target); no bytes at all.
-#   CONTENT (narrow) — `content_digests`: bytes of `investigation.md` and `report.md` only,
-#   the two documents the model writes from the fixed replay input.
-#
-# Other files carry timestamps, per-run salts and random ids, so they get no byte assertion;
-# there is deliberately no exemption list and no `exclude` argument.
+#   `snapshot` / `tree_diff`: the SAME SET OF NAMES, each with its kind (and a symlink's
+#   target); no bytes at all. Files carry timestamps, per-run salts and random ids, so there
+#   is deliberately no exemption list and no `exclude` argument.
+#   `capture_baseline` also records the digests of `investigation.md` and `report.md`
+#   (`content_digests`); no test compares them now.
 # ======================================================================================
 
 @dataclasses.dataclass(frozen=True)
 class Entry:
-    """One tree entry in the STRUCTURAL check: its name and kind, nothing it contains.
-
-    `target` is a symlink's link target and `None` otherwise (bytes live in `content_digests`).
-    """
+    """One tree entry: its name and kind, nothing it contains. `target` is a symlink's link
+    target and `None` otherwise."""
     rel: str
     kind: str                # "file" | "dir" | "symlink"
     target: str | None       # the link's target for a symlink; None otherwise
@@ -526,18 +450,15 @@ def tree_diff(a: dict[str, Entry], b: dict[str, Entry]) -> list[str]:
     return findings
 
 
-#: The content check, in full (see the banner above).
+#: The two documents whose digests `capture_baseline` records.
 O3_CONTENT = ("investigation.md", "report.md")
 
 
-def content_digests(root: Path, names: Iterable[str] = O3_CONTENT) -> dict[str, str | None]:
-    """The sha256 of each content file's bytes, `None` where the run produced no such file.
-
-    `None` is a VALUE the comparison sees, not a skip: a report that stopped being written is
-    a content finding, the same as one whose bytes changed.
-    """
+def content_digests(root: Path) -> dict[str, str | None]:
+    """The sha256 of each `O3_CONTENT` file's bytes, `None` where the run produced no such
+    file."""
     out: dict[str, str | None] = {}
-    for name in names:
+    for name in O3_CONTENT:
         p = root / name
         out[name] = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
     return out
@@ -558,23 +479,24 @@ def mutation_census(root: Path) -> dict[str, tuple[str, str | None]]:
     return out
 
 
-#: The baseline is a GOLDEN like `tests/e2e/test_replay_skeleton.py`'s: re-captured when the tree
-#: is meant to change, and the re-capture reviewed as a diff. Its `commit` field is for the
-#: reader only (a committed file cannot carry the sha of the commit that contains it).
+#: The baseline is a GOLDEN like `tests/e2e/test_replay_skeleton.py`'s: re-captured with
+#: `capture_baseline` when the tree is meant to change, and the re-capture reviewed as a diff. Its
+#: `commit` field is for the reader only (a committed file cannot carry the sha of the commit
+#: that contains it).
 TREE_BASELINE = Path(__file__).with_name("_tree_baseline_1077.json")
 
 
 def head_commit() -> str:
-    """The commit the comparison runs on, through `defender._git.git_head_sha`: a second
+    """The commit the capture runs on, through `defender._git.git_head_sha`: a second
     `rev-parse` here would be the shared-oracle shape `tooling/lint/lint_shared_oracle.py` flags.
     """
     return mod("_git").git_head_sha(REPO_ROOT)
 
 
-def load_baseline(path: Path = TREE_BASELINE) -> dict[str, Any]:
+def load_baseline() -> dict[str, Any]:
     """The captured baseline: `commit` (informational), the structural `entries` and the two
     `content` digests."""
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(TREE_BASELINE.read_text(encoding="utf-8"))
 
 
 def baseline_entries(doc: dict[str, Any]) -> dict[str, Entry]:
@@ -594,21 +516,8 @@ def capture_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> dict[str, 
 
 
 def structural_findings(run_dir: Path, doc: dict[str, Any]) -> list[str]:
-    """The strict half: the run directory's name set against the baseline's, in full."""
+    """The run directory's name set against the baseline's, in full."""
     return tree_diff(baseline_entries(doc), snapshot(run_dir))
-
-
-def content_findings(run_dir: Path, doc: dict[str, Any]) -> list[str]:
-    """The narrow half: the two documents' bytes, and no other file's."""
-    want: dict[str, str | None] = doc["content"]
-    got = content_digests(run_dir, want)
-    return [f"content differs: {name}" for name in sorted(want) if want[name] != got.get(name)]
-
-
-def compare_to_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> list[str]:
-    """The findings for `run_dir`: structural first, then content."""
-    doc = load_baseline(path)
-    return structural_findings(run_dir, doc) + content_findings(run_dir, doc)
 
 
 # ======================================================================================
@@ -685,7 +594,7 @@ class RecordingIo:
             prior = sum(1 for n, _ in self.calls[:-1] if n == name)
             if name in self.fault.fail_on and self.fault.raise_after <= prior:
                     raise self.fault.error or FileExistsError(
-                        f"{path}: the guarded exclusive create collided (claim C19)")
+                        f"{path}: the guarded exclusive create collided")
             if name in _WRITE_OPS and self.fault.before_write is not None:
                 self.fault.before_write(path)
             return real(*a, **kw)
@@ -759,23 +668,3 @@ def displays(found: Iterable[Any]) -> str:
 
 def reports(found: Iterable[Any], needle: str) -> bool:
     return needle in displays(found)
-
-
-# ======================================================================================
-# Refusals — "the run is refused" as an observable, not as "something raised".
-# ======================================================================================
-
-def refused_run(fn: Callable[[], Any], *, runs_base: Path, run_id: str) -> BaseException:
-    """Drive `fn` and assert the RUN was refused, not degraded: the call raised, and no
-    provenance stamp names a defaulted tenant. (A bare `pytest.raises` alone would pass on any
-    exception, the harness's included.)
-    """
-    with pytest.raises((SystemExit, Exception)) as excinfo:  # noqa: B017,PT011
-        fn()
-    stamp = runs_base / run_id / "provenance.json"
-    if stamp.is_file():
-        body = json.loads(stamp.read_text(encoding="utf-8"))
-        assert body.get("tenant_id") is None, (
-            "the run was DEGRADED, not refused: it stamped "
-            f"tenant_id={body.get('tenant_id')!r} over a tenant record it could not read")
-    return excinfo.value

@@ -62,10 +62,7 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
     tail = Tail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "flagged"), tail, "--update-ticket") == 0
     assert RECORD_STEP in tail.names, (
-        f"a completing run under the flag never recorded into its case (ran {tail.names}) — "
-        "D2 renames the post-step, and a run still calling `close_case_ticket` leaves the "
-        "case with no agent comment on it, which is O4's own failure witness"
-    )
+        f"a completing run under the flag never recorded into its case (ran {tail.names})")
     assert tail.names.index(OPEN_STEP) < tail.names.index("lifecycle") < tail.names.index(
         RECORD_STEP
     ), (
@@ -83,27 +80,21 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
     dying = Dying(state)
     with pytest.raises(RuntimeError):
         drive_tail(run_py.main, plant_alert(tmp_path / "dying"), dying, "--update-ticket")
-    assert RECORD_STEP not in dying.names, (
-        "a run that never completed its lifecycle recorded anyway: §7 R11 declined to build "
-        "record-on-crash, so reaching the store here would be mechanism no D-row names"
-    )
+    assert RECORD_STEP not in dying.names, "a run that never completed its lifecycle recorded anyway"
 
     # A failed open does not suppress the record attempt.
     use_mapping(monkeypatch, tmp_path / "dfn")
     for arm, (why, store) in enumerate((
-        ("a 409 on the create (FK33: the key already exists, c8)",
+        ("a 409 on the create (the key already exists)",
          FakeStore(status_by_suffix={TICKETS_PATH: "409"})),
-        ("a raising transport (FK32: the bastion is unreachable, c14)",
+        ("a raising transport (the bastion is unreachable)",
          FakeStore(transport_fault_on=TICKETS_PATH)),
     )):
         run_dir = make_run(tmp_path / f"open-failed-{arm}")
         try:
             open_ticket(run_dir, store)
         except Exception as exc:  # noqa: BLE001 — the open's own fate belongs to O7, not here
-            pytest.fail(
-                f"the open raised out of the writer on {why}: O7 catches every write fault, "
-                f"warns once and leaves the run's exit code untouched ({exc!r})"
-            )
+            pytest.fail(f"the open raised out of the writer on {why}: {exc!r}")
         record(run_dir, store)
 
         opened = [c.body for c in store.calls if c.path == TICKETS_PATH]
@@ -112,12 +103,7 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
         ], f"the open was never attempted at all on {why}, so nothing here is a failed open"
         assert store.paths(COMMENTS_SUFFIX) == [
             f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"
-        ], (
-            f"a failed open suppressed the record step on {why} (the writer's whole path was "
-            f"{store.paths()}). §7 R6 pins the two post-steps as independent statements under "
-            f"one flag, not `if the open worked: record`; the record proceeds against the "
-            f"existing key, which on the platform is the only case there is"
-        )
+        ], f"a failed open suppressed the record step on {why} (the writer's calls: {store.paths()})"
 
 
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
@@ -149,11 +135,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     with pytest.raises(SystemExit) as refusal:
         run_py.main(["--episode", episode_id, "--world", "b",
                      "--tenant", ep.parent.parent.name, "--update-ticket"])
-    assert "--update-ticket" in str(refusal.value), (
-        "the resume path accepted the ticket flag: the two ticket calls are ordered around "
-        "the curation marker, so accepting-and-ignoring breaks the pairing instead of the "
-        "obligation"
-    )
+    assert "--update-ticket" in str(refusal.value), "the resume path accepted the ticket flag"
 
 
 def test_767_record_runs_before_the_curation_marker(tmp_path, state):
