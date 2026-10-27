@@ -22,15 +22,15 @@ MAIN = compile_policy_for(MAIN_DEF, run_dir=_RUN, defender_dir=_DFN)
 
 @functools.cache
 def _gather():
-    """Gather's policy over the synthetic roots, compiled with a RUN's grant (#1106 M4:
-    `GATHER_DEF` carries none) — lazily, so the module collects before the tenant folder exists."""
+    """Gather's policy over the synthetic roots, compiled lazily with a run's grant (`GATHER_DEF`
+    carries none), so the module collects before the tenant folder exists."""
     return compile_policy_for(T1106.fixture_gather_def(), run_dir=_RUN, defender_dir=_DFN)
 
 
 def _bash(cmd, policy):
-    """Every decide_bash call threads the run roots: a `cat` operand is RESOLVED against the
-    executor's cwd (`defender_dir.parent`) before its scope check, so a gate call without them
-    fails closed on any file-opening stage (by design — see `bash._in_scope`)."""
+    """Every `decide_bash` call threads the run roots: a relative `cat` operand is rebased on the
+    run dir before its scope check, and a call without one fails closed on any file-opening
+    stage (`bash._in_scope`)."""
     return permission.decide_bash(cmd, policy=policy, run_dir=_RUN, defender_dir=_DFN)
 
 
@@ -87,6 +87,8 @@ def test_gather_denies_compound_with_adapter(cmd):
     "cat /run/gather_raw/l-001/0.json",
     '''cat /run/gather_raw/l-001/0.json | defender-sql 'SELECT * FROM data WHERE ts >= "2026-01-01" AND x <= "2026-12-31"' ''',
     '''cat /run/gather_raw/l-001/0.json | grep 'trust_edges_out > 0' ''',
+    "cat /run/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'",
+    "cat /run/gather_raw/l-001/1.json | wc -c",
 ])
 def test_gather_allows_readonly_commands_and_quoted_comparisons(cmd):
     assert _bash(cmd, _gather()).allow
@@ -149,7 +151,7 @@ def test_a_wrapped_viewer_denies_and_its_payload_alone_does_not(wrapped, payload
     "timeout 5 cat /run/investigation.md",
 ])
 def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
-    """#971: the prefix used to be STRIPPED before the decision, so these were allows."""
+    """The prefix is judged, never stripped before the decision (#971)."""
     for policy in (MAIN, _gather()):
         assert not _bash(cmd, policy).allow, f"{cmd!r}: `timeout` is not a granted program"
         assert _bash(cmd, policy).reason == policy.deny_reason
@@ -180,20 +182,6 @@ def test_unparseable_command_fails_closed_at_the_gate(cmd):
     assert d.pipelines is None  # nothing was parsed, so nothing is handed downstream
 
 
-_LEXING_FAILURES = [
-    ("unbalanced quote",            "cat /run/report.md | grep 'unterminated", "unbalanced quote"),
-    ("newline in a quoted arg",     "cat /run/report.md | grep 'a\nb'",        "quoted argument"),
-    ("trailing backslash",          "cat /run/report.md \\\n | wc -l",         "continues nothing"),
-    ("connector opens a line",      "cat /run/report.md\n| wc -l",             "line boundary"),
-    ("connector closes a line",     "cat /run/report.md |\nwc -l",             "line boundary"),
-    ("leading connector, one line", "| wc -l",                                 "BOTH sides"),
-    ("pipe then `;`",               "cat /run/report.md | ; wc -l",            "BOTH sides"),
-    ("pipe then `|`",               "cat /run/report.md | | wc -l",            "BOTH sides"),
-    ("connector then bare `;`",     "cat /run/report.md && ;",                 "BOTH sides"),
-    ("pipe into a bare redirect",   "cat /run/report.md | 2> /dev/null",       "BOTH sides"),
-]
-
-
 @pytest.mark.parametrize("cmd", [
     "cat /run/report.md > /tmp/out",     # a write
     "cat /run/report.md & rm -rf /",     # a background job + an ungranted program
@@ -218,9 +206,8 @@ def test_the_real_pipe_the_gather_deny_reason_teaches_is_still_allowed():
 # read: deny-by-default allowlist over {run_dir, defender_dir, the run's tenant agent root}
 
 def _read_roots(tmp_path):
-    """A run dir, a product tree (general skills only, #1108 P4 O1) and the run's tenant agent
-    root — a test-local stand-in for the run copy `<T>/run-knowledge/<run_id>/agent/`, holding
-    made-up corpus dirs (the gate only needs the root and the shapes, never lab content). All
+    """A run dir, a product tree (general skills only) and the run's tenant agent root, a
+    stand-in for the run copy `<T>/run-knowledge/<run_id>/agent/` with made-up corpus dirs. All
     real dirs so `resolve()` has something to anchor."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
@@ -240,8 +227,8 @@ def _main_on(run: Path, dfn: Path, agent: Path):
 
 
 def test_read_allows_in_root_corpus_and_run(tmp_path):
-    """O2: the run's own files, a product general skill, and the run's own tenant agent root's
-    system skill are readable."""
+    """The run's own files, a product general skill, and the run's tenant agent root's system
+    skill and lessons are readable."""
     run, dfn, agent = _read_roots(tmp_path)
     main = _main_on(run, dfn, agent)
     for p in (run / "alert.json", run / "investigation.md", run / "executed_queries.jsonl",
@@ -256,9 +243,8 @@ def test_read_allows_in_root_corpus_and_run(tmp_path):
 
 
 def test_o2_read_gate_admits_the_own_run_copy_and_refuses_another_tenants_agent_half(tmp_path):
-    """O2 (read-gate arm): a lesson in this run's own copy is admitted; the same lesson name in
-    ANOTHER tenant's run copy under the same data root is refused, on the same gate call with
-    the same policy (the positive control is the first assertion)."""
+    """The same lesson name in another tenant's run copy, under the same data root, is refused
+    by the policy that admits this run's, on the read tool and `cat` alike."""
     run, dfn, agent = _read_roots(tmp_path)
     other = tmp_path / "data" / "tenant-b" / "run-knowledge" / "run-2" / "agent"
     (other / "lessons").mkdir(parents=True)
@@ -274,10 +260,8 @@ def test_o2_read_gate_admits_the_own_run_copy_and_refuses_another_tenants_agent_
 
 
 def test_p1_the_product_tree_is_no_lesson_corpus_for_a_run(tmp_path):
-    """#1108 P4 P-1/O1 (old design D4: "`defender_dir`'s corpus shapes go once P4 lands"): a
-    run reads lessons from its own copy only, so a `lessons/` folder planted under the product
-    tree is NOT a readable corpus — by the typed read and by bash `cat` alike — while the same
-    name under the run's agent root is (the positive control on the same channel)."""
+    """A run reads lessons from its own copy only: a `lessons/` folder under the product tree is
+    not readable, by the read tool or `cat`, while the same name under the run's agent root is."""
     run, dfn, agent = _read_roots(tmp_path)
     (dfn / "lessons").mkdir()
     (dfn / "lessons" / "x.md").write_text("stale product lesson\n", encoding="utf-8")
@@ -334,17 +318,6 @@ def test_read_ssh_dir_component_denied_inside_a_shape(tmp_path):
         agent / "lessons" / ".ssh" / "id_rsa.md", run_dir=run, defender_dir=dfn, policy=main).allow
     assert permission.decide_read(          # positive control: same shape, no denied component
         agent / "lessons" / "auth" / "scope.md", run_dir=run, defender_dir=dfn, policy=main).allow
-
-
-def test_read_main_loop_gather_raw_not_enumerated_gather_allowed(tmp_path):
-    run, dfn, _agent = _read_roots(tmp_path)
-    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
-    gather = compile_policy_for(T1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)
-    raw = run / "gather_raw" / "l-001" / "0.json"
-    d = permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=main)
-    assert not d.allow
-    assert "must not read gather_raw" in d.reason
-    assert permission.decide_read(raw, run_dir=run, defender_dir=dfn, policy=gather).allow
 
 
 def test_alert_is_untrusted():
@@ -429,12 +402,12 @@ def test_write_allow_md_only_denies_non_md(tmp_path):
                                    defender_dir=dfn, policy=pol).allow
     assert not permission.decide_write(skills / "invlang" / "validate.py", "evil\n",
                                        run_dir=tmp_path / "run", defender_dir=dfn, policy=pol).allow
-    # rejected: allow any file under skills — that lets the writer clobber invlang/connect .py code,
-    #           caught only late by the loop's .md-only scope gate (after the worktree carries it)
+    # Any file under skills would let the writer clobber the invlang/connect `.py` code.
 
 
 def test_write_allow_no_implicit_run_dir(tmp_path):
-    """the flat allowlist REPLACES the old run-dir base (no implicit run_dir): a writer that declares only a skills subtree may NOT write run_dir."""
+    """A writer that declares only a skills subtree may not write the run dir: there is no
+    implicit run-dir base."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skills = tmp_path / "defender" / "skills"
@@ -448,8 +421,8 @@ def test_write_allow_no_implicit_run_dir(tmp_path):
 
 
 def test_write_allow_traversal_escape_denied(tmp_path):
-    """a `..` escape out of the declared subtree is denied after resolve() collapses it (the pattern
-    matches the RESOLVED path, so `skills/../lessons/z.md` lands outside the allowlist)."""
+    """The pattern matches the resolved path, so `skills/../lessons/z.md` lands outside the
+    allowlist."""
     skills = tmp_path / "defender" / "skills"
     skills.mkdir(parents=True)
     (tmp_path / "defender" / "lessons").mkdir(parents=True)
@@ -465,12 +438,12 @@ def test_write_empty_allow_denies_all(tmp_path):
     pol = permission.AgentPolicy()  # write_allow=()
     assert not permission.decide_write(run_dir / "report.md", _VALID_REPORT, run_dir=run_dir,
                                        defender_dir=tmp_path / "defender", policy=pol).allow
-    # rejected: an implicit run_dir base — it silently granted every agent (incl. read-only
-    #           predictors) run-dir writes; deny-by-default forces each writer to declare its paths
+    # An implicit run-dir base would grant every agent, read-only ones included, run-dir writes.
 
 
 def test_write_allow_corpus_file_named_investigation_not_gated(tmp_path):
-    """invlang validation is keyed on `<run_dir>/investigation.md`, so a CORPUS file that merely"""
+    """Invlang validation is keyed on `<run_dir>/investigation.md`, so a corpus file that merely
+    shares the name is not validated."""
     skills = tmp_path / "defender" / "skills"
     skills.mkdir(parents=True)
     run_dir = tmp_path / "run"
@@ -498,12 +471,6 @@ def test_gather_drops_find():
         assert not _bash(cmd, MAIN).allow, cmd
 
 
-def test_gather_keeps_local_computation():
-    for cmd in ("cat /run/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'",
-                "cat /run/gather_raw/l-001/1.json | wc -c"):
-        assert _bash(cmd, _gather()).allow, cmd
-
-
 _PAYLOAD_PIPE = "cat /run/gather_raw/l-001/0.json | defender-sql"
 
 
@@ -518,20 +485,12 @@ _PAYLOAD_PIPE = "cat /run/gather_raw/l-001/0.json | defender-sql"
     "--rows values",
 ])
 def test_gather_admits_the_declared_rows_flags_on_defender_sql(flags):
-    """#1138 O7: the lead can INVOKE the declaration from gather's bash lane — `--rows` and"""
+    """The lead can invoke the `--rows`/`--names` declaration from gather's bash lane, in either
+    order and spelling, before or after the SQL (#1138)."""
     for cmd in (f"{_PAYLOAD_PIPE} {flags} 'SELECT count(*) AS n FROM data'",
                 f"{_PAYLOAD_PIPE} 'SELECT count(*) AS n FROM data' {flags}"):
         decision = _bash(cmd, _gather())
         assert decision.allow, (cmd, decision.reason)
-
-
-from defender.execution import bash_exec  # noqa: E402 — grouped with its test section
-
-
-def _shape(cmd):
-    # `parse` takes the raw command text directly (#959 D1/C3) — the standalone wrapper step
-    # has folded into it, so there is no second function to apply first any more.
-    return bash_exec.parse(cmd)
 
 
 from defender.investigation.permission import AgentPolicy, Grant  # noqa: E402

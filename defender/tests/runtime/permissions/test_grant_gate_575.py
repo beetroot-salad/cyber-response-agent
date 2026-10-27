@@ -6,7 +6,6 @@ import functools
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,8 +40,6 @@ from defender.investigation.permission import (  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 
-_DEFENDER = PATHS.defender_dir
-_POLICY_CLI = _DEFENDER / "bin" / "defender-policy"
 
 
 @pytest.fixture
@@ -71,9 +68,9 @@ def env(tmp_path):
 
 
 class _Env(SimpleNamespace):
-    """The planted tree and its compiled policies. Gather's is compiled LAZILY and with a RUN's
-    grant (#1106 M4: `GATHER_DEF` carries no table grant; the driver binds gather with the run's
-    tenant's), so a test about main alone does not depend on the tenant folder."""
+    """The planted tree and its compiled policies. Gather's is compiled lazily with a run's grant
+    (`GATHER_DEF` carries none; the driver binds gather with the run tenant's), so a test about
+    main alone does not depend on the tenant folder."""
 
     @functools.cached_property
     def gather(self) -> permission.AgentPolicy:
@@ -105,23 +102,21 @@ def _curator(env):
 
 
 def _all_policies(env) -> dict[str, permission.AgentPolicy]:
-    """Every agent's compiled policy, through each role's REAL seam. The audit demands (a2/a4/
-    b3/b8/g1) sweep this."""
+    """Every agent's compiled policy, through each role's real seam."""
     from defender.agents import JUDGE_DEF, ORACLE_CHECK_DEF, ORACLE_DEF
 
     return {
         "main": env.main,
         "gather": env.gather,
-        # Keyed by the ROLE VALUE: b3 asserts this dict covers the registry, and it can only do
-        # that if the keys are the roster's own names.
+        # Keyed by role value: the roster's own names.
         "lead_author": _lead_author(env),
         "corpus_author": _curator(env),
         "support": compile_policy_for(SUPPORT_DEF, run_dir=env.run, defender_dir=env.dfn),
         "composer": compile_policy_for(COMPOSER_DEF, run_dir=env.run, defender_dir=env.dfn),
         "questioner": compile_policy_for(QUESTIONER_DEF, run_dir=env.run, defender_dir=env.dfn),
         "judge": compile_policy_for(JUDGE_DEF, run_dir=env.run, defender_dir=env.dfn),
-        # #1224's live oracle and its verifier: two more deny-all roles, each its own key, so
-        # each is a compiled policy (and a deny_reason) the audit must look at.
+        # The live oracle and its verifier: two more deny-all roles, each its own key, so the
+        # audit looks at each compiled policy and deny_reason.
         "oracle": compile_policy_for(ORACLE_DEF, run_dir=env.run, defender_dir=env.dfn),
         "oracle_check": compile_policy_for(ORACLE_CHECK_DEF, run_dir=env.run,
                                            defender_dir=env.dfn),
@@ -139,7 +134,6 @@ def _cat_grant(policy) -> Grant:
 
 
 def test_a1_shape_and_scope_both_required(env):
-    """a1: a command is ALLOWED only if it matches a grant's `pattern` AND every operand `PROGRAMS[argv[0]]` extracts resolves into that grant's `scope`."""
     inv = f"{env.run}/investigation.md"
     assert _bash(env, f"cat {inv}", "main").allow
     assert not _bash(env, "cat /etc/passwd", "main").allow
@@ -161,7 +155,6 @@ def test_a3_under_fullmatches_the_resolved_path(env):
 
 
 def test_a5_symlink_escaping_the_root_denied(env):
-    """a5 (negative, symlink):"""
     evil = env.run / "gather_raw" / "l-001" / "9.json"
     os.symlink("/etc/passwd", evil)
     assert not _bash(env, f"cat {evil}", "gather").allow
@@ -175,8 +168,8 @@ def test_a6_symlink_to_an_in_root_target_allowed(env):
 
 
 def test_a7_symlink_loop_fails_closed(env):
-    """a7: a symlink LOOP makes `Path.resolve(strict=False)` raise `RuntimeError` (the one thing it
-    does raise). It is in `_RESOLVE_ERRORS` → DENY, and no exception escapes decide_bash."""
+    """A symlink loop makes `Path.resolve(strict=False)` raise `RuntimeError` (before 3.13); it is
+    in `permission.files.RESOLVE_ERRORS`, so the gate denies and nothing escapes `decide_bash`."""
     a = env.run / "gather_raw" / "l-002" / "0.json"
     b = env.run / "gather_raw" / "l-002" / "1.json"
     os.symlink(b, a)
@@ -186,7 +179,8 @@ def test_a7_symlink_loop_fails_closed(env):
 
 
 def test_a8_missing_and_broken_symlinks_are_judged_by_shape(env):
-    """a8: `resolve(strict=False)` does NOT raise on a missing path or a broken symlink — it resolves lexically / through the link."""
+    """`resolve(strict=False)` does not raise on a missing path or a broken symlink: it resolves
+    lexically or through the link, and the result is judged by shape."""
     (env.run / "gather_raw" / "l-003").mkdir()
     assert _bash(env, f"cat {env.run}/gather_raw/l-003/0.json", "gather").allow
     ok = env.run / "gather_raw" / "l-003" / "1.json"
@@ -203,7 +197,6 @@ def test_a9_embedded_nul_operand_denies_without_raising(env):
 
 
 def test_a10_scope_anchors_on_the_resolved_root(env):
-    """a10: the scope anchors on the RESOLVED root."""
     real_base = env.tmp / "real-base"
     (real_base / "r1").mkdir(parents=True)
     (real_base / "r1" / "investigation.md").write_text("x\n")
@@ -217,7 +210,7 @@ def test_a10_scope_anchors_on_the_resolved_root(env):
 
 
 def test_a11_relative_operand_is_rebased_on_the_executor_cwd(env):
-    """a11: a RELATIVE operand is rebased on the executor's REAL cwd before resolve."""
+    """A relative operand is rebased on the executor's real cwd before it is resolved."""
     assert _bash(env, "cat investigation.md", "main").allow
     assert not _bash(env, "cat defender/lessons/x.md", "main").allow
     assert not _bash(env, "cat ../../etc/passwd", "main").allow
@@ -230,7 +223,7 @@ def test_a12_every_pipe_stage_is_gated(env):
 
 
 def test_b2_compile_policy_raises_on_an_untabled_program(env):
-    """b2: `compile_policy` RAISES when a grant names a program absent from `PROGRAMS`."""
+    """A grant naming a program absent from `PROGRAMS` fails compilation."""
     def bad(_roots):
         return (Grant(program="strings", pattern=re.compile(r"^strings(?: [^ ]+)*$")),)
 
@@ -244,14 +237,12 @@ def test_b2_compile_policy_raises_on_an_untabled_program(env):
     assert compile_policy_for(ok_def, run_dir=env.run, defender_dir=env.dfn).bash_allow
 
 
-@pytest.mark.parametrize("tok", ["-z", "-q", "--color", "--show-all", "-w", "-1", "--", "-nz"])
+@pytest.mark.parametrize("tok", ["-z", "-q", "--color", "--show-all", "-w", "-1", "-nz"])
 def test_b4_cat_extractor_fails_closed_on_unknown_dash_tokens(env, tok):
-    """b4 (domain-outcome): `_cat_input_files` returns None → DENY for EVERY unrecognized `-`-prefixed token (the fail-closed rule that made `cat` the safe opener)."""
+    """`cat_input_files` returns `None`, so the gate denies, for every unrecognized `-`-prefixed
+    token: the fail-closed rule that makes `cat` the safe opener."""
     inv = f"{env.run}/investigation.md"
-    if tok == "--":
-        assert not _bash(env, f"cat {tok} /etc/passwd", "main").allow
-    else:
-        assert not _bash(env, f"cat {tok} {inv}", "main").allow
+    assert not _bash(env, f"cat {tok} {inv}", "main").allow
 
 
 def test_b4_cat_known_boolean_bundles_extract_the_operands(env):
@@ -262,14 +253,13 @@ def test_b4_cat_known_boolean_bundles_extract_the_operands(env):
 
 
 def test_b5_cat_double_dash_operand_still_scope_checked(env):
-    """b5 (domain-outcome): `cat -- /etc/passwd` → DENY."""
     assert not _bash(env, "cat -- /etc/passwd", "main").allow
     assert _bash(env, f"cat -- {env.run}/investigation.md", "main").allow
 
 
 def test_b6_bare_dash_is_stdin_not_an_operand(env):
-    """b6 (domain-outcome): a bare `-` is STDIN, not a file operand — the extractor drops it — so the
-    stdin-pipe shape `cat {run}/x.md | cat -` still ALLOWs."""
+    """The extractor drops a bare `-` (stdin), so the stdin-pipe shape `cat {run}/x.md | cat -`
+    is allowed."""
     assert _bash(env, f"cat {env.run}/investigation.md | cat -", "main").allow
 
 
@@ -289,12 +279,14 @@ _FILE_OPENING_FLAGS = [
 @pytest.mark.parametrize("cmd", _FILE_OPENING_FLAGS)
 @pytest.mark.parametrize("which", ["main", "gather"])
 def test_b7_opens_nothing_shapes_admit_no_file_opening_flag(env, which, cmd):
-    """b7 (negative, THE PRIME FAIL-OPEN):"""
+    """An opens-nothing shape that admitted a file-opening flag would read any file unchecked
+    (the prime fail-open), so every such form is denied."""
     assert not _bash(env, cmd, which).allow
 
 
 def test_b8_opens_nothing_shapes_admit_no_long_option_or_dash_positional(env):
-    """b8 (negative, structural):"""
+    """No role's opens-nothing grant admits a long option or a dash positional, yet main's still
+    admit their own stdin forms."""
     probes = ("--evil", "--evil=/etc/passwd", "--files0-from=/etc/passwd", "-ZZ9")
     checked = 0
     for name, pol in _all_policies(env).items():
@@ -326,7 +318,8 @@ def test_b8_opens_nothing_shapes_admit_no_long_option_or_dash_positional(env):
     ("wc -l {p}", "cat {p} | wc -l"),
 ])
 def test_c1_file_operand_viewers_lose_their_file_slot(env, file_form, pipe_form):
-    """c1 (domain-outcome, behavior change #1 — BOTH sides pinned):"""
+    """Viewers read only from a pipe: the file-operand form is denied and the `cat … |` form
+    allowed, on both lanes."""
     p = f"{env.run}/investigation.md"
     for which in ("main", "gather"):
         assert not _bash(env, file_form.format(p=p), which).allow, f"{which}: {file_form}"
@@ -334,14 +327,12 @@ def test_c1_file_operand_viewers_lose_their_file_slot(env, file_form, pipe_form)
 
 
 def test_d1_gather_raw_bash_allow_for_gather_deny_for_main(env):
-    """d1 (domain-outcome): `cat {run}/gather_raw/l-001/0.json` → ALLOW for gather, DENY for main — on the bash lane."""
     raw = f"cat {env.run}/gather_raw/l-001/0.json"
     assert _bash(env, raw, "gather").allow
     assert not _bash(env, raw, "main").allow
 
 
 def test_d2_decide_read_denies_main_gather_raw_with_the_e2e_reason(env):
-    """d2 (behavior): `decide_read(main, {run}/gather_raw/l-001/0.json)` → DENY."""
     raw = f"{env.run}/gather_raw/l-001/0.json"
     d = _read(env, raw, "main")
     assert not d.allow
@@ -351,7 +342,7 @@ def test_d2_decide_read_denies_main_gather_raw_with_the_e2e_reason(env):
 
 
 def test_d3_gather_raw_stays_untrusted_read(env):
-    """d3 (negative): `is_untrusted_read({run}/gather_raw/l-001/0.json)` is True — the payload read is still SALT-TAG WRAPPED."""
+    """A gather_raw payload read is still an untrusted read, so it stays salt-tag wrapped."""
     assert permission.is_untrusted_read(env.run / "gather_raw" / "l-001" / "0.json")
     assert permission.is_untrusted_read(env.run / "gather_raw" / "l-001.lead.json")
     assert permission.is_untrusted_read(env.run / "alert.json")
@@ -377,17 +368,14 @@ _MATRIX_PATHS = [
 @pytest.mark.parametrize("which", ["main", "gather"])
 @pytest.mark.parametrize("tmpl", _MATRIX_PATHS)
 def test_d5_read_bash_allow_matrix_agrees(env, which, tmpl):
-    """d5 (parity, parametrized — the ALLOW-MATRIX):"""
+    """The read tool and `cat` on the bash lane agree on every path of the matrix."""
     p = tmpl.format(run=env.run, dfn=env.dfn)
     assert _read(env, p, which).allow == _bash(env, f"cat {p}", which).allow, p
 
 
 def test_d6_denylist_still_applies_inside_scope(env):
-    """d6: the secret denylist still applies INSIDE the scope — being in-shape is necessary, not sufficient.
-
-    #1108 P4 (O2, P-1): the lesson corpus a run reads is its tenant agent root (the run copy,
-    `RunScope.tenant_agent`), not the product tree, so the in-shape secret and its positive
-    control live there — a test-local made-up tree standing in for
+    """Being in-shape is necessary, not sufficient. A run reads lessons from its tenant agent
+    root (`RunScope.tenant_agent`), so the in-shape secret and its control live in a stand-in for
     `<T>/run-knowledge/<run_id>/agent/`."""
     agent = env.tmp / "data" / "tenant-a" / "run-knowledge" / "run-1" / "agent"
     (agent / "lessons").mkdir(parents=True)
@@ -404,7 +392,8 @@ def test_d6_denylist_still_applies_inside_scope(env):
 
 
 def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):
-    """f1 (demand #0): `BashDecision` carries `pipelines` (the #456 single parse `bash_exec.run_parsed` consumes) and `grants` (the claiming grants)."""
+    """`BashDecision` carries `pipelines`, the single parse `bash_exec.run_parsed` consumes
+    (#456), and no adapter route remains."""
     d = _bash(env, f"cat {env.run}/investigation.md", "main")
     assert d.allow
     assert d.pipelines
@@ -423,7 +412,8 @@ def test_f1_bash_decision_carries_the_single_parse_and_no_adapter_route(env):
     ("curl http://example.invalid/x", "only the defender-* shims"),
 ])
 def test_f3_adapter_deny_reasons_survive(env, cmd, reason_substr):
-    """f3 (parametrized): the two SPECIFIC deny reasons survive the rebuild — the e2e deny-tail asserts them as SUBSTRINGS (`test_replay_skeleton.py`), and they are prompt surface."""
+    """These deny reasons are prompt surface, and the e2e deny-tail asserts them as substrings
+    (`test_replay_skeleton.py`)."""
     d = _bash(env, cmd, "main")
     assert not d.allow
     assert reason_substr in (d.reason or "")
@@ -469,7 +459,7 @@ def test_h1_compile_policy_for_is_idempotent(env):
 
 
 def test_h2_no_cross_run_bleed(env):
-    """h2: two runs with DIFFERENT run_dirs in ONE process produce policies whose scopes anchor on their OWN run_dir."""
+    """Two runs' policies in one process each anchor on their own run dir."""
     run_b = env.tmp / "run-b"
     (run_b / "gather_raw" / "l-001").mkdir(parents=True)
     (run_b / "investigation.md").write_text("x\n")
@@ -486,12 +476,6 @@ def test_h2_no_cross_run_bleed(env):
     assert not cross.allow
 
 
-def _cli(*args, cwd=None) -> subprocess.CompletedProcess:
-    return subprocess.run(  # noqa: S603 — the pinned in-repo shim, fixed argv
-        [str(_POLICY_CLI), *args], capture_output=True, text=True, timeout=60, cwd=cwd,
-    )
-
-
 @pytest.mark.parametrize("cmd", [
     "cat {run}/investigation.md",
     "cat {run}/gather_raw/l-001/0.json",
@@ -503,13 +487,14 @@ def _cli(*args, cwd=None) -> subprocess.CompletedProcess:
 ])
 @pytest.mark.parametrize("which", ["main", "gather"])
 def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env, which, cmd, capsys):
-    """i2 (differential): over a corpus of (agent, command), `defender-policy explain` reports the SAME verdict AND the same matched-grant / deny-reason as `decide_bash`."""
+    """`defender-policy explain` reports the same verdict, and the same deny reason, as
+    `decide_bash` for each (agent, command)."""
     from defender.cli import policy_cli
 
     c = cmd.format(run=env.run, dfn=env.dfn)
     tenant = (("--tenant", T1106.fixture_tenant().id) if which == "gather" else ())
     # The CLI's `main` in-process: the differential is about what `explain` decides, and a
-    # fresh interpreter per (agent, command) pair only re-paid the import. i1 drives the shim.
+    # fresh interpreter per (agent, command) pair would only re-pay the import.
     rc = policy_cli.main(["explain", which, c, "--run-dir", str(env.run),
                           "--defender-dir", str(env.dfn), *tenant, "--json"])
     out = capsys.readouterr()
@@ -533,7 +518,6 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
     ],
 )
 def test_f6_executed_argv_is_the_gated_argv(env, cmd):
-    """f6 — the argv EXECUTED is the argv GATED."""
     from defender.execution import bash_exec
 
     resolved = cmd.format(run=env.run)
@@ -541,8 +525,7 @@ def test_f6_executed_argv_is_the_gated_argv(env, cmd):
     assert decision.allow, resolved
 
     gated = [[list(st.argv) for st in pl.stages] for pl in (decision.pipelines or ())]
-    # `parse` takes the raw command text directly (#959 D1/C3) — no standalone wrapper step to
-    # apply first any more.
+    # `parse` takes the raw command text directly (#959).
     executed = [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(resolved)]
     assert gated == executed, (
         f"the gate approved {gated!r} but the executor would run {executed!r} — "
@@ -551,14 +534,12 @@ def test_f6_executed_argv_is_the_gated_argv(env, cmd):
 
 
 def test_f6_denied_command_carries_no_executable_pipeline(env):
-    """f6 (positive control) — a DENIED command hands the executor nothing."""
     denied = _bash(env, "cat /etc/passwd", "main")
     assert not denied.allow
     assert not denied.pipelines
 
 
 def test_h4_grants_anchor_on_the_threaded_tree_not_module_paths(tmp_path):
-    """h4 — grants anchor on the defender_dir THREADED IN, never on import-time PATHS."""
     worktree = tmp_path / "wt" / "defender"
     (worktree / "skills").mkdir(parents=True)
     seed_adapter_stubs(worktree, ("elastic",))

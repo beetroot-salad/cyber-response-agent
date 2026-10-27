@@ -1,5 +1,5 @@
-"""#1235 round 3 at the unit edge: the run state is the record (a refused view write still charges
-the breaker), missing state fails closed for enforced roles, lead-0 reads the run's clock."""
+"""#1235 at the unit edge: the run state is the record (a refused view write still charges the
+breaker), missing state fails closed for enforced roles, lead-0 reads the run's clock."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -9,6 +9,7 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import asyncio
 import dataclasses
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -41,7 +42,7 @@ _PAYLOAD = '{"total": 1, "hits": ["web-1"]}'
 
 
 def _bare_run(root: Path, name: str = "run") -> tuple[Path, RunState]:
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(name)
+    # A run folder is named by its UUID run id.
     run_dir = root / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     return run_dir, RunState(run_dir, run_dir.name)
@@ -56,8 +57,8 @@ def _append(state: RunState, *, params: dict, lead: str = LEAD) -> dict:
 
 
 def _failures(state: RunState, system: str) -> int:
-    """`system`'s charged failures, read off the breaker snapshot (the O1 cases read it this
-    way so a failure there names O1, not the new accessor O7 adds)."""
+    """`system`'s charged failures, read off the breaker snapshot rather than
+    `breaker_failures`, which is tested on its own below."""
     rec = state.breaker_snapshot()["systems"].get(system)
     return rec["failures"] if rec else 0
 
@@ -84,11 +85,10 @@ def _record_failure(deps, *, params: dict) -> tuple[dict, str]:
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorded(
         tmp_path, kind):
-    """O1 at the query tool's recorder: a call that failed on the transport (exit 2) is
-    recorded while `executed_queries.jsonl` is squatted (a planted symlink, or a directory). The
-    view write's `OSError` propagates — the run is not told the call was viewed — and before it
-    does, the failure is charged to the system's breaker and the row is in the run's state."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    """At the query tool's recorder, a call that failed on the transport (exit 2) while
+    `executed_queries.jsonl` is squatted (a planted symlink or a directory): the view write's
+    `OSError` propagates, but first the failure is charged to the system's breaker and the row
+    is in the run's state."""
     run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1")
@@ -123,10 +123,9 @@ def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorde
 
 
 def test_a_succeeding_call_whose_view_write_is_refused_charges_nothing(tmp_path):
-    """The charge O1 keeps is the failure's, not a side effect of the refused write: a call that
-    SUCCEEDED (exit 0) while the view is squatted is in the state, the write's error propagates,
+    """The charge above is the failure's, not a side effect of the refused write: a call that
+    succeeded (exit 0) while the view is squatted is in the state, its write error propagates,
     and the breaker is untouched."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1-ok")
@@ -149,7 +148,6 @@ _ECHO = [[("bash", {"command": "echo o2"})]]
 
 
 def test_a_non_enforced_role_whose_deps_carry_no_state_neither_counts_nor_raises(tmp_path):
-    """O2's other posture."""
     run_dir = _run_dir(tmp_path, "o2-open")
     result, _ = drive_agent(MAIN_DEF, run_dir, _ECHO, limits=_LIMITS, enforce=False, state=None)
     returned = [str(part.content) for message in result.all_messages()
@@ -193,16 +191,21 @@ def _hook_kills(run_dir: Path, state: RunState) -> bool:
     return False
 
 
-@pytest.mark.parametrize(("wall_back", "mono_back", "credited", "killed"), [
-    pytest.param(0, 0, 0, False, id="fresh"),
-    pytest.param(1000, 1000, 0, True, id="spent"),
-    pytest.param(1000, 1000, 990, False, id="oracle-held-time-is-not-the-investigators"),
+@pytest.mark.parametrize(("wall_back", "mono_back", "credited", "open_for", "killed"), [
+    pytest.param(0, 0, 0, None, False, id="fresh"),
+    pytest.param(1000, 1000, 0, None, True, id="spent"),
+    pytest.param(1000, 1000, 990, None, False, id="oracle-held-time-is-not-the-investigators"),
+    pytest.param(1000, 1000, 0, 990, False, id="an-oracle-turn-open-now"),
 ])
 def test_lead_zeros_budget_gate_agrees_with_the_hooks_on_the_runs_clock(
-        tmp_path, wall_back, mono_back, credited, killed):
-    """O3."""
+        tmp_path, wall_back, mono_back, credited, open_for, killed):
+    """Lead-0's gate and the budget hooks read one run clock, on which oracle-held time
+    (credited, or a turn still open) is not the investigator's."""
     run_dir = _run_dir(tmp_path, "o3")
     state = _clocked(run_dir, wall_back=wall_back, mono_back=mono_back, credited=credited)
+    if open_for is not None:
+        with state.lock:
+            state.oracle_opened = time.monotonic() - open_for
     hook = _hook_kills(run_dir, state)
     assert hook is killed, f"the scenario no longer exercises the hooks' clock (hook={hook})"
     assert _lead_zero_kills(state) is hook, (
@@ -211,7 +214,6 @@ def test_lead_zeros_budget_gate_agrees_with_the_hooks_on_the_runs_clock(
 
 
 def test_a_failed_reducer_on_gather_deps_with_no_state_raises(tmp_path):
-    """O4."""
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"Binder Error: o4"))
     command = f"cat {model_path(payload, run_dir=deps.run_dir)} | defender-sql 'SELECT 1'"
     with pytest.raises(TypeError, match="RunState"):
@@ -225,7 +227,6 @@ def test_a_failed_reducer_on_gather_deps_with_no_state_raises(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_refused_shim_row_write_never_fails_the_command(tmp_path, kind):
-    """O4's other half."""
     deps, box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"Binder Error: o4"))
     table = RunPaths(deps.run_dir).executed_queries
     outside = tmp_path / "outside.jsonl"

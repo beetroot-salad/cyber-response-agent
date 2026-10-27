@@ -26,9 +26,8 @@ _CLEAN_DOC = PROLOGUE + attr_block("l-001|v-001|class|bastion")
 
 
 def _pay_inconclusive_price(deps) -> None:
-    """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a
-    source or capability) — unrelated to anything this module tests, which is about
-    #961/#964's gate on the write path itself, not about the price. Append a paying row"""
+    """`inconclusive` carries an entry price this module does not test (a `ceiling_test` row
+    naming a source or capability, #923): append a paying row."""
     from pathlib import Path
 
     path = Path(deps.run_dir) / "investigation.md"
@@ -57,8 +56,6 @@ def _close(deps, disposition, **kw):
 # #961 — the close is a gated write path
 
 def test_a_close_over_an_error_severity_document_commits_nothing(tmp_path):
-    """THE defect. A document carrying an error-severity finding used to close successfully and
-    commit `report.md` untouched."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -118,7 +115,6 @@ def test_the_frameworks_forced_close_is_exempt(tmp_path):
 
 
 def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_path):
-    """H7's condition, and the line the close has to keep straight."""
     import os
     from defender._vocab import HOST_ONLY_DISPOSITION
     from defender.investigation.close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR
@@ -354,7 +350,7 @@ def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
 
 def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, capsys):
     """The close's structure gate fails OPEN on a validator fault, like the gate one line above
-    it (#836 H7) and unlike the WRITE gate it shares a schema with."""
+    it (#836) and unlike the WRITE gate it shares a schema with."""
     import defender.records._artifact_schema as schema
 
     def _boom(_text, _current):
@@ -393,21 +389,11 @@ def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
     run.mkdir()
     (run / "investigation.md").write_text(_ERROR_DOC, encoding="utf-8")
 
-    _declare_l_finding(_writer_run_1165(run), "l-00c", "correlation lead", "elastic")
+    _declare_l_finding(_writer_run_1165(run), "l-00c", "correlation lead", "elastic")  # must not raise
 
     after = (run / "investigation.md").read_text(encoding="utf-8")
     assert after == _ERROR_DOC, "the seed appended to a document that does not validate"
     assert "refused to declare l-00c" in capsys.readouterr().err
-
-
-def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
-    from defender.investigation.lead_zero import _declare_l_finding
-
-    run = tmp_path / fixture_uuid("run")
-    run.mkdir()
-    (run / "investigation.md").write_text(_ERROR_DOC, encoding="utf-8")
-
-    _declare_l_finding(_writer_run_1165(run), "l-00c", "correlation lead", "elastic")  # must not raise
 
 
 def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_making():
@@ -424,7 +410,7 @@ def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_makin
 # the third site — the turn-N branch's seed
 
 def test_a_valid_document_can_have_an_invalid_fence_prefix():
-    """The premise the branch seed rested on, refuted by construction."""
+    """A branch seed cannot assume a valid document's fence prefix validates."""
     from defender.skills.invlang.parser import scan_fences
     from defender.skills.invlang.validate import diagnose
     from defender.tests.support.invlang.validation._invlang_amendment_954 import (

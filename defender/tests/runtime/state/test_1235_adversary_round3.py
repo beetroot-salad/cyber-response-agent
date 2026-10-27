@@ -1,9 +1,8 @@
-"""#1235 round 3 adversary holes: lead-0 gate clock agreement, enforced roles without run state
-raise, stored rows are handed out uncopied, state mismatch refused."""
+"""#1235: enforced roles without run state raise, stored rows are handed out uncopied, a
+mismatched state is refused, and production's path carries one state."""
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,31 +30,10 @@ from defender.tests.sandbox.test_959_downstream import Box  # noqa: E402
 from defender.tests.runtime.state.test_1235_round3 import (  # noqa: E402
     _append,
     _bare_run,
-    _clocked,
-    _hook_kills,
-    _lead_zero_kills,
 )
 from defender.tests.runtime.engine.test_budget_seams_631 import ScriptedModel, _run_dir, drive_agent  # noqa: E402
 
 LEAD = "l-001"
-
-
-@pytest.mark.parametrize(("wall_back", "mono_back", "credited", "open_for", "killed"), [
-    pytest.param(1000, 1000, 0, 990, False, id="an-oracle-turn-open-now"),
-])
-def test_lead_zeros_gate_agrees_with_the_hooks_on_the_rest_of_the_clock(
-        tmp_path, wall_back, mono_back, credited, open_for, killed):
-    """O3."""
-    run_dir = _run_dir(tmp_path, "adv3-o3")
-    state = _clocked(run_dir, wall_back=wall_back, mono_back=mono_back, credited=credited)
-    if open_for is not None:
-        with state.lock:
-            state.oracle_opened = time.monotonic() - open_for
-    hook = _hook_kills(run_dir, state)
-    assert hook is killed, f"the scenario no longer exercises the hooks' clock (hook={hook})"
-    assert _lead_zero_kills(state) is hook, (
-        "lead-0's budget gate disagrees with the budget hooks on the run's clock: "
-        f"hooks kill={hook}, lead-0 kill={not hook}")
 
 
 _LIMITS = {**DEFAULT_LIMITS, "max_tool_calls": 50, "wall_clock_timeout": 3600,
@@ -63,7 +41,6 @@ _LIMITS = {**DEFAULT_LIMITS, "max_tool_calls": 50, "wall_clock_timeout": 3600,
 
 
 def test_an_enforced_gather_whose_deps_carry_no_state_raises(tmp_path):
-    """O2."""
     run_dir = _run_dir(tmp_path, "adv3-o2-gather")
     script = [[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]]
     with pytest.raises(TypeError, match="RunState"):
@@ -99,7 +76,6 @@ def _drive_with_box(defn, run_dir: Path, turns, *, limits, enforce: bool, state,
 
 
 def test_an_enforced_role_with_no_state_raises_before_its_first_call_runs(tmp_path):
-    """O2."""
     run_dir = _run_dir(tmp_path, "adv3-o2-before")
     script = [[("bash", {"command": "echo o2"})]]
     box = Box(BoxResult(0, b"o2\n", b""))
@@ -114,7 +90,6 @@ def test_an_enforced_role_with_no_state_raises_before_its_first_call_runs(tmp_pa
 
 
 def test_lead_rows_hands_out_the_stored_rows_not_copies(tmp_path):
-    """O7."""
     _run, state = _bare_run(tmp_path)
     _append(state, params={"q": "a"})
     _append(state, params={"q": "b"})
@@ -129,7 +104,6 @@ def _store_down(case_id: str, run_dir: Path):  # noqa: ARG001
 
 @pytest.mark.parametrize("other", ["folder", "run-id"])
 def test_a_mismatched_state_is_refused_even_when_the_store_cannot_open(tmp_path, other):
-    """O6."""
     from defender.records import session_store
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, driver_summary, materialize
 
@@ -149,7 +123,8 @@ def test_a_mismatched_state_is_refused_even_when_the_store_cannot_open(tmp_path,
 
 
 def test_production_path_carries_one_state_to_lead_zero_and_the_gather_lead(tmp_path):
-    """O6, production's path (`run.py` hands no state)."""
+    """On production's path `run.py` hands no state; the run resolves one, and lead-0 and the
+    gather lead share it."""
     from defender.tests.e2e import _lead_zero_808 as LZ
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, driver_summary
     from defender.tests.e2e.test_query_tool_611 import DONE, q
