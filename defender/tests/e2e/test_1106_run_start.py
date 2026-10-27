@@ -277,8 +277,6 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
     """Each run reads its own RUN COPY (`<T>/run-knowledge/<run_id>/`): the box gets its `agent/`,
     the driver and ticket writer its `settings/`; never the clone, the other tenant, or the
     checkout's committed copy."""
-    import contextlib
-
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
     from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 

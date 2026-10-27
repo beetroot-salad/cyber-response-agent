@@ -85,9 +85,7 @@ def _assert_one_ulimit(argv: list[str], resource: str, want: str, lane: str) -> 
     at = argv.index(want) - 1    # the `--ulimit` token `_ulimits` read the value after
     assert argv[at] == "--ulimit", f"{lane}: {want!r} is not the value of a `--ulimit` flag"
     assert at < image_at, (
-        f"{lane}: `--ulimit {want}` sits at {at}, not before the image token at {image_at}, "
-        f"so docker would hand it to the container's command instead of applying it"
-    )
+        f"{lane}: `--ulimit {want}` sits at {at}, after the image token at {image_at}")
 
 
 # ---- the two launch paths, driven through the real `start_box` with a recording daemon ------

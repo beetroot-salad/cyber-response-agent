@@ -16,6 +16,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     FakeVerbs,
     ReplayFn,
     Turn,
+    dispatching_main,
     drive,
     driver_summary,
     materialize,
@@ -28,13 +29,7 @@ LEAD = "l-001"
 
 
 def _main() -> ReplayFn:
-    """MAIN dispatches one `cmdb` lead, then closes."""
-    return ReplayFn([
-        Turn(tool_calls=[("gather", {
-            "lead_id": LEAD, "system": "cmdb", "goal": "measure this lead",
-            "what_to_summarize": ["host inventory"]})]),
-        Turn(text="Investigation complete."),
-    ])
+    return dispatching_main("cmdb", "host inventory")
 
 
 class _Cmdb:

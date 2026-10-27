@@ -23,9 +23,11 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     ReplayFn,
     Turn,
     VerbRecorder,
+    dispatching_main,
     drive,
     materialize,
 )
+from defender.tests.e2e.test_1235_host_state_in_memory import PlantingReplay  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -35,33 +37,11 @@ LEAD = "l-001"
 OLD_POINTER_NAME = "session_store_pointer.json"
 
 
-class PlantingReplay(ReplayFn):
-    """A scripted gather model that, when asked for turn `at` (0-based), first does `plant()` to
-    the live run's queries table — in this process, after the driver opened the run."""
-
-    def __init__(self, turns: list[Turn], *, at: int, plant) -> None:
-        super().__init__(turns)
-        self._at, self._plant = at, plant
-        self.planted = False
-
-    def __call__(self, messages, info):  # noqa: ANN001 — the FunctionModel callable protocol
-        if self.calls == self._at:
-            self._plant()
-            self.planted = True
-        return super().__call__(messages, info)
-
-
 def _drive_lead(run_dir: Path, gather: ReplayFn, rec: VerbRecorder, *, run_id: str) -> None:
     """MAIN dispatches one elastic lead; the gather model replays `gather` against the injected
     happy-path registry (`elastic.query`, recorded in `rec`)."""
-    main = ReplayFn([
-        Turn(tool_calls=[("gather", {
-            "lead_id": LEAD, "system": "elastic", "goal": "measure this lead",
-            "what_to_summarize": ["auth events"],
-        })]),
-        Turn(text="Investigation complete."),
-    ])
-    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=elastic_ok(rec))
+    drive(run_dir, run_id=run_id, main=dispatching_main("elastic", "auth events"), gather=gather,
+          verbs=elastic_ok(rec))
 
 
 def _lead_lines(run_dir: Path) -> list[dict]:
@@ -92,11 +72,11 @@ def test_three_identical_requests_trip_the_repeat_guard(tmp_path):
 
 @pytest.mark.parametrize("plant", ["truncate", "delete"])
 def test_an_emptied_queries_table_does_not_reset_the_repeat_count(tmp_path, plant):
-    holder: list[Path] = []
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     def empty() -> None:
-        table = RunPaths(holder[0]).executed_queries
-        assert len(_lead_lines(holder[0])) == 2, "the plant ran before the two host rows landed"
+        table = RunPaths(run_dir).executed_queries
+        assert len(_lead_lines(run_dir)) == 2, "the plant ran before the two host rows landed"
         if plant == "truncate":
             table.write_text("", encoding="utf-8")
         else:
@@ -104,8 +84,6 @@ def test_an_emptied_queries_table_does_not_reset_the_repeat_count(tmp_path, plan
 
     rec = VerbRecorder()
     gather = PlantingReplay(list(_THREE_SAME), at=2, plant=empty)
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    holder.append(run_dir)
     _drive_lead(run_dir, gather, rec, run_id="r1235-empty")
 
     assert gather.planted, "the plant never ran — this arm measured nothing"
@@ -113,17 +91,15 @@ def test_an_emptied_queries_table_does_not_reset_the_repeat_count(tmp_path, plan
 
 
 def test_planted_rows_do_not_fire_the_repeat_guard(tmp_path):
-    holder: list[Path] = []
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     def duplicate() -> None:
-        rows = _lead_lines(holder[0])
+        rows = _lead_lines(run_dir)
         assert len(rows) == 1, "the plant ran before the first host row landed"
-        _append_copies(holder[0], rows[0], 2)
+        _append_copies(run_dir, rows[0], 2)
 
     rec = VerbRecorder()
     gather = PlantingReplay(list(_THREE_SAME), at=1, plant=duplicate)
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    holder.append(run_dir)
     _drive_lead(run_dir, gather, rec, run_id="r1235-dup")
 
     assert gather.planted
@@ -145,17 +121,15 @@ _CORRECTED = q("elastic", "query", {"native_query": "FROM corrected"})
 
 
 def test_an_emptied_queries_table_does_not_refund_the_rejection_budget(tmp_path):
-    holder: list[Path] = []
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
 
     def empty() -> None:
-        assert len(_lead_lines(holder[0])) == B - 1, "the plant ran at the wrong point"
-        RunPaths(holder[0]).executed_queries.write_text("", encoding="utf-8")
+        assert len(_lead_lines(run_dir)) == B - 1, "the plant ran at the wrong point"
+        RunPaths(run_dir).executed_queries.write_text("", encoding="utf-8")
 
     rec = VerbRecorder()
     gather = PlantingReplay([*[_rejected(i) for i in range(B + 3)], _CORRECTED, DONE],
                             at=B - 1, plant=empty)
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    holder.append(run_dir)
     _drive_lead(run_dir, gather, rec, run_id="j1235-empty")
 
     assert gather.planted

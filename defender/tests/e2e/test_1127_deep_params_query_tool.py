@@ -134,7 +134,6 @@ TEXT_REFUSED = Shape("text-refused", "text", REFUSED)
 TEXT_RECURSION = Shape("text-recursion", "text", RECURSION)
 TEXT_UNDECODABLE = Shape("text-undecodable", "text", UNDECODABLE)
 #: One past the limit in `query_id`, params shallow: the scan covers EVERY argument.
-DICT_QUERY_ID = Shape("dict-query-id", "qid-dict", ONE_PAST)
 TEXT_QUERY_ID = Shape("text-query-id", "qid-text", ONE_PAST)
 
 EVERY_SHAPE = [DICT_ONE_PAST, TEXT_ONE_PAST, TEXT_LIST, TEXT_REFUSED, TEXT_RECURSION,
@@ -147,9 +146,6 @@ WOULD_RUN = [DICT_ONE_PAST, TEXT_ONE_PAST]
 def deep_call(shape: Shape, *, system: str = "elastic", verb: str = "query") -> Turn:
     if shape.form == "dict":
         args: Any = {"params": deep_params(shape.depth), "system": system, "verb": verb}
-    elif shape.form == "qid-dict":
-        args = {"query_id": json.loads(deep_list_text(shape.depth)), "params": SHALLOW_PARAMS,
-                "system": system, "verb": verb}
     else:
         args = args_text(shape, system, verb)
     return Turn(tool_calls=[("query", args)])
@@ -182,7 +178,7 @@ def assert_regime(shape: Shape) -> None:
             _QueryArgs.model_validate_json(text)
         assert [err["type"] for err in refused.value.errors()] == ["string_type"]
         assert SENTINEL_VALUE in str(refused.value.errors()), \
-            "pydantic's own error no longer echoes the input, so the O4 arm is vacuous here"
+            "pydantic's own error no longer echoes the input, so the echo check is vacuous"
         return
     if shape.form == "list-text":
         # The parser reads it and `json.loads` decodes it; the SCHEMA refuses it, and the error
@@ -192,7 +188,7 @@ def assert_regime(shape: Shape) -> None:
             _QueryArgs.model_validate_json(text)
         assert [err["type"] for err in refused.value.errors()] == ["dict_type"]
         assert SENTINEL_VALUE in str(refused.value.errors()), \
-            "pydantic's own error no longer echoes the input, so the O4 arm is vacuous here"
+            "pydantic's own error no longer echoes the input, so the echo check is vacuous"
         return
     if shape.depth <= ACCEPTED:
         _ARGS.validate_json(text)

@@ -19,9 +19,6 @@ from defender.records import RunPaths  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-_SAME = {"native_query": "FROM logs"}
-
-
 # A planted row cannot re-attribute a reducer failure to another system.
 def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
     from defender.investigation.run_state import RunState

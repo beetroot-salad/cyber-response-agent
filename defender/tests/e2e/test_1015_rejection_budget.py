@@ -56,9 +56,9 @@ def _terminator(r: _Res) -> str | None:
     return rows[0][0]
 
 
-def _budget_phrase(occurrence: int = B) -> str:
+def _budget_phrase() -> str:
     """The leading phrase `rejection_detail` gives a budget trip's row, taken from the producer."""
-    return rq.rejection_detail(RejectionBudgetTrip(occurrence=occurrence, budget=B))
+    return rq.rejection_detail(RejectionBudgetTrip(occurrence=B, budget=B))
 
 
 def _summary_body(r: _Res) -> str:
@@ -76,15 +76,12 @@ def _summary_header(r: _Res) -> str:
     """The host-authored notice main receives above the gather summary, which must be non-empty."""
     body = _summary_body(r)
     header, sep, tail = body.partition("\n\n")
-    assert sep, (
-        "main's message carries no summary under the notice at all — #987 requires either the "
-        f"summary the gather agent wrote or the fixed sentence saying it could not: {body!r}"
-    )
+    assert sep, f"main's message carries no summary under the notice: {body!r}"
     assert tail.strip(), "the summary under the notice is empty"
     return header
 
 
-def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
+def _assert_budget_stop(r: _Res) -> None:
     """Host-ended session, trip row led by the budget phrase, and main's notice EQUAL to the host's
     two sentences (a substring check would miss a model-authored fragment around them)."""
     assert _terminator(r) == session_store.TRUNCATED_BY_DEAD_END, \
@@ -93,13 +90,12 @@ def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
     rows = _above_guard(r)
     assert rows, "no above-guard rejection was recorded, so the assertions below are vacuous"
     digest = rows[-1]["payload_digest"]
-    assert digest.startswith(f"exit=64; {_budget_phrase(occurrence)}"), \
+    assert digest.startswith(f"exit=64; {_budget_phrase()}"), \
         f"the trip row does not lead with the budget phrase: {digest!r}"
     assert "turned back at seq" not in digest, \
-        "a budget stop's row says the call repeated one already turned back — O2"
+        "a budget stop's row names a repeat"
 
-    reason = rejection_budget_dead_end_reason(
-        RejectionBudgetTrip(occurrence=occurrence, budget=B))
+    reason = rejection_budget_dead_end_reason(RejectionBudgetTrip(occurrence=B, budget=B))
     summary = _summary(r)
     assert "the lead's whole allowance" in summary, \
         "main was not told the lead spent its allowance — the reason below may be empty"
@@ -111,7 +107,7 @@ def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
     assert _summary_header(r) == (
         f"gather for {LEAD} hit a dead end: {reason} {REJECTION_BUDGET_ESCAPE} "
         f"{INCOMPLETE_IDIOM}"
-    ), "main's context carries something besides the host's own two sentences — O4"
+    ), "main's notice is not exactly the host's two sentences"
 
 
 # ── O1: the bound holds however the calls differ ───────────────────────────────────────────
@@ -258,7 +254,7 @@ def test_the_repeat_guard_takes_a_stop_that_is_both_a_repeat_and_the_budgets(tmp
         "main was told it spent its allowance for a stop taken on a repeat"
 
     assert _replay_rejections(r.rows) == [(LEAD, rows[-1]["seq"], "repeat")], \
-        "the replay names a different guard than the one the live run stopped on — O3"
+        "the replay names a different guard than the one the live run stopped on"
     assert rec.calls == [], "the lead ran on past its dead end"
 
 
@@ -285,7 +281,7 @@ def test_no_byte_the_model_authored_reaches_main_through_the_grant_placements_st
         assert canary not in body, \
             f"the model's own {canary!r} crossed into main's context through the grant stop"
     assert LOUD_SYSTEM not in str(r.rows), \
-        "#1016 stopped withholding the model's system from the grant check's own row"
+        "the grant check's row carries the model's system name"
     for row in rows:
         assert row["system_key"] not in body, \
             "a ghost's fingerprint — a stable identifier of the model's string — reached main"
@@ -315,8 +311,8 @@ def test_a_lead_iterating_on_a_declared_systems_parameters_is_not_the_budgets(tm
     assert len(_above_guard(r)) == 1, "the ghost did not land above the guard"
 
     assert _terminator(r) is None, \
-        f"a healthy lead was ended as {_terminator(r)!r} — the budget counted C13's population"
+        f"a healthy lead was ended as {_terminator(r)!r}: the budget counted below-guard refusals"
     assert not _dead_end(r), "the lead was stopped after one above-guard rejection"
     assert rec.calls, "the corrected query never ran — the lead was killed before it"
     assert _replay_rejections(r.rows) == [], \
-        "the replay reports a stop the live run did not take — O3"
+        "the replay reports a stop the live run did not take"

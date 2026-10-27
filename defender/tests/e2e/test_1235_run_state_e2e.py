@@ -31,9 +31,11 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     FakeVerbs,
     ReplayFn,
     Turn,
+    dispatching_main,
     drive,
     materialize,
 )
+from defender.tests.e2e.test_1235_queries_and_pointer import _CORRECTED, _SAME, _rejected  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import SQL, _Box  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
 
@@ -42,9 +44,7 @@ pytestmark = pytest.mark.e2e
 LEAD = "l-001"
 NEW_LEAD = "l-002"
 B = REJECTION_BUDGET
-_SAME = {"native_query": "FROM logs"}
 _OTHER = {"native_query": "FROM other"}
-_CORRECTED = q("elastic", "query", {"native_query": "FROM corrected"})
 
 
 class Asked:
@@ -69,21 +69,8 @@ class Asked:
         return FakeVerbs({"elastic": {"query": query}})
 
 
-def _dispatch(lead: str) -> Turn:
-    return Turn(tool_calls=[("gather", {
-        "lead_id": lead, "system": "elastic", "goal": "measure this lead",
-        "what_to_summarize": ["auth events"]})])
-
-
 def _main(lead: str) -> ReplayFn:
-    return ReplayFn([_dispatch(lead), Turn(text="Investigation complete.")])
-
-
-def _rejected(i: int) -> Turn:
-    """A call the query tool's argument schema turns back (an extra argument): an above-guard,
-    agent-fixable rejection. The verb varies per call, so no two rejections repeat."""
-    return Turn(tool_calls=[("query", {
-        "system": "elastic", "verb": f"ghostverb{i}", "params": _SAME, "bogus_extra_arg": "x"})])
+    return dispatching_main("elastic", "auth events", lead=lead)
 
 
 def _rows(run_dir: Path, lead: str = LEAD) -> list[dict]:
@@ -204,7 +191,7 @@ def test_a_siblings_next_row_takes_the_seq_after_its_inherited_rows(tmp_path):
 def test_the_rejection_budget_counts_inherited_rejections(tmp_path):
     rows, payloads = _real_rows(tmp_path / "rows",
                                 [q("elastic", "query", _SAME), *[_rejected(i) for i in range(B - 1)]])
-    assert len(rows) == B, "the source run did not write a capture and B-1 rejections"
+    assert len(rows) == B, f"the source run wrote {len(rows)} rows, not a capture and {B - 1} rejections"
     branched = Branched(tmp_path / "branch", rows, payloads)
     asked = Asked("sibling")
     branched.resume(main=_main(LEAD), gather=ReplayFn([_rejected(B), _CORRECTED, DONE]),
@@ -324,13 +311,8 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path)
         answered.append(native_query)
         return [{"host": "web-01"}]
 
-    main = ReplayFn([
-        Turn(tool_calls=[("gather", {
-            "lead_id": LEAD, "system": "cmdb", "goal": "measure this lead",
-            "what_to_summarize": ["host inventory"]})]),
-        Turn(text="Investigation complete."),
-    ])
-    result = drive(materialize(tmp_path, GOLDEN_AB3), run_id="r1235-v2-release", main=main,
+    result = drive(materialize(tmp_path, GOLDEN_AB3), run_id="r1235-v2-release",
+                   main=dispatching_main("cmdb", "host inventory"),
                    gather=ReplayFn([q("cmdb", "probe", {"native_query": "FROM hosts"}), DONE]),
                    verbs=FakeVerbs({"cmdb": {"probe": probe}}))
     ref = weakref.ref(result["run_state"])

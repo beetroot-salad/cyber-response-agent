@@ -12,7 +12,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.tenancy import case_ticket  # noqa: E402
 from defender.systems.verbs import VerbContext  # noqa: E402
-from defender.tests.support.runtime.engine._spec767 import FakeStore, make_run, record, require  # noqa: E402
+from defender.tests.support.runtime.engine._spec767 import FakeStore, make_run, record  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
@@ -37,25 +37,12 @@ PRIOR_NOTES = "PRIOR-RUN-NOTES-1221: the binary is the fleet's packaged metrics 
 DONE = Turn(text="Summary: ticket correlation complete.")
 
 
-class _Reading(ReplayFn):
-    """`ReplayFn` that also keeps the system prompt (`instructions`) each request carried —
-    gather's prompt reaches the model there, not as a message part."""
-
-    def __init__(self, turns: list[Turn]):
-        super().__init__(turns)
-        self.instructions: list[str] = []
-
-    def __call__(self, messages, info):  # noqa: ANN001 — FunctionModel's own callable shape
-        self.instructions.append(info.instructions or "")
-        return super().__call__(messages, info)
-
-
 def _q(system: str, verb: str, params: dict) -> Turn:
     return Turn(tool_calls=[("query", {"system": system, "verb": verb, "params": params})])
 
 
 def _drive(tmp_path: Path, *, verbs: FakeVerbs, turns: list[Turn], system: str) -> tuple[
-        Path, ReplayFn, _Reading]:
+        Path, ReplayFn, ReplayFn]:
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id=SELF)
     assert run_dir.name == SELF, "the fixture must use the Run-derived identity"
     main = ReplayFn([
@@ -65,7 +52,7 @@ def _drive(tmp_path: Path, *, verbs: FakeVerbs, turns: list[Turn], system: str) 
         })]),
         Turn(text="Investigation complete."),
     ])
-    gather = _Reading(turns)
+    gather = ReplayFn(turns)
     drive(run_dir, run_id=SELF, main=main, gather=gather, verbs=verbs)
     return run_dir, main, gather
 
@@ -83,7 +70,7 @@ def _capture(run_dir: Path) -> Any:
 
 def test_a_posted_agent_comment_on_an_open_case_reaches_gather_beside_the_own_case(tmp_path):
     """The real writer's posted body, served back on an open case beside the run's own, reaches gather."""
-    tag = require(case_ticket, "agent_comment_tag", "#1221 M1: the agent tag line")(PRIOR)
+    tag = case_ticket.agent_comment_tag(PRIOR)
 
     prior_dir = make_run(tmp_path / "prior", name=PRIOR, body=PRIOR_NOTES)
     store = FakeStore()

@@ -128,6 +128,16 @@ class DenyProbe:
         return ModelResponse(parts=[TextPart(content="Acknowledged; stopping.")])
 
 
+def dispatching_main(system: str, summarize: str, *, lead: str = "l-001") -> ReplayFn:
+    """MAIN dispatches one `system` lead to measure, then closes."""
+    return ReplayFn([
+        Turn(tool_calls=[("gather", {
+            "lead_id": lead, "system": system, "goal": "measure this lead",
+            "what_to_summarize": [summarize]})]),
+        Turn(text="Investigation complete."),
+    ])
+
+
 class NeverEndsModel:
     """A model that ALWAYS emits one benign, allowed tool call (read the alert),
     so the loop never reaches a text-only stop turn and instead runs straight

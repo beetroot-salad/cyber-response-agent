@@ -116,22 +116,22 @@ def _answer(system: str, verb: str, params: Mapping[str, Any]) -> Any:
     return search_envelope(EVENTS_INDEX, list(_LEAD_DOCS), len(_LEAD_DOCS), False, "desc")
 
 
-def canned_registry(answer: Callable[[str, str, Mapping[str, Any]], Any] = _answer) -> type:
+def canned_registry() -> type:
     """Keep real verb signatures and grants while returning canned backend answers."""
     from defender.systems.verbs import ModuleVerbRegistry
 
     class CannedBodies(ModuleVerbRegistry):
         def verbs(self, system: str) -> Mapping[str, Any]:
             real = super().verbs(system)
-            return {name: _canned(system, name, fn, answer) for name, fn in real.items()}
+            return {name: _canned(system, name, fn) for name, fn in real.items()}
 
     return CannedBodies
 
 
-def _canned(system: str, verb: str, fn: Any, answer: Callable[..., Any]) -> Any:
+def _canned(system: str, verb: str, fn: Any) -> Any:
     @functools.wraps(fn)
     def call(ctx: Any, /, **params: Any) -> Any:
-        return answer(system, verb, params)
+        return _answer(system, verb, params)
 
     return call
 
@@ -299,9 +299,6 @@ class Recording:
                 "clock_readings": [t.isoformat() for t in readings]}
 
 
-_DISPATCHED_LEAD = re.compile(r"\n## Dispatch\n```yaml\n(?:.*\n)*?lead_id: (\S+)\n")
-
-
 class RoleModel:
     """Record requests and replay turns independently for each gather lead."""
 
@@ -316,7 +313,7 @@ class RoleModel:
                          **{lead: ReplayFn(list(script)) for lead, script in (by_lead or {}).items()}}
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
-        from defender.tests.e2e._replay_harness import messages_text
+        from defender.tests.e2e._replay_harness import _DISPATCHED_LEAD, messages_text
 
         found = (_DISPATCHED_LEAD.search(messages_text(messages[:1]))
                  if self.role == "gather" else None)
@@ -346,14 +343,14 @@ def recording_review_stages(recording: Recording) -> Any:
 class SteppingClock:
     """Advance a fixed step per read and retain every reading."""
 
-    def __init__(self, start: dt.datetime, step: dt.timedelta = dt.timedelta(seconds=1)) -> None:
-        self._now, self._step = start, step
+    def __init__(self, start: dt.datetime) -> None:
+        self._now = start
         self.readings: list[dt.datetime] = []
 
     def __call__(self) -> dt.datetime:
         now = self._now
         self.readings.append(now)
-        self._now = now + self._step
+        self._now = now + dt.timedelta(seconds=1)
         return now
 
 
@@ -449,10 +446,6 @@ def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
         recording.refusal = str(refused.code)
 
 
-_ENV_KEYS = ("DEFENDER_DATA_ROOT", "DEFENDER_EPISODES_BASE", "DEFENDER_LEARNING_STATE_DIR",
-             "DEFENDER_RUN_VISUALIZATIONS_DIR", "DEFENDER_ALLOW_UNSANDBOXED")
-
-
 def _source_run(tenant_id: str, run_id: str) -> Any:
     """The natural run, opened by id through its tenant's runs repository (as the launcher and the arm open a source)."""
     from defender.tenancy import _tenant
@@ -463,8 +456,8 @@ def _source_run(tenant_id: str, run_id: str) -> Any:
     return tenant, tenant.runs_repository().open(RunId.parse(run_id))
 
 
-def branch_message_id(source: Any, *, tool: str = "gather") -> int:
-    """Find the tool-calling MAIN response for the requested branch tool."""
+def branch_message_id(source: Any) -> int:
+    """Find the MAIN response that calls `gather`: the branch point."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     from defender.investigation import branch
@@ -479,8 +472,8 @@ def branch_message_id(source: Any, *, tool: str = "gather") -> int:
     assert len(ids) == len(messages), "the main path and its messages are not aligned"
     hits = [row for row, msg in zip(ids, messages, strict=True)
             if isinstance(msg, ModelResponse)
-            and any(isinstance(p, ToolCallPart) and p.tool_name == tool for p in msg.parts)]
-    assert len(hits) == 1, f"expected one main response calling {tool!r}, found {hits}"
+            and any(isinstance(p, ToolCallPart) and p.tool_name == "gather" for p in msg.parts)]
+    assert len(hits) == 1, f"expected one main response calling 'gather', found {hits}"
     return hits[0]
 
 
@@ -546,7 +539,7 @@ def plant_alert(path: Path) -> Path:
     return path
 
 
-def record_pair(*, tenant_id: str, alert: Path, arm: bool = True) -> dict[str, Any]:
+def record_pair(*, tenant_id: str, alert: Path) -> dict[str, Any]:
     """Record a natural run, its replicate sibling, and its control arm through run.main."""
     natural = Recording("natural")
     run_main([str(alert), "--tenant", tenant_id, "--no-learn"], natural,
@@ -555,8 +548,6 @@ def record_pair(*, tenant_id: str, alert: Path, arm: bool = True) -> dict[str, A
     out: dict[str, Any] = {"natural": natural.as_json(), "arm": None, "sibling": None,
                            "episode_id": None, "branch_message_id": None,
                            "composition_error": None}
-    if not arm:
-        return out
     try:
         episode_id, k, world_ids = compose_control_episode(tenant_id, natural)
     except Exception as failed:  # noqa: BLE001 — reported, so the test names the composition step
@@ -617,14 +608,13 @@ def start_window(recording: Mapping[str, Any]) -> ClockWindow | None:
     return _window_from(_readings(recording), 0)
 
 
-def branch_window(natural: Mapping[str, Any], branch_turn: int = BRANCH_TURN,
-                  ) -> ClockWindow | None:
+def branch_window(natural: Mapping[str, Any]) -> ClockWindow | None:
     """Start the arm clock window at the natural run's last reading before the branch response."""
     readings = _readings(natural)
     mains = [r for r in natural["requests"] if r["role"] == "main"]
-    if not readings or len(mains) <= branch_turn:
+    if not readings or len(mains) <= BRANCH_TURN:
         return None
-    return _window_from(readings, int(mains[branch_turn].get("clock_reads", 0)) - 1)
+    return _window_from(readings, int(mains[BRANCH_TURN].get("clock_reads", 0)) - 1)
 
 
 DURATION_KEYS = ("duration_ms", "duration_api_ms")
@@ -934,11 +924,11 @@ def corpus_differences(first: Mapping[str, Any], second: Mapping[str, Any],
 
 
 def compare(natural: Mapping[str, Any], arm: Mapping[str, Any], *,
-            branch_turn: int = BRANCH_TURN, fork_turn: int | None = None) -> list[Difference]:
+            fork_turn: int | None = None) -> list[Difference]:
     """Compare an arm with its natural continuation using only permitted O4 normalization."""
-    window = branch_window(natural, branch_turn)
+    window = branch_window(natural)
     sides = ("natural", "arm")
-    return [*_compare_streams(streams(after_fork(natural, branch_turn)),
+    return [*_compare_streams(streams(after_fork(natural, BRANCH_TURN)),
                               streams(list(arm["requests"])), "after the fork",
                               sides, (window, window), (None, fork_turn)),
             *corpus_differences(natural, arm, sides),
@@ -1125,7 +1115,6 @@ def _child_env(config: Mapping[str, Any]) -> dict[str, str]:
     env.update({
         "PYTHONPATH": str(config["checkout_root"]),
         "DEFENDER_DATA_ROOT": str(config["data_root"]),
-        "DEFENDER_EPISODES_BASE": str(config["episodes_root"]),
         "DEFENDER_LEARNING_STATE_DIR": str(config["learning_root"]),
         "DEFENDER_RUN_VISUALIZATIONS_DIR": str(config["pages_root"]),
         "DEFENDER_ALLOW_UNSANDBOXED": "1",
@@ -1135,18 +1124,18 @@ def _child_env(config: Mapping[str, Any]) -> dict[str, str]:
     return env
 
 
-def start_layout(tmp: Path, *, label: str, tenant: str, arm: bool = True) -> subprocess.Popen:
+def start_layout(tmp: Path, *, label: str, tenant: str) -> subprocess.Popen:
     """Copy a host layout and launch its recording child process."""
     base = tmp / label
     checkout = copy_checkout(base / f"ck-{label}")
     config = {
-        "label": label, "tenant": tenant, "arm": arm,
+        "label": label, "tenant": tenant,
         "checkout_root": str(checkout.parent), "data_root": str(base / f"data-{label}"),
-        "episodes_root": str(base / "episodes"), "learning_root": str(base / "learning"),
+        "learning_root": str(base / "learning"),
         "pages_root": str(base / "pages"), "out": str(base / "recording.json"),
         "alert": str(base / "input" / "alert.json"),
     }
-    for key in ("data_root", "episodes_root", "learning_root", "pages_root"):
+    for key in ("data_root", "learning_root", "pages_root"):
         Path(config[key]).mkdir(parents=True, exist_ok=True)
     (base / "config.json").write_text(json.dumps(config), encoding="utf-8")
     log = (base / "child.log").open("w", encoding="utf-8")
@@ -1155,12 +1144,11 @@ def start_layout(tmp: Path, *, label: str, tenant: str, arm: bool = True) -> sub
         cwd=str(base), env=_child_env(config), stdout=log, stderr=subprocess.STDOUT)
 
 
-def finish_layout(proc: subprocess.Popen, tmp: Path, label: str,
-                  timeout: float = 600) -> dict[str, Any]:
+def finish_layout(proc: subprocess.Popen, tmp: Path, label: str) -> dict[str, Any]:
     """Read the child recording, or report its exit status and log tail."""
     base = tmp / label
     try:
-        code = proc.wait(timeout=timeout)
+        code = proc.wait(timeout=600)
     except subprocess.TimeoutExpired:
         proc.kill()
         code = "timeout"
@@ -1180,8 +1168,7 @@ def _child(config_path: str) -> int:
     config = json.loads(Path(config_path).read_text(encoding="utf-8"))
     _log.configure(fmt="text", level="WARNING")
     set_up_tenant(Path(config["data_root"]), config["tenant"])
-    pair = record_pair(tenant_id=config["tenant"], alert=plant_alert(Path(config["alert"])),
-                       arm=bool(config["arm"]))
+    pair = record_pair(tenant_id=config["tenant"], alert=plant_alert(Path(config["alert"])))
     pair["meta"] = {
         "label": config["label"], "tenant": config["tenant"],
         "data_root": config["data_root"],

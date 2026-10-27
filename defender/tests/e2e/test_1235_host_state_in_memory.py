@@ -21,6 +21,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     ReplayFn,
     Turn,
     VerbRecorder,
+    dispatching_main,
     drive,
     materialize,
 )
@@ -29,7 +30,6 @@ from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 FLAG = "DEFENDER_BUDGET_ENFORCE"
-LEAD = "l-001"
 BUDGET_FILE = "budget.json"
 BREAKER_FILE = "circuit_breaker.json"
 
@@ -117,18 +117,16 @@ def test_the_call_cap_refuses_at_the_cap(tmp_path, enforced):
 
 @pytest.mark.parametrize("plant", ["overwrite", "delete"])
 def test_a_reset_budget_file_does_not_reopen_the_cap(tmp_path, enforced, plant):
-    run_dir_holder: list[Path] = []
+    run_dir = materialize(tmp_path / plant, GOLDEN, run_id='b1235-reset')
 
     def reset() -> None:
-        target = run_dir_holder[0] / BUDGET_FILE
+        target = run_dir / BUDGET_FILE
         if plant == "overwrite":
-            _write(target, _zeroed_budget(run_dir_holder[0].name))
+            _write(target, _zeroed_budget(run_dir.name))
         else:
             target.unlink(missing_ok=True)
 
     main = PlantingReplay(list(_FOUR_BASH), at=2, plant=reset)
-    run_dir = materialize(tmp_path / plant, GOLDEN, run_id='b1235-reset')
-    run_dir_holder.append(run_dir)
     state = drive(run_dir, run_id="b1235-reset", main=main, limits=_CAP_TWO)["run_state"]
 
     assert main.planted, "the plant never ran — this arm measured nothing"
@@ -145,17 +143,15 @@ def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced)
     """The control: the same script under a zero timeout is refused on every call."""
     roomy = {**DEFAULT_LIMITS, "max_tool_calls": 100, "wall_clock_timeout": 3600,
              "grace_seconds": 600}
-    holder: list[Path] = []
+    run_dir = materialize(tmp_path / "ancient", GOLDEN, run_id='b1235-clock')
 
     def ancient() -> None:
-        _write(holder[0] / BUDGET_FILE, json.dumps({
-            "run_id": holder[0].name, "tool_calls": 0, "subagent_spawns": 0,
+        _write(run_dir / BUDGET_FILE, json.dumps({
+            "run_id": run_dir.name, "tool_calls": 0, "subagent_spawns": 0,
             "created_at": "2000-01-01T00:00:00+00:00",
             "started_at": "2000-01-01T00:00:00+00:00"}))
 
     main = PlantingReplay(list(_FOUR_BASH), at=0, plant=ancient)
-    run_dir = materialize(tmp_path / "ancient", GOLDEN, run_id='b1235-clock')
-    holder.append(run_dir)
     summary = drive(run_dir, run_id="b1235-clock", main=main, limits=roomy)
 
     assert main.planted
@@ -170,12 +166,10 @@ def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced)
     assert _refusals(spent) == 4, "the wall-clock limb never refuses, so the arm above is vacuous"
 
 
-def _registry(rec: VerbRecorder, *, cmdb_fails: bool) -> FakeVerbs:
+def _registry(rec: VerbRecorder) -> FakeVerbs:
     def probe(ctx, *, native_query: str = "FROM logs") -> list[dict]:
         rec.record("probe", ctx, {"native_query": native_query})
-        if cmdb_fails:
-            raise TransportFault("cmdb unreachable")
-        return [{"host": "web-01", "query": native_query}]
+        raise TransportFault("cmdb unreachable")
 
     return FakeVerbs({"cmdb": {"probe": probe}})
 
@@ -184,18 +178,10 @@ def _cmdb(n: int) -> Turn:
     return q("cmdb", "probe", {"native_query": f"FROM hosts-{n}"})
 
 
-def _drive_gather(root: Path, gather: ReplayFn, *, verbs, run_id: str) -> dict:
+def _drive_gather(run_dir: Path, gather: ReplayFn, *, verbs) -> dict:
     """Drive one cmdb lead; returns the run's breaker snapshot, read off the run's state."""
-    run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
-    main = ReplayFn([
-        Turn(tool_calls=[("gather", {
-            "lead_id": LEAD, "system": "cmdb", "goal": "measure this lead",
-            "what_to_summarize": ["host inventory"],
-        })]),
-        Turn(text="Investigation complete."),
-    ])
-    return drive(run_dir, run_id=run_id, main=main, gather=gather,
-                 verbs=verbs)["run_state"].breaker_snapshot()
+    return drive(run_dir, run_id=run_dir.name, main=dispatching_main("cmdb", "host inventory"),
+                 gather=gather, verbs=verbs)["run_state"].breaker_snapshot()
 
 
 def _down(gather: ReplayFn) -> bool:
@@ -207,8 +193,8 @@ def test_a_system_tripped_by_two_infra_failures_answers_down(tmp_path):
     """Positive control for the breaker arms below."""
     rec = VerbRecorder()
     gather = ReplayFn([_cmdb(1), _cmdb(2), _cmdb(3), DONE])
-    state = _drive_gather(tmp_path / "control", gather,
-                          verbs=_registry(rec, cmdb_fails=True), run_id="k1235-control")
+    state = _drive_gather(materialize(tmp_path / "control", GOLDEN_AB3, run_id="k1235-control"),
+                          gather, verbs=_registry(rec))
 
     assert len(rec.calls) == 2, "the tripped system was asked again"
     assert _down(gather)
@@ -219,10 +205,10 @@ def test_a_system_tripped_by_two_infra_failures_answers_down(tmp_path):
 
 @pytest.mark.parametrize("plant", ["blank", "delete"])
 def test_a_reset_breaker_file_does_not_untrip_a_system(tmp_path, plant):
-    holder: list[Path] = []
+    run_dir = materialize(tmp_path / plant, GOLDEN_AB3, run_id='k1235-reset')
 
     def reset() -> None:
-        target = holder[0] / BREAKER_FILE
+        target = run_dir / BREAKER_FILE
         if plant == "blank":
             _write(target, json.dumps({"systems": {}, "total_failures": 0}))
         else:
@@ -230,17 +216,7 @@ def test_a_reset_breaker_file_does_not_untrip_a_system(tmp_path, plant):
 
     rec = VerbRecorder()
     gather = PlantingReplay([_cmdb(1), _cmdb(2), _cmdb(3), DONE], at=2, plant=reset)
-    run_dir = materialize(tmp_path / plant, GOLDEN_AB3, run_id='k1235-reset')
-    holder.append(run_dir)
-    main = ReplayFn([
-        Turn(tool_calls=[("gather", {
-            "lead_id": LEAD, "system": "cmdb", "goal": "measure this lead",
-            "what_to_summarize": ["host inventory"],
-        })]),
-        Turn(text="Investigation complete."),
-    ])
-    state = drive(run_dir, run_id="k1235-reset", main=main, gather=gather,
-                  verbs=_registry(rec, cmdb_fails=True))["run_state"].breaker_snapshot()
+    state = _drive_gather(run_dir, gather, verbs=_registry(rec))
 
     assert gather.planted, "the plant never ran — this arm measured nothing"
     assert len(rec.calls) == 2, f"circuit_breaker.json ({plant}) untripped cmdb: the verb ran again"

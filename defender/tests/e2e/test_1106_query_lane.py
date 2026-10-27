@@ -115,7 +115,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     told_main = "\n".join(main.seen)
     about_cmdb = [ln for ln in told_main.splitlines() if "cmdb" in ln][:20]
     assert "config file not found" in told_main, (
-        f"MAIN was never told why cmdb is down (#1256 O-3/O-4); its cmdb lines: {about_cmdb}")
+        f"MAIN was never told why cmdb is down; its cmdb lines: {about_cmdb}")
     assert "settings/systems/cmdb/config.env" in told_main, (
         f"the reason MAIN was given does not name the settings file: {about_cmdb}")
     assert rec.calls == [], f"the down system's verb ran: {rec.calls}"

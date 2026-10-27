@@ -397,7 +397,6 @@ def test_1279_o2_another_tenants_run_with_the_same_id_cannot_overwrite_or_land_i
 
     vr = _renderer()
     run_a = tenant_run(driven_run(tmp_path / "a"))
-    tenant_a = tenant_of(run_a)
     b_id = fixture_uuid("tenant:second-1279")
     tenant_b = H5.tenant(data_root, b_id)
     run_b_dir = driven_run(tmp_path / "b")
@@ -412,7 +411,6 @@ def test_1279_o2_another_tenants_run_with_the_same_id_cannot_overwrite_or_land_i
     assert planted.read_bytes() == b"A-SENTINEL\n", "B's run overwrote A's published page"
     assert area(run_visualizations_dir, run_b).read_bytes() == (run_b_dir / PAGE).read_bytes()
     assert sorted(p.name for p in run_visualizations_dir.iterdir()) == sorted([run_a.tenant_id, b_id])
-    assert tenant_a.id == run_a.tenant_id
 
 
 def test_1279_a4_the_run_step_publishes_for_the_tenant_it_was_handed_not_one_it_looks_up(

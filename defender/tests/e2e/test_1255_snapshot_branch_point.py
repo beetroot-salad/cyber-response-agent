@@ -42,9 +42,7 @@ def _returns(request: list) -> list[str]:
 
 def _arm_launched(arm: S.Driven) -> None:
     refused = S.refused_at_launch(arm)
-    assert refused is None, (
-        f"the arm was refused at launch ({refused}) — a MAIN response that called tools is "
-        "exactly D1's branch point, and resuming it is U2's executed behaviour")
+    assert refused is None, f"the arm was refused at launch: {refused}"
 
 
 def test_d1_p4_an_arm_resumes_a_tool_calling_response_with_no_user_message(tmp_path):
@@ -60,19 +58,18 @@ def test_d1_p4_an_arm_resumes_a_tool_calling_response_with_no_user_message(tmp_p
     natural = source.main.requests[2]   # the request the source sent right after R2's calls ran
     tail = first[-1]
     assert isinstance(tail, ModelRequest), f"the arm's first request ends on {type(tail).__name__}"
-    assert tail.parts, (f"the arm's first request ends on a message carrying {[type(p).__name__ for p in tail.parts]}"
-        " — a natural run's request after a tool-calling turn carries only that turn's answers")
-    assert all(isinstance(p, ToolReturnPart | RetryPromptPart) for p in tail.parts), (f"the arm's first request ends on a message carrying {[type(p).__name__ for p in tail.parts]}"
-        " — a natural run's request after a tool-calling turn carries only that turn's answers")
+    assert tail.parts, "the arm's first request ends on an empty message"
+    assert all(isinstance(p, ToolReturnPart | RetryPromptPart) for p in tail.parts), (
+        f"the arm's first request ends on {[type(p).__name__ for p in tail.parts]}, not tool answers")
     assert {p.tool_call_id for p in tail.parts} == {
         c.tool_call_id for c in S.calls_of(S.message_at(source.store, r2))}, (
-        "the arm answered calls other than the ones R2 left dangling")
-    assert "one" in messages_text([tail]), "R2's `echo one` did not run in the arm"
+        "the arm answered calls other than the ones the branch response left dangling")
+    assert "one" in messages_text([tail]), "the branch response's `echo one` did not run in the arm"
 
     assert S.user_prompts(natural), "the source's request carries no opening at all"
     assert S.user_prompts(first) == S.user_prompts(natural), (
         f"the arm's request carries {len(S.user_prompts(first))} user message(s), the natural "
-        f"continuation {len(S.user_prompts(natural))} — the instrument added an opening")
+        f"continuation {len(S.user_prompts(natural))}")
     text, natural_text = messages_text(first), messages_text(natural)
     for marker in ("run_dir:", "alert:"):
         assert text.count(marker) == natural_text.count(marker), (
@@ -94,7 +91,7 @@ def test_d1_p4_an_arm_resumes_a_tool_calling_response_with_no_user_message(tmp_p
     child = children[0]
     assert ss.branch_point(source.store, child) == r2
     child_path = ss.path_row_ids(source.store, child)
-    assert child_path[: len(prefix)] == prefix, "the child's path does not open on the prefix through R2"
+    assert child_path[: len(prefix)] == prefix, "the child's path does not open on the source's path through the branch point"
     owned = message_ids(source.store, child)
     assert owned == child_path[len(prefix):], "the child owns rows that are not past the branch point"
     assert owned, "the arm appended nothing, so 'appended nothing twice' would be vacuous"
@@ -106,7 +103,7 @@ def test_d1_p4_an_arm_resumes_a_tool_calling_response_with_no_user_message(tmp_p
     dangling = {c.tool_call_id for c in S.calls_of(rows[r2])}
     repeats = [rid for rid in owned if isinstance(rows[rid], ModelResponse)
                and {c.tool_call_id for c in S.calls_of(rows[rid])} & dangling]
-    assert repeats == [], f"R2's calls were stored again under the child: rows {repeats}"
+    assert repeats == [], f"the branch response's calls were stored again under the child: rows {repeats}"
 
 
 def test_d1_the_branch_responses_own_writes_are_rerun_once_not_inherited(tmp_path):
@@ -118,14 +115,11 @@ def test_d1_the_branch_responses_own_writes_are_rerun_once_not_inherited(tmp_pat
     arm = S.drive_arm(tmp_path, S.spec_for(source, r3), S.Recorder([S.done()]))
     _arm_launched(arm)
 
-    assert arm.document == final, (
-        "the arm's document after re-running R3's append is not the source's document after "
-        "the same append")
+    assert arm.document == final, "the arm's re-run append left a different document"
     answer = _returns(arm.main.requests[0])
     natural = _returns(source.main.requests[3])
-    assert natural, "the source's request after R3 carries no tool answer"
-    assert answer == natural, (
-        "the arm's answer to R3's append is not the one the source received")
+    assert natural, "the source's request after the branch response carries no tool answer"
+    assert answer == natural, "the arm's answer to the re-run append is not the source's"
 
 
 SOURCE_WORLD = [hit(ts="2026-05-25T15:20:00.000Z", message="SOURCE-WORLD login")]
@@ -202,7 +196,7 @@ def test_d1_only_a_tool_calling_main_response_is_a_branch_point(tmp_path, point)
         _arm_launched(arm)
         assert len(S.child_sessions(source.store)) == 1
         return
-    assert not S.launched(arm), f"the arm launched at a {point}, which is not a D1 branch point"
+    assert not S.launched(arm), f"the arm launched at a {point}, which is not a branch point"
     assert arm.summary.get("exit_reason") == "BranchError", arm.summary
     assert S.child_sessions(source.store) == [], "a refused branch still forked a child session"
 
@@ -254,8 +248,7 @@ def test_d2_a_branch_point_inside_a_retry_streak_is_refused_at_launch(tmp_path, 
     for between in responses[2:index]:
         reply = rows[_row_after(source, between)]
         assert not any(isinstance(p, RetryPromptPart) for p in reply.parts), (
-            "a call between the refusal and the branch point was refused too — the scenario "
-            "is no longer the one it names")
+            "fixture: a call between the refusal and the branch point was refused too")
 
     caplog.set_level(logging.INFO)
     arm = S.drive_arm(tmp_path, S.spec_for(source, responses[index]), S.Recorder([S.done()]))

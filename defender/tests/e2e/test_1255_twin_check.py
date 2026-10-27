@@ -53,12 +53,11 @@ def _arm_reached_the_model(pair: dict[str, Any], layout: str, which: str = "arm"
     assert arm is not None, f"layout {layout}: no {ARMS[which]} was launched"
     main = [r for r in arm["requests"] if r["role"] == "main"]
     assert main, (
-        f"layout {layout}: the {ARMS[which]} never reached its first model request — run.main "
-        f"exit {arm['exit_code']!r}, refusal {arm['refusal']!r}, driver summary "
-        f"truncated_by={arm['summary'].get('truncated_by')!r} "
-        f"exit_reason={arm['summary'].get('exit_reason')!r}. D1: the branch point is a main "
-        f"response that called tools (message {pair['branch_message_id']}); the arm resumes "
-        "with no user message and the framework runs those calls against its world")
+        f"layout {layout}: the {ARMS[which]} never reached its first model request: run.main "
+        f"exit {arm['exit_code']!r}, refusal {arm['refusal']!r}, "
+        f"truncated_by={arm['summary'].get('truncated_by')!r}, "
+        f"exit_reason={arm['summary'].get('exit_reason')!r}, "
+        f"branch message {pair['branch_message_id']}")
     return arm
 
 
@@ -73,8 +72,7 @@ def test_1255_twin_records_every_role_and_read_scope(twin, layout):
     assert natural["exit_code"] == 0, (natural["exit_code"], natural["refusal"])
     assert natural["summary"].get("truncated_by") is None, natural["summary"]
     assert natural["summary"].get("closed_before_cut") is True, (
-        "the natural run never closed — the review stages, the report and the review record "
-        f"would be absent from every comparison: {natural['summary']}")
+        f"the natural run never closed: {natural['summary']}")
     counts = {key: len(reqs) for key, reqs in W.streams(natural["requests"]).items()}
     assert counts.get(("main", None)) == len(W.main_script()), counts
     assert counts.get(("gather", W.LEAD)) == 2, counts

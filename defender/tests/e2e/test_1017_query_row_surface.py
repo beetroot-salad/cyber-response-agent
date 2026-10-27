@@ -104,9 +104,8 @@ def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp
 
 @pytest.fixture
 def judge_roots(tmp_path, monkeypatch):
-    """The runs base, episodes root and learning-state dir, inside `tmp_path` as the judge suite sets them."""
+    """The runs base and learning-state dir, inside `tmp_path` as the judge suite sets them."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -184,7 +183,7 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
     elsewhere = tmp_path / "elsewhere" / "executed_queries.jsonl"
     append_jsonl(elsewhere, target_rows)
 
-    ep, base, world = _judge_world(tmp_path / "linked", [])
+    ep, _base, world = _judge_world(tmp_path / "linked", [])
     table = world / "executed_queries.jsonl"
     table.unlink()
     os.symlink(elsewhere, table)
@@ -201,7 +200,7 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
         assert "LINKED_PARAMS" not in prompt, "the judge followed a link at the table's name"
         assert "LINKED_DIGEST" not in prompt
 
-    ep0, base0, world0 = _judge_world(tmp_path / "tableless", [])
+    ep0, _base0, world0 = _judge_world(tmp_path / "tableless", [])
     (world0 / "executed_queries.jsonl").unlink()
     # A missing table is a missing required input: ungradable, named, and never judged.
     judge0 = J.scripted_judge()

@@ -53,10 +53,6 @@ def _repository_run() -> tuple[str, Path]:
     return tenant, run_dir
 
 
-def _run_page_argv(tenant: str, run_dir: Path) -> list[str]:
-    return ["visualize_run.py", "--tenant", tenant, run_dir.name]
-
-
 def _renderer():
     from defender.presentation import visualize_run
 
@@ -208,7 +204,7 @@ def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_
     page = vr.render_page(_run_handle_1165(run_dir))
     assert MARKER in page, "render_page did not generate this run's page"
     assert sorted(p.name for p in run_dir.iterdir()) == listing, (
-        "render_page wrote into the run dir — generation must write nothing (M1)")
+        "render_page wrote into the run dir")
 
     run_common.visualize(run, tenant=tenant_of(run))
 
@@ -433,7 +429,7 @@ def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedP
     """`python visualize_run.py --tenant T <run_id>` over a `_repository_run`, as a child process."""
     script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
     return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, tenant, run id
-        [sys.executable, str(script), *_run_page_argv(tenant, run_dir)[1:]],
+        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
         capture_output=True, text=True, encoding="utf-8", check=False,
         env={**os.environ, **env})
 
