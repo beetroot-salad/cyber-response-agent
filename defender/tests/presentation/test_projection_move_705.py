@@ -41,7 +41,7 @@ SALT = "0011223344556677"
 
 
 def _visualize(run_dir: Path) -> None:
-    """`run_common.visualize` over the fixture run, with its accepted `Tenant` (#1279 A4)."""
+    """`run_common.visualize` over the fixture run, with its accepted `Tenant`."""
     from defender import run_common
 
     run = _view_run_1165(run_dir)
@@ -91,12 +91,10 @@ def _log_derived_reference(run_dir: Path) -> dict:
     return {"usage": totals, "total_cost_usd": round(cost, 6), "num_turns": len(records)}
 
 
-# the negative and its positive control
-
-# consumed-field equivalence, one demand per frozen reader
+# consumed-field equivalence, one test per frozen reader
 
 def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_path):
-    """The store-derived projection emits `input_tokens` NET of cache reads and writes,"""
+    """The store-derived projection keeps `input_tokens` NET of cache reads and writes, so the cost is unchanged."""
     run_dir, _store, _replay = _driven_run(tmp_path, run_id="usage")
     expected = _log_derived_reference(run_dir)
 
@@ -113,7 +111,7 @@ def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_pat
 
 
 def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
-    """`load_turns_from_trace` parses the moved projection into the same scripted `Turn`s"""
+    """`load_turns_from_trace` parses the moved projection into the scripted `Turn`s, tool inputs intact."""
     run_dir, _store, replay = _driven_run(tmp_path, run_id="harness-turns")
     turns = load_turns_from_trace(run_dir / "tool_trace.jsonl")
 
@@ -128,7 +126,7 @@ def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
 
 
 def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
-    """`runtime.html`'s data layers render from the store-derived event stream with the same"""
+    """`runtime.html` renders from the store-derived events; `message.id` takes the re-minted `{session_id}/…` form."""
     from defender.presentation import visualize_run
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
@@ -155,7 +153,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
 
 
 def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second_write(tmp_path):
-    """`tool_trace.jsonl` is written at most once per `run_id`: a second write under the"""
+    """A second `write_trace` under one `run_id` fails loud or keeps every event of the first."""
     observe_mod = __import__("defender.investigation.observe", fromlist=["write_trace"])
     run_dir, store, _replay = _driven_run(tmp_path, run_id="trace-once")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -174,7 +172,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
         "the second write silently dropped events from the first")
 
 
-# gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
+# runtime.html's two render drivers and the store they read
 
 def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     """`(T, run_dir)` with the driven run moved to where the run page's repository opens it."""
@@ -183,7 +181,7 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
     runs.mkdir(exist_ok=True)
-    # #1235 F2: the run -> case link is a sidecar beside the run folder, so the move carries it.
+    # The run -> case link is a sidecar beside the run folder, so the move carries it.
     from defender.records import RunPaths
     moved = runs / run_dir.name
     shutil.move(RunPaths(run_dir).session_pointer(), RunPaths(moved).session_pointer())
@@ -191,7 +189,8 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
 
 
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path, capsys):
-    """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two"""
+    """The standalone re-render and the post-run step, in turn over one run: the second never leaves
+    an emptier page than the first."""
     from defender.presentation import visualize_run
 
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
@@ -237,12 +236,12 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
 
 @pytest.mark.parametrize("breakage", ["missing-pointer", "stale-store-path"])
 def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage):
-    """A visualizer that cannot resolve the store FAILS CLOSED: the standalone re-render"""
+    """A visualizer that cannot resolve the store FAILS CLOSED: the re-render exits non-zero and the
+    post-run step raises `VisualizeFailed`."""
     from defender import run_common
 
-    # #1187 declared change 1: the run id is a uuid, so the re-render's `--tenant T <run_id>`
-    # cannot be refused for the id's shape — that refusal is non-zero too, and would pass the
-    # negative below for the wrong reason (#1187 sweep: pass-by-accident).
+    # A uuid run id, so the re-render's argv is never refused for the id's shape: that refusal is
+    # non-zero too, and would pass the negative below for the wrong reason.
     run_dir, store, _replay = _driven_run(tmp_path, run_id=fixture_uuid(f"failclosed-{breakage}"))
     tenant, run_dir = _into_tenant_runs(run_dir)
     from defender.presentation import visualize_run
@@ -273,8 +272,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
             Path(str(body["store_path"]) + suffix).unlink(missing_ok=True)
         store.close()
 
-    # the standalone re-render really exits non-zero — the real script, the real argv
-    # (`--tenant T <run_id>`, #1105 PR 2 declared change 7), the real broken input
+    # the standalone re-render really exits non-zero: the real script, argv and broken input
     script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
     child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
         [sys.executable, str(script), "--tenant", tenant, run_dir.name],
@@ -294,10 +292,10 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         "a failed render must not leave a page behind that a reader would trust")
 
 
-# gl1 — the render path's escaping of model-authored payload text
+# the render path's escaping of model-authored payload text
 
 def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
-    """Model-authored payload text that is HTML/script-shaped cannot break out of its"""
+    """HTML/script-shaped model-authored payload text renders only escaped: no live `<script>`, no `onerror`."""
     payload = crafted_html_payload()
     run_dir = materialize(tmp_path, GOLDEN, run_id='escaping')
     inv = (GOLDEN / "investigation.md").read_text()
@@ -333,7 +331,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
 
 @pytest.mark.parametrize("spelling", ["onerror", "ONERROR", "OnError", "oNeRrOr"])
 def test_the_event_handler_split_covers_every_casing_and_preserves_the_original(spelling):
-    """#883 F-35 — HTML attribute names are case-insensitive, so `ONERROR=` IS the"""
+    """Attribute names are case-insensitive: every casing of `onerror=` is split, keeping the author's casing (#883)."""
     from defender.presentation.visualize_primitives import esc_untrusted
 
     zwsp = "​"

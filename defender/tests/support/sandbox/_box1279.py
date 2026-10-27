@@ -1,9 +1,6 @@
-"""#1279 box-start helpers — NOT a test module. Layouts for the run lane and the request lane,
-the publish-root environment, and readers of what a started box actually mounted.
-
-The refusal class is `box.BoxStartConflict`, a `BoxFault` subtype (the name this contract chose;
-the design leaves it to the implementer). It is reached at call time, so a missing symbol is a
-red at the test, not a collection error."""
+"""#1279 box-start helpers: run-lane and request-lane layouts, the publish-root environment, and
+readers of what a started box actually mounted. The refusal class is `box.BoxStartConflict`, a
+`BoxFault` subtype."""
 from __future__ import annotations
 
 import re
@@ -53,8 +50,8 @@ def allow_unsandboxed(monkeypatch: Any) -> None:
 
 
 def dev_unset_root(monkeypatch: Any) -> None:
-    """A dev deployment whose publish folder is UNSET (the conftest sets it for every test): the
-    root owner answers "unset" (A9, A11); the opt-out unset."""
+    """A dev deployment whose publish folder is UNSET (the conftest sets it for every test), so
+    the root owner answers "unset"; the opt-out unset."""
     monkeypatch.setenv(DEPLOYMENT_ENV, "dev")
     monkeypatch.delenv(PUBLISH_ROOT_ENV, raising=False)
     monkeypatch.delenv(ALLOW_ENV, raising=False)
@@ -89,7 +86,7 @@ def fake_main_and_worktree(base: Path) -> tuple[Path, Path]:
 @dataclass(frozen=True)
 class RunLane:
     """A run on `base`: `base/runs/<run>` (rw), the run copy's `base/stage/agent` (the tenant
-    half, ro) and its `base/stage/` with the startup token beside `agent/` (ro, #1108 P4 U9), the
+    half, ro) and its `base/stage/` with the startup token beside `agent/` (ro), the
     product code (ro) and the run clock's directory `base/clocks/<run>` (ro)."""
 
     base: Path

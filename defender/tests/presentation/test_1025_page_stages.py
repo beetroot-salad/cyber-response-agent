@@ -27,8 +27,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time
-    (it does not exist at the spec's base — one failure per test, never a collection error)."""
+    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
     return E.page_module()
 
 
@@ -82,8 +81,7 @@ def test_1025_the_stage_table_has_one_row_per_step_runs_expanded_per_run_dir_wal
 
 def test_1025_without_timing_json_the_axis_is_model_time_with_a_labelled_lower_bound_and_with_it_the_launchers_wall_per_step(
         tmp_path):
-    """Sample (no `timing.json`): the wall column is empty with a one-line reason naming the absent
-    record, the header reads "≈ 16m00s lower bound on wall: model calls +."""
+    """A partial `timing.json` renders the walls it has and marks the other steps "not on the record"."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     stages = page.text_of("sec-stages")
@@ -108,8 +106,7 @@ def test_1025_without_timing_json_the_axis_is_model_time_with_a_labelled_lower_b
 
 def test_1025_stage_costs_sum_response_row_usage_and_each_runs_result_event_and_a_run_with_no_trace_shows_no_cost_not_zero(
         tmp_path):
-    """Sample questioner cost $1.0500 over 3 traces / 2m00s, judge $1.5000 over 3 traces / 4m00s,
-    worlds $1.0000."""
+    """The render never opens a run's own `llm_requests.jsonl` (a FIFO planted there stays unread)."""
     ep = E.sample_episode(tmp_path)
     fifo = ep.run(E.GRADED_WORLD) / "wire_logs" / "llm_requests.jsonl"
     fifo.parent.mkdir()
@@ -137,8 +134,7 @@ def test_1025_stage_costs_sum_response_row_usage_and_each_runs_result_event_and_
 
 def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_first_with_the_framed_prompt_and_every_response_row(
         tmp_path):
-    """Sample: `tx-questioner_trace`, `tx-questioner_b_trace`, `tx-questioner_c_trace` under the
-    questioner stage; `tx-judge_family_0_trace` first then the two world draws."""
+    """A launcher episode with only `_framed` files still renders each call's prompt and reply."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for stem in ("questioner_trace", "questioner_b_trace", "questioner_c_trace"):
@@ -172,8 +168,8 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
 
 
 def test_1025_what_the_header_wall_covers(tmp_path):
-    """With `timing.json` present the header wall is labelled as the launcher's wall from the first
-    step's `started_at` to the last step's `ended_at` (9m00s) ."""
+    """The header wall is the launcher's first start to last end, labelled as excluding the prime
+    and including the gaps."""
     ep = E.sample_episode(tmp_path, timing=True)
     page = render(ep)
     text = page.one("header").text() + " " + page.text_of("sec-stages")
@@ -184,8 +180,7 @@ def test_1025_what_the_header_wall_covers(tmp_path):
 
 
 def test_1025_the_runs_row_has_two_clocks(tmp_path):
-    """The `runs` row shows the launcher's RUNS-step wall (1m00s from `timing.json`) labelled as the
-    launcher's."""
+    """The launcher's RUNS-step wall and each run's result-event wall are labelled apart, never summed."""
     page = render(E.sample_episode(tmp_path, timing=True))
     runs = page.text_of("stage-runs")
     assert "1m00s" in runs, runs
@@ -199,8 +194,7 @@ def test_1025_the_runs_row_has_two_clocks(tmp_path):
 
 
 def test_1025_a_trace_with_a_request_row_and_no_response_row(tmp_path):
-    """A trace with a request row and no response row renders the request with "no response
-    recorded"."""
+    """The request renders with "no response recorded"; the call is unpriced, not $0.0000."""
     ep = E.sample_episode(tmp_path)
     E.write_trace(ep.dir, "questioner:d", response=False, prompt="the unanswered prompt")
     page = render(ep)
@@ -214,8 +208,7 @@ def test_1025_a_trace_with_a_request_row_and_no_response_row(tmp_path):
 
 
 def test_1025_trace_present_but_framed_absent(tmp_path):
-    """A judge trace without its `_framed` twin renders its block's request from the plain trace's
-    request row ."""
+    """Without its `_framed` twin, a judge block's request comes from the plain trace, escaped."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "wire_logs" / f"judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_framed_trace.jsonl").unlink()
     E.write_trace(ep.dir, f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:0", prompt="PLAIN-PROMPT <b>x</b>",
@@ -258,8 +251,7 @@ def test_1025_trace_prompt_or_reply_contains_a_literal_pre_or_script_close_tag(t
 
 
 def test_1025_a_trace_whose_last_line_is_torn(tmp_path):
-    """A trace whose last line — the response row — is torn: the tolerant reader drops and counts
-    it, the block shows "1 unreadable rows" and "no response recorded", the call's."""
+    """A torn response row is dropped and counted, and the stage sum turns "partial — 2 of 3 calls priced"."""
     ep = E.sample_episode(tmp_path)
     trace = ep.dir / "wire_logs" / "questioner_c_trace.jsonl"
     lines = trace.read_text(encoding="utf-8").splitlines()
@@ -290,8 +282,7 @@ def test_1025_a_hostile_wire_logs_trace_stem(tmp_path):
 
 
 def test_1025_a_result_event_that_is_forged_or_misplaced(tmp_path):
-    """A result event with a string, `None`, NaN or negative `total_cost_usd` reads "unusable result
-    event" with no dollar figure ."""
+    """A non-numeric or negative `total_cost_usd` reads "unusable result event"; a result row not last is none."""
     ep = E.sample_episode(tmp_path)
     for forged in ("12.5", None, math.nan, -3.0):
         E.write_tool_trace(ep.run(E.GRADED_WORLD), [E.result_event(cost=forged)])
@@ -323,7 +314,7 @@ def test_1025_a_symlinked_tool_trace_in_a_run_dir(tmp_path):
 
 
 def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp_path):
-    """A wire-log `usage` block is box-writable."""
+    """A wire-log `usage` block is box-writable, so a cost that is not finite and non-negative is unpriced."""
     ep = E.sample_episode(tmp_path)
     rows = E.trace_rows("questioner:neg")
     rows[1]["usage"]["input_tokens"] = -50_000_000

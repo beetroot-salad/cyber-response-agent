@@ -49,8 +49,8 @@ def _no_unsandboxed(monkeypatch) -> None:
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
 
 
-#: N1's create WITHOUT `--pull=never`: the CLI's two-line pull-path text. Not a shape the
-#: create path can produce any more (JF5) — exactly why it must NOT select the remedy.
+#: The CLI's two-line pull-path text, printed by a create WITHOUT `--pull=never`. The create path
+#: cannot produce it, so it must NOT select the remedy.
 PULL_PATH_STDERR = (
     "Unable to find image 'defender-box:v1-0123456789ab:latest' locally\n"
     "docker: Error response from daemon: pull access denied for defender-box, repository does "
@@ -124,7 +124,7 @@ def test_a_create_fault_of_any_other_shape_never_names_the_build_command(tmp_pat
     assert remedy_command(str(e.value)) is not None, str(e.value)
 
 
-# ---- #1095 round 2: the other reading of a non-zero inspect --------------------------------------
+# ---- the other reading of a non-zero inspect ----------------------------------------------------
 @pytest.mark.parametrize("lane", ["run-dir", "request"])
 def test_a_daemon_that_stopped_answering_is_reported_as_that_and_never_told_to_build(tmp_path, monkeypatch, lane):
     _no_unsandboxed(monkeypatch)
@@ -228,11 +228,9 @@ def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failu
     ], message
 
 
-# ---- MF2 on the P4 drain (#1108 P4 re-spelling, OD12 class ii): the tenant drain's box --------
-# The drain box is `Batch.box_request()` over a git-free draft, started through
-# `TenantDelivery.start_box`; its `code` mount is the product's defender dir. The legacy row's
-# cut-commit pointer (`origin/main @ <sha>` + a checkout instruction) is gone with the worktree:
-# there is no deleted tree to point back to, so the message must not carry one.
+# ---- the tenant drain's box ----------------------------------------------------------------------
+# `Batch.box_request()` over a git-free draft, started through `TenantDelivery.start_box`; its
+# `code` mount is the product's defender dir. With no worktree there is no cut commit to name.
 @contextlib.contextmanager
 def _tenant_batch(tmp_path: Path, defender_dir: Path) -> Iterator[tuple[Any, Any]]:
     with build_tenant(tmp_path / "tenant") as built:
@@ -255,7 +253,7 @@ def test_the_tenant_drains_missing_image_fault_names_the_build_command_and_no_cu
     defender_dir = plant_tree(tmp_path / "product tree", copy_code=False)
     expected = image_tag(defender_dir)
     with _tenant_batch(tmp_path, defender_dir) as (delivery, batch):
-        # `<T>/drafts`, whichever depth the staged root sits at (#1108 P4 amendment A / U9).
+        # `<T>/drafts`, whichever depth the staged root sits at.
         drafts = next(p for p in batch.draft_root.parents if p.name == "drafts")
         before = _tree(drafts)
 

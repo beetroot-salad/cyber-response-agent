@@ -1,4 +1,4 @@
-"""#1279 A4 — the publisher for an accepted tenant: a layout over the one publish root, refusing outside `dev`."""
+"""#1279 — the publisher for an accepted tenant: a layout over the one publish root, refusing outside `dev`."""
 from __future__ import annotations
 
 import ast
@@ -33,7 +33,7 @@ def tenants(data_root):
 
 def test_1279_a4_targets_sit_in_the_tenants_area_under_the_publish_root(
         dev, tenants, run_visualizations_dir):
-    """A4: a run page is `<root>/<T>/runs/<R>/runtime.html`; a learning page `<root>/<T>/learning/<name>`."""
+    """A run page is `<root>/<T>/runs/<R>/runtime.html`; a learning page `<root>/<T>/learning/<name>`."""
     pub = _publisher().Publisher.for_tenant(tenants[0])
 
     assert pub.run_page(RUN).path == run_visualizations_dir / D9_TENANT_ID / "runs" / RUN / "runtime.html"
@@ -44,7 +44,7 @@ def test_1279_a4_targets_sit_in_the_tenants_area_under_the_publish_root(
 
 def test_1279_a4_two_tenants_get_disjoint_areas_for_the_same_run_id_and_page_name(
         dev, tenants, run_visualizations_dir):
-    """O2: tenant B's run R cannot land in, or overwrite, tenant A's area."""
+    """Tenant B's run R cannot land in, or overwrite, tenant A's area."""
     a, b = (_publisher().Publisher.for_tenant(t) for t in tenants)
 
     for name in ("runs", "learning"):
@@ -62,7 +62,7 @@ def test_1279_a4_two_tenants_get_disjoint_areas_for_the_same_run_id_and_page_nam
 
 @pytest.mark.parametrize("bad", ["../escape", "r1", "", RUN.upper()])
 def test_1279_a4_a_run_page_is_only_for_a_run_id(dev, tenants, bad):
-    """A4: the run page's name is a run id, so nothing path-like leaves the tenant's runs area."""
+    """The run page's name is a run id, so nothing path-like leaves the tenant's runs area."""
     from defender.records import RunRefused
 
     pub = _publisher().Publisher.for_tenant(tenants[0])
@@ -73,7 +73,7 @@ def test_1279_a4_a_run_page_is_only_for_a_run_id(dev, tenants, bad):
 
 def test_1279_a4_a_write_makes_the_area_and_replaces_by_a_new_inode_leaving_neighbours(
         dev, tenants, run_visualizations_dir, tmp_path):
-    """A4: stage-then-rename — a hard-linked old page is replaced, not written through; other pages stay."""
+    """Stage-then-rename: a hard-linked old page is replaced, not written through; other pages stay."""
     pub = _publisher().Publisher.for_tenant(tenants[0])
     other = pub.run_page(OTHER_RUN)
     other.write("other run")
@@ -94,7 +94,7 @@ def test_1279_a4_a_write_makes_the_area_and_replaces_by_a_new_inode_leaving_neig
 @pytest.mark.parametrize("deployment", [None, "production", "staging"], ids=["unset", "production", "typo"])
 def test_1279_o4_outside_dev_there_is_no_publisher_and_the_refusal_names_the_deployment(
         tenants, monkeypatch, run_visualizations_dir, deployment):
-    """O4: the publisher refuses to exist without a root; nothing is written."""
+    """The publisher refuses to exist without a root; nothing is written."""
     mod = _publisher()
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
     mod.Publisher.for_tenant(tenants[0])  # positive control: the same tenant has a publisher on dev
@@ -111,7 +111,7 @@ def test_1279_o4_outside_dev_there_is_no_publisher_and_the_refusal_names_the_dep
 
 
 def test_1279_a4_the_publisher_follows_the_root_at_call_time(dev, tenants, monkeypatch, tmp_path):
-    """A4: the override is host configuration read when asked, not frozen at import."""
+    """The override is host configuration read when asked, not frozen at import."""
     mod = _publisher()
     first, second = tmp_path / "first", tmp_path / "second"
     monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(first))
@@ -120,12 +120,9 @@ def test_1279_a4_the_publisher_follows_the_root_at_call_time(dev, tenants, monke
     assert mod.Publisher.for_tenant(tenants[0]).run_page(RUN).path.is_relative_to(second)
 
 
-# A4 census: callers pass the tenant they already accepted; the presentation and the build never
-# accept one again. The only places a call is allowed are an `if __name__ == "__main__":` block and
-# a function named `main` whose first parameter is `argv` (the command line's own entry point, where
-# the one acceptance of the command line's tenant sits). Inner code named `main` that takes anything
-# else (`build.main(tenant)`) is scanned like any other function. Chosen: the `argv`-parameter rule
-# rather than a per-module list, so a new entry point needs no edit here.
+# Census: callers pass the tenant they already accepted; the presentation and the build never
+# accept one again. A call is allowed only in an `if __name__ == "__main__":` block or a `main`
+# whose first parameter is `argv` (a rule, not a module list, so a new entry point needs no edit).
 
 _ACCEPTANCE = frozenset({
     "accept_tenant", "requested_tenant", "requested_tenant_id", "accept_requested_tenant",
@@ -212,7 +209,7 @@ def test_1279_a4_the_census_sees_a_reacceptance_and_spares_an_entry_points_own_a
 
 
 def test_1279_a4_no_presentation_or_frontend_module_accepts_a_tenant_outside_its_entry_point():
-    """A4: the publisher, the root owner, the mirror, the renderers and the build take the `Tenant`
+    """The publisher, the root owner, the mirror, the renderers and the build take the `Tenant`
     their caller accepted. The scanned set is derived from the owners' module objects plus the
     `presentation/` and `learning/frontend/` trees."""
     from pathlib import Path
@@ -230,7 +227,7 @@ def test_1279_a4_no_presentation_or_frontend_module_accepts_a_tenant_outside_its
     assert offences == [], "tenant acceptance outside an entry point's main:\n" + "\n".join(offences)
 
 
-# A4 census: the deployment rule ("only `dev` has a publish destination") is stated once, in the
+# Census: the deployment rule ("only `dev` has a publish destination") is stated once, in the
 # publish root's owner. Reading the deployment elsewhere re-states it. Allowed: the environment
 # module that defines `deployment()`, the owner, and the publisher's refusal message (which only
 # names the value the owner refused on). Scanned: every production module of the package.
@@ -282,7 +279,7 @@ def test_1279_a4_the_deployment_census_sees_a_restated_rule_and_spares_innocent_
 
 
 def test_1279_a4_only_the_publish_root_owner_reads_the_deployment():
-    """A4: the rule is stated only in `configuration/publish_root.py`; no mirror, build or run
+    """The rule is stated only in `configuration/publish_root.py`; no mirror, build or run
     step restates it (the allow-list: `_env.py`, the owner, and `publisher.py`'s refusal message)."""
     from pathlib import Path
 
@@ -300,7 +297,7 @@ def test_1279_a4_only_the_publish_root_owner_reads_the_deployment():
 
 
 def test_1279_a4_the_run_step_hands_on_the_tenant_it_was_given_and_never_accepts_one():
-    """A4: `run_common.visualize` forwards its `tenant` and holds no acceptance call of its own."""
+    """`run_common.visualize` forwards its `tenant` and holds no acceptance call of its own."""
     from pathlib import Path
 
     run_common = importlib.import_module("defender.run_common")

@@ -22,7 +22,7 @@ printf 'ERR\\n' >&2
 """
 
 
-#: What `_parsed` reports for a candidate that parses to anything other than ONE stage. A
+#: What `_parsed` reports for a candidate that is not exactly one stage; distinct from `None` (refused).
 MULTI_STAGE = object()
 
 
@@ -77,7 +77,7 @@ def test_the_verdict_does_not_depend_on_the_value_of_an_operand(operand):
     ("echo 2 2>/dev/null", ["echo", "2"]),
 ])
 def test_an_accepted_command_never_loses_an_operand(cmd, argv):
-    """The second half of the defect"""
+    """A refusal is fine, a silent rewrite is not: only the fd prefix that is the redirect may go."""
     result = _single(cmd)
     if argv is None:
         assert result is None, f"{cmd!r} was accepted — a spaced `>` is a redirect of stdout"
@@ -117,7 +117,7 @@ def test_a_quoted_or_suffixed_two_is_not_an_fd(cmd):
     ('echo "&&"', ["echo", "&&"]),
 ])
 def test_a_quoted_or_escaped_operator_is_a_word(cmd, argv):
-    """The same defect as F-50, in the other direction"""
+    """Operators are read off the raw text, not `shlex`'s value: an escaped or quoted `;` is a word."""
     parsed = _single(cmd)
     assert parsed is not None, f"{cmd!r} was refused — a quoted operator is an ordinary word"
     assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
@@ -136,7 +136,7 @@ def test_a_quoted_or_escaped_operator_is_a_word(cmd, argv):
     (r"w a\#b", ["w", "a#b"]),
 ])
 def test_an_unquoted_hash_that_starts_a_word_opens_a_comment(cmd, argv):
-    """F-50's own class, on the third fact the raw text has to answer."""
+    """`shlex` resolves `#` before any arm looks; only a word-initial `#` opens a comment (`a#b`, `'#'` are words)."""
     parsed = _parsed(cmd)
     assert parsed is not None, f"{cmd!r} was refused — a comment is not a lexing failure"
     assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
@@ -161,14 +161,16 @@ def test_a_real_operator_boundary_still_admits_the_fd(cmd):
     assert _parsed(cmd) is not None
 
 
-#: Characters `str.isspace()` OR `shlex.whitespace` calls whitespace and BASH does not. The
+#: Characters `str.isspace()` or `shlex.whitespace` calls whitespace and bash does not (bash
+#: splits on space and tab).
 _NOT_SHELL_BLANKS = [
     "\r",
     "\x0b", "\x0c", "\x1c", "\x1f", "\x85", "\xa0", "\u2003", "\u3000",
 ]
 
 
-#: The same question as `_NOT_SHELL_BLANKS`, asked so that RECALL cannot answer it.
+#: The same question, derived from the libraries rather than a hand list. U+3000 is the highest
+#: code point `str.isspace()` accepts, so the collection-time scan stops there.
 _ISSPACE_CEILING = 0x3000
 
 _CANDIDATE_BLANKS = sorted(
@@ -196,7 +198,6 @@ def test_our_word_boundary_is_bash_s_word_boundary(shim_dir, blank):
 
 @pytest.mark.parametrize("blank", _NOT_SHELL_BLANKS)
 def test_a_character_the_shell_does_not_split_on_stays_inside_its_word(blank):
-    """A character the shell does not split on stays inside its word."""
     result = _parsed(f"w -n a{blank}b")
     assert result is not None, f"U+{ord(blank):04X} made an ordinary command untokenizable"
     assert result[0] == ["w", "-n", f"a{blank}b"], (
@@ -207,21 +208,19 @@ def test_a_character_the_shell_does_not_split_on_stays_inside_its_word(blank):
 
 @pytest.mark.parametrize("blank", [" ", "\t"])
 def test_the_characters_the_shell_DOES_split_on_still_split(blank):
-    """The control the test above needs: pinning "do not split on X" is satisfied by a scanner
-    that never splits at all, which would collapse every command into a single argv word."""
+    """Control for the test above, which a scanner that never splits at all would also pass."""
     assert _parsed(f"w -n a{blank}b")[0] == ["w", "-n", "a", "b"]
 
 
 def test_an_unquoted_operator_is_still_an_operator():
-    """The control the test above needs: if quoting were ignored the other way round, every
-    pipeline in the tree would collapse into one argv and this file would still be green."""
+    """Control: if quoting were ignored the other way round, every pipeline would collapse into one argv."""
     stages = [s for p in bash_exec.parse("a | b && c") for s in p.stages]
     assert [s.argv for s in stages] == [["a"], ["b"], ["c"]]
 
 
 # The same invariant, at the layer that actually decides.
 def test_the_gate_does_not_rewrite_the_command_before_it_parses_it(tmp_path):
-    """`decide_bash` is the entry point"""
+    """Pinned at the gate, not the scanner: a rewrite above `parse` (a Unicode `strip()`) would undo its blank rule."""
     from defender.investigation.agent_definition import compile_policy_for
     from defender.investigation.permission import decide_bash
 
@@ -243,8 +242,7 @@ def test_the_gate_does_not_rewrite_the_command_before_it_parses_it(tmp_path):
             cmd, policy=policy, run_dir=run_dir, defender_dir=defender_dir,
         )
         if decision.pipelines is None:
-            # Refused — always this executor's prerogative, and it means no argv was
-            # authorised, which cannot be the wrong argv.
+            # Refusing is always allowed: no argv authorised cannot be the wrong argv.
             continue
         gate_argv = [s.argv for p in decision.pipelines for s in p.stages]
         scanner_argv = [s.argv for p in bash_exec.parse(cmd) for s in p.stages]
@@ -266,8 +264,7 @@ _CANDIDATES = [
 ] + [
     f"{_SHIM} -n 2>/dev/null", f"{_SHIM} -n 2 2>/dev/null", f"{_SHIM} 2 2>&1",
 ] + [
-    # The comment question, against the same oracle. `#` was absent from this alphabet, which
-    # is why the differential was green while `w a # ; w b` ran a stage bash comments away.
+    # Comments, against the same oracle: `w a # ; w b` must not run a stage bash comments away.
     f"{_SHIM} a # b", f"{_SHIM} a #b", f"{_SHIM} a# b", f"{_SHIM} a #",
     f"{_SHIM} a # ; {_SHIM} b", f"{_SHIM} a '#' b", f"{_SHIM} -c 2 # 2>/dev/null",
     f"{_SHIM} a )2>/dev/null", f"{_SHIM} a;2>/dev/null",
@@ -301,7 +298,8 @@ def _inner_c_argument(cmd: str) -> str | None:
 
 
 def _bash_meaning(shim: tuple[Path, str], cmd: str):
-    """What bash DOES with `cmd`"""
+    """`(argv, stderr route)` of what bash runs for `cmd`; `None` if bash, or a `-c` wrapper's inner
+    payload, fails `bash -n`. Evidence is read as bytes: a text read would turn a CR into a newline."""
     shim_dir, bash = shim
     argv_file = shim_dir / "argv.out"
     argv_file.unlink(missing_ok=True)
@@ -341,7 +339,7 @@ def _bash_meaning(shim: tuple[Path, str], cmd: str):
 
 @pytest.mark.parametrize("cmd", _CANDIDATES)
 def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
-    """The direction #897's file does not assert, and the only one that could see F-50."""
+    """The direction #897's verdict differential cannot see: same verdict, different argv or stderr route."""
     ours = _single(cmd)
     if ours is None:
         return                      # refusing more than bash is this executor's prerogative
@@ -358,14 +356,15 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
     )
 
 
-# #959 — the wrapper seam, the blank alphabet, and the oracle's own evidence channels.
+# #959 — the blank alphabet and the oracle's own evidence channels.
 
 
 _CR = chr(0x000D)
 _NBSP = chr(0x00A0)
 _THIS_FILE = Path(__file__).resolve()
 
-#: WRAPPER SHAPES ARE GONE FROM THIS DIFFERENTIAL (#971), and so is the test that consumed
+# No wrapper shapes here: the parse folds none, so bash has nothing to answer for. That they
+# deny is pinned in `test_959_wrapper_fold.py`.
 
 
 def _stages(cmd: str):
@@ -396,7 +395,7 @@ def _bash_argv_bytes(shim: tuple[Path, str], cmd: str) -> list[str] | None:
 
 
 def test_the_scanner_ends_a_word_exactly_where_bash_ends_one(shim_dir):
-    """No character ends a word here that does not end one in bash"""
+    """A CR is an ordinary word byte to bash (it splits on space and tab), wherever it sits in a word."""
     for cmd in (
         f"{_SHIM} a{_CR}b",
         f"{_SHIM} P{_CR}",
@@ -416,7 +415,7 @@ def test_the_scanner_ends_a_word_exactly_where_bash_ends_one(shim_dir):
 
 
 def test_our_blank_set_is_the_blank_set_bash_splits_on(shim_dir):
-    """The differential's alphabet carries blanks derived from both sides of the comparison — `str.isspace()` together with the scanner's own set — so..."""
+    """Every character either side calls a blank (`str.isspace()` or `_BLANKS`), glued to a word, splits iff bash splits it."""
     ours_side = set(bash_exec._BLANKS)
     pythons_side = {chr(cp) for cp in range(0x110000) if chr(cp).isspace()}
     alphabet = sorted((ours_side | pythons_side) - {"\n"})

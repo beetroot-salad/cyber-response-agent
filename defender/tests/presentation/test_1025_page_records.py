@@ -1,5 +1,5 @@
-"""#1025 — the records section, the per-record refusal policy, the value-channel escape, the one-reader
-discipline, and the housekeeping the page PR owes."""
+"""#1025 — the records section, the per-record refusal policy, the value-channel escape and the
+one-reader discipline."""
 from __future__ import annotations
 
 import json
@@ -41,8 +41,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time
-    (it does not exist at the spec's base — one failure per test, never a collection error)."""
+    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
     return E.page_module()
 
 
@@ -199,10 +198,8 @@ def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_pat
         stages = page.text_of("sec-stages")
         assert "timing record unreadable" in stages, stages
         assert "not on the record" not in stages, stages
-        # Scoped to the TABLE (`stage-timing`), not the whole section: `sec-stages` also holds
-        # every call's own transcript block, and the sample's real judge response durations
-        # legitimately format to "1m00s" there — unrelated to whether `timing.json` itself
-        # parsed. The docstring's own claim is about the table's wall column, not the section.
+        # Scoped to the TABLE (`stage-timing`): the section's transcript blocks legitimately
+        # show "1m00s" call durations, whether or not `timing.json` parsed.
         assert "1m00s" not in page.text_of("stage-timing")
         assert page.text_of("sec-verdict") == intact["sec-verdict"]
         assert page.text_of("sec-worlds") == intact["sec-worlds"]
@@ -234,8 +231,7 @@ def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
             ("samples.yaml", "absent", "samples record unreadable"),
             ("provenance.json", "absent", "provenance record unreadable"),
             ("outcome.yaml", "no record: outcome.yaml is absent", "does not parse")):
-        # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its
-        # manifest's episode id); only its root differs.
+        # A copy keeps the episode's folder name (its manifest's episode id); only its root differs.
         fresh = E.copy_episode(ep, tmp_path / f"absent-{name}" / ep.dir.name)
         (fresh.dir / name).unlink()
         assert absent in _records(render(fresh)), name

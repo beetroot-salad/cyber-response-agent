@@ -43,8 +43,8 @@ def _ledger_name(label: str) -> str:
 
 #: The two spare worlds the every-arm fixture names through judge rows of their own (no
 #: manifest entry), so a symlinked and a dangling `worlds/<w>` each get a section and a leads
-#: block. Their arms are STRAY arms, `runs/<uuid4>` no roster entry names (review-3 F33: the
-#: roster stays exactly the manifest's worlds, so the page reads a valid roster).
+#: block. Their arms are STRAY arms, `runs/<uuid4>` no roster entry names (the roster stays
+#: exactly the manifest's worlds, so the page reads a valid roster).
 LINKED_WORLD = "spare_link"
 DANGLING_WORLD = "spare_dangle"
 
@@ -56,7 +56,7 @@ def _plant_shared_arms(built: E.Episode) -> None:
     E.plant_raw(built.dir / "outcome.yaml", R.UNDECODABLE)                # read arm
     E.plant_raw(built.dir / "samples.yaml", "{\n  [")                    # parse arm
     E.plant_raw(built.dir / "provenance.json", '{"a": 1}')               # shape arm
-    E.plant_link(built.dir / "timing.json", built.dir / "family.yaml")    # OSError-shaped, C-02
+    E.plant_link(built.dir / "timing.json", built.dir / "family.yaml")    # OSError-shaped
     E.plant_link(built.world(E.PASSTHROUGH_WORLD) / "report.md", built.dir / "family.yaml")
     (built.dir / _ledger_name(E.PASSTHROUGH_WORLD)).unlink()                 # absent ledger
     E.plant_link(built.dir / _ledger_name(E.CONTROL), built.dir / "family.yaml")  # aliased ledger
@@ -79,13 +79,9 @@ def _plant_per_copy_arms(copy: E.Episode) -> None:
 
 
 def _write_grade_over(copy: E.Episode) -> None:
-    """`judge.yaml` written from the rows `family.read_world` — the sole producer of a row's
-    `ungradable_reason` from the archive — computes over the planted tree, so the record carries
-    the reader's sentence for each planted world (the hard-linked investigation; the other
-    world's linked `gather_summaries/` — #1234 A3 refuses a listed-but-not-plain input as
-    malformed, naming it, where the link at that world's report once read as
-    `_missing_required_input`'s "missing its report.md"; the pass no longer requires a served
-    ledger, so the absent one is the leads block's note)."""
+    """`judge.yaml` written from the rows `family.read_world` (the sole producer of a row's
+    `ungradable_reason`) computes over the planted tree, so the record carries the reader's
+    sentence for each planted world."""
     family = R.family()
     with J.episode_runs_for(copy.dir).episode_files(copy.dir.name) as episode:
         bound = episode.view()
@@ -104,8 +100,8 @@ def _every_arm(tmp_path: Path) -> tuple[E.Episode, E.Episode, E.Episode]:
         extra_worlds=tuple(T.world_doc(label, role="B", axis=f"{label} fact")
                            for label in (LINKED_WORLD, DANGLING_WORLD)))
     _plant_shared_arms(built)
-    # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its manifest's
-    # episode id); the two copies differ only in where they sit.
+    # A copy keeps the episode's folder name (its manifest's episode id); the two copies differ
+    # only in where they sit.
     one = E.copy_episode(built, tmp_path / "root-one" / built.dir.name)
     two = E.copy_episode(built, tmp_path / "root-two" / "nested" / built.dir.name)
     for copy in (one, two):
@@ -133,8 +129,8 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
     assert rows[E.PASSTHROUGH_WORLD].get("malformed") is True, rows[E.PASSTHROUGH_WORLD]
     assert "gather_summaries" in rows[E.PASSTHROUGH_WORLD]["ungradable_reason"], (
         rows[E.PASSTHROUGH_WORLD])
-    # R5: a renamed copy is refused, naming the folder's id and the manifest's, and writes no
-    # page (the two copies above are the positive control on the same door).
+    # A renamed copy is refused, naming the folder's id and the manifest's, and writes no page
+    # (the two copies above are the positive control on the same door).
     renamed_id = str(uuid.uuid4())
     renamed = E.copy_episode(built, tmp_path / "root-three" / renamed_id)
     err = H5.raised(E.render_episode, renamed.dir)
@@ -216,8 +212,8 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
 
 
 def _grade_record_refused_over_its_own_trees(tmp_path: Path) -> None:
-    """The grade record's arm (F-2): a link at judge.yaml over one tree, then each c-14 shape
-    over another — the two-roots tree cannot carry them, its judge.yaml IS the record."""
+    """The grade record's arm: a link at judge.yaml over one tree, then each malformed shape over
+    another (the two-roots tree cannot carry them: its judge.yaml IS the record)."""
     linked = E.sample_episode(tmp_path / "judge-link")
     E.plant_link(linked.dir / "judge.yaml", linked.dir / "family.yaml")
     band = _grade_record_unreadable(E.render(linked), linked.dir)
@@ -303,9 +299,6 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
     assert "not archived" not in linked_leads, linked_leads
     assert str(ep.dir) not in page.raw
     assert str(tmp_path) not in page.raw
-
-
-# D-V5 — the closed list of listing sites
 
 
 # s-66 — the timing slot tells absent from unreadable from no stages

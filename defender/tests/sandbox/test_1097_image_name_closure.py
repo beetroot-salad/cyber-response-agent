@@ -238,8 +238,8 @@ def test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_ever
     narrowed = _lock_edit(one_versioned_link)
     assert _names(box_closure(narrowed, ROOT)) == PLANTED_CLOSURE, "a link's version narrowed the walk"
 
-    # Nor a link's `source`: one that matches no entry's still reaches them all (#1097
-    # round-3 adversary H7 — a source filter dropped alpha's whole subtree).
+    # Nor a link's `source`: one that matches no entry's still reaches them all (a source
+    # filter would drop alpha's whole subtree).
     def foreign_source(lock: dict) -> None:
         _entry(lock, ROOT)["dependencies"][0]["source"] = {"registry": "https://pypi.org/simple/"}
     assert _names(box_closure(_lock_edit(foreign_source), ROOT)) == PLANTED_CLOSURE, "a link's source narrowed the walk"
@@ -251,7 +251,7 @@ def test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_ever
         assert _names(box_closure(edited, ROOT)) == PLANTED_CLOSURE, f"{what}: the closure moved"
 
 
-# ---- O1: what does NOT rename the image --------------------------------------------------------
+# ---- what does NOT rename the image ------------------------------------------------------------
 def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
     baseline = image_tag(_plant(tmp_path, "baseline"))
     assert TAG_RE.match(baseline), baseline
@@ -278,7 +278,7 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
     def runtime_relock(lock: dict) -> None:
         _entry(lock, ROOT)["optional-dependencies"]["runtime"].append({"name": "devdep"})
 
-    # `[tool.uv]` keys in another order: a table has no order (#1097 round-4 adversary A6).
+    # `[tool.uv]` keys in another order: a table has no order.
     two_keys = _replace_once(PLANTED_PYPROJECT, "package = false\n", "package = false\ncompile-bytecode = true\n")
     swapped_keys = _replace_once(PLANTED_PYPROJECT, "package = false\n", "compile-bytecode = true\npackage = false\n")
     assert image_tag(_plant(tmp_path, "uv-keys", pyproject=two_keys)) == image_tag(
@@ -297,7 +297,7 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
         "a runtime-extra relock": {"lock": _lock_edit(runtime_relock)},
         "the lock's format revision": {"lock": _lock_edit(lambda lock: lock.__setitem__("revision", 4))},
         # Dependency groups: the fenced sync (`--no-default-groups`) cannot install them, so a
-        # group edit and its relock never rename (#1097 round-3 adversary H5).
+        # group edit and its relock never rename.
         "a dependency group and its relock": {
             "pyproject": PLANTED_PYPROJECT + '\n[dependency-groups]\nlint = ["devtool>=7"]\n',
             "lock": _lock_edit(lambda lock: _entry(lock, ROOT).__setitem__(
@@ -325,7 +325,7 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
     assert manifest_read != baseline, "the positive control: [tool.uv] did not rename"
 
 
-# ---- O2: what DOES rename the image ------------------------------------------------------------
+# ---- what DOES rename the image ----------------------------------------------------------------
 def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_image(tmp_path):
     baseline = image_tag(_plant(tmp_path, "baseline"))
     assert baseline.startswith("defender-box:v2-"), baseline
@@ -347,14 +347,13 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
         "another extra on the box edge": _set([ROOT, "optional-dependencies", "box", 0, "extra"], ["fast", "slow"]),
         "a new box edge": _append([ROOT, "optional-dependencies", "box"], {"name": "rtlib"}),
         # A closure entry's OWN edge marker: `alpha -> winonly` gated to linux instead of
-        # win32 changes what a Linux build installs (#1097 round-2 adversary H2).
+        # win32 changes what a Linux build installs.
         "a closure entry's edge marker": _set(["alpha", "dependencies", 1, "marker"], "sys_platform == 'linux'"),
         # A root CORE link's marker or version, the names unchanged: the Linux image stops
-        # installing alpha (#1097 round-3 adversary H1 — core links hashed by name only).
+        # installing alpha.
         "a root core link's marker": _set([ROOT, "dependencies", 0, "marker"], "sys_platform == 'win32'"),
         "a root core link's version": _set([ROOT, "dependencies", 0, "version"], "1.0.0"),
-        # Entries are hashed whole: a wheel's url alone moves the name (#1097 round-3
-        # adversary H6 — url/size/upload-time projected away).
+        # Entries are hashed whole: a wheel's url alone moves the name.
         "a wheel's url alone": _set(["alpha", "wheels", 0, "url"], "https://mirror.example/alpha-1.0.0-py3-none-any.whl"),
     }
     manifest_edits = {
@@ -362,19 +361,18 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
         "[tool.uv] key": _replace_once(PLANTED_PYPROJECT, "package = false\n", "package = false\ncompile-bytecode = true\n"),
         "[tool.uv] emptied": _replace_once(PLANTED_PYPROJECT, "package = false\n", ""),
         # Not only scalars: a list-valued key and a nested table change what a sync does
-        # without touching the lock (#1097 round-2 adversary H4).
+        # without touching the lock.
         "[tool.uv] list key": _replace_once(PLANTED_PYPROJECT, "package = false\n", 'package = false\nno-binary-package = ["gamma"]\n'),
         "[tool.uv] nested table": PLANTED_PYPROJECT + "\n[tool.uv.pip]\nno-build = true\n",
         "[tool.uv] indexes a, b": PLANTED_PYPROJECT + _INDEXES.format(first="a", second="b"),
         "[tool.uv] indexes b, a": PLANTED_PYPROJECT + _INDEXES.format(first="b", second="a"),
-        # Requirement strings are hashed AS WRITTEN — extras and markers included (#1097
-        # round-4 adversary A2 — reducing them to name + specifier hid these).
+        # Requirement strings are hashed AS WRITTEN, extras and markers included.
         "the box requirement's extra dropped, unlocked": _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = ["gamma"]'),
         "a core requirement's marker added, unlocked": _replace_once(
             PLANTED_PYPROJECT, '"alpha>=1",', '"alpha>=1; sys_platform == \'linux\'",'),
         "a core requirement's marker value's case, unlocked": _replace_once(
             PLANTED_PYPROJECT, '"alpha>=1",', '"alpha>=1; sys_platform == \'Linux\'",'),
-        # Amendment 3, M1‴ (a): the core and `box` requirement lists as written, lock untouched.
+        # The core and `box` requirement lists as written, lock untouched.
         "a core requirement, unlocked": _replace_once(PLANTED_PYPROJECT, '"split",\n', '"split",\n    "requests>=2",\n'),
         "a core requirement dropped, unlocked": _replace_once(PLANTED_PYPROJECT, '    "split",\n', ""),
         "a core requirement's specifier, unlocked": _replace_once(PLANTED_PYPROJECT, '"alpha>=1"', '"alpha>=2"'),
@@ -399,7 +397,7 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     absent = image_tag(_plant(tmp_path, "tool-uv-absent", pyproject=no_tool_uv))
     assert absent == moved["[tool.uv] emptied"], "an absent [tool.uv] is not read as {}"
 
-    # The two requirement lists read absent as [] (amendment 3, M1‴ (a)).
+    # The two requirement lists read absent as [].
     core_block = 'dependencies = [\n    "alpha>=1",\n    "split",\n]\n'
     no_core = image_tag(_plant(tmp_path, "core-absent", pyproject=_replace_once(PLANTED_PYPROJECT, core_block, "")))
     empty_core = image_tag(_plant(tmp_path, "core-empty", pyproject=_replace_once(
@@ -449,8 +447,7 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     assert image_tag(_plant(tmp_path, "nested", lock=nested)) != image_tag(
         _plant(tmp_path, "nested-bumped", lock=nested_bumped)), "a target behind a nested optional list did not rename"
 
-    # A NaN or infinity in a hashed value names an image or faults — never another exception
-    # (#1097 round-3 adversary H4).
+    # A NaN or infinity in a hashed value names an image or faults — never another exception.
     for i, special in enumerate(("nan", "inf")):
         text = _replace_once(PLANTED_PYPROJECT, "package = false\n", f"package = false\nx = {special}\n")
         try:
@@ -576,7 +573,7 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
         "pyproject.toml", _replace_once(PLANTED_PYPROJECT, 'name = "planted"\n', ""))),
     "a box link names no entry": ("uv.lock", USE, "ghost", None, _write_lock(
         _append([ROOT, "optional-dependencies", "box"], {"name": "ghost"}))),
-    # -- amendment 2's one shape check, at the parse seam --
+    # -- the one link-shape check, at the parse seam --
     "a reached entry's link has no name": ("uv.lock", USE, None, "no package entry", _write_lock(
         _append(["alpha", "dependencies"], {"version": "2.0.0"}))),
     "a reached entry's link is not a table": ("uv.lock", USE, None, None, _write_lock(
@@ -591,7 +588,7 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
         _set(["winonly", "name"], 9))),
     "an entry is not a table": ("uv.lock", USE, None, None, _write(
         "uv.lock", 'version = 1\npackage = [\n    { name = "planted", version = "0.0.0" },\n    1,\n]\n')),
-    # -- the ROOT's links are shape-checked too (#1097 round-3 adversary H3) --
+    # -- the ROOT's links are shape-checked too --
     "the root's dependencies is a string": ("uv.lock", USE, None, None, _write_lock(
         _set([ROOT, "dependencies"], "alpha"))),
     "the root's optional-dependencies is a list": ("uv.lock", USE, None, None, _write_lock(
@@ -621,7 +618,7 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
         "pyproject.toml", _in_tool_uv(f"x = {_BIG_HEX}"))),
     "a hex integer past the digit limit in a reached lock entry": ("uv.lock", USE, None, None, _write(
         "uv.lock", _with_key("alpha", f"x = {_BIG_HEX}"))),
-    # -- amendment 3, M1‴ (a): the two requirement lists are lists of strings --
+    # -- the two requirement lists are lists of strings --
     "[project].dependencies is a string": ("pyproject.toml", USE, None, None, _write(
         "pyproject.toml", _replace_once(
             PLANTED_PYPROJECT, 'dependencies = [\n    "alpha>=1",\n    "split",\n]\n', 'dependencies = "alpha>=1"\n'))),

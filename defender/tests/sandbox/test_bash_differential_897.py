@@ -26,7 +26,7 @@ _FULL_ALPHABET_MAX_LEN = 3
 _CONNECTOR_MAX_LEN = 4
 
 _SEEDED_FAMILIES: tuple[tuple[str, ...], ...] = (
-    (_WORD, "&&", ";", "\n", _WORD),      # the connector crosses the line — #897 review
+    (_WORD, "&&", ";", "\n", _WORD),      # the connector crosses the line
     (_WORD, "||", ";", "\n", _WORD),
     (_WORD, "&&", ";", ";", "\n", _WORD),  # ...and survives more than one bare `;`
     (_WORD, "|", ";", "\n", _WORD),       # the #884 F-28 shape, spelled across a boundary
@@ -103,7 +103,7 @@ def corpus():
 
 
 def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
-    """The class-level guard the two hand-found instances (#854 F-22, #884 F-28) each needed."""
+    """One direction only: `parse` may refuse what bash accepts, never accept what bash rejects (benign `;` aside)."""
     diverging = [
         combo for combo, ok in corpus
         if not ok and _parse_accepts(_render(combo))
@@ -134,7 +134,7 @@ def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
 
 
 def test_the_corpus_actually_exercises_the_grammar(corpus):
-    """The control for the test above, which is a "no findings" assertion and so passes just as happily on an..."""
+    """Control for the no-findings test above: bash and `parse` each reject a large share of the corpus."""
     assert len(corpus) > 1800, "the corpus shrank — the sweep is no longer exhaustive in both tiers"
 
     accepted = sum(1 for _, ok in corpus if ok)
@@ -148,7 +148,7 @@ def test_the_corpus_actually_exercises_the_grammar(corpus):
 
 
 def test_the_semicolon_exemption_does_not_cover_a_dropped_pipe():
-    """The exemption's own guard rail, stated as a test so a future widening of..."""
+    """Adding `|` to the exemption would disarm the sweep: `echo | ; echo` strips to the legal `echo | echo`."""
     assert "|" not in _SEPARATORS_BEFORE_A_BENIGN_SEMICOLON
     assert _without_benign_semicolons((_WORD, "|", ";", _WORD)) == (_WORD, "|", ";", _WORD)
     # and the carve-out it IS meant to cover still strips

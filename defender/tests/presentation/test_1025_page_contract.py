@@ -35,8 +35,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time
-    (it does not exist at the spec's base — one failure per test, never a collection error)."""
+    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
     return E.page_module()
 
 
@@ -47,22 +46,21 @@ def render(ep) -> E.Page:
 
 
 def cli(argv, capsys):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured (#1187 O9: an id
-    names an episode under its tenant's own `<T>/episodes/`; no episodes base is set)."""
+    """`visualize_episode().main(argv)` with its stdout / stderr captured (an id names an
+    episode under its tenant's own `<T>/episodes/`; no episodes base is set)."""
     return E.cli(argv, capsys, module=visualize_episode())
 
 
 def cli_on(episode_dir, capsys):
     """`visualize_episode().main(["--tenant", T, <episode id>])` for the episode at
-    `episode_dir`, under the episodes base holding it (#1105 PR 2, declared change 4: the CLI
-    names the episode by id, no longer by folder path)."""
+    `episode_dir`: the CLI names an episode by id, not by folder path."""
     return E.cli_on(episode_dir, capsys, module=visualize_episode())
 
 
 def hook_page(episode_dir) -> E.Page:
     """The page the launcher's hook wrote, parsed — after checking it is byte-identical to a
     standalone `visualize_episode().render_episode` over the same directory: the hook is a
-    plain call to the same function (d40) and the page is a pure function of the directory."""
+    plain call to the same function and the page is a pure function of the directory."""
     page = pathlib.Path(episode_dir) / E.PAGE_NAME
     assert page.is_file(), f"the launcher did not write {E.PAGE_NAME}"
     written = page.read_bytes()
@@ -168,10 +166,8 @@ class _PlantingJudge(J.FakeJudge):
     """`FakeJudge` that plants a real symlink at the page's name the first time the judge seam
     is reached — the episode dir does not exist before the launch (`prepare_episode` refuses an
     existing one), so the plant happens from inside the one seam that runs after it does. The
-    fault itself is the guarded write meeting the link (p1); the fake decides nothing.
-
-    #1187: the launcher mints the episode's id, so the folder is the one `ST._NextEpisode`
-    finds when the seam is reached, not a composed `<episodes root>/<id>`."""
+    fault itself is the guarded write meeting the link; the fake decides nothing. The launcher
+    mints the episode's id, so the folder is the one `ST._NextEpisode` finds at the seam."""
 
     def __init__(self, episode: ST._NextEpisode, target: Path, **kw):
         super().__init__(**kw)
@@ -315,10 +311,8 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     questioner = ST._Interrupting(ST._NextEpisode())
     ep2, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused, questioner=questioner)
     assert not (ep2 / "family.yaml").exists(), "the control failed: the manifest was written"
-    # The abort above still primes the capture before the interrupt lands (priming precedes the
-    # questioner in the launcher's own order) and that print is real launcher stderr, not the
-    # standalone CLI's — drained here so the assertion below is about the CLI's OWN report,
-    # not noise the launcher run left sitting in the shared capsys buffer.
+    # Drain the launcher's own stderr (it primes the capture before the questioner runs), so
+    # the assertion below reads only the CLI's report.
     capsys.readouterr()
     rc, out, err = cli_on(ep2, capsys)
     assert rc == 1, (out, err)
@@ -403,7 +397,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
             self.episode.dir.chmod(0o555)
             return reply
 
-    # #1187: the launcher mints the episode's id — the folder is the one the launch makes.
+    # The launcher mints the episode's id: the folder is the one the launch makes.
     nxt = ST._NextEpisode()
     judge = _ReadOnlyJudge(nxt, default=J.as_reply_text(J.reply_doc()))
     try:
@@ -434,8 +428,8 @@ def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_pat
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-    # #1105 PR 2 (declared change 4): `--tenant T <episode id>`; #1187 (O9): the episode is
-    # found under the tenant's own `<T>/episodes/`, so the child is handed no episodes base.
+    # `--tenant T <episode id>` finds the episode under the tenant's own `<T>/episodes/`, so
+    # the child is handed no episodes base.
     env.pop(T.EPISODES_BASE_ENV, None)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -512,10 +506,9 @@ def test_1025_a_link_into_an_unreadable_directory_at_a_records_name_is_that_slot
 
 
 def _assert_a_renamed_copy_is_refused(built: E.Episode, root: Path, name: str) -> None:
-    """R5 / #1187 declared change 10: `built` copied under `root` to a folder named by a FRESH
-    UUID — a well-formed episode id (declared change 1), so only the manifest check can refuse
-    it — is refused, the refusal naming both the folder's id and the id its manifest carries,
-    and no page is written for it."""
+    """`built` copied under `root` to a folder named by a FRESH UUID — a well-formed episode id,
+    so only the manifest check can refuse it — is refused, naming both the folder's id and the
+    id its manifest carries, and no page is written for it."""
     from defender.tests.storage.ids_1187 import _spec1187 as R
 
     folder_id = R.new_id()

@@ -33,8 +33,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time
-    (it does not exist at the spec's base — one failure per test, never a collection error)."""
+    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
     return E.page_module()
 
 
@@ -52,7 +51,7 @@ def cli(argv, capsys):
 def hook_page(episode_dir) -> E.Page:
     """The page the launcher's hook wrote, parsed — after checking it is byte-identical to a
     standalone `visualize_episode().render_episode` over the same directory: the hook is a
-    plain call to the same function (d40) and the page is a pure function of the directory."""
+    plain call to the same function and the page is a pure function of the directory."""
     page = pathlib.Path(episode_dir) / E.PAGE_NAME
     assert page.is_file(), f"the launcher did not write {E.PAGE_NAME}"
     written = page.read_bytes()
@@ -97,8 +96,7 @@ def _ungradable_episode(tmp_path: Path) -> E.Episode:
 
 def test_1025_every_step_in_steps_order_and_every_directory_under_runs_has_its_section_the_control_included(
         tmp_path):
-    """On the sample the page has `stage-timing` rows for `questioner, preflight, runs, verify,
-    judge` in `STEPS` order, a `world-<id>` section and a `leads-<id>` block for."""
+    """Steps missing from `timing.json` still get rows, saying they are not on the record."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     timing = page.text_of("stage-timing")
@@ -118,7 +116,7 @@ def test_1025_every_step_in_steps_order_and_every_directory_under_runs_has_its_s
 
 def test_1025_a_world_section_is_not_graded_ungradable_with_its_reason_or_graded_and_never_confuses_the_three(
         tmp_path):
-    """`a` (no row) renders "not graded" with no bucket and no verdict line."""
+    """The control (no row) is "not graded"; an `ungradable` row shows its reason escaped; neither has a verdict line."""
     page = render(E.sample_episode(tmp_path))
     control = _world(page, E.CONTROL)
     assert "not graded" in control, control
@@ -147,7 +145,6 @@ def test_1025_a_world_section_is_not_graded_ungradable_with_its_reason_or_graded
 
 def test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never_a_recomputed_one(
         tmp_path):
-    """For `prior_fake_key_precedent` the world block shows the verdict line (`verdict = declared."""
     ep = E.sample_episode(tmp_path)
     graded = _world(render(ep), E.GRADED_WORLD)
     assert _ordered(graded, VERDICT_LINE, "inconclusive", "malicious", "decision-discipline",
@@ -164,7 +161,6 @@ def test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never
 
 def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_and_never_a_default(
         tmp_path):
-    """Each graded world's chip names the systems the judge model's answer touched."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
@@ -193,8 +189,7 @@ def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_
 
 def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and_the_run_dir_pointer_is_never_the_source(
         tmp_path):
-    """Every world section's link is exactly `runs/<episode>-<world>/runtime.html` (the episode id
-    the manifest's, correction 4)."""
+    """The link is composed from the arm roster; the `run_dir` pointer's path never reaches the page."""
     ep = E.sample_episode(tmp_path)
     for label in E.WORLDS:
         (ep.world(label) / "run_dir").write_text(str(ep.run(label)), encoding="utf-8")
@@ -213,7 +208,6 @@ def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and
 
 def test_1025_headings_carry_substituted_counts_the_worlds_guide_uses_each_axis_verbatim_and_the_nav_iterates_the_same_sets_as_the_sections(
         tmp_path):
-    """Section headings carry the sample's counts (3 worlds, 13 findings, 5 stages)."""
     page = render(E.sample_episode(tmp_path))
     worlds = page.text_of("sec-worlds")
 
@@ -239,8 +233,7 @@ def test_1025_headings_carry_substituted_counts_the_worlds_guide_uses_each_axis_
 
 def test_1025_per_world_leads_are_referenced_leads_union_gather_summary_stems_with_their_chains_and_exclude_pre_branch_leads(
         tmp_path):
-    """Each world's leads block lists `l-001`, `l-002`, `l-00c` (the `:T resolutions` row's lead ∪
-    the gather-summary stems) and not the pre-branch alert fetch `l-000`."""
+    """An unreadable `investigation.md` costs only its own world's block, which shows the refusal."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for label in E.WORLDS:
@@ -276,8 +269,7 @@ def test_1025_a_lead_id_that_names_no_single_file_reads_nothing_and_renders_the_
 
 
 def test_1025_the_artifacts_anchor_ids_exist_and_every_nav_href_resolves_to_an_id_on_the_page(tmp_path):
-    """Ids present: `sec-verdict`, `sec-case`, `sec-worlds`, `world-<id>` ×3, `sec-findings`,
-    `fg-<n>` per group, `f-<world>-<draw>-<index>` ×13, `sec-stages`, `stage-timing`."""
+    """No id repeats: a lead id shared by several worlds gets per-world anchors."""
     page = render(E.sample_episode(tmp_path))
     for anchor in ("sec-verdict", "sec-case", "sec-worlds", "sec-findings", "sec-stages",
                    "stage-timing", "stage-questioner", "stage-runs", "stage-judge", "sec-leads",
@@ -301,7 +293,7 @@ def test_1025_the_artifacts_anchor_ids_exist_and_every_nav_href_resolves_to_an_i
 
 def test_1025_the_header_names_the_episode_alert_rule_source_run_and_branch_point_knobs_and_lessons_commit_never_defender_run(
         tmp_path):
-    """The header's h1 carries the episode id and not "defender run:"."""
+    """On the live-996 shape (no family draw or row) the alert rule still resolves."""
     page = render(E.sample_episode(tmp_path))
     header = page.elements("header")
     assert header, "no <header>"
@@ -389,8 +381,7 @@ def test_1025_a_bucket_or_reason_word_used_as_an_attribute_value(tmp_path):
 
 
 def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_runs(tmp_path):
-    """A `judge.yaml` row for a label in neither the manifest nor `runs/` renders on the row-driven
-    surfaces ."""
+    """A record row for a label in neither the manifest nor `runs/` still gets its card and a section."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"].append(E.world_row("ghost_world", declared="benign", bucket="lead-set"))
@@ -441,7 +432,7 @@ def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_co
 
 
 def test_1025_symlink_planted_at_a_leaf_file_the_page_reads_inside_a_world(tmp_path):
-    """For EVERY leaf the page reads inside `worlds/<label>/` ."""
+    """A link or FIFO at any leaf the page reads in a world is refused unopened: no content, no blocking."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     assert f"summary of l-001 for {E.GRADED_WORLD}" in page.text_of(f"leads-{E.GRADED_WORLD}")
@@ -485,7 +476,7 @@ def test_1025_symlink_planted_at_a_leaf_file_the_page_reads_inside_a_world(tmp_p
 
 def test_1025_alert_fields_reach_the_header_frame(tmp_path):
     """The alert rule name and id are escaped by the page before they reach `render_header`'s raw
-    byline slot (g17)."""
+    byline slot."""
     ep = E.sample_episode(tmp_path)
     plant_source_copy(ep.dir, json.dumps(
         {"alert_id": "id<img src=x onerror=alert(1)>", "rule": {"name": "<b>rule</b> name"}}
@@ -500,7 +491,7 @@ def test_1025_alert_fields_reach_the_header_frame(tmp_path):
 
 def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
     """Lead `goal`, `params`, `raw_command`, payload digest fields and resolution rows render
-    through the untrusted escape (O9, c14/x09)."""
+    through the untrusted escape."""
     from defender.records import RunPaths
 
     ep = E.sample_episode(tmp_path)
@@ -524,8 +515,7 @@ def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
 
 
 def test_1025_the_worlds_and_leads_headings_count_exactly_the_sections_under_them(tmp_path):
-    """"Worlds (N)" is the number of `world-*` sections rendered and "Leads (M)" the number of
-    `leads-*` blocks ."""
+    """Both headings count the one roster classified at load, so they match the sections rendered."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
     (ep.dir / "runs" / "bad name!" / "gather_raw").mkdir(parents=True)

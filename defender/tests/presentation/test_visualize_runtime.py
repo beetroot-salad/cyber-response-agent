@@ -35,10 +35,8 @@ _FULL_INVESTIGATION = (
 
 
 def _seed_session_store(run: Path, messages: list[dict]) -> None:
-    """`render_runtime_page` now opens the run's own session store
-    (R4/#705) — this fixture predates the store, so give it a real one seeded from the
-    same `messages` it already writes to the wire log, rather than fabricating a
-    run dir the new render path cannot resolve."""
+    """A real session store seeded from the same `messages` the fixture writes to the wire log:
+    `render_runtime_page` opens the run's own store."""
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
     from defender.records import session_store as ss
@@ -58,7 +56,7 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
 
 
 def _build_run(tmp: Path) -> Path:
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # A run id is a canonical UUID, so the folder is `fixture_uuid(<label>)`.
     run = tmp / fixture_uuid("run")
     (run / "gather_raw" / "l-001").mkdir(parents=True)
 
@@ -138,7 +136,7 @@ def _phase_order(run: Path) -> list[str]:
 
 def test_tagger_advances_on_write_file(tmp_path):
     """write_file/edit_file writes introducing ## headers advance the cursor —
-    so cost lands in multiple phases, not all in phase[0] (the migration bug)."""
+    so cost lands in multiple phases, not all in phase[0]."""
     run = _build_run(tmp_path)
     events = read_jsonl_rows(run / "tool_trace.jsonl")
     order = _phase_order(run)
@@ -332,8 +330,8 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
 def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
     """Give the fixture run a review gate that actually cost something, and return the total.
 
-    Written as wire records under `review:{lens}` because that is where the gate's calls land
-    since #787 — one shared `RequestLogger`, one `agent_id` namespace."""
+    Written as wire records under `review:{lens}`, where the gate's calls land (one shared
+    `RequestLogger`, one `agent_id` namespace)."""
     from defender.configuration._pricing import usage_cost
 
     rows = []
@@ -351,7 +349,7 @@ def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
 
 
 def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path, monkeypatch):
-    """#787. The gate's calls are calls the run made, so they are IN the total — and named,
+    """The gate's calls are calls the run made, so they are IN the total — and named,
     because an operator who cannot separate them cannot answer what the gate cost."""
     import re
 
@@ -390,7 +388,7 @@ def _duplicate_the_gather_phase(run: Path) -> None:
 
 
 def test_a_bucket_that_appears_twice_is_tiled_once(tmp_path):
-    """#956, the half the render list hides: a repeat that is NOT adjacent."""
+    """A repeated bucket that is NOT adjacent is still tiled once (#956)."""
     phases = [{"name": n} for n in ["ORIENT", "PLAN", "GATHER", "ANALYZE", "GATHER", "REPORT"]]
     order = [p["name"] for p in d.normalize_phase_names(phases)]
     assert order.count("GATHER (loop 1)") == 2, f"fixture names no repeat: {order}"

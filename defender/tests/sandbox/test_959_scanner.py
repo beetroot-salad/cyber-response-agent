@@ -63,7 +63,7 @@ def _records(line: str):
 
 
 def test_a_quote_that_never_closes_still_ends_the_scan_with_no_tokens():
-    """A line whose quote never closes yields no token record stream, and `parse` turns that into `UntokenizableCommand` exactly as it does today -..."""
+    """An unclosed quote scans to nothing and is refused with the lexing reason, also inside a `-c` argument."""
     assert bash_exec._scan("cat 'x") is None
     with pytest.raises(bash_exec.UntokenizableCommand):
         bash_exec.parse("cat 'x")
@@ -78,7 +78,7 @@ def test_a_quote_that_never_closes_still_ends_the_scan_with_no_tokens():
 
 
 def test_a_blank_command_is_answered_ahead_of_the_parse_not_by_its_result():
-    """The blank command is answered before the parse runs and not from the parse's result"""
+    """A blank command allows; an empty parse would deny (`_decide_readers([])` is `None`), so the allow comes first."""
     d = _bash("")
     assert d.allow
     assert d.pipelines is None
@@ -93,7 +93,6 @@ def test_a_blank_command_is_answered_ahead_of_the_parse_not_by_its_result():
 
 @pytest.mark.parametrize("cmd", list(base.BASH_BLANKS))
 def test_a_command_of_only_bash_blanks_is_still_the_allowed_no_op(cmd):
-    """A command that is empty, or only spaces, tabs or newlines, still allows with no pipelines - deleting the trim does not turn the blank command into..."""
     d = _bash(cmd)
     assert d.allow, f"{cmd!r} stopped being the allowed no-op"
     assert d.pipelines is None
@@ -102,7 +101,6 @@ def test_a_command_of_only_bash_blanks_is_still_the_allowed_no_op(cmd):
 @pytest.mark.parametrize("blank", [base.NBSP, base.VT, base.FF, base.LSEP],
                          ids=["nbsp", "vt", "ff", "u2028"])
 def test_a_command_of_only_unicode_blanks_is_a_word_bash_would_try_to_run(blank):
-    """A command that is nothing but U+00A0, a vertical tab, a form feed or U+2028 is a command bash would look up as a program name, so it is refused..."""
     d = _bash(blank)
     assert not d.allow, (
         f"a command that is nothing but U+{ord(blank):04X} was answered as blank; bash would "
@@ -111,12 +109,11 @@ def test_a_command_of_only_unicode_blanks_is_a_word_bash_would_try_to_run(blank)
 
 
 def test_a_no_break_space_at_either_end_is_part_of_the_word_it_touches():
-    """An allowed pipeline prefixed or suffixed with U+00A0, a vertical tab or a form feed no longer authorises the trimmed command"""
+    """A blank at either end belongs to its word, as in bash, so the trimmed command is never what is authorised."""
     for blank in (NBSP, base.VT, base.FF):
         assert not _bash(blank + "cat " + REPORT).allow
         assert not _bash("cat " + REPORT + blank).allow
-    # The wrapper words, glued (worked examples 1 and 2). Refused before and after - what the
-    # examples pin is WHY: the first token is not `timeout`/`bash` at all.
+    # Glued to a wrapper word, the blank makes the first token not `timeout`/`bash` at all.
     assert not _bash("timeout" + NBSP + "5 cat " + REPORT).allow
     assert not _bash("bash" + NBSP + "-c 'ls'").allow
     # The allow-side half, which a check reading only allow/deny cannot see: where the grant
@@ -125,7 +122,7 @@ def test_a_no_break_space_at_either_end_is_part_of_the_word_it_touches():
 
 
 def test_a_divergent_blank_inside_a_quoted_argument_is_part_of_that_argument():
-    """There is no extracted inner text any more (#971), so the question this used to ask - does the divergent-blank rule reach inside a `-c` payload -..."""
+    """A quoted argument is one token, blanks included; `bash -c '<U+00A0>cat x'` is refused only as ungranted `bash`."""
     inner = NBSP + "cat " + REPORT
     assert _parsed("bash -c '" + inner + "'") == [[["bash", "-c", inner]]], (
         "the quoted argument is one token and keeps its blank; nothing re-scans its contents"
@@ -136,9 +133,9 @@ def test_a_divergent_blank_inside_a_quoted_argument_is_part_of_that_argument():
         assert d.reason == base.MAIN.deny_reason, cmd
 
 
-# M6 + M2 - the carriage return, and the two layers that must agree about it.
+# The carriage return, and the two layers that must agree about it.
 def test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_separator():
-    """The boundary decision and the value resolution agree about the removed separator in all three shapes, which is only true once the unquoter has no..."""
+    """Scanner and unquoter agree on a CR mid-word, at an edge or alone: the unquoter has no blank set of its own."""
     assert bash_exec._word_value("A" + CR + "B") == "A" + CR + "B"
     assert bash_exec._word_value("P" + CR) == "P" + CR
     assert bash_exec._word_value(CR) == CR
@@ -153,17 +150,14 @@ def test_the_boundary_decision_and_the_value_resolution_agree_about_the_removed_
     assert _parsed("echo 'A" + CR + "B'") == [[["echo", "A" + CR + "B"]]]
 
 
-# O2 - one module decides, and it still decides.
+# One module decides, and it still decides.
 def test_the_unquoter_has_no_notion_of_whitespace():
-    """`_word_value` resolves the quoting of one span and nothing else"""
-    # Handed a span carrying the character the scanner no longer splits on, it resolves it rather
-    # than re-splitting or dropping it; `shlex.split` would treat the carriage return as its own
-    # whitespace, so an unquoter built on it fails here.
+    """`_word_value` only resolves quoting: an unquoter built on `shlex.split` would split on the CR."""
     assert bash_exec._word_value("A" + CR + "B") == "A" + CR + "B"
 
 
 def test_the_unquoter_resolves_every_quoting_form_the_lexer_resolved():
-    """The hand-rolled unquoter returns exactly what the POSIX lexer returned for every form the grammar admits"""
+    """The hand-rolled unquoter matches the POSIX lexer on every quoting form the grammar admits."""
     table = [
         ('"a\\nb"', "a\\nb"),
         ('"a\\"b"', 'a"b'),
@@ -189,7 +183,7 @@ def test_a_trailing_backslash_still_continues_nothing():
 
 
 def test_the_line_boundary_and_incomplete_connector_causes_still_name_what_they_name():
-    """Causes (3) and (4) - a `|`/`&&`/`||` at a line boundary, and a connector without a complete command on both sides within one line - still name..."""
+    """The lexing reason still names causes (3) and (4) where they fire; a blank after a connector moves the refusal off them."""
     for cmd, phrase in (
         (f"cat {REPORT} |\nwc -l", "line boundary"),
         (f"cat {REPORT}\n| wc -l", "line boundary"),

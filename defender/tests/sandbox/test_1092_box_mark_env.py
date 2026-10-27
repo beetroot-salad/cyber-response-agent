@@ -95,8 +95,6 @@ def test_each_granted_shim_execs_bare_python3_when_defender_box_is_set_and_the_v
 
 # ---- d34 -------------------------------------------------------------------------------------
 def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherwise(tmp_path):
-    """`reexec_into_venv`, with a venv interpreter present beside its own tree, does not exec
-    when `DEFENDER_BOX` is set and does exec into it when the variable is unset."""
     tree = tmp_path / "defender"
     (tree / "execution").mkdir(parents=True)
     shutil.copy(DEFENDER / "execution/_venv.py", tree / "execution/_venv.py")

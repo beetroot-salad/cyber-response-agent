@@ -62,8 +62,6 @@ def _run_parts(instruction: str) -> tuple[list[dict[str, str]], list[str], list[
 
 # ---- d11 -------------------------------------------------------------------------------------
 def test_the_dockerfile_pins_its_base_by_sha256_digest():
-    """The Dockerfile's base line is `FROM python:3.11-slim@sha256:<64 hex>`, a digest pin
-    and not a floating tag; every `FROM` in the file is digest-pinned."""
     froms = [ins for ins in _instructions() if ins.startswith("FROM ")]
     assert froms, "no FROM instruction"
     assert _FROM_DIGEST.match(froms[0]), froms[0]

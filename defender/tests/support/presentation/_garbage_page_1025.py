@@ -23,14 +23,9 @@ SUITE = tuple(f"defender/tests/test_1025_page_{part}.py"
 CONTENT_FILES = tuple(Path(p).name for p in SUITE) + ("_episode_1025.py",)
 STEPS = ("questioner", "preflight", "runs", "verify", "judge")
 
-#: Tests whose red against the stub is a HEAD-missing dependency or an instrument limit — a
-#: reason INDEPENDENT of the page's content — keyed by a test-name fragment and verified by
-#: the failure message (a test here that instead fails on the page is counted as red-content):
-#: the launcher hook that does not call the page on HEAD, the root-stamp accessor and the
-#: world-archive screen that do not exist yet, the two lint gates, a subprocess that cannot
-#: import an in-memory module, and the in-frame fault injection that targets page functions
-#: the stub does not have (`when_inside` fires on entry to a named `_write_page` or
-#: `_render_document`).
+#: Tests whose red against the stub has a reason INDEPENDENT of the page's content (a missing
+#: dependency or an instrument limit), keyed by a test-name fragment and confirmed by a needle
+#: in the failure message; one that fails on the page instead is counted as red-content.
 HEAD_REASONS: tuple[tuple[str, str, str], ...] = (
     ("the_launcher_renders_the_page_after_the_judge_frame", "the launcher did not write", "launcher hook absent on HEAD"),
     ("a_render_fault_is_printed_and_changes_neither", "", "launcher hook absent on HEAD"),
@@ -209,7 +204,7 @@ def head_reason(nodeid: str, entry: dict[str, Any]) -> str | None:
 
 
 def classify(entry: dict[str, Any], nodeid: str = "") -> str:
-    """`green` | `red-content` | `red-head` | `red-other` | `skipped` — see the module docstring.
+    """`green` | `red-content` | `red-head` | `red-other` | `skipped`.
 
     `red-content` is "the test's OWN observation refused the page": an `AssertionError` or a
     `pytest.raises` that saw no raise with a suite/fixture frame on the stack, or any

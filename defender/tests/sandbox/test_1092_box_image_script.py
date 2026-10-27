@@ -95,8 +95,7 @@ def test_box_image_tag_prints_the_name_derived_from_the_scripts_own_tree_and_not
         assert out.stdout == expected + "\n", (cwd, out.stdout)
         assert out.stderr == "", (cwd, out.stderr)
     assert expected != image_tag(DEFENDER), "the planted tree must name a different image"
-    # `export` included: #1097 round 1's exported-list verb is gone with the list (the design
-    # amendment) — the contract is exactly `tag` | `build` again.
+    # `export` included: the verbs are exactly `tag` | `build`.
     for argv in ((), ("frobnicate",), ("export",), ("tag", "extra")):
         out = _run_script(script, *argv, cwd=tmp_path)
         assert out.returncode == 2, (argv, out.returncode, out.stderr)
@@ -128,7 +127,7 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     assert len(recorded_docker_calls(log)) == 1, "the build was retried"
 
 
-# ---- #1095 round 2: no docker to run ---------------------------------------------------------------
+# ---- no docker to run ---------------------------------------------------------------------------
 def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_path):
     _, script = _planted_script(tmp_path)
     empty = tmp_path / "empty-bin"
@@ -140,7 +139,7 @@ def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_
     assert "Traceback" not in out.stderr, out.stderr
 
 
-# ---- MF1's script side (CLI #18) ----------------------------------------------------------------
+# ---- an unreadable input, script side ----------------------------------------------------------
 @pytest.mark.parametrize("verb", ["tag", "build"])
 def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_path, verb):
     root, script = _planted_script(tmp_path)

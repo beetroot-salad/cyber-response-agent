@@ -1,4 +1,5 @@
-"""#959 - the wrapper folded into the parser (M3)"""
+"""#971 — no word is a wrapper: `bash -c` and `timeout` reach the gate as ordinary ungranted words.
+A fold would delete text ahead of the decision, so a mis-read could only widen what is allowed."""
 from __future__ import annotations
 
 import re
@@ -44,7 +45,7 @@ def _generic_lexing_reason() -> str:
 
 # #971 - no word is a wrapper, and what that leaves the parser doing.
 def test_no_word_is_parsed_as_a_wrapper():
-    """#971: neither `bash` nor `sh` is recognised, so no text is extracted from a command before the gate decides about it."""
+    """Neither `bash` nor `sh` is recognised, so nothing is extracted before the gate decides."""
     for cmd in (
         f"bash -c 'cat {REPORT}'",                    # the plain wrapper
         f"bash -c 'cat {REPORT} | wc -l'",            # a pipeline payload
@@ -62,7 +63,7 @@ def test_no_word_is_parsed_as_a_wrapper():
         "bash -c 'ls'\ncat /etc/hosts",               # a second physical line
         "bash -c ''",                                 # an empty payload
         "bash -c 'bash -c \"echo hi\"'",              # a wrapper inside a wrapper
-        "bash -c 'echo a '2>/dev/null",              # the retired member 3: an OUTER operator
+        "bash -c 'echo a '2>/dev/null",              # an OUTER operator after the quote
         f"bash -c 'cat {REPORT} '2>/dev/null",
     ):
         d = _bash(cmd)
@@ -89,7 +90,7 @@ def test_no_word_is_parsed_as_a_wrapper():
 
 
 def test_a_newline_inside_a_quoted_argument_is_the_unclosed_quote_it_looks_like():
-    """A quoted argument carrying a newline is refused for the reason every cross-line quote is refused - a quoted string cannot span lines - and the..."""
+    """A quoted newline is an unclosed quote on its line, and the reason says so: a pretty-printed payload needs telling."""
     for cmd in (
         f"bash -c 'cat {REPORT}\nwc -l'",
         f"cat {REPORT} | grep 'a\nb'",
@@ -105,7 +106,7 @@ def test_a_newline_inside_a_quoted_argument_is_the_unclosed_quote_it_looks_like(
 
 
 def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
-    """#971: `timeout` is an ORDINARY UNGRANTED WORD."""
+    """`timeout` is an ordinary ungranted word: no prefix is stripped before the decision."""
     assert _parsed(f"timeout 5 cat {REPORT}") == [[["timeout", "5", "cat", REPORT]]], (
         "the prefix is still in the argv - the parse reports what the text says, and the "
         "capability question is asked about `timeout` itself"
@@ -113,12 +114,12 @@ def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
     for cmd in (
         f"timeout 5 cat {REPORT}",             # the plain prefix
         f"timeout 0.5 cat {REPORT}",           # a fractional duration
-        f"timeout '5' cat {REPORT}",           # quoted: the retired member 4
+        f"timeout '5' cat {REPORT}",           # quoted
         f'"timeout" 5 cat {REPORT}',
-        f"timeout --foreground cat {REPORT}",  # no duration anywhere: the old FK1 hazard
+        f"timeout --foreground cat {REPORT}",  # no duration anywhere
         f"timeout\n5 cat {REPORT}",            # the prefix straddling a line boundary
-        f"timeout 5 timeout 3 cat {REPORT}",   # a second prefix the apply-once fold left behind
-        f"bash -c 'timeout 5 cat {REPORT}'",   # inside a wrapper, where the fold never reached
+        f"timeout 5 timeout 3 cat {REPORT}",   # a second prefix
+        f"bash -c 'timeout 5 cat {REPORT}'",   # inside a `bash -c`
         f"timeout cat {REPORT}",
         "timeout",
         "timeout --",
@@ -136,7 +137,7 @@ def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
 
 
 def test_an_ungranted_first_word_answers_before_any_classification_of_the_rest():
-    """The consequence #971 accepts rather than repairs, pinned so nobody repairs it."""
+    """Deliberate: a prefixed adapter command gets the capability reason, not the adapter redirect."""
     for policy in (base.MAIN, base.GATHER):
         bare = _bash("defender-elastic query foo", policy)
         assert bare.reason == permission.ADAPTER_RETIRED_REASON, (
@@ -152,7 +153,7 @@ def test_an_ungranted_first_word_answers_before_any_classification_of_the_rest()
 
 
 def test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal():
-    """The composition #971 retires"""
+    """A blank that changes nothing about the refusal is not named; a decisive one still is."""
     for cmd in (NBSP + f"timeout '5' cat {REPORT}", f"timeout '5' cat {REPORT}" + NBSP):
         d = _bash(cmd)
         assert not d.allow
@@ -166,7 +167,7 @@ def test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal():
     assert re.search(rf"U\+0*{ord(NBSP):04x}\b", d.reason, re.IGNORECASE)
 
 
-# C3 / C4 - what the removal leaves behind.
+# What the removal leaves behind.
 def _identifier_hits(name: str, *, skip: set[str]) -> dict[str, list[int]]:
     """Every line under `defender/` naming `name`, by file - tests included, this file's own
     suite excluded (it names the symbol in prose about its removal)."""
@@ -185,7 +186,7 @@ def _identifier_hits(name: str, *, skip: set[str]) -> dict[str, list[int]]:
 
 
 def test_the_paren_fall_through_still_fails_closed_a_layer_up():
-    """`(` and `)` still break a word without being operators the grammar accepts, so `cat <(id)` still reaches argv as ordinary words and is still..."""
+    """`(`/`)` break words without being operators, so `cat <(id)` reaches argv as words and the argv guard refuses it."""
     assert _parsed("cat <(id)") == [[["cat", "<(", "id", ")"]]]
     assert _parsed("bash -c 'cat <(id)'") == [[["bash", "-c", "cat <(id)"]]]
     for cmd in ("cat <(id)", "bash -c 'cat <(id)'"):

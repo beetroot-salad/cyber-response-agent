@@ -1,6 +1,6 @@
 """#1202: removing a paused runsc box. `docker rm -f` on a paused box kills it but answers non-zero;
-every removal site must wait it out and retry, and none may thaw the box. (#1279 O6 removed the
-pre-create sweep's removal of a finished container, so that site is no longer one of them.)"""
+every removal site must wait it out and retry, and none may thaw the box. (The pre-create check
+leaves a same-name container alone, so it is not a removal site.)"""
 from __future__ import annotations
 
 import subprocess

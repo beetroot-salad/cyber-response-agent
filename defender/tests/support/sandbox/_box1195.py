@@ -1,4 +1,4 @@
-"""Shared fakes for the #1195 rows (both drain lanes), design amendment 3. NOT a test module."""
+"""Shared fakes for the #1195 box-lifecycle tests (both drain lanes)."""
 from __future__ import annotations
 
 import contextlib
@@ -33,8 +33,8 @@ DEFENDER = Path(__file__).resolve().parents[3]
 #: from these under `<wt>/defender`.
 IMAGE_INPUTS = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 
-#: The build pointer the retired worktree batch start appended to a `BoxFault` (#1195; that unwind
-#: went with the worktree drains, #1108 P4): a mid-batch box fault must never carry it.
+#: The cut-commit pointer the retired worktree batch start appended to a `BoxFault`; a mid-batch
+#: box fault must never carry it.
 POINTER = "origin/main @ "
 
 #: A batch box's docker calls from its post-create stop on (`FakeDaemon.calls_from_the_first_stop`)
@@ -103,7 +103,7 @@ def assert_the_stop_fault_won(got: BaseException | None, raised: BaseException,
 
 
 # ---------------------------------------------------------------------------------------
-# The design's new names, reached at call time
+# Box names, imported at call time
 # ---------------------------------------------------------------------------------------
 
 
@@ -591,7 +591,7 @@ def plant_image_inputs(repo: Path) -> None:
     """Copy this checkout's image inputs under `<repo>/defender`, so a real `start_box` over a
     drain request on `repo` resolves an image name rather than faulting on a missing input.
     The product's committed code check file comes too: the drain's read-only worktree is a
-    `code` mount, read back at `<repo>/defender/<box.CODE_CHECK_FILE>` (#1108 D7 amended)."""
+    `code` mount, read back at `<repo>/defender/<box.CODE_CHECK_FILE>`."""
     (repo / "defender").mkdir(parents=True, exist_ok=True)
     for name in (*IMAGE_INPUTS, box_mod.CODE_CHECK_FILE):
         shutil.copyfile(DEFENDER / name, repo / "defender" / name)
@@ -599,5 +599,5 @@ def plant_image_inputs(repo: Path) -> None:
 
 def clear_opt_out(monkeypatch: Any) -> None:
     """`DEFENDER_ALLOW_UNSANDBOXED` unset: a start fault must surface, never degrade to a host
-    executor (N12)."""
+    executor."""
     monkeypatch.delenv(box_mod._ALLOW_UNSANDBOXED, raising=False)

@@ -56,9 +56,8 @@ print(n)
 
 @contextlib.contextmanager
 def _batch(base: Path) -> Iterator[Any]:
-    """A tenant batch the way a P4 drain cuts one (#1108 P4 re-spelling, OD12 class ii): the
-    tenant, its git-free draft and the product code the box mounts (this checkout's image inputs
-    and code check file) all under `base`, daemon-visible under DooD."""
+    """A tenant batch the way a drain cuts one: the tenant, its git-free draft and the product
+    code the box mounts (this checkout's image inputs and code check file), all under `base`."""
     X.plant_image_inputs(base / "product")
     code = base / "product" / "defender"
     with build_tenant(base / "tenant") as built:
@@ -138,7 +137,7 @@ def live_worktree_base(tmp_path: Path) -> Iterator[Path]:
 @pytest.mark.box
 def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(
         tmp_path: Path, live_worktree_base: Path, monkeypatch):
-    """#1195 on a P4 drain box (`Batch.box_request()` over a tenant draft): a stopped box keeps
+    """On a drain box (`Batch.box_request()` over a tenant draft): a stopped box keeps
     nothing a run left (no writer, no scratch), keeps its link ban across a restart, refuses a
     run in a box someone else started, and the draft as run 1 left it is what the batch commits."""
     with contextlib.ExitStack() as stack:

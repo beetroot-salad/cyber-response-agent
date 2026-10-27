@@ -32,8 +32,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time
-    (it does not exist at the spec's base — one failure per test, never a collection error)."""
+    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
     return E.page_module()
 
 
@@ -51,7 +50,7 @@ def cli(argv, capsys):
 def hook_page(episode_dir) -> E.Page:
     """The page the launcher's hook wrote, parsed — after checking it is byte-identical to a
     standalone `visualize_episode().render_episode` over the same directory: the hook is a
-    plain call to the same function (d40) and the page is a pure function of the directory."""
+    plain call to the same function and the page is a pure function of the directory."""
     page = pathlib.Path(episode_dir) / E.PAGE_NAME
     assert page.is_file(), f"the launcher did not write {E.PAGE_NAME}"
     written = page.read_bytes()
@@ -127,8 +126,7 @@ def _live996(tmp_path: Path, **kw) -> E.Episode:
 
 def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_opens_with_the_templated_line_when_there_is_no_family_draw(
         tmp_path):
-    """Sample: the lede's first line carries the three family findings as `topic: claim` escaped,
-    then the templated line "13 findings queued"; a synthetic two-draw family."""
+    """A family `draws_failed_reason` takes the lede's first line, ahead of "N findings queued"."""
     ep = E.sample_episode(tmp_path)
     band = render(ep).text_of("sec-verdict")
     for row in E.family_findings():
@@ -160,8 +158,7 @@ def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_op
 
 def test_1025_the_verdict_tile_carries_judged_and_verdict_equals_declared_counts_on_both_archives(
         tmp_path):
-    """Sample tile 1: "2 worlds judged · verdict = declared on 0 of 2"; the live-996 shape (one row
-    ungradable, so not judged): "1 worlds judged · verdict = declared on 0 of."""
+    """An ungradable row (the live-996 shape) is not counted as judged."""
     tile = _tile(render(E.sample_episode(tmp_path)), 0)
     assert TILE_ONE in tile.text(), tile.text()
 
@@ -171,8 +168,6 @@ def test_1025_the_verdict_tile_carries_judged_and_verdict_equals_declared_counts
 
 def test_1025_tiles_two_to_four_carry_judged_of_rows_with_reasons_queued_of_total_split_and_cost_with_the_labelled_lower_bound(
         tmp_path):
-    """Sample: tile 2 "2 of 2" (judged of the record's rows) with no caption; tile 3 "13 of 13"
-    split 8 defender / 5 world author / 0 unqueueable / 0 dropped; tile 4 "$3.5500"."""
     page = render(E.sample_episode(tmp_path))
     two, three, four = (_tile(page, i).text() for i in (1, 2, 3))
     assert two == f"{S.graded} of {S.graded}", two
@@ -191,7 +186,6 @@ def test_1025_tiles_two_to_four_carry_judged_of_rows_with_reasons_queued_of_tota
 
 
 def test_1025_a_not_graded_stamp_renders_its_reason_and_no_tiles_cards_or_findings_table(tmp_path):
-    """An episode whose `judge.yaml` carries `not_graded."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     assert len(_tiles(page)) == 4
@@ -209,7 +203,7 @@ def test_1025_a_not_graded_stamp_renders_its_reason_and_no_tiles_cards_or_findin
 
 
 def test_1025_a_not_graded_page_below_the_band(tmp_path):
-    """"Nothing below the band" is the verdict section's own layer (J14)."""
+    """Only the verdict section empties: stages, worlds, leads and records still render."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["not_graded"] = {"outcome": "unusable", "reason": "STAMP-REASON"}
@@ -231,7 +225,7 @@ def test_1025_a_not_graded_page_below_the_band(tmp_path):
 
 def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_stages_and_worlds_and_says_which_world_is_in_progress(
         tmp_path):
-    """A launcher-produced episode whose judge pass failed at the enqueue ."""
+    """The queue folder is a file, so the append fails after `judge.yaml` records b as `queueing`."""
     # One investigator finding per world draw; the family scope refuses a world-scope reply,
     # so the family call completes no draw.
     class JudgeWithCurrentPointers(J.FakeJudge):
@@ -265,7 +259,7 @@ def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_sta
 
 
 def test_1025_draw_documents_exist_but_judge_yaml_does_not(tmp_path):
-    """The failed-judge snapshot (J9a)."""
+    """With no record no draw is named, so no finding row renders."""
     ep = E.sample_episode(tmp_path, judge=False)
     page = render(ep)
     assert "no grade record" in page.text_of("sec-verdict")
@@ -289,8 +283,7 @@ def test_1025_every_finding_across_per_draw_docs_and_family_draws_renders_exactl
 
 def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_unqueueable_blocked_by_verdict_or_enqueued(
         tmp_path):
-    """Sample: both siblings' 4 defender findings read enqueued (the episode has the 5 world-author
-    rows read enqueued; a ledger entry re-filed unqueueable marks that id."""
+    """Every disposition is the record's ledger (`judge.yaml.dispositions`), never a rule the page re-runs."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
@@ -332,7 +325,7 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_unqueueab
 
 def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_family_rows_at_family_level_and_dropped_counts_per_draw(
         tmp_path):
-    """Two addressee tables (defender / world author)."""
+    """A dropped finding is its own row under its drop lane's group (no per-draw dropped count)."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     defender = {_group_id(page, f"f-{E.GRADED_WORLD}-0-{i}") for i in range(4)}
@@ -370,15 +363,14 @@ def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_fam
 
 def test_1025_a_world_drawn_twice_renders_both_draws_findings_once_each_in_numeric_draw_order_via_draws_on_disk(
         tmp_path):
-    """A copied episode with `worlds/prior_fake_key_precedent/judge/{0,1,10}.yaml` renders that
-    world's findings under draws 0, 1, 10 in that order (numeric, not `0, 10, 1` as."""
+    """Draws render in numeric order (0, 1, 10); an `01.yaml` is ignored, as `draws_on_disk` ignores it."""
     ep = E.sample_episode(tmp_path)
     for draw in (1, 10):
         E.draw_document(ep.dir, E.GRADED_WORLD, draw, E.draw_doc(
             findings=[E.finding(subject="defender", claim=f"draw {draw} claim")]))
     E.draw_document(ep.dir, E.GRADED_WORLD, "01", E.draw_doc(
         findings=[E.finding(subject="defender", claim="NON-CANONICAL STEM")]), check=False)
-    # #1234 A6: the page shows the draws the record names, so the record names all three
+    # The page shows only the draws the record names, so the record names all three
     E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1, 10)))
     page = render(ep)
     rows = [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
@@ -392,7 +384,7 @@ def test_1025_a_world_drawn_twice_renders_both_draws_findings_once_each_in_numer
 
 def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_unqueueable_malformed_and_dropped_counts(
         tmp_path):
-    """The collapsed details carry "defender."""
+    """Each queue's recorded path is shown as escaped text, never a link."""
     page = render(E.sample_episode(tmp_path))
     acct = page.elements(cls="vd-acct")
     assert acct, "no queue-accounting details"
@@ -407,8 +399,8 @@ def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_unqu
 
 def test_1025_one_card_per_graded_world_with_declared_to_verdict_bucket_and_systems_heading_and_a_footer_linking_its_findings_group(
         tmp_path):
-    """Sample: two cards; `no_remote_session`'s header "benign → inconclusive", heading the judge
-    model's bucket "lead-set" and its systems, footer "4 findings · enqueued"."""
+    """Each card's footer links its findings group; the ungradable world and the control get no
+    card, and no card carries a family finding."""
     page = render(E.sample_episode(tmp_path))
     cards = {c.text(): c for c in _cards(page)}
     assert len(cards) == 2, list(cards)
@@ -434,7 +426,7 @@ def test_1025_one_card_per_graded_world_with_declared_to_verdict_bucket_and_syst
 
 def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_triple_absent_from_every_draw_document(
         tmp_path):
-    """A ledger entry whose draw document is gone (J9b)."""
+    """The record holds lanes, not finding text, so a triple with no row on disk renders no stub row."""
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
     (ep.world(E.PASSTHROUGH_WORLD) / "judge" / "0.yaml").unlink()
@@ -459,7 +451,7 @@ def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_tripl
 
 
 def test_1025_top_level_enqueue_counts_disagree_with_the_rows_the_page_walks(tmp_path):
-    """Both sources are shown labelled ."""
+    """Both counts are shown labelled; the disagreement line appears only when they differ."""
     ep = E.sample_episode(tmp_path)
     acct = render(ep).one(cls="vd-acct").text()
     assert f"record: {S.defender_enqueued} enqueued · page found: {S.defender_enqueued}" in acct, acct
@@ -477,7 +469,7 @@ def test_1025_top_level_enqueue_counts_disagree_with_the_rows_the_page_walks(tmp
 
 
 def test_1025_a_draw_document_is_torn_mid_write(tmp_path):
-    """A torn draw document, an undecodable one and a non-canonical stem beside an intact one."""
+    """Torn and undecodable documents count as unreadable; a non-canonical stem is "skipped", not unreadable."""
     ep = E.sample_episode(tmp_path)
     draws = ep.world(E.GRADED_WORLD) / "judge"
     E.plant_raw(draws / "1.yaml", "findings:\n  - {claim: 'torn")
@@ -527,8 +519,7 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
 
 
 def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path):
-    """A world finding the pass refused for citing a samples section the record marks `unavailable`
-    (pointer assessment."""
+    """It stays in the world-author table under an "unqueueable — <reason>" group, never dropped."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     reason = "cites samples.yaml#identity, whose section holds no real answers"
@@ -550,7 +541,7 @@ def _class_carries(page: E.Page, word: str) -> list[str]:
 
 
 def test_1025_judge_yaml_is_a_symlink_whose_target_is_a_different_episodes_judge_yaml(tmp_path):
-    """`read_grade` refuses the alias (`JudgeRefused`, F25/x16)."""
+    """`read_grade` refuses the alias: "grade record unreadable", and nothing from the linked grade shows."""
     ep = E.sample_episode(tmp_path)
     other = tmp_path / "other-judge.yaml"
     other_doc = E.sample_grade()
@@ -585,7 +576,7 @@ def test_1025_judge_yaml_is_present_with_an_empty_worlds_array_and_no_not_graded
 
 
 def test_1025_a_finding_row_carries_a_non_null_world_field_that_disagrees_with_its_directory(tmp_path):
-    """The directory is the world (correction 2, F5)."""
+    """The directory is the world: a row's own `world` field never addresses it and renders escaped."""
     ep = E.sample_episode(tmp_path)
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=[
         E.finding(subject="defender", claim="MISFILED CLAIM", world="<b>elsewhere</b>")]))
@@ -599,8 +590,7 @@ def test_1025_a_finding_row_carries_a_non_null_world_field_that_disagrees_with_i
 
 
 def test_1025_unqueueable_reason_text_contains_the_page_join_delimiter(tmp_path):
-    """A ledger reason carrying `": "` (the old `unqueueable_findings` line's join delimiter) is
-    shown whole, escaped: #1234's ledger carries the reason in its own field, so."""
+    """The ledger keeps the reason in its own field, so a `": "` inside it is shown whole, escaped."""
     ep = E.sample_episode(tmp_path)
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
                      "reason part one: part two <x>")

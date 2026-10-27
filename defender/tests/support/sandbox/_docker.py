@@ -25,11 +25,9 @@ def daemon_reachable() -> bool:
 def is_dood() -> bool:
     """Docker-outside-of-Docker: a reachable daemon whose root dir is not OUR root dir.
 
-    This is the case that matters and the one a bare `daemon_reachable()` misses. Inside a
-    container talking to the host's daemon, `docker run -v` binds resolve against the
-    HOST's filesystem, so a bind source that exists here is invisible there — the container
-    starts and the test then fails on missing files rather than skipping. The probe is
-    exactly that: the daemon reports a root directory this process cannot see.
+    `docker run -v` binds then resolve on the HOST, so a bind source that exists here is
+    invisible to the daemon: the box starts and the test fails on missing files instead of
+    skipping. `daemon_reachable()` alone misses this.
     """
     if not Path("/.dockerenv").exists():
         return False
@@ -43,14 +41,11 @@ def is_dood() -> bool:
 
 @functools.cache
 def docker_runtimes() -> frozenset[str]:
-    """The runtimes the daemon registers (`docker info` Runtimes). Empty when the daemon
-    answers non-zero.
+    """The runtimes the daemon registers (`docker info` Runtimes); empty when it answers non-zero.
 
-    RAISES when `docker` cannot be run or does not answer in time, and that is the point: an
-    empty set here skips every runtime-gated live test, so a `docker info` that timed out once
-    under load would otherwise turn those suites green while they test nothing. Every caller
-    asks only after `daemon_reachable()`, so a raise is a daemon that stopped answering, and it
-    fails where it was asked: collection for a module-level gate, the case for a per-case one."""
+    RAISES when `docker` cannot run or times out, on purpose: an empty set skips every
+    runtime-gated live test, so one slow `docker info` would turn those suites green while they
+    test nothing. Callers ask only after `daemon_reachable()`."""
     probe = subprocess.run(
         ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
         capture_output=True, text=True, encoding="utf-8", timeout=30,

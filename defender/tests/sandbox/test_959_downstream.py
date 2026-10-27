@@ -1,4 +1,5 @@
-"""#959 - everything downstream of the decision"""
+"""#959 — downstream of the bash decision: the box handoff, the operand set's consumers, the audit
+row, refusal reasons and the operator's view."""
 from __future__ import annotations
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -77,9 +78,8 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     dfn.mkdir(parents=True)
     payload = run / "gather_raw" / lead_id / "0.json"
     payload.write_text("{}", encoding="utf-8")
-    # The run's state, as the driver starts it and hands it to gather deps (#1235): the
-    # shim-failure row's seq and its `system=` attribution are read from it, and this folder
-    # went through no driver.
+    # This folder went through no driver, so the run state is started here (#1235): the
+    # shim-failure row's seq and `system=` attribution are read from it.
     from defender.investigation.run_state import RunState
 
     box = Box(result)
@@ -91,17 +91,16 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
 
 
 
-# FK8 - the operand set the four post-decision consumers read.
+# The operand set the four post-decision consumers read.
 def test_the_operand_set_the_four_post_decision_consumers_read_is_the_one_the_gate_authorised(
     tmp_path,
 ):
-    """The operand set is walked once from the authorised decision and threaded, and every consumer downstream of the decision sees THAT set"""
+    """Refusal, untrusted frame, output ceiling and overflow hint all read the operand set the gate authorised."""
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(0, b"x" * 20000, b""))
 
     opened = _tool_bash(deps, f"cat {model_path(payload, run_dir=deps.run_dir)}")
     assert "untrusted" in opened, "the payload operand did not reach the frame decision"
-    # #1255 C5: the hint names the operand as the model handed it (its model path), never the
-    # host path this used to assert.
+    # The hint names the operand as the model handed it (its model path), not the host path.
     assert model_path(payload, run_dir=deps.run_dir) in opened, "the overflow hint names a file the operand set did not carry"
     assert len(opened) < 12000, (
         "the capture ceiling the payload operand chose was not applied - the ceiling is a "
@@ -160,15 +159,13 @@ _PARITY = (
 
 # The object that crosses into the box.
 def test_the_object_the_gate_authorised_is_the_object_the_box_runs(tmp_path):
-    """The pipelines the gate authorised are the pipelines the box runs"""
     deps, box, payload = _gather_scene(tmp_path, BoxResult(0, b"ok", b""))
     m_payload = model_path(payload, run_dir=deps.run_dir)
     cmd = f"cat {m_payload}"
     _tool_bash(deps, cmd)
     assert len(box.calls) == 1
     sent = box.calls[0]
-    # #1255 C8/C11: the decomposition the box receives, stated literally in the model view — how
-    # the gate's own functions spell their inputs is the implementer's choice (C11).
+    # The decomposition the box receives, stated literally in the model view.
     assert [[list(st.argv) for st in pl.stages] for pl in sent["pipelines"]] == \
         [[["cat", m_payload]]], "the box ran something other than what the gate authorised"
     assert sent["command"] == cmd
@@ -185,7 +182,6 @@ def test_the_object_the_gate_authorised_is_the_object_the_box_runs(tmp_path):
 
 
 def test_nothing_mutates_the_authorised_pipelines_between_authorisation_and_execution(tmp_path):
-    """Nothing mutates the authorised pipeline objects between the authorisation and the execution"""
     deps, box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"boom"))
     m_payload = model_path(payload, run_dir=deps.run_dir)
     _tool_bash(deps, f"cat {m_payload} | defender-sql 'SELECT 1'")
@@ -196,8 +192,7 @@ def test_nothing_mutates_the_authorised_pipelines_between_authorisation_and_exec
         "the authorised pipelines were mutated after they crossed into the box - the audit "
         "path and the operand walk read this object graph and must not write to it"
     )
-    # ...and what crossed is still the command's own decomposition, in the model view (#1255
-    # C8/C11: stated literally — the gate's own input spelling is the implementer's choice).
+    # ...and what crossed is still the command's own decomposition, in the model view.
     assert live == [[["cat", m_payload], ["defender-sql", "SELECT 1"]]], live
 
 
@@ -209,7 +204,7 @@ def _names_codepoint(reason: str, char: str) -> bool:
 
 
 def test_a_command_refused_only_for_an_invisible_character_is_told_so():
-    """A command refused only because a character the model cannot see is now part of a word is told WHICH character"""
+    """The refusal names the invisible character by codepoint; refusals it did not move keep their reason."""
     for blank in base.DIVERGENT_BLANKS:
         for position, cmd in (
             ("trailing, in an operand", f"cat {REPORT}" + blank),
@@ -282,7 +277,6 @@ def test_a_command_refused_only_for_an_invisible_character_is_told_so():
 
 
 def test_the_serialised_verdict_an_operator_reads_carries_the_argv_half(capsys):
-    """The one tool that prints a decision for a human reports the WHOLE verdict"""
     cmd = f"cat {REPORT} | wc -c"
     buf = io.StringIO()
     with redirect_stdout(buf):
