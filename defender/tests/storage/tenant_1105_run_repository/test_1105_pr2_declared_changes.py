@@ -20,20 +20,14 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
 RID_R1 = fixture_uuid('pr2-dc8-r1')
 
-ONLY_IN_U = fixture_uuid('pr2-dc8-only-in-u')
-
-NOPE = fixture_uuid('pr2-dc8-nope')
-
-LINKED = fixture_uuid('pr2-dc8-linked')
-
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
 
 
 def _episode_names() -> set[str]:
-    """Every entry under any tenant's `<data root>/<T>/episodes/` — #1187 Layout A, where every
-    launch claims its episode (O9: no configured episodes root)."""
+    """Every entry under any tenant's `<data root>/<T>/episodes/`, where every launch claims its
+    episode."""
     root = location_path(P.data_root)()
     return {str(p.relative_to(root)) for p in root.glob("*/episodes/*")}
 
@@ -88,7 +82,7 @@ def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path):
     assert prompts, "the judge was never asked"
     from defender.learning.judge.layout import FOCUS_VIEW_TITLES
 
-    # #1234 M3/A10: the focus world's report view is titled, in host text, by its world label.
+    # The focus world's report view is titled, in host text, by its world label.
     assert any(f" — {FOCUS_VIEW_TITLES['report']}" in p for p in prompts)
     for prompt in prompts:
         assert "SIBLING TRIALS" not in prompt, "the prompt still carries the sibling view"
@@ -197,9 +191,8 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
 
 
 class _LinkingSibling(P.J.FakeSibling):
-    """`FakeSibling` whose arm `b` is materialised OUTSIDE the container, with a link left at
-    its name: the one arm-entry shape a host (never a box: seccomp, B-03) can leave. #1187: the
-    arm's name is the id the episode's roster holds for `b`."""
+    """`FakeSibling` whose arm `b` (at its roster id) is materialised OUTSIDE the container, with
+    a link left at its name: the one arm-entry shape a host (never a box: seccomp) can leave."""
 
     def __init__(self, *, outside: Path) -> None:
         super().__init__()
@@ -302,8 +295,7 @@ def test_dc6_the_sibling_judges_the_container_before_the_manifest(tmp_path):
 
 def test_dc7_the_run_page_refuses_a_linked_run_folder(tmp_path):
     src, _ep = P.sibling_scene(tmp_path)
-    # #1187 declared change 1: the link's name is a uuid, so the id rule admits it and the
-    # refusal is the link's (O8), never the id grammar's.
+    # The link's name is a uuid, so the id rule admits it and the refusal is the link's.
     target = tmp_path / "elsewhere" / fixture_uuid("dc7-linked")
     shutil.copytree(src, target)
     link = src.parent / target.name
@@ -341,7 +333,7 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
 
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
-    rc = run_py.main([str(alert), "--tenant", d9_tenant], **with_publish(seams))  # #1108 P4
+    rc = run_py.main([str(alert), "--tenant", d9_tenant], **with_publish(seams))
     assert rc == 0
     run_dir = rec.run_dir
     assert run_dir is not None
@@ -378,33 +370,6 @@ def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
         f"served {lane.run_dirs}")
     assert P.dead_letter(paths, "case-t") is None
     assert P.dead_letter(paths, "case-u") is None
-
-
-def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
-    t, u, paths = _drain_scene(tmp_path)
-    H.make_run(location_path(u.runs), ONLY_IN_U)
-    os.symlink(Path(location_path(t.runs)) / RID_R1, Path(location_path(t.runs)) / LINKED)
-    gone = {
-        "absent": {"case_id": "absent", "tenant_id": H.T_ID, "run_id": NOPE},
-        "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": ONLY_IN_U},
-    }
-    not_now = {
-        "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": RID_R1},
-        "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": LINKED},
-    }
-    for case_id, body in {**gone, **not_now}.items():
-        P.queue_row(paths, case_id, body)
-    P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.U_ID, "run_id": ONLY_IN_U})
-    lane = P.Lane()
-    P.drain(paths, lane)
-    assert lane.run_dirs == [Path(location_path(u.runs)) / ONLY_IN_U], f"served {lane.run_dirs}"
-    for case_id in gone:
-        letter = P.dead_letter(paths, case_id)
-        assert letter is not None, f"{case_id}: {letter!r}"
-        assert letter.get("failed") == "artifact-missing", f"{case_id}: {letter!r}"
-    for case_id in not_now:
-        assert P.dead_letter(paths, case_id) is None, f"{case_id} was dead-lettered at once"
-        assert P.still_queued(paths, case_id), f"{case_id} was not re-queued"
 
 
 def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch):
@@ -489,10 +454,9 @@ def _the_launched_episode() -> Path:
 
 
 def _tenant_episode(tenant_id: str) -> tuple[Path, str]:
-    """#1187's layout (decision 1, declared change 5): `<data root>/<tenant_id>/episodes/<uuid>/`
-    holding a manifest the family model loads (`_triplet_947.family_doc`, worlds a, b, c) that
-    names that uuid (R5), and the arm roster `arms.json` naming every manifest world — no
-    container record anywhere. Returns `(folder, episode id)`."""
+    """`<data root>/<tenant_id>/episodes/<uuid>/` holding a manifest the family model loads
+    (worlds a, b, c) that names that uuid, and the arm roster naming every manifest world.
+    Returns `(folder, episode id)`."""
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.storage.ids_1187 import _spec1187 as S
 

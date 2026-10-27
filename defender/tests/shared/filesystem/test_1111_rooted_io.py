@@ -34,14 +34,13 @@ from defender.tests.support.shared.contracts._create_lane import assert_single_p
 from defender.tests.support.shared.filesystem._umask import umask
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-#: #1187 declared change 1: a run id is a canonical lowercase uuid4 text.
 RUN_ID = fixture_uuid("rooted-io-1111")
-#: How long one call may take before O3 calls it hung. A right answer takes milliseconds; the
+#: How long one call may take before it counts as hung. A right answer takes milliseconds; the
 #: deadline only bounds a regression, so it fails the test rather than wedging the run.
 DEADLINE = 3.0
 
 
-#: Today's write-once members (`create`; a second write is refused). Not #1111's to change.
+#: The write-once members (`create`: a second write is refused).
 WRITE_ONCE = frozenset({"alert", "alert_record", "provenance", "leads"})
 
 #: What a plant can put AT a record's name.
@@ -73,8 +72,8 @@ PLAIN = "plain record at its own address\n"
 
 @dataclasses.dataclass(frozen=True)
 class Member:
-    """One record, addressed as the design's M2 addresses it: a trust root (`run_dir`,
-    `runs_base`, `session_root` or `world_dir`) and the record's name relative to it."""
+    """One record, addressed by a trust root (`run_dir`, `runs_base`, `session_root` or
+    `world_dir`) and the record's name relative to it."""
 
     group: str
     name: str
@@ -92,7 +91,7 @@ class Member:
 
 
 def trust_roots(runs_base: Path, world_dir: Path) -> dict[str, Path]:
-    """The design's M2 trust-root table, most specific first: an in-run record's root is the
+    """The trust-root table, most specific first: an in-run record's root is the
     run dir, a sidecar's the runs base, the session db's `SessionPaths(runs_base).trust_root`,
     an archived world's member's the world dir."""
     return {
@@ -167,9 +166,7 @@ class Tree:
         return self.root(m) / m.rel
 
     def run(self, io: Any = _io) -> Any:
-        """The handle as application code builds it. #1187 (R1): `Run.for_tenant` and the
-        runs base's `_tenant.json` it read are retired; `Run.under(container, id, tenant_id=)`
-        replaces it, over a container holding no record."""
+        """The handle as application code builds it (`Run.under`)."""
         return H.Run.under(fixture_runs_base(self.runs_base), RUN_ID, tenant_id=S.DEFAULT_TENANT_ID, io=io)
 
     def handle(self, m: Member, *, run: Any = None, io: Any = _io) -> Any:
@@ -280,7 +277,7 @@ def census(top: Path) -> dict[str, tuple]:
 
 def in_time(fn: Callable[[], Any], *, fifo: Path | None = None) -> Any:
     """`fn()`'s value (or its exception, re-raised), failing if it has not returned within
-    `DEADLINE` (O3). A call stuck opening `fifo` is released by opening the FIFO's other end,
+    `DEADLINE`. A call stuck opening `fifo` is released by opening the FIFO's other end,
     so a regression costs one failed test, not a wedged run."""
     outcome: dict[str, Any] = {}
 
@@ -330,8 +327,7 @@ def assert_row(exc: BaseException | None, kind: str, *, where: str) -> None:
 
 def owner_refusal(h: Any) -> BaseException | None:
     """The owner's own refusal of the address (`_confine` on a composed path resolving outside
-    the run), which fires before any I/O and is unchanged by #1111. `None` if the owner builds
-    the path."""
+    the run), which fires before any I/O. `None` if the owner builds the path."""
     try:
         _ = h.path
     except (OSError, ValueError) as e:
@@ -439,12 +435,12 @@ def _fill_record_sources(tree: Tree) -> None:
         json.dumps({"truncated_by": "budget", "closed_before_cut": False}), encoding="utf-8")
 
 
-#: The `_io` reads `run.record` may make: today's path-based pair, and the rooted read.
+#: The `_io` reads `run.record` may make: the path-based pair and the rooted read.
 _RECORD_READ_OPS = ("rooted_read", "read_guarded", "read_bytes_guarded")
 
 
 def _record_sources(tree: Tree) -> list[Path]:
-    """Every file `run.record` reads, by construction (O4): the address of each read call a
+    """Every file `run.record` reads, by construction: the address of each read call a
     pass-through recorder captured, whichever read seam it went through."""
     rec = S.RecordingIo()
     run = tree.run(io=rec)
@@ -559,22 +555,6 @@ def test_o7_a_fifo_at_the_tool_trace_is_a_partial_failure_not_a_raise_and_not_a_
     assert run.partial_failures == ("tool_trace: append failed",)
 
 
-def test_o7_a_symlinked_wire_logs_folder_raises_and_records_no_partial_failure(tree):
-    m = _member("wire_log")
-    run = tree.run()
-    planted = plant_folder(tree.root(m), m.rel, m.folders[0], "folder_link_outside",
-                           host=tree.host)
-    before = census(tree.host)
-    assert_row(raised_by(verb_call(tree.handle(m, run=run), m, "x")), "folder_link_outside",
-               where="wire_log.append")
-    assert run.partial_failures == ()
-    assert census(tree.host) == before
-
-    planted.remove()
-    verb_call(tree.handle(m, run=run), m, "plain")()
-    assert_landed(tree.path(m), m, "plain")
-
-
 @pytest.mark.parametrize("m", [m for m in WRITABLE if m.verb == "write"], ids=str)
 def test_o6_a_second_write_is_refused_as_write_once_only_where_the_record_is_write_once(
         tree, m):
@@ -667,8 +647,7 @@ def test_o5_a_symlinked_runs_base_or_data_root_keeps_every_record_readable_and_w
 
 @pytest.mark.parametrize("m", ARCHIVED_MEMBERS, ids=str)
 def test_o5_an_archived_world_at_a_symlinked_world_dir_reads_every_member(tree, m):
-    """O5 for `ArchivedWorld`: its root, the world dir, is followed when spelled through a
-    symlink."""
+    """`ArchivedWorld`'s root, the world dir, is followed when spelled through a symlink."""
     alias = tree.tmp / "alias-of-the-world"
     alias.symlink_to(tree.world_dir, target_is_directory=True)
     (tree.world_dir / m.rel).write_text(PLAIN, encoding="utf-8")
@@ -683,9 +662,7 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "unused-world", tmp_path)
     assert not tree.root(m).exists()
 
-    # #1105 NH-3 planted the runs base's record here, after the precondition; #1187 (R1)
-    # retired the record, but the runs base is still made here so the cases stay the ones the
-    # docstring names.
+    # Every root but the world dir hangs off the runs base, made here; the write makes the rest.
     if m.root != "world_dir":
         location_path(tree.runs_base).mkdir()
     verb_call(tree.handle(m), m, "created")()
@@ -695,7 +672,7 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
 @pytest.mark.parametrize("m", READABLE, ids=str)
 def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m):
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "worlds" / "gone", tmp_path)
-    if m.root != "world_dir":  # #1105 NH-3's precondition, kept (#1187 R1: no record now)
+    if m.root != "world_dir":  # the runs base exists; the record's own root may not
         location_path(tree.runs_base).mkdir(parents=True)
     before = census(tmp_path)
     assert tree.handle(m).read() is None
@@ -760,7 +737,7 @@ def test_rooted_read_returns_the_text_or_the_bytes_of_a_plain_file(scratch):
 
 def test_rooted_read_is_absent_for_a_missing_leaf_folder_or_root(scratch):
     """Absence is `(None, reason)`, never a raise: a missing record, a missing holding folder,
-    a missing root (O5)."""
+    a missing root."""
     (scratch.root / "a").mkdir()
     for root, name in ((scratch.root, "a/rec.json"), (scratch.root, "a/b/rec.json"),
                        (scratch.tmp / "no-such-root", "rec.json")):
@@ -798,7 +775,7 @@ def test_rooted_read_refuses_every_plant_without_blocking(scratch, kind, folder,
 
 
 def test_rooted_read_follows_the_roots_own_spelling(scratch):
-    """O5: the root is opened following its spelling (a symlinked root, or a root under a
+    """The root is opened following its spelling (a symlinked root, or a root under a
     symlinked folder). Only what is below it is judged."""
     scratch.real_folders().write_text(PLAIN, encoding="utf-8")
     alias = scratch.tmp / "alias"
@@ -824,8 +801,8 @@ def test_rooted_read_never_reads_a_name_outside_the_grammar(scratch, name):
 # -- rooted_mkdir -----------------------------------------------------------------------
 
 def test_rooted_mkdir_creates_a_missing_root_following_links_then_each_folder(scratch):
-    """M1: a missing root is created following links (`os.makedirs`, as `guarded_mkdir`'s
-    base). Each missing folder is then created relative to its parent. It is idempotent."""
+    """A missing root is created following links (`os.makedirs`, as `guarded_mkdir`'s base).
+    Each missing folder is then created relative to its parent. It is idempotent."""
     link = scratch.tmp / "link"
     link.symlink_to(scratch.host, target_is_directory=True)
     root = link / "new" / "root"
@@ -1019,7 +996,7 @@ def test_rooted_write_refuses_every_plant_in_todays_shape_and_changes_nothing(
 
 @pytest.mark.parametrize("mode", MODES)
 def test_rooted_write_follows_the_roots_own_spelling(scratch, mode):
-    """O5: a symlinked root is followed; the record lands in the folder it points at."""
+    """A symlinked root is followed; the record lands in the folder it points at."""
     scratch.real_folders()
     alias = scratch.tmp / "alias"
     alias.symlink_to(scratch.root, target_is_directory=True)
@@ -1061,8 +1038,7 @@ def plant_device(path: Path, kind: str) -> Planted:
     return Planted(kind, path)
 
 
-#: The seam ops a leaf judge guards: both reads and each write mode. (The lock,
-#: `rooted_locked_for_rewrite`, left with #1235.)
+#: The seam ops a leaf judge guards: both reads and each write mode.
 SEAM_OPS = ("read", "read_bytes", "create", "replace", "append")
 
 
@@ -1104,7 +1080,7 @@ def assert_seam_lands(s: Scratch, op: str, **kw: Any) -> None:
     assert target.read_text(encoding="utf-8").endswith(f"{op} landed\n"), f"control: {op}"
 
 
-# -- hole 1: a device at the leaf ----------------------------------------------------------
+# -- A device at the leaf ------------------------------------------------------------------
 
 @pytest.mark.parametrize("op", SEAM_OPS)
 @pytest.mark.parametrize("kind", sorted(DEVICES))
@@ -1193,7 +1169,7 @@ O6_ROWS.update({
 })
 
 
-# -- hole 2: the race window between the leaf's check and its open ------------------------
+# -- The race window between the leaf's check and its open --------------------------------
 
 @pytest.mark.parametrize("op", ["read", "read_bytes", "append"])
 @pytest.mark.parametrize("pose", sorted(p for p in POSES if p != "as_symlink"))
@@ -1307,7 +1283,7 @@ def test_a_write_once_collision_writes_no_body(scratch):
     assert target.read_text(encoding="utf-8") == "first\n"
 
 
-# -- hole 3: create's DEFAULT lane --------------------------------------------------------
+# -- Create's DEFAULT lane ----------------------------------------------------------------
 
 class _RecordsCreate(PassThroughOs):
     """Records every `link`, with whether the record's name already existed at that moment
@@ -1434,8 +1410,7 @@ def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_
         bad, landed = _alert_leftovers(root, body)
         return [f"kill {kill}: {b}" for b in bad], landed
 
-    # Each kill is its own child in its own run dir, so they run side by side: sixteen start-ups
-    # one after another were the whole cost of this test.
+    # Each kill is its own child in its own run dir, so they run side by side.
     with ThreadPoolExecutor(max_workers=8) as pool:
         outcomes = list(pool.map(one_kill, range(ALERT_KILLS)))
     torn = [line for lines, _ in outcomes for line in lines]

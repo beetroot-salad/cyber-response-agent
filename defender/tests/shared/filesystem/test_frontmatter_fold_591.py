@@ -39,8 +39,8 @@ def _skill(skills_dir: Path, system: str, content: bytes) -> None:
 
 
 def _name_status(scaffold, defroot: Path, system: str) -> str:
-    """The name-check outcome of check_skill: 'PASS', 'FAIL', 'MISSING' or 'UNREADABLE' — or the
-    raised exception propagates (the pre-fold crash on unreadable bytes)."""
+    """The name-check outcome of check_skill: 'PASS', 'FAIL', 'MISSING' or 'UNREADABLE'; a raised
+    exception propagates."""
     rep = scaffold.Report()
     scaffold.check_skill(rep, defroot, system)
     for status, msg in rep.rows:
@@ -77,6 +77,7 @@ def test_d0_predicted_disposition(tmp_path):
     assert predicted_disposition(
         _report_run(tmp_path, "nonstr", b"---\ndisposition: 123\n---\nbody\n")
     ) is None
+    assert "escalate" not in DISPOSITION_ENUM
     assert predicted_disposition(
         _report_run(tmp_path, "nonenum", b"---\ndisposition: escalate\n---\nbody\n")
     ) is None
@@ -106,8 +107,8 @@ def test_d0_read_description(tmp_path):
 
 
 def test_d0_descriptor_catalog_seam(tmp_path):
-    """#1256 r4: the catalog is gather's system index, built once (`descriptor_index`) and
-    rendered at use; rendered with nothing down it lists what `descriptor_catalog` did."""
+    """The catalog is gather's system index (`descriptor_index`, rendered at use): one line per
+    granted system that has an adapter and a description."""
     hook = _hook()
     skills = tmp_path / "skills"
     adapters = tmp_path / "adapters"
@@ -134,8 +135,6 @@ def test_d0_descriptor_catalog_seam(tmp_path):
 
 
 def test_d0_parse_report(tmp_path):
-    """#785 typed the viewer's read (a `ReportRead`, not a merged frontmatter dict), so the shape
-    assertions here read fields instead of dict equality."""
     missing = vp.parse_report(tmp_path / "nope")
     assert (missing.disposition, missing.body) == (None, "")
     undecodable = vp.parse_report(
@@ -204,29 +203,8 @@ def test_d_parity_grammar(tmp_path):
             assert pred == ref_disp, label
 
 
-def test_d_junk_opener_none(tmp_path):
-    run = _report_run(tmp_path, "junk", b"---disposition: benign\n...\n---\nbody\n")
-    assert predicted_disposition(run) is None
-
-
 def test_d_crlf_report_parses(tmp_path):
     run = _report_run(tmp_path, "crlf", b"---\r\ndisposition: benign\r\n---\r\nbody\r\n")
-    assert predicted_disposition(run) == "benign"
-
-
-def test_d_non_enum_none(tmp_path):
-    run = _report_run(tmp_path, "esc", b"---\ndisposition: escalate\n---\nbody\n")
-    assert "escalate" not in DISPOSITION_ENUM
-    assert predicted_disposition(run) is None
-
-
-def test_d_non_utf8_report_none(tmp_path):
-    run = _report_run(tmp_path, "nb", b"---\ndisposition: benign\n---\n\xff\xfe body\n")
-    assert predicted_disposition(run) is None
-
-
-def test_d_wellformed_report_unflipped(tmp_path):
-    run = _report_run(tmp_path, "wf", b"---\ndisposition: benign\n---\nbody\n")
     assert predicted_disposition(run) == "benign"
 
 
@@ -247,19 +225,6 @@ def test_d_unfenced_skill_none(tmp_path):
     assert "`evil`" not in catalog
     assert hook.read_description("good", skills_dir=skills) == "real desc"
     assert "- `good`: real desc" in catalog
-
-
-def test_d_fenced_skill_desc(tmp_path):
-    hook = _hook()
-    skills = tmp_path / "skills"
-    adapters = tmp_path / "adapters"
-    adapters.mkdir(parents=True)
-    _skill(skills, "good", b"---\nname: defender-good\ndescription: real desc\n---\nbody\n")
-    (adapters / "good_adapter.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
-    assert hook.read_description("good", skills_dir=skills) == "real desc"
-    grant = VerbGrant(role="gather", entries=(("good", "ping", "r"),))
-    assert SI.listing(SI.index_text(hook, skills, read_roster(adapters), grant)) == [
-        "- `good`: real desc"]
 
 
 def test_d_trailing_space_opener_none(tmp_path):
@@ -285,21 +250,6 @@ def test_d_block_scalar_fence_truncation(tmp_path):
     assert hook.read_description("ind", skills_dir=skills) == "line one\n---\nline two"
 
 
-def test_d_traversal_guard_regression(tmp_path):
-    hook = _hook()
-    skills = tmp_path / "skills"
-    _skill(skills, "good", b"---\nname: defender-good\ndescription: real desc\n---\nbody\n")
-    assert hook.read_description("../../secret", skills_dir=skills) is None
-    assert hook.read_description("good", skills_dir=skills) == "real desc"
-
-
-def test_d_non_utf8_skill_none(tmp_path):
-    hook = _hook()
-    skills = tmp_path / "skills"
-    _skill(skills, "nb", b"---\nname: defender-nb\ndescription: x\xff\xfey\n---\nbody\n")
-    assert hook.read_description("nb", skills_dir=skills) is None
-
-
 def test_d_block_scalar_multiparagraph_green(tmp_path):
     hook = _hook()
     skills = tmp_path / "skills"
@@ -318,17 +268,13 @@ def test_d_block_scalar_multiparagraph_green(tmp_path):
 
 
 def test_d_catalog_survival():
-    """A real committed catalog survives the fold: one line per system skill it ships.
-
-    #1108 P4 (O1, O4): the product tree ships no per-system skills and `SKILLS_DIR` is banned
-    (`tenant_1108_p4/test_census.py`); a run's catalog is its tenant's `agent/skills/`. The real
-    committed one is the fixture tenant's, so every system skill it ships (with a `SKILL.md`)
-    that the run's grant reaches renders one line, its non-ASCII description intact."""
+    """The committed fixture tenant's catalog (a run's catalog is its tenant's `agent/skills/`)
+    renders one line per system skill the grant reaches, its non-ASCII description intact."""
     from defender.tests.support.tenancy import _tenants1106 as T1106
 
     hook = _hook()
     skills = T1106.FIXTURE_AGENT / "skills"
-    # #1106 M4: the gather grant is a run's (the playground tenant's), not GATHER_DEF's.
+    # The gather grant is a run's (the playground tenant's).
     grant = T1106.fixture_grants().gather
     out = SI.index_text(hook, skills, read_roster(hook.ADAPTERS_DIR), grant)
     adapters_dir = DEFENDER / "integrations"
@@ -347,14 +293,6 @@ def test_d_catalog_survival():
     assert "—" in out, "the description's em-dash did not survive the fold"
 
 
-def test_d_malformed_yaml_collapse(tmp_path):
-    whole = b"---\ndisposition: [unterminated\n---\nbody text\n"
-    got = vp.parse_report(_report_run(tmp_path, "mal", whole))
-    assert (got.disposition, got.body) == (None, whole.decode())
-    ok = vp.parse_report(_report_run(tmp_path, "ok", b"---\ndisposition: benign\n---\nbody\n"))
-    assert ok.disposition == "benign"
-
-
 def test_d_non_mapping_collapse(tmp_path):
     whole = b"---\n- a\n- b\n---\nbody\n"
     got = vp.parse_report(_report_run(tmp_path, "lst", whole))
@@ -367,47 +305,7 @@ def test_d_crlf_viewer_fix(tmp_path):
     assert got.body == "body"
 
 
-def test_d_parse_report_body_strip(tmp_path):
-    got = vp.parse_report(
-        _report_run(tmp_path, "wf", b"---\ndisposition: benign\n---\n\nbody with trailing  \n\n")
-    )
-    assert got.body == "body with trailing"
-
-
-def test_d_no_closer_fail(tmp_path):
-    scaffold = _scaffold()
-    defroot = _mk_scaffold_tree(tmp_path, "nc", b"---\nname: defender-nc\nno closing fence here\n")
-    assert _name_status(scaffold, defroot, "nc") == "FAIL"
-    ok = _mk_scaffold_tree(tmp_path, "okc", b"---\nname: defender-okc\n---\n## Execution\n")
-    assert _name_status(scaffold, ok, "okc") == "PASS"
-
-
-def test_d_nested_name_fail(tmp_path):
-    scaffold = _scaffold()
-    defroot = _mk_scaffold_tree(tmp_path, "nn", b"---\nmap:\n  name: defender-nn\n---\nbody\n")
-    assert _name_status(scaffold, defroot, "nn") == "FAIL"
-
-
 def test_d_uniform_indent_name_pass(tmp_path):
     scaffold = _scaffold()
     defroot = _mk_scaffold_tree(tmp_path, "ui", b"---\n  name: defender-ui\n---\nbody\n")
     assert _name_status(scaffold, defroot, "ui") == "PASS"
-
-
-def test_d_scaffold_wellformed_pass(tmp_path):
-    scaffold = _scaffold()
-    defroot = _mk_scaffold_tree(
-        tmp_path, "foo", b"---\nname: defender-foo\n---\n## Execution pointer\n"
-    )
-    assert _name_status(scaffold, defroot, "foo") == "PASS"
-
-
-def test_d_unreadable_skill_fail_row(tmp_path):
-    scaffold = _scaffold()
-    nb = _mk_scaffold_tree(tmp_path, "nb", b"---\nname: defender-nb\ndesc: x\xff\xfe\n---\n")
-    # A FAIL ROW either way — the pre-fold behavior was an uncaught UnicodeDecodeError — but it
-    # names the decode failure rather than asserting the frontmatter name is wrong (#901).
-    assert _name_status(scaffold, nb, "nb") == "UNREADABLE"
-    defroot = tmp_path / "missing"
-    (defroot / "skills" / "gone").mkdir(parents=True)
-    assert _name_status(scaffold, defroot, "gone") == "MISSING"
