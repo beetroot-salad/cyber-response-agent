@@ -27,7 +27,7 @@ def planted(monkeypatch):
 
 
 def test_r6_the_publish_child_gets_none_of_the_issuer_named_variables(planted, tmp_path):
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
 
     spawn = _RecordingSpawn()
     publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=5.0, spawn=spawn)
@@ -55,7 +55,7 @@ def test_r6_every_other_host_child_gets_none_of_the_issuer_named_variables(plant
 def test_r6_the_publish_child_gets_no_model_provider_key(monkeypatch, tmp_path, name):
     """EXPECTED RED until production drops model-provider keys from the publish child's
     environment (`publish_launch.child_environment` passes them today)."""
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
 
     monkeypatch.setenv(name, "r6-model-provider-key")
     spawn = _RecordingSpawn()

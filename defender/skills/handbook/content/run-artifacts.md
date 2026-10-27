@@ -56,7 +56,7 @@ episode dir alone.
 - **`investigation.md`** — the agent's audit trail, written across the loop.
   The human + machine debug surface where the agent shows its work. See
   `content/invlang.md` for the block grammar.
-- **`report.md`** — the headline, written by `runtime/close_tool.py` and by
+- **`report.md`** — the headline, written by `investigation/close_tool.py` and by
   nothing else (it is not in the agent's write scope). The body is
   **host-rendered from typed arguments** — no model-supplied prose reaches it,
   because this file rides verbatim into the judge's prompt (the family judge
@@ -96,12 +96,12 @@ episode dir alone.
   like a confident one, against its ceiling claim rather than a verdict.
 - **`executed_queries.jsonl`** (the queries table) + **`gather_raw/{lead_id}.lead.json`**
   (the leads table) — the two canonical tables, each written **live** during the
-  run by its own generator (`runtime/record_query.py` and
+  run by its own generator (`investigation/record_query.py` and
   `hooks/record_lead.py`). There is no post-run projection. The single
   read/join surface is `defender/learning/lead_repository.py`. A run that ran no
   queries has neither table — a monitor case, not a break.
 - **`gather_raw/{lead_id}/{seq}.json`** — raw query payload per executed query,
-  written by-ref by the capture wrapper (`runtime/record_query.py`). Each
+  written by-ref by the capture wrapper (`investigation/record_query.py`). Each
   queries-table row carries `payload_status` (`ok` | `empty` | `error`) and a
   ≤200-char `payload_digest` so loud failures reach the offline lead-author
   without forcing payload inspection. The agent works from gather's summary and

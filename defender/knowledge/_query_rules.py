@@ -5,7 +5,7 @@ bounded by `PARAMS_NESTING_LIMIT`), the reserved `∅.` sentinel ids and their p
 the screen a model-supplied `query_id` passes (`resolve_query_id`). Request keys are persisted
 in the queries table and replayed by learning's branch ledger, so their bytes must not change.
 
-Flat tier: the gather writer and guards (`runtime/record_query.py`), the query
+Flat tier: the gather writer and guards (`investigation/record_query.py`), the query
 tool and learning all import these from here, below the runtime.
 """
 from __future__ import annotations

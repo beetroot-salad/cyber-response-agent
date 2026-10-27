@@ -56,11 +56,11 @@ class _Clock:
 
 
 def _run_end() -> Any:
-    return S.mod("runtime.run_end")
+    return S.mod("records.run_end")
 
 
 def _base_members() -> frozenset[str]:
-    """The six `truncated_by` members at base (runtime/run_end.py:33-42) — the endings a lead
+    """The six `truncated_by` members at base (records/run_end.py:33-42) — the endings a lead
     MAIN dispatches keeps; the timed-out member A7 adds is none of these."""
     rb = _run_end()
     return frozenset({rb.TRUNCATED_BY_REQUEST_LIMIT, rb.TRUNCATED_BY_RETRY_EXHAUSTED,
@@ -203,11 +203,11 @@ def _parallel(system: str, verb: str, n: int, *, start: int = 0) -> S.Turn:
 
 def _kill_limit() -> int:
     """The run-level failure kill's count (`circuit_breaker.RUN_FAIL_KILL_LIMIT`)."""
-    return int(S.sym("runtime.circuit_breaker", "RUN_FAIL_KILL_LIMIT"))
+    return int(S.sym("systems.circuit_breaker", "RUN_FAIL_KILL_LIMIT"))
 
 
 def _enforce_flag() -> str:
-    return str(S.sym("runtime.driver", "BUDGET_ENFORCE_FLAG"))
+    return str(S.sym("investigation.driver", "BUDGET_ENFORCE_FLAG"))
 
 
 class _AgentAppendFault(SS.FaultStore):
@@ -308,7 +308,7 @@ def _assert_store_fault_stopped_the_run(d: S.Drive) -> None:
     assert SUMMARY in (d.gather_summary(L3) or ""), (
         "the lead's output was not produced before the store fault")
     store_member = _run_end().TRUNCATED_BY_STORE
-    escaped = isinstance(d.raised, (sqlite3.Error, S.sym("runtime.session_store", "StoreError")))
+    escaped = isinstance(d.raised, (sqlite3.Error, S.sym("records.session_store", "StoreError")))
     stopped = escaped or (d.summary or {}).get("truncated_by") == store_member
     assert stopped, (
         f"a store fault after the lead's output did not stop the run: raised {d.raised!r}, "
@@ -428,7 +428,7 @@ def test_a7_a_timed_out_lead_session_reads_back_as_timed_out(tmp_path: Path) -> 
                     store_factory=S.store_factory(tmp_path / "cut", sink=stores), stores=stores)
     _assert_lead_ran(d)
     member = _assert_timed_out_member(_session_ending(stores, L3), who="l-00c")
-    assert member in S.sym("runtime.run_end", "TRUNCATED_BY_VALUES")
+    assert member in S.sym("records.run_end", "TRUNCATED_BY_VALUES")
 
     # The same member every time the lead times out: the stamp is the ending, not a detail.
     again: list = []

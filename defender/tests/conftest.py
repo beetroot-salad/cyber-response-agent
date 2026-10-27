@@ -70,7 +70,7 @@ def checkout_roster():
     """The real checkout's adapters roster, read ONCE per session — the value a production
     process reads at its composition root and hands down."""
     from defender._paths import PATHS
-    from defender.runtime.verbs import read_roster
+    from defender.systems.verbs import read_roster
 
     return read_roster(PATHS.adapters_dir)
 

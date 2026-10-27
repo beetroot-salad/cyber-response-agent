@@ -253,7 +253,7 @@ class _ReplayLifecycle:
 @pytest.fixture
 def entrypoint_env(tmp_path, monkeypatch) -> Path:
     """What the real `run.py main` needs to get past its startup and into its tail:"""
-    from defender.runtime import providers
+    from defender import providers
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     for var in providers.api_key_vars():

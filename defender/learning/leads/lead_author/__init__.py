@@ -40,7 +40,7 @@ from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.leads import lead_render
 from defender import box as _box
-from defender.runtime.verbs import engine_for
+from defender.systems.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_PREFIX,

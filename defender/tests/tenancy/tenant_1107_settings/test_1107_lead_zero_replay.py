@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import run_tenant  # noqa: E402
+from defender.systems import run_tenant  # noqa: E402
 from defender.integrations import (  # noqa: E402
     _stub_transport,
 )
@@ -114,7 +114,7 @@ class _QueryAnswers(ReplayFn):
 def test_d_agentdeps_record(tmp_path):
     marker = "adeps1107"
     _root, _folder, tenant = _plant(tmp_path, marker)
-    fields = {f.name for f in dataclasses.fields(S.mod("runtime.tools._deps").AgentDeps)}
+    fields = {f.name for f in dataclasses.fields(S.mod("investigation.tools._deps").AgentDeps)}
     assert S.RECORD_FIELD in fields, sorted(fields)
     assert S.RETIRED_FIELD not in fields, sorted(fields)
 

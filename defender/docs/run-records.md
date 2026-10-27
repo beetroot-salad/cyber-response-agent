@@ -52,7 +52,7 @@ census) and the page's former per-kind reader/writer tables retired with it.
 Locations are relative to one of four roots: `<run>` (the run dir), `<runs_base>` (its
 parent — `<data root>/<T>/runs` for a tenant's own runs, `<episode>/runs` for a family's
 siblings; no record lives there since #1187), `<sessions>` (`<runs_base>/../sessions`,
-`runtime/session_store.py`), and `<episode>` = `<data root>/<T>/episodes/<episode uuid>`, reached
+`records/session_store.py`), and `<episode>` = `<data root>/<T>/episodes/<episode uuid>`, reached
 only through the tenant's runs repository (`runs.episode(<id>)`), which walks every level from
 `<T>` without following a link. Episodes sit beside `runs/`, never in it, so no runs-base walker
 counts a sibling as an ordinary run.
@@ -61,7 +61,7 @@ counts a sibling as an ordinary run.
 neither forge nor suppress it), *live* (during the run), *end* (at or after close), *later* (by
 a tool that runs over a finished run).
 
-**"Denied to"** carries the read gate's *mode*, from `runtime/permission/files.py::decide_read`:
+**"Denied to"** carries the read gate's *mode*, from `investigation/permission/files.py::decide_read`:
 *shape* (a `gather_raw` payload is denied unless the role declares a matching read shape),
 *outright* (every role: the wire-log dir, `provenance.json`), *confined* (the case answer key is
 denied to the confined learning roles), and the declarative secrets/ground-truth denylist. *cap*

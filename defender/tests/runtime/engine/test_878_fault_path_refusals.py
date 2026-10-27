@@ -23,8 +23,8 @@ _LONG_NAME = "n" * 300
 
 
 def _main_deps(tmp_path: Path):
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import MAIN_DEF
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.driver import MAIN_DEF
 
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True)
@@ -34,7 +34,7 @@ def _main_deps(tmp_path: Path):
 
 
 def test_the_read_gate_allows_the_overlong_basename_it_is_then_asked_to_probe(tmp_path):
-    from defender.runtime import permission
+    from defender.investigation import permission
 
     run_dir, deps = _main_deps(tmp_path)
     decision = permission.decide_read(
@@ -46,7 +46,7 @@ def test_the_read_gate_allows_the_overlong_basename_it_is_then_asked_to_probe(tm
 def test_read_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import tools
+    from defender.investigation import tools
 
     run_dir, deps = _main_deps(tmp_path)
     with pytest.raises(ModelRetry) as excinfo:
@@ -57,7 +57,7 @@ def test_read_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
 def test_edit_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import tools
+    from defender.investigation import tools
 
     run_dir, deps = _main_deps(tmp_path)
     for old_string in ("", "some anchor"):
@@ -85,6 +85,6 @@ def test_a_naive_origin_is_read_as_utc_not_dropped(tmp_path):
 
 
 def _state(tmp_path):
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(tmp_path, "run-878")

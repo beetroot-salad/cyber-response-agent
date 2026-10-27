@@ -15,7 +15,7 @@ import pytest
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO = DEFENDER.parent
-FORBIDDEN = ("defender.runtime", "defender.learning")
+FORBIDDEN = ("defender.investigation", "defender.learning")
 
 _PROBE = """
 import importlib, json, sys
@@ -50,4 +50,4 @@ def test_an_api_module_loads_no_runtime_or_learning(module):
 
 def test_the_probe_sees_a_runtime_load():
     """Positive control: a module that does load the runtime is reported."""
-    assert "defender.runtime.verbs" in _forbidden(_loaded("defender.runtime.verbs"))
+    assert "defender.investigation.run_state" in _forbidden(_loaded("defender.investigation.run_state"))

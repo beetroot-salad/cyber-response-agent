@@ -10,8 +10,8 @@ from pathlib import Path
 
 from defender import _git
 #: Re-exported so the #869 suites keep importing the shape predicate from the one module that
-#: states this seam's contract, rather than each reaching into `runtime.verbs` themselves.
-from defender.runtime.verbs import is_system_name  # noqa: F401  (re-exported)
+#: states this seam's contract, rather than each reaching into `systems.verbs` themselves.
+from defender.systems.verbs import is_system_name  # noqa: F401  (re-exported)
 
 # THE SURFACE UNDER TEST — it does not exist on this base (RED by construction)
 try:  # pragma: no cover — the post-implementation branch
@@ -332,8 +332,8 @@ def seed_executed_query(
     real historical row instead of the test's own idea of one."""
     from defender._io import read_jsonl_rows
     from defender.records import Run, RunPaths
-    from defender.runtime.run_state import RunState
-    from defender.runtime.record_query import append_query_row
+    from defender.investigation.run_state import RunState
+    from defender.investigation.record_query import append_query_row
 
     gather = RunPaths(run_dir).gather_raw
     gather.mkdir(parents=True, exist_ok=True)

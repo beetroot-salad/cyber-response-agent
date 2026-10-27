@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from defender._paths import PATHS
-from defender.runtime import verb_dispositions
+from defender.systems import verb_dispositions
 from defender.integrations import confinement
 from defender.integrations.confinement import ConfinementFault
 from defender.tests.support.runtime.engine._spec767 import (
@@ -76,7 +76,7 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
         confinement.guard_outbound(None, "case-history", f"{URL_BASE}{TICKETS_PATH}",
                                    method="GET")
 
-    from defender.runtime.permission.policies import _common
+    from defender.investigation.permission.policies import _common
 
     programs = {g.program for g in _common.reader_grants(tmp_path, DEFENDER_DIR, raw=False)}
     assert programs, "the program set is empty — this assertion would pass over anything"
@@ -86,7 +86,7 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
             "route to the store's write endpoints that no grant table can see"
         )
 
-    policy = json.loads(_text(DEFENDER_DIR / "runtime" / "bash_policy.json"))
+    policy = json.loads(_text(DEFENDER_DIR / "investigation" / "bash_policy.json"))
     assert set(policy) <= {"version", "read_deny", "_README"}, (
         "bash_policy.json now carries a program set; D8 re-pointed this demand at "
         "`_common.reader_grants` precisely because it did not (c2)"
@@ -165,7 +165,7 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
         f"a shipped module still screens ticket replies: {consumers} — #1221 removed both "
         "read screens"
     )
-    assert not (DEFENDER_DIR / "runtime" / "ticket_screen.py").exists(), (
+    assert not (DEFENDER_DIR / "investigation" / "ticket_screen.py").exists(), (
         "runtime/ticket_screen.py survives #1221's removal of both read screens"
     )
 
@@ -179,7 +179,7 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
     subprocess_readers = _shipped_hits(r"get-ticket")
     allowed = {
         "defender/integrations/ticket_adapter.py",
-        "defender/runtime/query_tool.py",
+        "defender/investigation/query_tool.py",
         "defender/learning/judge/family.py",
     }
     assert set(subprocess_readers) <= allowed, (

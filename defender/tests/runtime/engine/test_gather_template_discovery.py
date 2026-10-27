@@ -20,12 +20,12 @@ from defender.tests.support.learning.curation._frames680 import frame_salt_of
 pytest.importorskip("pydantic_ai")
 
 from defender.knowledge import _corpus  # noqa: E402
-from defender.runtime import permission, tools  # noqa: E402
-from defender.runtime import tools_gather  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
-from defender.runtime.verb_grant import VerbGrant  # noqa: E402
+from defender.investigation import permission, tools  # noqa: E402
+from defender.investigation import tools_gather  # noqa: E402
+from defender.investigation.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
-from defender.runtime import workspace_map as wsm  # noqa: E402
+from defender.investigation import workspace_map as wsm  # noqa: E402
 from defender.tests.support.learning.curation._lead_author_1134 import skills_view  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[3]
@@ -87,7 +87,7 @@ def _deps(tmp_path: Path, agent_root: Path, *, role=None) -> tools.AgentDeps:
     real gather dispatch already binds with) and a code tree holding only a decoy catalog."""
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    from defender.runtime.agent_definition import RunScope, bind
+    from defender.investigation.agent_definition import RunScope, bind
     from defender.tests.support.tenancy import _tenants1106 as T1106
     return bind(role if role is not None else T1106.fixture_gather_def(), run_dir,
                 defender_dir=_code_tree(tmp_path), scope=RunScope(tenant_agent=agent_root))

@@ -8,7 +8,7 @@ import logging
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
 from defender.learning.core import config
 from defender.box import BoxResult
-from defender.runtime.tools import _format_bash_result, _tool_bash, _tool_read_file
+from defender.investigation.tools import _format_bash_result, _tool_bash, _tool_read_file
 from defender.tests.support.learning.curation._frames680 import (
     FRAME_RE,
     RUN_SALT,

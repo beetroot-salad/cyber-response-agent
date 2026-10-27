@@ -505,7 +505,7 @@ def _questioner():
 def _branch_error() -> type[BaseException]:
     """`BranchError` NAMED — `T.refusals()` includes `ValueError`, which a bare `MalformedReply`
     would satisfy."""
-    return T.sym("runtime.branch", "BranchError")
+    return T.sym("investigation.branch", "BranchError")
 
 
 def _fenced_doc(doc: dict) -> str:

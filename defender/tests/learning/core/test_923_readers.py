@@ -17,7 +17,7 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
     from evaluations.held_out import predicted_disposition
     from defender.learning.core.validate import normalize_disposition
     from defender.cli.learning.trace_lesson import _report_disposition
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
 
     report = run_dir / "report.md"
 

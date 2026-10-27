@@ -1,17 +1,17 @@
 # Runtime gates — in-process permission, budget, and integrity hooks
 
-How the runtime driver enforces its gates in-process (the successor to the retired `claude -p` hook wiring). Moved out of `defender/CLAUDE.md` verbatim (2026-07-20); the code is the spec — start at `defender/runtime/permission/` and `defender/agents.py`.
+How the runtime driver enforces its gates in-process (the successor to the retired `claude -p` hook wiring). Moved out of `defender/CLAUDE.md` verbatim (2026-07-20); the code is the spec — start at `defender/investigation/permission/` and `defender/agents.py`.
 
 The learning loop has proven its value end-to-end on real cases, so the
 earlier "runtime reliability gates are out of scope" stance is **lifted**.
-The runtime is the in-process **PydanticAI driver** (`runtime/driver/`),
+The runtime is the in-process **PydanticAI driver** (`investigation/driver/`),
 so these gates run **in-process** — not as Claude Code PreToolUse/PostToolUse
 subprocesses. The legacy `claude -p` runtime and its `run-settings.json` hook
 wiring were retired; the gate *logic* lives on, re-hosted in-process (the
 `hooks/` modules below are now imported as plain libraries, not wired as
 hooks). The gates:
 
-- **`runtime/permission/`** — the single in-process permission/validation
+- **`investigation/permission/`** — the single in-process permission/validation
   gate (a package: `bash.py` gate / `command_shape.py` classifiers shared with
   dispatch / `files.py` read+write). It unifies the four old `claude -p`
   PreToolUse hooks, the driver calls it before each tool, raising `ModelRetry`
@@ -84,7 +84,7 @@ hooks). The gates:
     said `l-\d+` while every validator said `l-[A-Za-z0-9]+` — latently, because
     every id ever recorded happened to be numeric.
   - **Query capture is a capability of the typed `query` tool** — since #611 the
-    gather subagent calls the in-process `query` tool (`runtime/query_tool.py`)
+    gather subagent calls the in-process `query` tool (`investigation/query_tool.py`)
     with `system`/`verb`/`params`; there is no standalone adapter call on any bash
     lane. The tool's capture capability records the queries-table row + by-ref
     payload in-process — inseparable from the call, so a query that ran cannot
@@ -105,7 +105,7 @@ hooks). The gates:
   in `driver.py`: an `after_tool_execute` budget accountant (warning-only
   per-run tool-call / spawn / wall-clock caps, `hooks/budget_enforcer.py`'s
   logic) and a `model_request` wrap that logs every API request to
-  `wire_logs/llm_requests.jsonl` (`runtime/observe.py`, which projects
+  `wire_logs/llm_requests.jsonl` (`investigation/observe.py`, which projects
   `tool_trace.jsonl`). The wire log sits one level below the run root **as a gate
   decision, not a layout one**: MAIN's and GATHER's run-dir read shape is
   `under(run, SEG)` and `SEG` is a single path segment, so a run-root file is
@@ -126,7 +126,7 @@ hooks). The gates:
   untagged by `is_untrusted_read` — and handed GATHER MAIN's whole transcript by
   the same shape. A new run-dir stream that carries wire bodies belongs beside it,
   under `wire_logs/`, never at the root.
-- **lead claim + descriptor injection + tagging** — `runtime/tools_gather.py`
+- **lead claim + descriptor injection + tagging** — `investigation/tools_gather.py`
   imports `record_lead.claim_lead` (writes the leads-table row and claims the
   `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises
   in-process, bouncing the defender back to PLAN, so it stays a real integrity
@@ -141,7 +141,7 @@ hooks). The gates:
   (`inject_system_skill_description.descriptor_index`) is read once by
   `run_investigation` at run start and handed down as `catalog=` (#1031), each dispatch
   rendering it with the systems down at that moment marked (#1256); its parent
-  `runtime/tools.py` imports `record_lesson_load.lesson_name` (lesson→outcome
+  `investigation/tools.py` imports `record_lesson_load.lesson_name` (lesson→outcome
   traceability into `lessons_loaded.jsonl`). These anchor on the run dir from
   `AgentDeps`.
 - **the frame and the ceiling follow the DATA, not the lane** (#776, #849) — two

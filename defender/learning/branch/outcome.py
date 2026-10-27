@@ -7,7 +7,7 @@ from typing import Any
 import yaml
 
 from defender import _yaml
-from defender.runtime.branch._family import Family, FamilyError, load_family
+from defender.episodes._family import Family, FamilyError, load_family
 from defender.episodes._episode_handle import Episode
 from defender.episodes._episode_paths import LAYOUT
 from defender._io import Bound

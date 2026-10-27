@@ -61,21 +61,21 @@ claims:
   - id: A-C-current-alert
     kind: referential
     claim: Current fork seeding preserves an existing sibling alert rather than comparing source bytes.
-    probe: Read defender/runtime/branch/_seed.py::_inherit_evidence at the grounding base.
+    probe: Read defender/investigation/branch/_seed.py::_inherit_evidence at the grounding base.
     probe_kind: read
     observed: Source alert copy is conditional on the sibling alert not existing; source alert integrity is verified when copied.
     verdict: holds
   - id: A-C-copy-scope
     kind: referential
     claim: Current evidence copy admits arbitrary plain-file payload names within selected lead directories.
-    probe: Read defender/runtime/branch/_seed.py::_inherit_lead_dir and _copy_artifact at the grounding base.
+    probe: Read defender/investigation/branch/_seed.py::_inherit_lead_dir and _copy_artifact at the grounding base.
     probe_kind: read
     observed: Every sorted entry within a selected lead directory is passed to the plain-file copy without a payload-name filter.
     verdict: holds
   - id: A-C-run-state
     kind: referential
     claim: The current runtime has a per-execution RunState with budget, breaker, query rows and oracle clock.
-    probe: Read defender/runtime/run_state.py and branch/_seed.py at the grounding base.
+    probe: Read defender/investigation/run_state.py and branch/_seed.py at the grounding base.
     probe_kind: read
     observed: RunState holds those fields; seeding calls inherit_rows after writing inherited query rows.
     verdict: holds

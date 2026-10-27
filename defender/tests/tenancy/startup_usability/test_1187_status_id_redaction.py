@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime import system_status as status
-from defender.runtime.run_state import RunState
-from defender.runtime.verbs import read_roster
+from defender.systems import system_status as status
+from defender.investigation.run_state import RunState
+from defender.systems.verbs import read_roster
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 KNOWN = "0b5c7e2a-4d1f-4a8e-9c3b-2f6d8e1a7c40"

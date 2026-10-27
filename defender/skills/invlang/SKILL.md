@@ -683,7 +683,7 @@ nothing else: the invlang above is already the loop's record, so the marker
 carries no summary or disposition. Write one `:T close` per loop, in the same
 `append_block` call that lands the loop's final `:R`/`:T resolutions`. The
 marker is what the runtime folds a completed loop on (see
-`runtime/compaction.fold_boundary`); it is rejected if loop N has no committed
+`investigation/compaction.fold_boundary`); it is rejected if loop N has no committed
 finding yet (you cannot close a loop you have only *planned*), so only close a
 loop you have actually worked.
 The **last** loop goes to REPORT, not back to PLAN — it gets `:T conclude`,

@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime.query_tool import QueryCapture  # noqa: E402
+from defender.investigation.query_tool import QueryCapture  # noqa: E402
 from defender.knowledge._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
 
 

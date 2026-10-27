@@ -1,6 +1,6 @@
 """The session store's error root and its bad-case-id error — stdlib only.
 
-Kept out of `runtime/session_store.py` (which pulls in pydantic-ai) because
+Kept out of `records/session_store.py` (which pulls in pydantic-ai) because
 `_layout.SessionPaths` raises `InvalidCaseId` and must import with no third-party package
 installed. `session_store` re-exports both names.
 """
@@ -18,3 +18,8 @@ class StoreError(Exception):
 class InvalidCaseId(StoreError, ValueError):
     """A `case_id` that is not a case-stable slug; refused, not sanitized. Also a `ValueError`
     for callers that catch that."""
+
+
+class BranchError(Exception):
+    """A branch point that cannot carry a sibling world, or a sibling run folder that cannot
+    receive one."""

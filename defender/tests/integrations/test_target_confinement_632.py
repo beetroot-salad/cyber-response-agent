@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.integrations import elastic_adapter, host_state_adapter  # noqa: E402
 from defender.integrations import identity_adapter  # noqa: E402

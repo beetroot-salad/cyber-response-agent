@@ -5,8 +5,8 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run as _ru
 
 
 from defender.records._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
-from defender.runtime import case_ticket
-from defender.runtime.close_tool import (
+from defender.tenancy import case_ticket
+from defender.investigation.close_tool import (
     CAUSE_REVIEW_INCOMPLETE,
     FAILURE_KINDS,
     REPORT_CAUSES,
@@ -156,7 +156,7 @@ def test_confident_and_forced_commits_carry_no_ceiling_test(tmp_path):
 
 def _near_cap_rows() -> tuple[str, ...]:
     """As many distinct paying receipts as fit under `_MAX_CEILING_FRONTMATTER_BYTES`."""
-    from defender.runtime.review.projector import parse_investigation
+    from defender.investigation.review.projector import parse_investigation
     from defender.skills.invlang.validate import conclude_ceiling_test_rows
 
     rows: list[str] = []

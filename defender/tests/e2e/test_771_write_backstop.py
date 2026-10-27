@@ -18,8 +18,8 @@ from defender.records import RunPaths
 from defender import _io  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks import record_lead  # noqa: E402
-from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.investigation import tools as runtime_tools  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.tests.e2e._spec771 import (  # noqa: E402
     CENSUS,
     POSTURES,
@@ -208,7 +208,7 @@ def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
 
 
 def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
-    from defender.runtime import session_store
+    from defender.records import session_store
 
     # The whole shared tree sits under a symlinked ancestor — the macOS `/tmp` shape.
     real_base = tmp_path / "real"
@@ -415,7 +415,7 @@ def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
 def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_path):
     import asyncio
 
-    from defender.runtime.tools_gather import _run_gather
+    from defender.investigation.tools_gather import _run_gather
 
     cases = ("l-1", "l-abc123", "l-", "L-1", "l-abc_def", "l-abc-def", " l-1", "l-1 ", "l-1\n",
              "../etc", "l-1/../..")

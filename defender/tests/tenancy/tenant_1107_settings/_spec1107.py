@@ -69,8 +69,8 @@ BRANCH_CONFIG_VARS: tuple[str, ...] = (
 
 
 def run_tenant_mod() -> Any:
-    """`defender.runtime.run_tenant` — the record's module (d1096: the four types live here)."""
-    return mod("runtime.run_tenant")
+    """`defender.systems.run_tenant` — the record's module (d1096: the four types live here)."""
+    return mod("systems.run_tenant")
 
 
 def record_type(name: str) -> type:
@@ -78,7 +78,7 @@ def record_type(name: str) -> type:
     class the record's module defines (d1096), so a test that asks where a type lives, or
     whether a value is one, can never read an absent or stand-in name as an answer."""
     cls = getattr(run_tenant_mod(), name, None)
-    assert isinstance(cls, type), f"runtime.run_tenant does not define the record type {name}: {cls!r}"
+    assert isinstance(cls, type), f"systems.run_tenant does not define the record type {name}: {cls!r}"
     return cls
 
 
@@ -88,7 +88,7 @@ def config_fault() -> type:
 
 
 def case_ticket_error() -> type:
-    return mod("runtime.case_ticket").CaseTicketError
+    return mod("tenancy.case_ticket").CaseTicketError
 
 
 def tenant_refused() -> type:
@@ -97,7 +97,7 @@ def tenant_refused() -> type:
 
 def settings_pointer() -> str:
     """`SETTINGS_POINTER` — the model-facing name of the tenant's settings folder (#1106)."""
-    return mod("runtime.verbs").SETTINGS_POINTER
+    return mod("systems.verbs").SETTINGS_POINTER
 
 
 # ======================================================================================
@@ -260,7 +260,7 @@ def verb_context(record: Any, run_dir: Path, env: Mapping[str, str], **kw: Any) 
     fields = {"defender_dir": DEFENDER, "run_dir": Path(run_dir), "env": env,
               RECORD_FIELD: record}
     fields.update(kw)
-    return mod("runtime.verbs").VerbContext(**fields)
+    return mod("systems.verbs").VerbContext(**fields)
 
 
 def record_on(ctx: Any) -> Any:
@@ -567,7 +567,7 @@ class RunRecorder:
 def seed_session_store(run_dir: Path) -> None:
     """A real, empty session store behind the run dir's pointer — `render_and_mirror`'s
     precondition (the page is refused for a run whose record cannot be found)."""
-    ss = mod("runtime.session_store")
+    ss = mod("records.session_store")
     store = ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", sessions=SessionPaths(fixture_runs_base(Path(run_dir).parent)))
     try:
         ss.write_case_pointer(_run_handle_1165(Path(run_dir)), case_id=store.case_id, store_path=store.path)
@@ -595,7 +595,7 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 # ======================================================================================
 
 def ticket_writer() -> Any:
-    return mod("runtime.ticket_writer")
+    return mod("investigation.ticket_writer")
 
 
 def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str],

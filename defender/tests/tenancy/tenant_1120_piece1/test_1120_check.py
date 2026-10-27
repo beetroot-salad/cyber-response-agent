@@ -16,7 +16,7 @@ import pytest
 import yaml
 
 from defender.tenancy import _tenant
-from defender.runtime import verb_dispositions
+from defender.systems import verb_dispositions
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 

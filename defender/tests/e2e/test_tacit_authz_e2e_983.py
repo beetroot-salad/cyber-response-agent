@@ -54,7 +54,7 @@ def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     the fixture tree under `root` and at `AS_OF`. #1108 P4 (O1, O4): the registry is the run's
     agent knowledge, so `root` is handed as the run tenant's agent root (`RunTenant.agent`),
     not as `defender_dir`."""
-    from defender.runtime.verbs import VerbContext
+    from defender.systems.verbs import VerbContext
     from defender.kit.verbs import declared_params
     from defender.integrations import tacit_knowledge_adapter
 

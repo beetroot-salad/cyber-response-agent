@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.runtime.verbs import VerbContext
+from defender.systems.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.integrations import ticket_adapter
 from defender.kit.faults import TransportFault

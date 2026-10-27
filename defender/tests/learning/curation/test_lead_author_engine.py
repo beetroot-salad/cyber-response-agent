@@ -32,10 +32,10 @@ from defender.learning.leads.lead_author_engine import (  # noqa: E402
     run_author_stage,
 )
 from defender.learning._pydantic_stage import run_stage  # noqa: E402
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import RunScope, bind  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.permission import AgentPolicy  # noqa: E402
+from defender.investigation.permission import AgentPolicy  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
@@ -511,7 +511,7 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
 @pytest.mark.parametrize("grouped", [False, True])
 def test_box_output_overflow_is_not_an_unprocessable_learning_stage(tmp_path, grouped):
     from defender.box import BoxOutputLimitExceeded
-    from defender.runtime.exception_groups import carried
+    from defender._exception_groups import carried
 
     overflow = BoxOutputLimitExceeded()
     fault = ExceptionGroup("stage", [overflow]) if grouped else overflow

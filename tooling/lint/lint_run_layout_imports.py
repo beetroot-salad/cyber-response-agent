@@ -86,29 +86,30 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
         "hooks/record_lead.py",
-        "runtime/close_tool.py",
-        "runtime/driver/__init__.py", "runtime/driver/_build.py",
-        "runtime/lead_zero/__init__.py", "runtime/lead_zero/_capture.py", "runtime/observe.py",
-        "runtime/permission/files.py", "runtime/permission/policies/_common.py",
-        "runtime/run_end.py", "box/_scrub.py", "runtime/session_store/_write.py",
-        "runtime/tools/_document.py", "runtime/tools/_files.py",
-        "runtime/toon_gate.py", "box/_lifecycle.py",
-        "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
-        "runtime/branch/_spec.py",
-        "runtime/record_query.py", "skills/invlang/corpus.py",
+        "investigation/close_tool.py",
+        "investigation/driver/__init__.py", "investigation/driver/_build.py",
+        "investigation/lead_zero/__init__.py", "investigation/lead_zero/_capture.py", "investigation/observe.py",
+        "investigation/permission/files.py", "investigation/permission/policies/_common.py",
+        "records/run_end.py", "box/_scrub.py", "records/session_store/_write.py",
+        "investigation/tools/_document.py", "investigation/tools/_files.py",
+        "investigation/toon_gate.py", "box/_lifecycle.py",
+        "investigation/branch/__init__.py", "investigation/branch/_frontier.py", "investigation/branch/_seed.py",
+        "records/_seeded.py",
+        "investigation/branch/_spec.py",
+        "investigation/record_query.py", "skills/invlang/corpus.py",
         # #1105 PR 2 (row 26): `infra_env` takes `DEFENDER_RUNS_BASE` from the run folder's
         # own hand-out (`RunPaths.runs_base_export`).
         "box/_docker.py",
     ),
     # A `/` join onto a layout value here is `lint_run_records` arm (b)'s finding, not this one.
     "names-only": (
-        "records/_report.py", "records/_artifact_schema.py", "runtime/compaction.py", "learning/branch/seams.py",
+        "records/_report.py", "records/_artifact_schema.py", "investigation/compaction.py", "learning/branch/seams.py",
         # F-09 (#1105 PR 2): learning/judge/render.py left this row (J3 took its last name).
         "learning/judge/__init__.py",
         "learning/core/config.py",
-        "runtime/workspace_map.py", "api/demo.py",
+        "investigation/workspace_map.py", "api/demo.py",
     ),
-    "run-lifecycle": ("run.py", "run_common.py", "runtime/ticket_writer.py"),
+    "run-lifecycle": ("run.py", "run_common.py", "investigation/ticket_writer.py"),
     "path-taking-readers": (
         "learning/lead_repository.py", "presentation/visualize_run.py",
         "presentation/visualize_runtime.py", "presentation/visualize_messages.py",

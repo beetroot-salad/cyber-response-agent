@@ -34,7 +34,7 @@ def test_an_aliased_outcome_is_refused_by_the_gate_not_read_as_accepted(tmp_path
     with pytest.raises(outcome_mod.OutcomeUnreadable, match="alias"):
         outcome_mod.read_outcome(ep.view())
     with pytest.raises(episode_mod.EpisodeError, match="no outcome record"):
-        episode_mod._refuse_incomplete(ep.view(), T.sym("runtime.branch._family", "parse_family")(T.family_doc()))
+        episode_mod._refuse_incomplete(ep.view(), T.sym("episodes._family", "parse_family")(T.family_doc()))
 
 
 def test_a_torn_outcome_still_reads_as_no_record(tmp_path):
@@ -42,7 +42,7 @@ def test_a_torn_outcome_still_reads_as_no_record(tmp_path):
     ep = _episode(tmp_path, TORN_OUTCOME)
 
     with pytest.raises(episode_mod.EpisodeError, match="no outcome record"):
-        episode_mod._recorded_outcome(ep.view(), T.sym("runtime.branch._family", "parse_family")(T.family_doc()))
+        episode_mod._recorded_outcome(ep.view(), T.sym("episodes._family", "parse_family")(T.family_doc()))
 
 
 def test_a_parsed_value_holding_one_immutable_value_twice_is_a_tree():

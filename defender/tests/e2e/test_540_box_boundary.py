@@ -19,11 +19,11 @@ from defender.tests.support.sandbox._docker import daemon_reachable, docker_runt
 pytest.importorskip("pydantic_ai")
 
 from defender.run_common import run_env  # noqa: E402
-from defender.runtime import providers  # noqa: E402
-from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender import providers  # noqa: E402
+from defender.investigation.agent_definition import compile_policy_for  # noqa: E402
 from defender.execution.bash_exec import parse  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.permission.bash import decide_bash  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.permission.bash import decide_bash  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER  # noqa: E402
 
 from defender import box as box_mod  # noqa: E402
@@ -395,7 +395,7 @@ def test_write_under_defender_dir_fails_erofs_by_errno(box, run_dir):
     targets = [
         poisoned,
         DEFENDER / "SKILL.md",
-        DEFENDER / "runtime" / "permission" / "bash.py",
+        DEFENDER / "investigation" / "permission" / "bash.py",
     ]
     for i, target in enumerate(targets):
         res = _probe(box, run_dir, f"erofs{i}", _WRITE_PATH, str(Path("/defender") / target.relative_to(DEFENDER)))
@@ -638,7 +638,7 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
     hostile = [
         f"cat {outside}",
         f"cat {sibling_run / 'gather_raw' / 'l-001.lead.json'}",
-        f"cat {DEFENDER / 'runtime' / 'permission' / 'bash.py'} | head -1",
+        f"cat {DEFENDER / 'investigation' / 'permission' / 'bash.py'} | head -1",
         "cat /etc/shadow",
         "defender-policy show",
     ]

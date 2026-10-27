@@ -13,10 +13,10 @@ def plant_fork_snapshots(store: Any, session_id: str, run_dir: Path) -> None:
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.runtime import challenge_gate
-    from defender.runtime import session_store
-    from defender.runtime.branch import SnapshotWriter
-    from defender.runtime.run_state import RunState
+    from defender.investigation import challenge_gate
+    from defender.records import session_store
+    from defender.investigation.branch import SnapshotWriter
+    from defender.investigation.run_state import RunState
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
     bounds = challenge_gate.default_bounds()
@@ -42,10 +42,10 @@ def recorded_snapshot(run: Any) -> Any:
     import tempfile
 
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.runtime import challenge_gate
-    from defender.runtime.branch import SnapshotWriter
-    from defender.runtime.branch._snapshot import load
-    from defender.runtime.run_state import RunState
+    from defender.investigation import challenge_gate
+    from defender.investigation.branch import SnapshotWriter
+    from defender.investigation.branch._snapshot import load
+    from defender.investigation.run_state import RunState
     from defender.tests.support.storage._session_store_705 import store_factory
 
     with tempfile.TemporaryDirectory() as folder:

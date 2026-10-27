@@ -1,7 +1,7 @@
 {
  "_meta": {
   "base": "80888efb9a46fb5a298eea264316f79c374a1232",
-  "how": "runtime.verbs.read_roster(PATHS.adapters_dir) at the base (the registry's path load of the staying adapters); and the names each of the five confinement importers took from defender.scripts.adapters.confinement at the base (AST of their import statements)"
+  "how": "systems.verbs.read_roster(PATHS.adapters_dir) at the base (the registry's path load of the staying adapters); and the names each of the five confinement importers took from defender.scripts.adapters.confinement at the base (AST of their import statements)"
  },
  "roster_verbs": {
   "change-mgmt": [
@@ -77,7 +77,7 @@
    "is_world_view",
    "world_view"
   ],
-  "defender/runtime/branch/_family.py": [
+  "defender/episodes/_family.py": [
    "ViewNameError",
    "refuse_unnameable_world"
   ]

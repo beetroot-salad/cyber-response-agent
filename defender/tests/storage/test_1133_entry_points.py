@@ -642,7 +642,7 @@ MARKER = "host-manifest-1133-never-read"
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink"])
 def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it(tmp_path, kind):
-    fam = T.mod("runtime.branch._family")
+    fam = T.mod("episodes._family")
     doc = T.family_doc()
     doc["worlds"][1]["story"] = MARKER
     ep = T.episode(tmp_path, doc=doc)

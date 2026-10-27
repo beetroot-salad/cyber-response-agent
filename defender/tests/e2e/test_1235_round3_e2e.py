@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime.run_state import RunState  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
 from defender.kit.faults import TransportFault  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402

@@ -47,11 +47,11 @@ L3 = S.L3
 # =================================================================================================
 
 def providers() -> Any:
-    return mod("runtime.providers")
+    return mod("providers")
 
 
 def provider_down_cls() -> type[BaseException]:
-    return sym("runtime.providers", "ProviderDown")
+    return sym("providers", "ProviderDown")
 
 
 def provider_down(model: str = "fake", status: int | None = 503, attempts: int = MAX_ATTEMPTS) -> BaseException:
@@ -65,12 +65,12 @@ def provider_down_fault(model: str = "fake") -> Callable[[], BaseException]:
 
 
 def with_retries(model: Any, policy: Any) -> Any:
-    return sym("runtime.providers", "with_retries")(model, policy)
+    return sym("providers", "with_retries")(model, policy)
 
 
 def retry_policy(*, sleep: Any = None, clock: Any = None, jitter: Any = None) -> Any:
     kw = {k: v for k, v in (("sleep", sleep), ("clock", clock), ("jitter", jitter)) if v is not None}
-    return sym("runtime.providers", "RetryPolicy")(**kw)
+    return sym("providers", "RetryPolicy")(**kw)
 
 
 # =================================================================================================
@@ -450,7 +450,7 @@ def sidecar(run_dir: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     doc = json.loads(path.read_text(encoding="utf-8"))
-    rec = sym("runtime.run_end", "parse_record")(doc)
+    rec = sym("records.run_end", "parse_record")(doc)
     return None if rec is None else {"truncated_by": rec.truncated_by,
                                      "closed_before_cut": rec.closed_before_cut, "raw": doc}
 

@@ -35,7 +35,14 @@ DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 # Runtime includes the former gather_tools; only ticket_writer belonged to case_history.
 # Box I/O moved out of runtime and retains the same counted coverage.
-ROOTS = ("runtime", "hooks", "box")
+# #1308 moved runtime modules into other packages; each keeps its counted coverage here, by file
+# where the destination package holds other code.
+ROOTS = (
+    "investigation", "hooks", "box", "systems", "providers", "records/session_store",
+    "records/run_end.py", "records/selection.py", "records/_wire.py", "records/_seeded.py",
+    "tenancy/tenant_settings.py", "tenancy/case_ticket.py", "tenancy/run_knowledge.py",
+    "episodes/_family.py", "_exception_groups.py",
+)
 READERS = frozenset({
     "read_jsonl_rows", "read_jsonl_rows_report", "read_text_soft", "read_text_utf8",
     "locked_for_read", "locked_json_read", "read_bytes_capped", "iter_plain_jsonl_rows",
@@ -204,9 +211,9 @@ def deviations(hits: list[Hit], residue: dict) -> list[str]:
 # Exact residual occurrences are intentionally small, categorized, and not regenerated from
 # implementation. The live-state files and durable record writers are not exemptions.
 RESIDUE = {
-    ("runtime.driver._build", "_fold_decision", "read_text_utf8"): (1, "m_read"),
+    ("investigation.driver._build", "_fold_decision", "read_text_utf8"): (1, "m_read"),
     ("hooks.inject_system_skill_description", "read_description", "read_text_soft"): (1, "nonrecord", ('skill_path',)),
-    ("runtime.bash_policy", "_load_policy", "read_text_utf8"): (1, "nonrecord", ('path',)),
+    ("investigation.bash_policy", "_load_policy", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("box._docker", "_own_container_ids", "read_text_soft"): (2, "nonrecord", ('hostname_path', 'mountinfo_path')),
     # #1205: send the request frame to the Docker client's stdin pipe, not a run record.
     ("box._output", "_send", "os.write"): (1, "nonrecord", ("fd",)),
@@ -243,42 +250,42 @@ RESIDUE = {
     # (removed by name through `tenancy._exports.remove_entry`); and the host-held
     # knowledge-source record beside the run dir (U12). None is a run-dir record, so each is
     # non-record I/O.
-    ("runtime.run_knowledge", "copy_for_run", "hold_new"): (1, "nonrecord", ('copies',)),
-    ("runtime.run_knowledge", "copy_for_run", ".mkdir"): (1, "nonrecord", ('held',)),
-    ("runtime.run_knowledge", "copy_for_run", "os.rename"): (1, "nonrecord", ('copies / temporary',)),
-    ("runtime.run_knowledge", "write_host_record", "write_guarded"): (1, "nonrecord", ('path',)),
-    ("runtime.driver", "_stop_before_main", "write_guarded"): (1, "retiring"),
+    ("tenancy.run_knowledge", "copy_for_run", "hold_new"): (1, "nonrecord", ('copies',)),
+    ("tenancy.run_knowledge", "copy_for_run", ".mkdir"): (1, "nonrecord", ('held',)),
+    ("tenancy.run_knowledge", "copy_for_run", "os.rename"): (1, "nonrecord", ('copies / temporary',)),
+    ("tenancy.run_knowledge", "write_host_record", "write_guarded"): (1, "nonrecord", ('path',)),
+    ("investigation.driver", "_stop_before_main", "write_guarded"): (1, "retiring"),
     # #1255 extracted the existing empty tool-trace fallback; #1165 N-c still
     # retires this projection separately. Its record target and count are unchanged.
-    ("runtime.driver", "_write_trace_or_empty", "write_guarded"): (
+    ("investigation.driver", "_write_trace_or_empty", "write_guarded"): (
         1, "retiring", ('RunPaths(run_dir).tool_trace',)),
-    ("runtime.driver._build", "_gather_instructions", "read_text_utf8"): (1, "nonrecord", ("defender_dir / 'skills' / 'gather' / 'SKILL.md'",)),
-    ("runtime.driver._prompts", "_main_instructions", "read_text_utf8"): (1, "nonrecord", ("defender_dir / 'SKILL.md'",)),
-    ("runtime.lead_zero", "run_correlation", "read_text_utf8"): (1, "m_read"),
-    ("runtime.lessons_engine.lessons_fm", "cmd_show", "read_text_utf8"): (1, "nonrecord", ('lesson',)),
-    ("runtime.lessons_engine.lessons_frontier", "main", "read_text_soft"): (1, "nonrecord", ('Path(ns.investigation)',)),
+    ("investigation.driver._build", "_gather_instructions", "read_text_utf8"): (1, "nonrecord", ("defender_dir / 'skills' / 'gather' / 'SKILL.md'",)),
+    ("investigation.driver._prompts", "_main_instructions", "read_text_utf8"): (1, "nonrecord", ("defender_dir / 'SKILL.md'",)),
+    ("investigation.lead_zero", "run_correlation", "read_text_utf8"): (1, "m_read"),
+    ("investigation.lessons_engine.lessons_fm", "cmd_show", "read_text_utf8"): (1, "nonrecord", ('lesson',)),
+    ("investigation.lessons_engine.lessons_frontier", "main", "read_text_soft"): (1, "nonrecord", ('Path(ns.investigation)',)),
     # Explicit non-run backend paths: learning loggers and worktree scrubs share these
     # utilities. Run integrations are separately driven with the handed record handles.
-    ("runtime.observe", "RequestLogger.__init__", "open_guarded"): (1, "non_run", ('path',)),
-    ("runtime.observe", "stage_trace_path", "guarded_mkdir"): (1, "non_run"),
-    ("runtime.observe", "write_trace", "write_guarded"): (1, "retiring"),
-    ("runtime.orient", "_invlang_grammar", "read_text_soft"): (1, "nonrecord", ("defender_dir / 'skills' / 'invlang' / 'SKILL.md'",)),
-    ("runtime.review", "role_prompt", "read_text_utf8"): (1, "nonrecord", ('path',)),
+    ("investigation.observe", "RequestLogger.__init__", "open_guarded"): (1, "non_run", ('path',)),
+    ("investigation.observe", "stage_trace_path", "guarded_mkdir"): (1, "non_run"),
+    ("investigation.observe", "write_trace", "write_guarded"): (1, "retiring"),
+    ("investigation.orient", "_invlang_grammar", "read_text_soft"): (1, "nonrecord", ("defender_dir / 'skills' / 'invlang' / 'SKILL.md'",)),
+    ("investigation.review", "role_prompt", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("box._scrub", "_write_verdict", "write_guarded"): (1, "non_run", ('verdict_path(tree)',)),
     ("box._scrub", "mark_unsandboxed", "read_text_utf8"): (1, "non_run", ('p',)),
     ("box._scrub", "tree_unsandboxed", "read_text_utf8"): (1, "non_run", ('verdict_path(tree)',)),
     ("box._scrub", "tree_verified", "read_text_utf8"): (1, "non_run", ('p',)),
     # Extracted from session_store.py; the count, target and classification are unchanged.
-    ("runtime.session_store._write", "open_store", "guarded_mkdir"): (1, "session_store", ('path.parent',)),
+    ("records.session_store._write", "open_store", "guarded_mkdir"): (1, "session_store", ('path.parent',)),
     # The SQL shim reads the model's file operands and operates only inside the box.
-    ("runtime.sql_engine.sql", "_inferred_load", "builtins.open"): (1, "model_tools"),
-    ("runtime.sql_engine.sql", "_load_rows", "builtins.open"): (1, "model_tools"),
-    ("runtime.sql_engine.sql", "_run", "shutil.rmtree"): (1, "nonrecord", ('scratch',)),
-    ("runtime.tenant_settings", "read_regular_bytes", "getattr(os)"): (1, "nonrecord", ('os',)),
-    ("runtime.tenant_settings", "read_regular_bytes", "os.open"): (1, "nonrecord", ('path',)),
-    ("runtime.tools._files", "_write_operand", "hold"): (1, "model_tools", ('root',)),
-    ("runtime.verb_roster", "audit_read_surfaces", "read_text_utf8"): (1, "nonrecord", ('path',)),
-    ("runtime.verbs", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
+    ("investigation.sql_engine.sql", "_inferred_load", "builtins.open"): (1, "model_tools"),
+    ("investigation.sql_engine.sql", "_load_rows", "builtins.open"): (1, "model_tools"),
+    ("investigation.sql_engine.sql", "_run", "shutil.rmtree"): (1, "nonrecord", ('scratch',)),
+    ("tenancy.tenant_settings", "read_regular_bytes", "getattr(os)"): (1, "nonrecord", ('os',)),
+    ("tenancy.tenant_settings", "read_regular_bytes", "os.open"): (1, "nonrecord", ('path',)),
+    ("investigation.tools._files", "_write_operand", "hold"): (1, "model_tools", ('root',)),
+    ("systems.verb_roster", "audit_read_surfaces", "read_text_utf8"): (1, "nonrecord", ('path',)),
+    ("systems.verbs", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
 }
 
 

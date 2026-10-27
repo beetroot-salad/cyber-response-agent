@@ -3,8 +3,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from defender.runtime.run_state import RunState
-from defender.runtime.record_query import bind_call_ids, next_call_id
+from defender.investigation.run_state import RunState
+from defender.investigation.record_query import bind_call_ids, next_call_id
 
 
 def test_call_ids_ignore_disk_rows_and_are_independent_between_run_states(tmp_path: Path):

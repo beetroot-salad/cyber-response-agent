@@ -60,13 +60,13 @@ def _flagged(text):
 
 
 def _append(deps, text):
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     return _tool_append_block(deps, text)
 
 
 def _fix(deps, old_row, new_row):
-    from defender.runtime.tools import _tool_fix_row
+    from defender.investigation.tools import _tool_fix_row
 
     return _tool_fix_row(deps, old_row, new_row)
 
@@ -519,7 +519,7 @@ def test_a_rebuilt_row_that_loses_a_delimiter_is_withheld():
 
 def test_a_candidate_carrying_a_fence_delimiter_is_withheld():
     """A row whose cells carry ``` gets no candidate, because no rewrite of it can be pasted."""
-    from defender.runtime.tools import _new_row_shape_reason
+    from defender.investigation.tools import _new_row_shape_reason
 
     row = "l-001|v-001|bogus|see ```x``` here"
     d = key_warning(attr_doc(row))

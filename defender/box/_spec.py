@@ -279,7 +279,7 @@ class _HostTransport:
     def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
         pipelines = decode_request(frame)
         if self.view is not None:
-            from defender.runtime.permission.grant import PROGRAMS, rm_target_files
+            from defender.investigation.permission.grant import PROGRAMS, rm_target_files
 
             # The permission grammar owns which arguments are paths. A grep pattern or
             # Python string that resembles a workspace path must keep its literal bytes.

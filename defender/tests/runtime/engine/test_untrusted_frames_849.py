@@ -10,10 +10,10 @@ from defender.tests.support.runtime.state._1255_view import model_path
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.runtime import permission, tools  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.investigation import permission, tools  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.box import BoxResult  # noqa: E402
-from defender.runtime.tools import _tool_bash, _tool_read_file  # noqa: E402
+from defender.investigation.tools import _tool_bash, _tool_read_file  # noqa: E402
 
 from defender.tests.support.learning.curation._frames680 import (
     frame_salt_of,  # noqa: E402

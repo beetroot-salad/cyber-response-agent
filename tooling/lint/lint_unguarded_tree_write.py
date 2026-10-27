@@ -57,17 +57,17 @@ _UNSAFE_METHODS = frozenset({"write_text", "write_bytes", "mkdir"})
 #: the write-lint census test (set-for-set);
 #: a census row added there and not here is a module the gate stops covering.
 LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
-    "runtime/observe.py",
-    "runtime/driver/",
-    "runtime/session_store/_write.py",
-    "runtime/query_tool.py",
-    "runtime/query_catalog.py",
-    "runtime/session_store/_pointers.py",
-    "runtime/tools_gather.py",
+    "investigation/observe.py",
+    "investigation/driver/",
+    "records/session_store/_write.py",
+    "investigation/query_tool.py",
+    "investigation/query_catalog.py",
+    "records/session_store/_pointers.py",
+    "investigation/tools_gather.py",
     "hooks/record_lead.py",
     "_io.py",
     "_filesystem/",
-    "runtime/tools/",
+    "investigation/tools/",
     "box/",
     "learning/author/drain.py",
     "tenancy/_tenant.py",
@@ -78,7 +78,7 @@ def _hard_gated(rel: str) -> bool:
     """Is this file one the census hard-gates?
 
     An entry ending in `/` names a package and covers every file under it, so a census
-    module that became a package (`runtime/driver.py` -> `runtime/driver/`) stays covered
+    module that became a package (`investigation/driver.py` -> `investigation/driver/`) stays covered
     across all its files.
     """
     return any(selects(entry, rel) for entry in LINT_HARD_GATED_MODULES)

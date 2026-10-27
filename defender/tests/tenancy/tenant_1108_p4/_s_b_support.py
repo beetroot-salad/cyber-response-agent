@@ -476,7 +476,7 @@ def drive_main(  # noqa: PLR0913 — the e2e entry: one keyword per seam
 #
 # ASSUMED SEAMS (reported):
 # - the parent launcher, the callable the CLI binds to `run.main(publish=...)`:
-#   `defender.runtime.publish_launch.launch_publish(tenant_id, *, data_root, budget: float = 60.0,
+#   `defender.investigation.publish_launch.launch_publish(tenant_id, *, data_root, budget: float = 60.0,
 #   command: Sequence[str] | None = None) -> str` — spawns the child process (`command`
 #   replaces the default argv prefix of the real child's process entry; the parent appends its
 #   own arguments after it), waits up to `budget` seconds while the child is in its network
@@ -490,7 +490,7 @@ def drive_main(  # noqa: PLR0913 — the e2e entry: one keyword per seam
 #   clone.
 
 def launcher() -> Callable[..., str]:
-    return importlib.import_module("defender.runtime.publish_launch").launch_publish
+    return importlib.import_module("defender.investigation.publish_launch").launch_publish
 
 
 #: The child process a budget test spawns: the REAL child process entry, its fakes rebuilt

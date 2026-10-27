@@ -23,9 +23,9 @@ pytest.importorskip("pydantic_ai")
 from defender import run_common  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead  # noqa: E402
-from defender.runtime import permission  # noqa: E402
-from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation import tools as runtime_tools  # noqa: E402
+from defender.investigation.agent_definition import bind, compile_policy_for  # noqa: E402
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.box import (  # noqa: E402
@@ -39,7 +39,7 @@ from defender.box import (  # noqa: E402
     stop_and_scrub,
     stop_box,
 )
-from defender.runtime import workspace_map as workspace_map_mod  # noqa: E402
+from defender.investigation import workspace_map as workspace_map_mod  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.support.storage._alert_plant import plant_alert  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402

@@ -13,7 +13,7 @@ from defender.tests.support.learning.curation._curator_691_harness import (  # n
 
 from defender.agents import AGENTS  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.agent_definition import (  # noqa: E402
+from defender.investigation.agent_definition import (  # noqa: E402
     AgentDefinition,
     ToolSet,
     bind,
@@ -58,7 +58,7 @@ def test_the_registry_validates_the_curator_at_import_time(tmp_path):
 
 
 def test_every_role_in_the_registry_binds_through_the_one_seam(tmp_path):
-    from defender.runtime.agent_definition import RunScope, compile_policy_for
+    from defender.investigation.agent_definition import RunScope, compile_policy_for
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     # a non-curator role reaches a compiled policy through the seam — the positive control.
     gather_policy = compile_policy_for(T1106.fixture_gather_def(), rd, scope=RunScope())
@@ -80,7 +80,7 @@ def test_policy_cli_prints_a_compiled_curator_policy(tmp_path):
 def test_binding_a_corpus_requiring_role_without_a_name_raises_legibly(tmp_path):
     """M8: binding a corpus-REQUIRING role (the curator) with NO corpus name raises a LEGIBLE
     ValueError naming the role and the missing input — never an IndexError."""
-    from defender.runtime.agent_definition import RunScope
+    from defender.investigation.agent_definition import RunScope
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=r"(?i)corpus[_ ]?name|corpus name"):
         bind(CORPUS_AUTHOR_DEF, rd, scope=RunScope(), defender_dir=wt / "defender")

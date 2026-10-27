@@ -203,7 +203,7 @@ def session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     This composition used to live in the deleted transcript renderer, which is why the tests
     that pin it read as being about a page. They are not: what they pin is
     `resolve_session_id` falling back to `main_session_id`, and that pick refusing zero or
-    several roots rather than choosing one. `runtime/branch/_frontier.py` is the production
+    several roots rather than choosing one. `investigation/branch/_frontier.py` is the production
     caller that still depends on both.
     """
     ss = store_mod()
@@ -239,7 +239,7 @@ DELIBERATE = (AttributeError, NameError, TypeError, IndexError, KeyError)
 
 _READBACK = """
 import json, sys
-from defender.runtime import session_store as ss
+from defender.records import session_store as ss
 
 store = ss.open_store_for_read(sys.argv[1])
 out = {}

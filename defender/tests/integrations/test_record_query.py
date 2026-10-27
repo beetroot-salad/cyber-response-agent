@@ -11,10 +11,10 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-ge = load_module(DEFENDER / "runtime" / "record_query.py")
+ge = load_module(DEFENDER / "investigation" / "record_query.py")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -63,7 +63,7 @@ def _write_rows(tmp_path, rows):
     """A run that starts holding `rows` — a branch sibling's inherited prefix, handed to the
     run's state the way seeding hands it (`RunState.inherit_rows`, #1235 round 2). Returns the
     state: `repeat_note` reads it, never `executed_queries.jsonl`."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     state = RunState(tmp_path, "rq")
     state.inherit_rows(rows)
@@ -191,7 +191,7 @@ def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
 
 
 def _live():
-    from defender.runtime import record_query as rq
+    from defender.investigation import record_query as rq
 
     return rq
 
@@ -199,7 +199,7 @@ def _live():
 def _bare_run(tmp_path, name: str = "run"):
     """A run folder and a fresh state for it, as `run_investigation` starts one."""
     from defender.records import RunPaths
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = tmp_path / fixture_uuid(name)

@@ -51,10 +51,10 @@ JUDGE_FAMILY = "learning.judge.family"
 OUTCOME = "learning.branch.outcome"
 EPISODE_MOD = "learning.branch.episode"
 REGISTRY = "learning.branch.estate.registry"
-QUERY_TOOL = "runtime.query_tool"
-RECORD_QUERY = "runtime.record_query"
-SEED = "runtime.branch._seed"
-BASH_TOOL = "runtime.tools._bash"
+QUERY_TOOL = "investigation.query_tool"
+RECORD_QUERY = "investigation.record_query"
+SEED = "investigation.branch._seed"
+BASH_TOOL = "investigation.tools._bash"
 LESSONS_RUN = "learning.author.lessons.run"
 QUESTIONER_RUN = "learning.author.questioner.run"
 DRAIN = "learning.author.drain"
@@ -64,7 +64,7 @@ VOCAB = "_vocab"
 REPORT = "records._report"
 PROMPT = "learning._prompt"
 VISUALIZE = "presentation.visualize_episode"
-FAMILY_LOADER = "runtime.branch._family"
+FAMILY_LOADER = "episodes._family"
 CLI = "learning.branch.cli"
 RUN = "run"
 
@@ -719,7 +719,7 @@ def table_row(call: CallRow, *, seq: int) -> dict:
     """One `executed_queries.jsonl` row in the writer's fourteen columns, in writer order, and
     no call id (#1255 G4: the table is the model's; the id is in the call-join record)."""
     rq = mod(RECORD_QUERY)
-    breaker = mod("runtime.circuit_breaker")
+    breaker = mod("systems.circuit_breaker")
     params = call.the_params
     body = _payload_of(call)
     text = json.dumps(body, sort_keys=True)
@@ -1421,7 +1421,7 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000,
         samples = fam.read_samples_record(bound)
         try:
             pre = outcome.read_outcome(bound)
-            failed = outcome.failed_worlds(bound, pre, family=T.sym("runtime.branch._family", "parse_family")(manifest))
+            failed = outcome.failed_worlds(bound, pre, family=T.sym("episodes._family", "parse_family")(manifest))
         except outcome.OutcomeUnreadable:
             pre, failed = None, {}
         world = next(w for w in manifest["worlds"] if w["label"] == label)
@@ -1653,7 +1653,7 @@ def capture_sentinel(src: Path, *, system: str = "edr", verb: str = "lookup",  #
     set (J3's inherited `∅.denied` by default) — a real row the real `ForkSnapshot.restore_files` seeds
     into every sibling."""
     rq = mod(RECORD_QUERY)
-    breaker = mod("runtime.circuit_breaker")
+    breaker = mod("systems.circuit_breaker")
     body = {"error": "never reached a system"}
     text = json.dumps(body, sort_keys=True)
     rel = f"gather_raw/{lead}/{seq}.json"
@@ -1880,7 +1880,7 @@ class InProcessSiblings:
 
     def _run(self, script: RealWorld, tail: list[str]) -> int:
         from defender.learning.branch.estate.registry import prebranch_calls
-        from defender.runtime import branch as branch_mod
+        from defender.investigation import branch as branch_mod
 
         harness = S24.replay_harness()
         oracle = script.oracle if script.oracle is not None else passing_oracle()
@@ -1926,7 +1926,7 @@ class InProcessSiblings:
             return out
 
         try:
-            from defender.runtime.verbs import read_roster
+            from defender.systems.verbs import read_roster
 
             return mod(RUN).main(tail, lifecycle=lifecycle, visualize=_no_visualize,
                                  preflight=_no_preflight, oracle=oracle.model,

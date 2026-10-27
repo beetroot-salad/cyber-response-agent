@@ -10,8 +10,8 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 import pytest
 
-from defender.runtime import verbs
-from defender.runtime.verbs import SYSTEM_MAX_LEN, is_system_name
+from defender.systems import verbs
+from defender.systems.verbs import SYSTEM_MAX_LEN, is_system_name
 
 ADMITTED = ("elastic", "cmdb", "change-mgmt", "host-state", "threat-intel", "ticket",
             "identity", "gather", "fakesys", "a", "s3", "a-b-c")

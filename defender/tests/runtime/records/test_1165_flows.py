@@ -8,12 +8,12 @@ import pytest
 from pydantic_ai import RunContext
 from pydantic_ai.toolsets import FunctionToolset
 
-from defender.runtime.tools import AgentDeps
+from defender.investigation.tools import AgentDeps
 
 from defender.knowledge._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
-from defender.runtime import run_end
-from defender.runtime.run_state import RunState
-from defender.runtime import record_query as rq
+from defender.records import run_end
+from defender.investigation.run_state import RunState
+from defender.investigation import record_query as rq
 from defender.tests.support.runtime.records._1165_flows import RecordIO, drive_run, run_handle
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, FakeVerbs, ReplayFn, Turn, materialize
@@ -159,7 +159,7 @@ def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault
 
 def test_driver_refuses_missing_run_before_invoking_a_model(tmp_path):
     """O1: the driver has a required Run, so callers cannot reconstruct one from paths."""
-    from defender.runtime import driver
+    from defender.investigation import driver
     with pytest.raises(TypeError, match="'run'"):
         # Omit run deliberately; this must fail at the boundary before any setup.
         driver.run_investigation(alert_path=tmp_path / "alert.json", defender_dir=tmp_path,
@@ -169,7 +169,7 @@ def test_driver_refuses_missing_run_before_invoking_a_model(tmp_path):
 def test_budget_and_breaker_decisions_keep_the_same_live_state_across_record_migration(tmp_path, monkeypatch):
     """O6: model-written retired state files cannot reopen the budget or reset the breaker."""
     from defender.hooks import budget_enforcer as budgets
-    from defender.runtime import circuit_breaker as breaker
+    from defender.systems import circuit_breaker as breaker
     from defender.tests.e2e.test_1235_host_state_in_memory import PlantingReplay
 
     monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "true")

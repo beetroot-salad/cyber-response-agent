@@ -7,7 +7,7 @@ import os
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-from defender.runtime import challenge_gate, observe
+from defender.investigation import challenge_gate, observe
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.runtime.records._1165_records import run_at, writes
 

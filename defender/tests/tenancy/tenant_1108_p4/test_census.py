@@ -41,10 +41,10 @@ BANNED: dict[str, str] = {
     **{f"{_P}.PATHS.{a}": f"PATHS.{a}" for a in CORPUS_ACCESSORS},
     **{f"{_P}.DefenderPaths.{a}": f"DefenderPaths.{a}" for a in CORPUS_ACCESSORS},
     # The import-time corpus constants O4 names, by their defining module (P4-C2's sites).
-    "defender.runtime.lessons_engine.lessons_fm.LESSONS_DIR": "lessons_fm.LESSONS_DIR",
-    "defender.runtime.lessons_engine.lessons_frontier.DEFAULT_CORPUS": "lessons_frontier.DEFAULT_CORPUS",
+    "defender.investigation.lessons_engine.lessons_fm.LESSONS_DIR": "lessons_fm.LESSONS_DIR",
+    "defender.investigation.lessons_engine.lessons_frontier.DEFAULT_CORPUS": "lessons_frontier.DEFAULT_CORPUS",
     "defender.hooks.inject_system_skill_description.SKILLS_DIR": "inject_system_skill_description.SKILLS_DIR",
-    "defender.runtime.query_catalog._SKILLS_REL": "query_catalog._SKILLS_REL",
+    "defender.investigation.query_catalog._SKILLS_REL": "query_catalog._SKILLS_REL",
     "defender.learning.leads.path_validation.CATALOG_DIR": "path_validation.CATALOG_DIR",
     "defender.learning.leads.path_validation.CATALOG_REL": "path_validation.CATALOG_REL",
     "defender.learning.leads.path_validation.SKILLS_DIR": "path_validation.SKILLS_DIR",
@@ -344,7 +344,7 @@ def test_no_production_module_outside_the_owner_reaches_the_product_layout():
 
 # --- positive controls over synthetic modules, through the same classifier -------------------
 
-def _scan_synthetic(source: str, rel: str = "defender/runtime/planted.py",
+def _scan_synthetic(source: str, rel: str = "defender/investigation/planted.py",
                     roots: tuple[Path, ...] = (DEFENDER,)) -> list[Hit]:
     tree = _astlib.parse_source(source, rel)
     module, package = _astlib.module_and_package(rel.removeprefix("defender/"))
@@ -367,7 +367,7 @@ def test_the_resolver_catches_aliased_imports_attribute_chains_and_door_reexport
     hits = _scan_synthetic(roots=(tmp_path / "defender", DEFENDER), source=
         "from defender.knowledge._knowledge import KnowledgePaths as KP\n"     # 1 (class: not banned)
         "import defender._paths as pp\n"                                       # 2
-        "from defender.runtime.lessons_engine import lessons_fm as fm\n"       # 3
+        "from defender.investigation.lessons_engine import lessons_fm as fm\n"       # 3
         "def a(x):\n"                                                          # 4
         "    return KP.of_defender_dir(x).lessons_dir\n"                       # 5
         "def b():\n"                                                           # 6
@@ -385,7 +385,7 @@ def test_the_resolver_catches_aliased_imports_attribute_chains_and_door_reexport
     assert (5, f"{_K}.KnowledgePaths.of_defender_dir", "ref") in got, hits
     assert (7, f"{_P}.PATHS.catalog_dir", "ref") in got, hits
     assert (10, f"{_P}.DefenderPaths.skills_rel", "ref") in got, hits
-    assert (12, "defender.runtime.lessons_engine.lessons_fm.LESSONS_DIR", "ref") in got, hits
+    assert (12, "defender.investigation.lessons_engine.lessons_fm.LESSONS_DIR", "ref") in got, hits
     assert (14, f"{_K}.CHECKOUT_KNOWLEDGE", "import") in got, hits
     assert (15, f"{_K}.CHECKOUT_KNOWLEDGE", "ref") in got, hits
 
@@ -535,7 +535,7 @@ def test_the_author_config_carries_no_product_corpus_spelling():
 #: its working-tree halves). The data model says the working tree is read by nothing in
 #: production, and P-3 that the run process never touches the clone.
 TENANT = "defender.tenancy._tenant.Tenant"
-RUN_TENANT = "defender.runtime.run_tenant.RunTenant"
+RUN_TENANT = "defender.systems.run_tenant.RunTenant"
 CLONE_ATTRS = frozenset({"knowledge", "settings", "agent"})
 RUN_ENTRIES = ("defender.run", "defender.run_common")
 
@@ -812,7 +812,7 @@ def test_the_run_process_reads_nothing_from_the_tenant_clone():
 
 def _planted_clone_reads(source: str) -> list[int]:
     tree = _astlib.parse_source(source, "runtime/planted.py")
-    reads = _clone_reads("runtime/planted.py", tree, "defender.runtime.planted", "defender.runtime")
+    reads = _clone_reads("runtime/planted.py", tree, "defender.investigation.planted", "defender.investigation")
     return sorted({int(r.split(":")[1].split()[0]) for r in reads})
 
 
@@ -826,7 +826,7 @@ def test_the_clone_reader_census_sees_typed_receivers():
     lines = _planted_clone_reads(
         "from typing import Optional\n"                                                  # 1
         "from defender.tenancy._tenant import Tenant, accept_tenant\n"                   # 2
-        "from defender.runtime.run_tenant import RunTenant\n"                            # 3
+        "from defender.systems.run_tenant import RunTenant\n"                            # 3
         "def a(t: Tenant):\n    return t.settings / 'x'\n"                              # 4-5
         "def b(t: Tenant | None):\n    return t.agent\n"                                # 6-7
         "def c(t: Optional[Tenant]):\n    return t.knowledge\n"                         # 8-9

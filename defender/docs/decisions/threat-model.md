@@ -172,7 +172,7 @@ bytes an attacker-controlled model chose:
 - The disposition changes what the SOC does, and the attacker is watching.
 - **The report is the honest limitation.** It flows to analysts and into lesson PRs,
   and today it is free-form: `report.md` is written through the generic `write_file`
-  tool (`runtime/tools.py`), so there is no structure to constrain it. **Validating
+  tool (`investigation/tools.py`), so there is no structure to constrain it. **Validating
   the report's output structure is the control, and it does not exist yet** — a
   schema-constrained report is what stops it being an arbitrary carrier.
 

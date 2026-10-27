@@ -90,8 +90,9 @@ OWNER_MODULES: frozenset[str] = frozenset({
 })
 
 #: The sweep set. Never shrinks below this.
-SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
-                               "api", "tenancy", "knowledge", "episodes", "configuration", "records", "kit")
+SWEEP_DIRS: tuple[str, ...] = ("investigation", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
+                               "api", "tenancy", "knowledge", "episodes", "configuration", "records", "kit", "providers",
+                               "systems")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -241,7 +242,7 @@ RECORD_LOCATION_NAMES = frozenset({
 CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("learning_root", "learning/core/state.py"): frozenset({"LearningState.open", "LearningAdoption.__init__"}),
     ("data_root", "learning/core/state.py"): frozenset({"LearningAdoption.__init__"}),
-    ("session_trust_root", "runtime/session_store/_write.py"): frozenset({"open_store"}),
+    ("session_trust_root", "records/session_store/_write.py"): frozenset({"open_store"}),
     ("exports_root", _EXPORT_OWNER): frozenset({"materialise_export", "publish_locked", "write_export"}),
     ("drafts_root", _EXPORT_OWNER): frozenset({"sweep_dead_owners", "build_draft", "draft_path"}),
     ("knowledge_lock", _EXPORT_OWNER): frozenset({"tenant_lock"}),

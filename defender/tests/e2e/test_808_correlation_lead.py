@@ -6,9 +6,9 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import circuit_breaker  # noqa: E402
-from defender.runtime import session_store  # noqa: E402
-from defender.runtime.driver import GATHER_REQUEST_LIMIT  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
+from defender.records import session_store  # noqa: E402
+from defender.investigation.driver import GATHER_REQUEST_LIMIT  # noqa: E402
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e

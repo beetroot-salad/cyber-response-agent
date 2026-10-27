@@ -7,7 +7,7 @@ import pytest
 from pydantic_ai.exceptions import ModelRetry
 
 from defender.agents import AGENTS, LEAD_AUTHOR_DEF
-from defender.runtime.agent_definition import (
+from defender.investigation.agent_definition import (
     RunScope,
     ToolSet,
     bind,
@@ -15,8 +15,8 @@ from defender.runtime.agent_definition import (
     effective_tools_for,
 )
 from defender._agent_role import AgentRole
-from defender.runtime.tools import _tool_read_file
-from defender.runtime.verb_grant import GrantError
+from defender.investigation.tools import _tool_read_file
+from defender.systems.verb_grant import GrantError
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._by_path import load_lint_gate
@@ -36,7 +36,7 @@ def _isolated_roots(tmp_path, monkeypatch):
 
 def _roots(run_dir: Path, defender_dir: Path):
     """A minimal `ResolvedRoots` — the shape `bind` hands `compile_policy`."""
-    from defender.runtime.agent_definition import ResolvedRoots
+    from defender.investigation.agent_definition import ResolvedRoots
 
     return ResolvedRoots(run_dir=run_dir, defender_dir=defender_dir, corpus_roots=(),
                          read_roots=(), read_confine=(), scripts=())
@@ -106,7 +106,7 @@ def test_922_the_framing_guard_discriminates_at_the_witnesses_own_construction(t
 
 
 def test_922_a_verb_bearing_bit_over_an_empty_grant_is_still_refused():
-    from defender.runtime.agent_definition import AgentDefinition
+    from defender.investigation.agent_definition import AgentDefinition
 
     roots = _roots(Path("/nonexistent/run"), Path("/nonexistent/defender"))
     stale = AgentDefinition(

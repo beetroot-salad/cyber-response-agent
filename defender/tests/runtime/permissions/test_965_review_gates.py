@@ -76,7 +76,7 @@ def test_an_id_carrying_upper_case_is_not(run_id: str) -> None:
 
 def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
     """At the MINT, where every id rule belongs"""
-    from defender.runtime.branch import _family
+    from defender.episodes import _family
 
     doc = {
         "label": "Alpha", "world_id": T.fixture_world_id("alpha"),

@@ -5,8 +5,8 @@
 **Partly shipped, and the training half is redesigned.** Three things landed since the
 first draft and are no longer proposals:
 
-- **Runtime review is live.** `runtime/challenge_gate.py` (#774/#783, 08-04) plus the
-  blind lenses in `runtime/review/` (#796/#802, 08-07). §Runtime review is now a
+- **Runtime review is live.** `investigation/challenge_gate.py` (#774/#783, 08-04) plus the
+  blind lenses in `investigation/review/` (#796/#802, 08-07). §Runtime review is now a
   comparison between what was asked for and what exists.
 - **The frozen-actor metric is already retired** (#795, 08-07) — §What dies described its
   death prospectively; `evals/README.md` records it.
@@ -16,7 +16,7 @@ first draft and are no longer proposals:
   post-mortem, not a critique of a running system.
 
 **The redesign has since shipped, and this doc is now its rationale rather than its
-plan.** The turn-N branch is `runtime/branch.py` (#920), the questioner and the family
+plan.** The turn-N branch is `investigation/branch.py` (#920), the questioner and the family
 are `learning/branch/` (#947), the family judge is `learning/judge/` (#921), and #922
 deleted the pipeline this argues against — the two actors, the oracle and the pipeline
 judge, along with the direction routing and `run_cycle.py` itself. Read the sections below
@@ -352,7 +352,7 @@ a CR is the base rate and the inference is invalid at any scope. A specificity f
 have forced fabricated selectors onto the two lessons where empty is the truthful answer, so
 no gate ships. Note the scope of what replaces it: the specificity RANKING #919 builds is on the
 DEFENDER corpus's new `frontier_nodes` / `frontier_edges` selectors, matched by
-`runtime/lessons_engine/lessons_frontier.py`. The `entities: []` lessons live in the sibling
+`investigation/lessons_engine/lessons_frontier.py`. The `entities: []` lessons live in the sibling
 ENVIRONMENT corpus, which `lessons_env_retrieve.py` still returns unranked and in filename
 order — the three survivors there (`cmdb-indexes-by-hostname-not-ip`,
 `authorized-keys-key-accumulation-detection`, `dev-workstation-to-jump-box`) are unchanged by

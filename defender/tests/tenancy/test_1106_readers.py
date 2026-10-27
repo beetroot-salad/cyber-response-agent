@@ -72,7 +72,7 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
 
 
 def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
-    case_ticket = T.mod("runtime.case_ticket")
+    case_ticket = T.mod("tenancy.case_ticket")
     settings = tmp_path / "bare" / "settings"
     settings.mkdir(parents=True)
     with pytest.raises(case_ticket.CaseTicketError) as caught:
@@ -88,7 +88,7 @@ def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
     recording request seam, is handed the run's record — and both the store it
     addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
     injected tenant's."""
-    writer = T.mod("runtime.ticket_writer")
+    writer = T.mod("investigation.ticket_writer")
     # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run-1106")
     run_dir.mkdir()
@@ -116,7 +116,7 @@ def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
 # ---- lead-zero ---------------------------------------------------------------------------------
 
 def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
-    lz = T.mod("runtime.lead_zero_config")
+    lz = T.mod("systems.lead_zero_config")
     assert lz.load_correlation_template(lz.lead_zero_config_path(injected)) == \
         "elastic.injected-tenant-template"
     assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) != \

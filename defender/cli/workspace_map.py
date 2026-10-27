@@ -9,7 +9,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._paths import adapters_under  # noqa: E402
-from defender.runtime.workspace_map import DEFENDER_DIR, workspace_map  # noqa: E402
+from defender.investigation.workspace_map import DEFENDER_DIR, workspace_map  # noqa: E402
 
 def main(argv: list[str]) -> int:
     """`workspace_map.py --tenant T <run_id>` (#1105 declared change 10, J8): the map of T's
@@ -25,7 +25,7 @@ def main(argv: list[str]) -> int:
     # The CLI reads the checkout's roster itself; an unreadable adapters tree is a one-line
     # refusal and exit 2, not a traceback.
     from defender.tenancy._command_line_run import open_command_line_run
-    from defender.runtime.verbs import RegistryError, read_roster
+    from defender.systems.verbs import RegistryError, read_roster
 
     opened = open_command_line_run(ns.tenant, ns.run_id)
     if isinstance(opened, str):

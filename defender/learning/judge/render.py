@@ -50,7 +50,7 @@ from defender.learning.judge.calls import (
 )
 from defender.learning.judge.runs import RunSet, read_run_set
 from defender._git import REPO_ROOT
-from defender.runtime.branch._family import world_id_for, parse_family
+from defender.episodes._family import world_id_for, parse_family
 
 #: The frame tag every model-authored body in the judge's prompt is wrapped in — the
 #: questioner's spelling, so one frame regex matches both.

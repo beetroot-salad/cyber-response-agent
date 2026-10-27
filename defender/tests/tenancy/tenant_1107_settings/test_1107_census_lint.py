@@ -69,8 +69,8 @@ def test_o7_lint_flags_each_form(tmp_path):
         "defender/integrations/planted_1107.py",
         "defender/learning/branch/estate/planted_1107.py",
         "defender/integrations/planted_1107.py",
-        "defender/runtime/lead_zero/planted_1107.py",
-        "defender/runtime/lead_zero_config.py",
+        "defender/investigation/lead_zero/planted_1107.py",
+        "defender/systems/lead_zero_config.py",
     ]
     for rel in planted:
         S.plant_module(tmp_path, rel, _EACH_FORM)
@@ -112,7 +112,7 @@ def test_o7_lint_allows_passthrough(tmp_path):
                "def verb(ctx):\n"
                "    return ctx.env.get('X_1107'), os.getenv('X_1107')\n")
     in_tree = "defender/integrations/pass_1107.py"
-    out_of_tree = ["defender/runtime/elsewhere_1107.py", "defender/learning/branch/cli_1107.py",
+    out_of_tree = ["defender/investigation/elsewhere_1107.py", "defender/learning/branch/cli_1107.py",
                    "defender/run_1107.py"]
     S.plant_module(tmp_path, in_tree, inside)
     for rel in out_of_tree:

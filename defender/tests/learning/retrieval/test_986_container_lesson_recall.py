@@ -41,7 +41,7 @@ def _lessons() -> tuple:
 
 
 def _recall(text: str, *, top_k: int | None = None) -> list[str]:
-    from defender.runtime.lessons_engine import lessons_frontier
+    from defender.investigation.lessons_engine import lessons_frontier
 
     kw = {} if top_k is None else {"top_k": top_k}
     return [

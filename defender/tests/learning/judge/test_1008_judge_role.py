@@ -68,10 +68,10 @@ def test_1008_the_real_selection_step_builds_the_judges_agent_with_no_tool_at_al
 
     from defender.learning._pydantic_stage import build_stage_agent
     from defender.learning.core.config import StageWiring, judge_effort, judge_model
-    from defender.runtime import observe
-    from defender.runtime.agent_definition import ToolSet
-    from defender.runtime.driver import build_agent_core
-    from defender.runtime.providers import BuiltModel
+    from defender.investigation import observe
+    from defender.investigation.agent_definition import ToolSet
+    from defender.investigation.driver import build_agent_core
+    from defender.providers import BuiltModel
 
     AgentRole = _role()
     JUDGE_DEF = _judge_def()
@@ -140,8 +140,8 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
 
 def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     """The compiled policy carries a refusal in the JUDGE's words."""
-    compile_policy_for = T.sym("runtime.permission", "compile_policy_for")
-    default_reason = T.sym("runtime.agent_definition", "_DEFAULT_DENY_REASON")
+    compile_policy_for = T.sym("investigation.permission", "compile_policy_for")
+    default_reason = T.sym("investigation.agent_definition", "_DEFAULT_DENY_REASON")
     questioner_reason = T.sym("learning.branch.questioner", "_QUESTIONER_DENY_REASON")
     named_programs = _grant_gate()._named_programs
     JUDGE_DEF = _judge_def()
@@ -200,7 +200,7 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
 def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
     """The judge holds nothing on any surface a definition can open: no tool lane, no verb entry, no
     bash grant, no declared read root, no read shape and no write root."""
-    compile_policy_for = T.sym("runtime.permission", "compile_policy_for")
+    compile_policy_for = T.sym("investigation.permission", "compile_policy_for")
     JUDGE_DEF = _judge_def()
 
     assert tuple(JUDGE_DEF.tools) == ()
@@ -218,7 +218,7 @@ def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
     assert not policy.write_roots
     assert policy.verb_allow.entries == ()
 
-    files = T.mod("runtime.permission.files")
+    files = T.mod("investigation.permission.files")
     resolved = files._resolved_read_roots(policy, tmp_path, T.DEFENDER)
     assert T.DEFENDER.resolve() in resolved, (
         "the judge's resolved read roots no longer include the defender tree — the docstring "
@@ -230,7 +230,7 @@ def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
 
 def test_1008_bind_refuses_the_judges_definition_by_its_deps_type_name(tmp_path):
     """`bind(JUDGE_DEF, …)` REFUSES, and names `JudgeDeps` in the refusal."""
-    bind = T.sym("runtime.agent_definition", "bind")
+    bind = T.sym("investigation.agent_definition", "bind")
     JUDGE_DEF = _judge_def()
     assert JUDGE_DEF.deps_cls is not None, (
         "the definition names no deps class, so `bind` would refuse for a different reason")

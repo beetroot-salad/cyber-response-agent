@@ -419,7 +419,7 @@ def _gate_original_json(part: dict) -> str | None:
     """The tool's own JSON, carried beside a TOON-gate-substituted view under
     `GATE_METADATA_KEY` in the part's `metadata`.
 
-    The key comes from `defender.records._layout`, not `defender.runtime.toon_gate`, which imports
+    The key comes from `defender.records._layout`, not `defender.investigation.toon_gate`, which imports
     pydantic-ai (a runtime-only extra) and would fail on a learning-loop/CI install."""
     meta = part.get("metadata")
     if not isinstance(meta, dict) or GATE_METADATA_KEY not in meta:

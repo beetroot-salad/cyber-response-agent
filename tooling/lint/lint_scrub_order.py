@@ -31,7 +31,7 @@ import _astlib
 DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 _RUN = "run.py"
-_BASH = "runtime/tools/_bash.py"
+_BASH = "investigation/tools/_bash.py"
 _CONSUMERS = ("iterdir", "cross_check_tables", "enqueue_curation", "record_case_ticket",
               "visualize")
 _SWALLOWERS = ("RunTainted", "Exception", "BaseException")

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base, location_path
 
-from defender.runtime import session_store
-from defender.runtime import run_tenant as run_tenant_mod
+from defender.records import session_store
+from defender.systems import run_tenant as run_tenant_mod
 from defender.tests.support.learning.core import _state1135
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
 

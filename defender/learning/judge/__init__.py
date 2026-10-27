@@ -31,7 +31,7 @@ from defender.learning.judge import render as render_mod  # noqa: E402
 from defender.learning.judge import route as route_mod  # noqa: E402
 from defender.learning.judge import run as run_mod  # noqa: E402
 from defender.learning.judge.runs import RunSet, failed_row, read_run_set  # noqa: E402
-from defender.runtime.branch._family import ManifestPredatesOracle  # noqa: E402
+from defender.episodes._family import ManifestPredatesOracle  # noqa: E402
 from defender import _yaml
 
 if TYPE_CHECKING:

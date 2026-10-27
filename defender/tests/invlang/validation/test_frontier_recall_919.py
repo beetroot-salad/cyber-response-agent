@@ -197,7 +197,7 @@ def _contract_tuples(text: str) -> list[tuple]:
 
 def _lessons_frontier():
     """The retrieval script as a module."""
-    from defender.runtime.lessons_engine import lessons_frontier
+    from defender.investigation.lessons_engine import lessons_frontier
 
     return lessons_frontier
 
@@ -418,7 +418,7 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
     #1108 P4 (O2, O-TEXT): the recalled lesson is the RUN COPY's, shown by its model-view path
     `/agent/lessons/<name>.md`; a lesson left in the checkout's `lessons/` (a decoy matching the
     same open slot) is never recalled."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run, agent, dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
@@ -472,7 +472,7 @@ def test_a_malformed_block_yields_an_empty_frontier_rather_than_raising(tmp_path
 
 def test_an_append_landing_a_half_written_block_still_leads_with_its_byte_count(tmp_path):
     """CLAIM: the recall never turns a write that LANDED into a failed tool call."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     _write_lesson(_corpus(agent), "process-class-open", nodes=("type: process, slot: class",))
@@ -599,7 +599,7 @@ def test_matched_names_the_frontier_item_rather_than_the_selector(tmp_path):
 
 def test_the_recall_is_omitted_when_the_corpus_is_missing_or_malformed(tmp_path):
     """CLAIM: the recall never turns a landed write into a failed tool call."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, _run, agent, dfn = _run_copy_main_deps(tmp_path)
     opening = PROLOGUE + OPEN_LOGINUID_BLOCK
@@ -647,7 +647,7 @@ def test_render_of_nothing_is_empty_and_the_cli_honours_top_k(tmp_path):
 
 def test_the_tool_pushes_only_the_lessons_that_matched(tmp_path):
     """CLAIM: `_tool_append_block` is wired to `match_lessons`, not to a directory listing."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, _run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
@@ -795,7 +795,7 @@ ac1|e-001|approved-source-list|"source host is on the approved list"|escalate|es
 
 def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
     """CLAIM: the repair verb pushes lessons on the same terms `append_block` does."""
-    from defender.runtime.tools import _tool_append_block, _tool_fix_row
+    from defender.investigation.tools import _tool_append_block, _tool_fix_row
 
     deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)
@@ -817,7 +817,7 @@ def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
 
 
 def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
-    from defender.runtime.tools import _tool_append_block, _tool_read_file
+    from defender.investigation.tools import _tool_append_block, _tool_read_file
     from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
     deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
@@ -852,7 +852,7 @@ def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
     O5: for a lesson pushed from the RUN COPY's `lessons/` too."""
     import json
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = _corpus(agent)

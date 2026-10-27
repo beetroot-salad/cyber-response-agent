@@ -56,7 +56,7 @@ MODULES = (
     "learning/judge/_grade_record.py",
     "learning/judge/_records.py",
     "learning/judge/enqueue.py",
-    "runtime/branch/_family.py",
+    "episodes/_family.py",
     "presentation/visualize_episode.py",
     "presentation/episode_models.py",
     "presentation/episode_transcript.py",
@@ -428,7 +428,7 @@ NB_READERS = frozenset({
     # (#1105 PR 2 deleted `episode_dir_for` — the owner's `episode_dir` — and
     # `sibling_runs_base`, F-13.)
     ("learning.branch.cli", "sibling_argv"),
-    ("runtime.branch._family", "resume_world_from"),
+    ("episodes._family", "resume_world_from"),
     ("run", "main"),
     # The root-binding readers (O3, N-b).
     ("learning.judge", "read_grade"),

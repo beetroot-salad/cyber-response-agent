@@ -52,7 +52,7 @@ def test_a_bound_deps_is_copied_with_one_field_replaced(tmp_path):
 
 def test_importing_runtime_does_not_import_the_learning_stages():
     code = (
-        "import defender.runtime.tools, sys; "
+        "import defender.investigation.tools, sys; "
         "leaked = [m for m in sys.modules if m.startswith('defender.learning.author')]; "
         "assert not leaked, leaked"
     )

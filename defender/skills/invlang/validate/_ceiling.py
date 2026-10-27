@@ -15,7 +15,7 @@ from defender._model import model
 
 
 
-from defender.runtime.verbs import RosterRead
+from defender.systems.verbs import RosterRead
 
 from defender.skills.invlang.parser import is_conclude_empty_marker
 from defender.skills.invlang.schema import CompanionBody, FindingRecord
@@ -227,9 +227,9 @@ def _cap_is_identifier_shaped(cap: str) -> bool:
 
     `cap` is the one receipt field checked by absence (`not _capability_exists`), which any
     non-capability string satisfies, `</report>` included. `ref` and `state` are checked by exact
-    membership, which already refuses non-members. Uses `runtime.verbs`' system-name alphabet for
+    membership, which already refuses non-members. Uses `systems.verbs`' system-name alphabet for
     both halves, since verb names share it."""
-    from defender.runtime.verbs import SYSTEM_PATTERN, is_system_name
+    from defender.kit.verbs import SYSTEM_PATTERN, is_system_name
 
     system, sep, verb = cap.partition(".")
     if not is_system_name(system):

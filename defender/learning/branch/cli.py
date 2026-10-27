@@ -71,7 +71,7 @@ from defender.records import (
     RunRefused,
     RunsRepository,
 )
-from defender.runtime.run_tenant import RunTenant
+from defender.systems.run_tenant import RunTenant
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
@@ -81,13 +81,14 @@ from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
 from defender.tenancy import _tenant
 from defender._git import REPO_ROOT
-from defender.runtime import branch, session_store
-from defender.runtime.branch._family import (
+from defender.investigation import branch
+from defender.records import session_store
+from defender.episodes._family import (
     FamilyError,
     load_family,
     runnable_worlds,
 )
-from defender.runtime.verb_grant import GrantError
+from defender.systems.verb_grant import GrantError
 
 from defender.learning.branch.questioner_launch import (
     _SAMPLES_PER_VERB as _SAMPLES_PER_VERB,
@@ -254,7 +255,7 @@ def _episode_tenant(tenant_id: _tenant.TenantId, data_root: DataRoot) -> RunTena
 
     The same acceptance a sibling's run start uses, asked once up front so a tenant a sibling
     would refuse is refused before any spend. Siblings dispatch no turn-0 lead."""
-    from defender.runtime import run_tenant as run_tenant_mod
+    from defender.systems import run_tenant as run_tenant_mod
 
     try:
         # THE TREES A BOX MOUNTS, as the launcher knows them: acceptance already holds the
@@ -588,7 +589,7 @@ def _launch(  # noqa: PLR0913 — see `main`
         live_tree=live_capture, oracle=oracle, verifier=verifier)
     if roster is None:
         from defender._paths import adapters_under
-        from defender.runtime.verbs import read_roster
+        from defender.systems.verbs import read_roster
 
         roster = read_roster(adapters_under(_DEFENDER_DIR))
 

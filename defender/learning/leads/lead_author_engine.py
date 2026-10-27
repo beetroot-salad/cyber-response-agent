@@ -13,12 +13,12 @@ from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning.leads.declared_systems import adapter_systems_under
 from defender.learning._pydantic_stage import run_stage as _run_stage_fn
-from defender.runtime import providers
-from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
+from defender import providers
+from defender.investigation.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender._agent_role import AgentRole
-from defender.runtime.driver import MakeModel
-from defender.runtime.permission.grant import SEG, Grant, PathShapes
-from defender.runtime.tools import AgentDeps
+from defender.investigation.driver import MakeModel
+from defender.investigation.permission.grant import SEG, Grant, PathShapes
+from defender.investigation.tools import AgentDeps
 
 _LEAD_AUTHOR_DENY_REASON = (
     "Blocked: the lead author curates the gather query catalog and the per-SYSTEM skill docs. "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir

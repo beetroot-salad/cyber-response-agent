@@ -1,7 +1,7 @@
 # The session head pointer and the head-move log
 
 **Status:** design, ready for write-tests. Amends the store shipped in #705 /
-#744 (`runtime/session_store.py`, `runtime/selection.py`). No data migration —
+#744 (`records/session_store.py`, `records/selection.py`). No data migration —
 no runs exist under the current schema.
 
 ## What this changes

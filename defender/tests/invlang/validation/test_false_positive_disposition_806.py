@@ -174,9 +174,9 @@ def _close(tmp_path, companion: str, disposition: str):
     import asyncio
 
     from defender.agents import MAIN_DEF
-    from defender.runtime import challenge_gate
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.close_tool import _close_investigation_async
+    from defender.investigation import challenge_gate
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.close_tool import _close_investigation_async
     from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
     from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
 
@@ -294,9 +294,9 @@ def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, sh
     import asyncio
 
     from defender.agents import MAIN_DEF
-    from defender.runtime import challenge_gate
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.close_tool import _close_investigation_async
+    from defender.investigation import challenge_gate
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.close_tool import _close_investigation_async
     from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
     from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
 
@@ -324,9 +324,9 @@ def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_pa
     from defender._io import ALIAS_READ_REFUSAL
     from defender._vocab import HOST_ONLY_DISPOSITION
     from defender.agents import MAIN_DEF
-    from defender.runtime import challenge_gate
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.close_tool import (
+    from defender.investigation import challenge_gate
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.close_tool import (
         CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR, _close_investigation_async,
     )
     from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
@@ -366,9 +366,9 @@ def test_an_absent_companion_is_not_a_fault(tmp_path):
     import asyncio
 
     from defender.agents import MAIN_DEF
-    from defender.runtime import challenge_gate
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.close_tool import _close_investigation_async
+    from defender.investigation import challenge_gate
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.close_tool import _close_investigation_async
     from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
     from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
 

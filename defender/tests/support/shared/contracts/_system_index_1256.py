@@ -10,7 +10,7 @@ from typing import Any
 #: The module the index builder replaced `descriptor_catalog` in.
 INDEX_MODULE = "defender.hooks.inject_system_skill_description"
 #: The module holding the down map's "nothing down" value.
-STATUS_MODULE = "defender.runtime.system_status"
+STATUS_MODULE = "defender.systems.system_status"
 
 
 def index_module() -> ModuleType:

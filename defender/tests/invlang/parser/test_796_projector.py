@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime.review.projector import (
+from defender.investigation.review.projector import (
     INFERENCE_COMPANION_KEYS,
     INFERENCE_HYPOTHESIS_KEYS,
     INFERENCE_LEAD_KEYS,
@@ -44,7 +44,7 @@ def _body(projection) -> dict:
 def _every_lens(companion) -> list:
     """Every projection a LENS is handed on this record — support, and its ablation when the
     record has a load-bearing edge to withhold."""
-    from defender.runtime.review.projector import ablation_target
+    from defender.investigation.review.projector import ablation_target
 
     lenses = [support_projection(companion, SALT)]
     ablated = ablation_target(companion)
@@ -281,7 +281,7 @@ def _contracts(body: dict) -> list[dict]:
 def test_the_ablation_leaves_no_surviving_row_citing_the_edge_it_withheld():
     """The ablation lens is never told an edge was removed — and a `:H <h>.authz` row still
     naming an id that appears nowhere else in the projection tells it exactly that."""
-    from defender.runtime.review.projector import ablation_target
+    from defender.investigation.review.projector import ablation_target
 
     doc = parse_investigation(_CONTRACT_CITES_THE_TARGET)
     target, _carried = ablation_target(doc)
@@ -351,7 +351,7 @@ def test_an_empty_document_is_refused():
 
 def test_the_ablation_target_is_a_load_bearing_edge_with_its_footprint(companion):
     """On the golden, ONE edge supports every strong resolution."""
-    from defender.runtime.review.projector import ablation_target
+    from defender.investigation.review.projector import ablation_target
 
     target, carried = ablation_target(companion)
     assert target.startswith("e-")
@@ -360,7 +360,7 @@ def test_the_ablation_target_is_a_load_bearing_edge_with_its_footprint(companion
 
 def test_targeting_reaches_a_close_carried_by_refutation():
     """`--` on a refuted sibling is load-bearing exactly as `++` on a surviving hypothesis is."""
-    from defender.runtime.review.projector import ablation_target
+    from defender.investigation.review.projector import ablation_target
 
     refuting = {
         "findings": [{
@@ -375,7 +375,7 @@ def test_targeting_reaches_a_close_carried_by_refutation():
 
 
 def test_a_record_with_no_strong_movement_has_no_target():
-    from defender.runtime.review.projector import ablation_target
+    from defender.investigation.review.projector import ablation_target
 
     weak = {
         "findings": [{
@@ -424,7 +424,7 @@ def test_an_edge_named_twice_in_one_cell_is_one_citation():
 
 def test_the_ablation_target_counts_resolutions_not_mentions():
     """#969's consequence, and the reason the parse matters."""
-    from defender.runtime.review.projector import ablation_target
+    from defender.investigation.review.projector import ablation_target
 
     doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)
     assert ablation_target(doc) == ("e-002", 1), (

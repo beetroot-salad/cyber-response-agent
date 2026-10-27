@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from defender.runtime.verbs import read_roster
+from defender.systems.verbs import read_roster
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.tenancy.alert_front_door_1222._spec1222 import host_paths_in
 from defender.tests.e2e import _lead_zero_808 as LZ

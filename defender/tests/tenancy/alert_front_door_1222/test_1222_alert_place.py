@@ -956,7 +956,7 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     planted = _tenant()
     src = _branchable_source(tmp_path, planted)
     assert src.run_dir is not None
-    store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
+    store = S.sym("investigation.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
     # #1255 (D1, C7): a branch point is a MAIN response that called tools, and the arm resumes
     # with no continuation prompt — the source's third one (its `echo`), after the capture.
     point = tool_calling_responses(store)[2]

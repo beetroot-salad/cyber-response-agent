@@ -246,7 +246,7 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
     probe = (
         "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
         "print(json.dumps(sorted(m for m in sys.modules "
-        "if m.startswith(('defender.runtime', 'defender.learning')))))"
+        "if m.startswith(('defender.investigation', 'defender.learning')))))"
     )
     out = subprocess.run(
         [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,

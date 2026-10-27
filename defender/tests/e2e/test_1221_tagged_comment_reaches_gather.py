@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import case_ticket  # noqa: E402
-from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.tenancy import case_ticket  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.tests.support.runtime.engine._spec767 import FakeStore, make_run, record, require  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402

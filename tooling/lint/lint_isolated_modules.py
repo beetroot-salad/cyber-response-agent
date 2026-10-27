@@ -13,10 +13,10 @@ or call.
   JSON: its caps are set by the caller, so nothing in the environment can move them (`os.environ`,
   `environ.get`, `env_int(`, `open(`, `json.load(`).
 
-* The ticket writer (`runtime/ticket_writer.py`) finds nothing for itself: no call to
-  `process_defender_dir` or `cwd`. It and every `runtime/lead_zero/*.py` build and read no
-  environment: no `run_env` call and no `os.environ` / `os.getenv` (run.py and the driver hand the
-  environment in).
+* The ticket writer (`investigation/ticket_writer.py`) finds nothing for itself: no call to
+  `process_defender_dir` or `cwd`. It, every `investigation/lead_zero/*.py` and `systems/correlation.py`
+  (the correlation lead's dispatch identity) build and read no environment: no `run_env` call and
+  no `os.environ` / `os.getenv` (run.py and the driver hand the environment in).
 
 A missing file is a finding (re-site the rule), never a pass. A file that does not parse or decode
 is exit 2. There is no baseline and no suppression: fix the code.
@@ -41,8 +41,9 @@ _REGISTRY = "integrations/tacit_knowledge_adapter.py"
 _MUTATING_ATTRS = frozenset({"write_text", "write_bytes", "mkdir", "unlink", "rmdir", "rename",
                              "touch", "safe_dump", "dump", "remove", "replace"})
 _MUTATING_MODULES = frozenset({"shutil"})
-_TICKET_WRITER = "runtime/ticket_writer.py"
-_LEAD_ZERO = "runtime/lead_zero"
+_TICKET_WRITER = "investigation/ticket_writer.py"
+_LEAD_ZERO = "investigation/lead_zero"
+_CORRELATION = "systems/correlation.py"
 _BUDGET = "hooks/budget_enforcer.py"
 _BUDGET_CALLS = frozenset({"env_int", "open"})
 
@@ -155,6 +156,8 @@ def scan(root: Path) -> list[str]:
             rel = path.relative_to(root).as_posix()
             findings.extend(_hands_in_environment(
                 rel, _astlib.read_and_parse(path, rel)[1], frozenset({"run_env"})))
+    if (tree := _tree(root, _CORRELATION, findings)) is not None:
+        findings.extend(_hands_in_environment(_CORRELATION, tree, frozenset({"run_env"})))
     return findings
 
 

@@ -52,7 +52,7 @@ what manufactures the read PR's fixtures.
 
 - **Anti-corruption boundary — internal model ≠ external model.** `report.md`
   (+ `alert.json`) is the *internal* case model; the ticket schema is the *external*
-  model. `runtime/case_ticket.py` is the **only** code that knows both: it
+  model. `tenancy/case_ticket.py` is the **only** code that knows both: it
   parses the internal artifacts into a `CaseRecord` and maps that to/from ticket
   payloads. The drivers, the report schema, and (PR 2) the learning reader never bind
   to ticket field names. When the store changes (e.g. Elastic Cases), only the mapper,
@@ -104,12 +104,12 @@ what manufactures the read PR's fixtures.
 
 ## Shape
 
-- `runtime/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
+- `tenancy/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
   mapper (`alert_to_open_payload`, `case_record_to_comment`), the agent tag
   (`agent_comment_tag`, `posted_comment`), rendering from the mapping config.
 - `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions), editable without touching code.
-- `runtime/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
+- `investigation/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `record_case_ticket` (at most one comment POST, a receipt on every
   branch that called out; no transition call exists), non-fatal.
 - The read side has no ticket screen (#1221): every ticket is served whole. Each

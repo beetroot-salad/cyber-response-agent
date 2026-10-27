@@ -9,7 +9,28 @@ from defender._clock import parse_iso_utc
 from defender._agent_role import AgentRole
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.run_state import RunState
+    from contextlib import AbstractContextManager
+    from typing import Any, Protocol
+
+    class _Ticks(Protocol):
+        def ticks(self) -> float: ...
+
+    class RunState(Protocol):
+        """The slice of the run's live state (`investigation.run_state.RunState`, which sits above
+        `hooks`) this module reads and writes: the budget, the oracle clock hold and the lock."""
+
+        oracle_credited: float
+        oracle_opened: float | None
+
+        @property
+        def lock(self) -> AbstractContextManager[Any]: ...
+        @property
+        def budget(self) -> dict: ...
+        @property
+        def clock(self) -> _Ticks: ...
+        def oracle_held_at(self, tick: float) -> float: ...
+        def budget_snapshot(self) -> dict: ...
+        def elapsed(self) -> float: ...
 
 DEFAULT_LIMITS = {
     "max_tool_calls": 200,

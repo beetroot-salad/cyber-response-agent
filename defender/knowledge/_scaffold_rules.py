@@ -23,8 +23,8 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, RecordRead, bind
 from defender._model import model
 from defender._paths import adapters_under
-from defender.runtime.verb_grant import DENY_ALL
-from defender.runtime.verbs import ModuleVerbRegistry, RegistryError, read_roster
+from defender.systems.verb_grant import DENY_ALL
+from defender.systems.verbs import ModuleVerbRegistry, RegistryError, read_roster
 from defender.kit.verbs import Verb, engine_of, model_facing_params, wrapper_only_params
 
 #: The checked placeholder grammar, as `SCHEMA.md` documents it. The bare `{name}` form

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from defender.records._alert_input import AlertFacts
-from defender.runtime import case_ticket
+from defender.tenancy import case_ticket
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_SETTINGS
 

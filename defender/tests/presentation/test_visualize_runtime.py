@@ -41,7 +41,7 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
     run dir the new render path cannot resolve."""
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-    from defender.runtime import session_store as ss
+    from defender.records import session_store as ss
 
     store = ss.open_store(
         case_id=f"visualize-runtime-fixture-{run.parent.name}", sessions=SessionPaths(fixture_runs_base(run.parent)))

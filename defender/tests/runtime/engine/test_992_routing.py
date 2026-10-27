@@ -6,7 +6,7 @@ from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
-from defender.runtime.close_tool import (
+from defender.investigation.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_NOTHING_LEFT_TO_ASK,
     CAUSE_REVIEW_INCOMPLETE,
@@ -21,8 +21,8 @@ from defender.runtime.close_tool import (
     UNREADABLE,
     render_report,
 )
-from defender.runtime.review.reply import ASK_PROSE_MAX
-from defender.runtime.review_roles import ReviewStages
+from defender.investigation.review.reply import ASK_PROSE_MAX
+from defender.investigation.review_roles import ReviewStages
 from defender.tests.support.runtime.engine import _spec923
 from defender.tests.support.learning.curation._frames680 import frame_salt_of
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
@@ -560,7 +560,7 @@ def test_fault_handling_parity_with_a_confident_close(tmp_path):
     assert review_state(deps).disposition == GAP
 
     # A malformed-but-plausible receipt row renders exactly as `render_report` renders it.
-    from defender.runtime.review.projector import parse_investigation
+    from defender.investigation.review.projector import parse_investigation
     from defender.skills.invlang.validate import conclude_ceiling_test_rows
 
     doc = sparse_companion(plausible)

@@ -33,7 +33,7 @@ def _effective(text):
 
 def test_ident_is_accepted_as_a_refinement_key(tmp_path):
     """O6: `key=ident` is legal, so the operation 7 of 7 measured refusals reached for finally exists."""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     doc = PROLOGUE + attr_block(_IDENT_ROW)
@@ -145,7 +145,7 @@ def test_refinement_targets_a_vertex_never_declared(tmp_path):
     """H8: a refinement naming a vertex no `:V` block ever declared is REFUSED, at error severity."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     for row in (
         "l-001|v-999|attrs.owner|svc.config-mgmt",
@@ -173,7 +173,7 @@ def test_refinement_targets_a_vertex_never_declared(tmp_path):
 
 def test_append_only_still_compares_the_declared_identifier(tmp_path):
     """The negative M6 must not weaken:"""
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
     _tool_append_block(deps, PROLOGUE)

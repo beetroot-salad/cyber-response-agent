@@ -22,14 +22,14 @@ from defender.knowledge._scaffold_rules import (  # noqa: E402
     check_system_skill,
     check_template,
 )
-from defender.runtime.tenant_settings import assignments  # noqa: E402
+from defender.tenancy.tenant_settings import assignments  # noqa: E402
 from defender.kit.settings import is_blank  # noqa: E402
-from defender.runtime.system_status import (  # noqa: E402
+from defender.systems.system_status import (  # noqa: E402
     ReasonScope,
     cause_text,
     judge_adapter,
 )
-from defender.runtime.verbs import (  # noqa: E402
+from defender.systems.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     VerbContext,
     fresh_adapter_module,

@@ -673,8 +673,8 @@ class Writer:
 
 
 def _invoke_write_trace(run_dir: Path) -> None:
-    from defender.runtime import observe
-    from defender.runtime import session_store
+    from defender.investigation import observe
+    from defender.records import session_store
 
     store = session_store.open_store(case_id="c-771", sessions=SessionPaths(fixture_runs_base(run_dir.parent / "stores")))
     sid = store.new_session("main")
@@ -682,7 +682,7 @@ def _invoke_write_trace(run_dir: Path) -> None:
 
 
 def _invoke_observe_logger(run_dir: Path) -> None:
-    from defender.runtime import observe
+    from defender.investigation import observe
 
     # The run-backed logger eagerly initializes the handed wire record. The budget-refusal
     # row makes the positive control observe real bytes as well as eager file creation.
@@ -694,7 +694,7 @@ def _invoke_observe_logger(run_dir: Path) -> None:
 
 
 def _invoke_denial_logger(run_dir: Path) -> None:
-    from defender.runtime import observe
+    from defender.investigation import observe
 
     observe.denial_logger(fixture_run(run_dir)).log_policy_denial(
         role="main", system="elastic", verb="search", call_id="c1", params={},
@@ -702,19 +702,19 @@ def _invoke_denial_logger(run_dir: Path) -> None:
 
 
 def _invoke_case_pointer(run_dir: Path) -> None:
-    from defender.runtime import session_store
+    from defender.records import session_store
 
     session_store.write_case_pointer(fixture_run(run_dir), case_id="c-771", store_path=run_dir / "s.db")
 
 
 def _invoke_query_payload(run_dir: Path) -> Any:
-    from defender.runtime import query_tool
+    from defender.investigation import query_tool
 
     return query_tool._persist_payload(fixture_run(run_dir), "l-001", 0, '[{"a": 1}]')
 
 
 def _invoke_gather_summary(run_dir: Path) -> None:
-    from defender.runtime import tools_gather
+    from defender.investigation import tools_gather
 
     tools_gather._persist_gather_summary(fixture_run(run_dir), "l-001", "## summary\nfindings\n")
 
@@ -733,8 +733,8 @@ def _invoke_lesson_load(run_dir: Path) -> None:
     # `_io.append_jsonl` directly measures a raise the real call site never lets out — the
     # altitude error F3 names, one row over.
     from defender.agents import MAIN_DEF
-    from defender.runtime import tools as runtime_tools
-    from defender.runtime.agent_definition import bind
+    from defender.investigation import tools as runtime_tools
+    from defender.investigation.agent_definition import bind
 
     from dataclasses import replace
 
@@ -759,13 +759,13 @@ def _invoke_queries_table(run_dir: Path) -> Any:
     import asyncio
     from dataclasses import replace
 
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.query_tool import QueryCapture
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.query_tool import QueryCapture
     from defender.tests.support.tenancy import _tenants1106
 
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
     # process-level one carried by `GATHER_DEF`.
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     # #1235 round 2: the capture records into the run's `RunState` its deps carry
     # (`driver.run_investigation` starts it); this writer is driven outside a run, so its deps
@@ -824,29 +824,29 @@ CENSUS: tuple[Writer, ...] = (
     # `unmeasured`. (X5's swallow-continue site itself retired with #1235: the accounting
     # call no longer writes, so there is no failure for it to swallow.)
     Writer("write_trace", "tool_trace.jsonl", "write_text", "unmeasured",
-           _invoke_write_trace, "runtime/observe.py", cite="C1,X10"),
+           _invoke_write_trace, "investigation/observe.py", cite="C1,X10"),
     Writer("run_investigation", "tool_trace.jsonl", "write_text", "unmeasured",
-           _invoke_fault_exit_trace, "runtime/driver/", cite="C1,X10", lands_empty=True),
+           _invoke_fault_exit_trace, "investigation/driver/", cite="C1,X10", lands_empty=True),
     Writer("observe_logger", "wire_logs/llm_requests.jsonl", "append-open", "unmeasured",
-           _invoke_observe_logger, "runtime/observe.py", cite="C1", mkdirs_component=True),
+           _invoke_observe_logger, "investigation/observe.py", cite="C1", mkdirs_component=True),
     Writer("denial_logger", "policy_denials.jsonl", "append-open", "unmeasured",
-           _invoke_denial_logger, "runtime/observe.py", cite="C1,G12"),
+           _invoke_denial_logger, "investigation/observe.py", cite="C1,G12"),
     # #1235 F2: the run -> case pointer left the run dir for a host-only sidecar beside it,
     # `<run_id>.session-pointer.json` in the runs base — named relative to the run dir the way
     # the retired tenant record's row was (`run_tree`'s dir is `RUN_771`, #1187). Still a setup
     # writer, still required to refuse a planted alias at its own name.
     Writer("write_case_pointer", f"../{RUN_771}.session-pointer.json", "write_text", "unmeasured",
-           _invoke_case_pointer, "runtime/session_store/_write.py", cite="C1,R4"),
+           _invoke_case_pointer, "records/session_store/_write.py", cite="C1,R4"),
     # #1235: the `budget_enforcer` and `circuit_breaker` rows retired with their artifacts.
     # The budget counters and the breaker live in the run process's memory; nothing writes
     # `budget.json` or `circuit_breaker.json`, so neither module is a writer into the tree.
     Writer("query_tool", "gather_raw/l-001/0.json", "write_text", "return-none",
-           _invoke_query_payload, "runtime/query_tool.py", cite="X5,G15",
+           _invoke_query_payload, "investigation/query_tool.py", cite="X5,G15",
            mkdirs_component=True),
     Writer("query_tool_queries_table", "executed_queries.jsonl", "append_jsonl", "unmeasured",
-           _invoke_queries_table, "runtime/query_tool.py", cite="C1,G1"),
+           _invoke_queries_table, "investigation/query_tool.py", cite="C1,G1"),
     Writer("gather_dispatch", "gather_summaries/l-001.md", "write_text", "unmeasured",
-           _invoke_gather_summary, "runtime/tools_gather.py", cite="B11,G15",
+           _invoke_gather_summary, "investigation/tools_gather.py", cite="B11,G15",
            mkdirs_component=True),
     # X5's site, and the label is the site's — but the OBSERVABLE is fault-shaped: under X5's
     # own fault (a plain file squatting the parent component) it returns 0, and under this
@@ -857,7 +857,7 @@ CENSUS: tuple[Writer, ...] = (
     Writer("claim_lead", "gather_raw/l-001.lead.json", "excl-create", "return-zero",
            _invoke_claim_lead, "hooks/record_lead.py", cite="X5,C1", mkdirs_component=True),
     Writer("record_lesson_load", "lessons_loaded.jsonl", "append_jsonl", "unmeasured",
-           _invoke_lesson_load, "runtime/tools/", cite="G15"),
+           _invoke_lesson_load, "investigation/tools/", cite="G15"),
     Writer("start_box", ".box-sentinel", "write_text", "fault-startup",
            _invoke_sentinel_plant, "box/", cite="X5,G10"),
     # (#1235 deleted `_io.write_atomic`, whose only writer, the budget record, retired with
@@ -915,7 +915,7 @@ class MeasuredSite:
 def _x5_query_payload_site(run_dir: Path) -> object:
     """`query_tool._persist_payload` — X5's return-none site, under a directory squatting the
     by-ref payload name."""
-    from defender.runtime import query_tool
+    from defender.investigation import query_tool
 
     target = run_dir / "gather_raw" / "l-001" / "0.json"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -964,12 +964,12 @@ X5_MEASURED_SITES: tuple[MeasuredSite, ...] = (
 )
 
 #: The modules the lint must HARD-GATE (fork R25) — DERIVED from the census, plus the drain
-#: lane's own writers. Typing this list by hand is what dropped `runtime/driver.py` from the
+#: lane's own writers. Typing this list by hand is what dropped `investigation/driver.py` from the
 #: gate while the demand still bound its edge, so the derivation is the repair.
 CENSUS_MODULES: frozenset[str] = frozenset(w.module for w in CENSUS)
 DRAIN_MODULES: frozenset[str] = frozenset({"learning/author/drain.py"})
 LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
-    "_filesystem/", "runtime/query_catalog.py", "runtime/session_store/_pointers.py",
+    "_filesystem/", "investigation/query_catalog.py", "records/session_store/_pointers.py",
 }
 
 
@@ -1025,7 +1025,7 @@ def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = 
 
     This is the only production route to `interacts(run_investigation->run_dir)` — C1's row 2,
     the second writer of the one fixed `tool_trace.jsonl` name."""
-    from defender.runtime import session_store as ss
+    from defender.records import session_store as ss
 
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive
 

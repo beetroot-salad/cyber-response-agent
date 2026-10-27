@@ -1,4 +1,4 @@
-"""Pure unit tests for the runtime permission gate (runtime/permission/): bash, read and write allow/deny decisions."""
+"""Pure unit tests for the runtime permission gate (investigation/permission/): bash, read and write allow/deny decisions."""
 from __future__ import annotations
 
 import re
@@ -10,9 +10,9 @@ import pytest
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import RunScope, compile_policy_for  # noqa: E402
-from defender.runtime.permission.grant import PathShapes, under  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import RunScope, compile_policy_for  # noqa: E402
+from defender.investigation.permission.grant import PathShapes, under  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 _RUN = Path("/run")
@@ -534,7 +534,7 @@ def _shape(cmd):
     return bash_exec.parse(cmd)
 
 
-from defender.runtime.permission import AgentPolicy, Grant  # noqa: E402
+from defender.investigation.permission import AgentPolicy, Grant  # noqa: E402
 
 
 def test_policy_read_roots_extend_the_allowlist(tmp_path):

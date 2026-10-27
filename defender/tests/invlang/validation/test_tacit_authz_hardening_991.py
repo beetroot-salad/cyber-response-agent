@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from defender.records._artifact_schema import REPORT_FILE_MAX, validate_report
-from defender.runtime import close_tool
+from defender.investigation import close_tool
 from defender.integrations import tacit_knowledge_adapter as tk
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import validate_companion
@@ -401,7 +401,7 @@ def test_every_cell_the_renderer_copies_is_checked_for_the_delimiter() -> None:
 def test_a_forced_close_still_commits_over_a_companion_the_gate_cannot_parse(tmp_path) -> None:
     """The framework's FORCED close is exempt from the PARSE fault, the way it is already exempt
     from both document gates beside it."""
-    from defender.runtime import close_tool as ct
+    from defender.investigation import close_tool as ct
 
     deps, run_dir = main_deps(tmp_path, GOOD)
     exploded = {"n": 0}

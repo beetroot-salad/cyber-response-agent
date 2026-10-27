@@ -12,7 +12,7 @@ import pytest
 
 from defender._io import append_jsonl, read_jsonl_rows
 from defender.records import RunPaths
-from defender.runtime.verbs import read_roster
+from defender.systems.verbs import read_roster
 from defender.episodes._episode_handle import Episode
 from defender.episodes._episode_paths import BASE_FILENAME, SERVED_DIRNAME
 from defender.learning.branch.ledger import (
@@ -21,9 +21,9 @@ from defender.learning.branch.ledger import (
     LedgerError,
     payload_text,
 )
-from defender.runtime.verb_grant import VerbGrant
+from defender.systems.verb_grant import VerbGrant
 from defender.tests.support.tenancy import _tenants1106
-from defender.runtime.verbs import VerbContext
+from defender.systems.verbs import VerbContext
 from defender.knowledge._query_rules import ABOVE_GUARD_QUERY_ID, BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
 
 #: The episode's clock. A primed capture is served under it like anything else, so the registry

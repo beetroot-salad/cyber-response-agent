@@ -6,7 +6,7 @@ from pydantic_ai import RunContext
 
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender.knowledge._knowledge import LESSON_CORPORA
-from defender.runtime.tools import AgentDeps, _bound_and_wrap, _gated_read, _grep_lines
+from defender.investigation.tools import AgentDeps, _bound_and_wrap, _gated_read, _grep_lines
 
 
 def _select_part(text: str, part: str) -> str:

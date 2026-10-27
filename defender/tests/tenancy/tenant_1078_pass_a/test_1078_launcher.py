@@ -316,7 +316,7 @@ def _accepted(root: Path):
 def _sibling_state(sib: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
     """A fresh run state for the sibling at `sib`, which seeding takes as its third argument
     (#1235 round 2, where it was the sibling's run dir)."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(sib, sib.name)
 
@@ -327,7 +327,7 @@ def test_o4_fork_store_location(tmp_path, data_root):
     base = H.runs_dir(data_root, TID)
     base.mkdir(parents=True)
     src = H.source_run(base)
-    br = H.mod("runtime.branch")
+    br = H.mod("investigation.branch")
     store = br.open_source_store(src, source_run=_run_handle_1165(src))
     try:
         as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))

@@ -4,7 +4,7 @@ Thin, stable wrappers the defender agent (orchestrator + gather subagents)
 invokes by a single token — `defender-invlang enum types`, `cat <payload> | defender-sql '<SQL>'`.
 
 **There is no data-source shim here, and there cannot be one (#611).** A system of record is
-reached through the typed `query` tool (`runtime/query_tool.py` → the `VERBS` registry), never
+reached through the typed `query` tool (`investigation/query_tool.py` → the `VERBS` registry), never
 through a program the model names: the seven `defender-<system>` shims and the
 `defender-record-query` wrapper they were captured through are deleted, and the gate denies an
 adapter-shaped command on every lane. What remains here is local computation over payloads the
@@ -24,7 +24,7 @@ produces a different leading token every time, which the permission gate would
 have to special-case (issue #261).
 
 Each shim collapses all those forms to one stable `defender-*` token that
-`runtime/permission.py` allowlists in-process. `run_common.run_env` puts this
+`investigation/permission.py` allowlists in-process. `run_common.run_env` puts this
 dir first on `PATH` and exports `DEFENDER_DIR` / `DEFENDER_RUNS_BASE` (derived, `<T>/runs`), so the
 shims resolve from any cwd.
 
@@ -38,7 +38,7 @@ shims resolve from any cwd.
   the permission gate admits into the box can resolve the mounted `.venv` —
   the gate itself refuses both ways of clearing `DEFENDER_BOX` for a single
   command (a leading `VAR=` assignment, or routing through `env`/`unset`,
-  `runtime/permission/bash.py::_stage_unsafe`/`_claim`), and every command's
+  `investigation/permission/bash.py::_stage_unsafe`/`_claim`), and every command's
   environment is derived fresh from the container's own start-time mark, never
   carried over from a prior command. This is a property of the gate, not of
   `DEFENDER_BOX` alone — a process with shell access inside the box but NOT
@@ -47,7 +47,7 @@ shims resolve from any cwd.
   tool no agent lane ever admits (above), was not part of this fix and keeps
   its venv-first lookup unconditionally, by design (#1092 non-obligation).
 - `defender-sql` and `defender-lessons` run their engines as modules
-  (`python3 -P -m defender.runtime.sql_engine.sql`, `…lessons_engine.lessons_fm`) with the
+  (`python3 -P -m defender.investigation.sql_engine.sql`, `…lessons_engine.lessons_fm`) with the
   shim's own checkout root first on `PYTHONPATH` and the working folder kept off the import
   path, so the engine that answers is always the one beside the shim, never a checkout an
   inherited `PYTHONPATH` or the caller's folder names. `defender-sql` refuses (exit 2) when
@@ -65,6 +65,6 @@ shims resolve from any cwd.
   deny it with a reason that names the `query` tool. The classification outlived the route.
 
 To add a data source: do NOT drop a shim here — export a `VERBS` mapping from
-`integrations/{system}_adapter.py` (see `runtime/verbs.py`). To add a local tool: drop a shim
+`integrations/{system}_adapter.py` (see `systems/verbs.py`). To add a local tool: drop a shim
 following the same pattern and add it to `NON_ADAPTER_SHIMS` *and* `grant._SHIM_FLAGS` (a shim
 in one but not the other degrades to a free-text shape that silently widens what it accepts).

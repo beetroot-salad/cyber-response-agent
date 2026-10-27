@@ -13,19 +13,19 @@ from defender.knowledge._corpus import QueryTemplate, is_established
 from defender._paths import adapters_under
 from defender.learning.leads.declared_systems import declared_systems_over, read_adapters
 from defender.learning.leads._errors import LeadAuthorError
-from defender.runtime import lead_zero as lead_zero_mod
-from defender.runtime.lead_zero._spec import correlation_grant
-from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
-from defender.runtime.run_tenant import catalog_templates, correlation_dispatch
-from defender.runtime.verb_dispositions import (
+from defender.investigation import lead_zero as lead_zero_mod
+from defender.investigation.lead_zero._spec import correlation_grant
+from defender.systems.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
+from defender.systems.run_tenant import catalog_templates, correlation_dispatch
+from defender.systems.verb_dispositions import (
     CensusGaps,
     Disposition,
     census_gaps,
     dispositions_path,
     load_dispositions,
 )
-from defender.runtime.verb_grant import GrantError
-from defender.runtime.verbs import RosterRead
+from defender.systems.verb_grant import GrantError
+from defender.systems.verbs import RosterRead
 from defender.tenancy._tenants import AGENT_HALF
 
 

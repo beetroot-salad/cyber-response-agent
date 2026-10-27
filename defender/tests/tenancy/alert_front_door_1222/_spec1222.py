@@ -1350,7 +1350,7 @@ class RecordingShim:
         if any(f in joined for f in self._fail):
             self.answers.append(None)
             return None
-        real = self._real if self._real is not None else sym("runtime.orient", "_shim")
+        real = self._real if self._real is not None else sym("investigation.orient", "_shim")
         out = real(argv, env)
         self.answers.append(out)
         return out
@@ -1448,7 +1448,7 @@ class HoldingTicketStore(TicketStore):
 
 def ticket_writer(store: TicketStore) -> Any:
     """The REAL ticket writer's two legs bound to `store` — what `run.main(ticket_writer=…)` takes."""
-    tw = mod("runtime.ticket_writer")
+    tw = mod("investigation.ticket_writer")
     deps = tw.TicketWriterDeps(request=store.request)
     return SimpleNamespace(
         open_case_ticket=functools.partial(tw.open_case_ticket, deps=deps),
@@ -1648,7 +1648,7 @@ def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ..., 
             kw[name] = value
     d.run_dir = Path(run_dir)
     if d.run_state is None:
-        d.run_state = sym("runtime.run_state", "RunState")(
+        d.run_state = sym("investigation.run_state", "RunState")(
             run_dir, run_id or Path(run_dir).name)
     kw["run_state"] = d.run_state
     out = H.drive(Path(run_dir), run_id=run_id or Path(run_dir).name, main=d.main,

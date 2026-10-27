@@ -82,13 +82,13 @@ def test_nonrecord_residue_cannot_be_reused_for_a_run_record():
 
 
 def test_unknown_target_inside_an_existing_nonrecord_scope_is_not_exempt():
-    residue = {("runtime.bash_policy", "_load_policy", "read_text_utf8"):
+    residue = {("investigation.bash_policy", "_load_policy", "read_text_utf8"):
                (1, "nonrecord", ("path",))}
     source = "from defender._io import read_text_utf8\ndef _load_policy(path):\n return read_text_utf8(path)"
-    assert _GATE.deviations(_GATE.census_source("runtime/bash_policy.py", source), residue) == []
+    assert _GATE.deviations(_GATE.census_source("investigation/bash_policy.py", source), residue) == []
     unknown = source.replace("read_text_utf8(path)", "read_text_utf8(mystery)")
     assert any("unclassified" in finding for finding in _GATE.deviations(
-        _GATE.census_source("runtime/bash_policy.py", unknown), residue))
+        _GATE.census_source("investigation/bash_policy.py", unknown), residue))
 
 
 def test_owner_alias_target_is_classified_as_record():

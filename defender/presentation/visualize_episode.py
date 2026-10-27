@@ -34,7 +34,7 @@ from defender.learning.judge.enqueue import (
     draws_on_disk_report,
 )
 from defender.learning.judge.render import episode_alert
-from defender.runtime.branch._family import (
+from defender.episodes._family import (
     FamilyError, ManifestPredatesOracle,
 )
 from defender.presentation.visualize_primitives import (
@@ -128,7 +128,7 @@ def _read_outcome(bound: Bound, manifest: dict[str, Any]) -> _Record:
     """Pre-flight's outcome record with the worlds O5 counts as failed, as
     `{"record": <record or None>, "failed": {label: entry}}`. An absent or torn record is the
     "no record" state: `error` names it, and the failed worlds' own records still show."""
-    from defender.runtime.branch._family import parse_family
+    from defender.episodes._family import parse_family
 
     family_model = parse_family(manifest)
     try:
@@ -225,7 +225,7 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
     grade = ep.grade
     grade_rows = [r for r in (_items(grade.worlds) if grade is not None else [])
                   if isinstance(r, dict) and isinstance(r.get("world"), str)]
-    from defender.runtime.branch._family import label_for_world_id
+    from defender.episodes._family import label_for_world_id
 
     ep.archived_world_dirs = [
         label_for_world_id(ep.manifest, world_id)

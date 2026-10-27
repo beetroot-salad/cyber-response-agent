@@ -24,9 +24,9 @@ def _registered_names(defn) -> set[str]:
     from pydantic_ai.models.function import FunctionModel
 
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.runtime import driver, observe
-    from defender.runtime.providers import BuiltModel
-    from defender.runtime.tools import AgentDeps
+    from defender.investigation import driver, observe
+    from defender.providers import BuiltModel
+    from defender.investigation.tools import AgentDeps
     from defender.tests.e2e._replay_harness import ReplayFn
 
     logger = observe.RequestLogger(Path(os.devnull))
@@ -68,7 +68,7 @@ def test_exactly_one_agent_definition_is_offered_fix_row():
 def _budgeted(tmp_path, tool_calls: int):
     """MAIN deps whose run's real budget — the run's `RunState`, started and counted through the production `RunState(...)` / `count_call` (#1235 round 2) and carried on the deps as the run's own — holds `tool_calls` executed calls."""
     from defender.hooks.budget_enforcer import count_call
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     deps, run = main_deps(tmp_path)
     state = RunState(run, run.name)
@@ -80,7 +80,7 @@ def _budgeted(tmp_path, tool_calls: int):
 def _short_circuit(deps, tool_name, limits):
     import os
 
-    from defender.runtime import driver, observe
+    from defender.investigation import driver, observe
 
     logger = observe.RequestLogger(Path(os.devnull))
     return driver._budget_short_circuit(deps, tool_name, limits, logger, "main")
@@ -150,8 +150,8 @@ def test_budget_stop_message_while_flagged(tmp_path):
 
 def test_main_is_not_regranted_write_file_or_edit_file():
     """N4: the repair window does not re-open the surface #810 closed on measurement."""
-    from defender.runtime.agent_definition import ToolSet
-    from defender.runtime.driver import MAIN_DEF
+    from defender.investigation.agent_definition import ToolSet
+    from defender.investigation.driver import MAIN_DEF
 
     assert MAIN_DEF.tools == ToolSet(read=True, bash=True, append=True, close=True)
     assert MAIN_DEF.tools.write is False
@@ -164,9 +164,9 @@ def test_main_is_not_regranted_write_file_or_edit_file():
 
 def test_bash_grant_cannot_construct_a_write_reaching_investigation_md(tmp_path):
     """O3/SEC1 are only as strong as this negative, which the brief stated with no claim behind it."""
-    from defender.runtime import permission
-    from defender.runtime.agent_definition import compile_policy_for
-    from defender.runtime.driver import MAIN_DEF
+    from defender.investigation import permission
+    from defender.investigation.agent_definition import compile_policy_for
+    from defender.investigation.driver import MAIN_DEF
 
     deps, run = main_deps(tmp_path)
     inv = seed_investigation(run, WARN_DOC)

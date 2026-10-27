@@ -118,8 +118,8 @@ def test_moved_module_reads_its_environment_knob_at_a_different_point(
 #: module is at module level, so a stale name is loud at process start.
 S053_EDGES = (
     ("api_serve->_venv", "defender.api.serve", "reexec_into_venv"),
-    ("tools_init->sql", "defender.runtime.tools", "EXIT_NO_RUNTIME"),
-    ("query_tool->payload_view", "defender.runtime.query_tool", "ELISION_PREFIX"),
+    ("tools_init->sql", "defender.investigation.tools", "EXIT_NO_RUNTIME"),
+    ("query_tool->payload_view", "defender.investigation.query_tool", "ELISION_PREFIX"),
 )
 
 _CLEAN_IMPORTS = r'''

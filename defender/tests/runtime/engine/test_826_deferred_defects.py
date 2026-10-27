@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime.circuit_breaker import (
+from defender.systems.circuit_breaker import (
     AGENT_FIXABLE_ERROR_CLASS,
     INFRA_ERROR_CLASS,
     error_class_for_exit,
@@ -16,7 +16,7 @@ from defender.runtime.circuit_breaker import (
 from defender.integrations import elastic_adapter as ea
 from defender.kit.faults import UpstreamFault
 from defender.knowledge import _query_rules
-from defender.runtime import record_query as rq
+from defender.investigation import record_query as rq
 
 LEAD = "l-001"
 
@@ -130,7 +130,7 @@ def _write(tmp_path: Path, rows: list[dict]):  # noqa: ANN202 — a `RunState` (
     """A run that starts holding `rows` — a branch sibling's inherited prefix, handed to the
     run's state the way seeding hands it (`RunState.inherit_rows`, #1235 round 2). Returns the
     state: the live reader (`repeat_note` here) reads it, never `executed_queries.jsonl`."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     state = RunState(tmp_path, "r826")

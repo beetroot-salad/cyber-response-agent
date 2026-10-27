@@ -40,8 +40,9 @@ AT_BASE = os.environ.get("SPEC1080_AT_BASE") == "1"
 
 REPORTS = "defender/reports"
 #: Pinned by demand text.
-RUNTIME = "defender/runtime"
-VERBS = "defender/runtime/verbs.py"
+RUNTIME = "defender/investigation"
+TENANCY = "defender/tenancy"
+VERBS = "defender/systems/verbs.py"
 #: The flat tier: a module directly under `defender/` whose name starts with `_`.
 FLAT_TIER = "defender/_*.py"
 #: The price table and process bootstrap keep dependency-free package initializers; neither
@@ -196,7 +197,7 @@ def definitions(name: str, root: Path = REPO_ROOT) -> tuple[str, ...]:
 #: Where each symbol the locator is asked about lives at the BASE outside `defender/scripts/`
 #: (the exit-code vocabulary moves out of the circuit breaker, m1). `SPEC1080_AT_BASE` accepts
 #: these; nothing else does.
-_BASE_HOMES_OUTSIDE_SCRIPTS = ("defender/runtime/circuit_breaker.py",)
+_BASE_HOMES_OUTSIDE_SCRIPTS = ("defender/systems/circuit_breaker.py",)
 
 
 def home_of(name: str, *, home: str | None = None, root: Path = REPO_ROOT) -> str:

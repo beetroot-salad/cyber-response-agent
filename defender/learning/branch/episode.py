@@ -20,7 +20,7 @@ from defender.learning.branch.ledger import (
     correlation_key_of,
 )
 from defender.records import EpisodeRuns
-from defender.runtime.branch._family import (
+from defender.episodes._family import (
     BASE_ROLE,
     family_identities,
     Family, FamilyError,

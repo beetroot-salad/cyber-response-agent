@@ -27,8 +27,8 @@ def _vocab():
 def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(tmp_path):
     pytest.importorskip("pydantic_ai")
     from defender.agents import MAIN_DEF
-    from defender.runtime import permission
-    from defender.runtime.agent_definition import compile_policy_for
+    from defender.investigation import permission
+    from defender.investigation.agent_definition import compile_policy_for
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     J.grade_at(

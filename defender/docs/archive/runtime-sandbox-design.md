@@ -36,7 +36,7 @@ broker's egress allowlist; credentials are attached *at the broker boundary* and
 never cross into the isolate. The broker's proxy half is **adopted, not built**
 (a credential-injecting proxy + vault — Infisical Agent Vault is the leading
 candidate; see §Build/buy); the capability-RPC half stays ours. The in-process
-`runtime/permission/` gate demotes to defense-in-depth / UX. **The driver/brain
+`investigation/permission/` gate demotes to defense-in-depth / UX. **The driver/brain
 runs host-side and trusted; the isolate is a thin tool-executor (hands)** — see
 §Prior art & the brain/hands/session decision for that split and the
 origination-not-MITM stance it implies.
@@ -119,7 +119,7 @@ lifecycle seam — is a follow-up, flagged inline).
 
 ## Why the in-process gate isn't the boundary
 
-The runtime is an in-process PydanticAI loop (`runtime/driver.py`). It processes
+The runtime is an in-process PydanticAI loop (`investigation/driver.py`). It processes
 attacker-influenceable input — `alert.json` and adapter output are
 prompt-injection vectors — so a hostile payload can drive the model to emit tool
 calls. The gate (`decide_read`/`decide_write`/`decide_bash`) is a real

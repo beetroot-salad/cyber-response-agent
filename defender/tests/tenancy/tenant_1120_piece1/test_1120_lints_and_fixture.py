@@ -64,8 +64,8 @@ KNOWLEDGE_JOINS = ("settings", "knowledge", "agent")
 
 #: The settings-half loaders that survive piece 1 unchanged (profile resource
 SETTINGS_LOADER_MODULES = (
-    "runtime/verb_dispositions.py", "runtime/lead_zero_config.py", "runtime/run_tenant.py",
-    "runtime/case_ticket.py", "integrations/elastic_adapter.py",
+    "systems/verb_dispositions.py", "systems/lead_zero_config.py", "systems/run_tenant.py",
+    "tenancy/case_ticket.py", "integrations/elastic_adapter.py",
     "integrations/_stub_transport.py", "learning/branch/estate/stagers/elastic.py",
     "learning/branch/staging.py", "skills/connect/validate_scaffold.py",
 )
@@ -116,7 +116,7 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
 
         from defender.episodes._episode_paths import EpisodePaths
         from defender.tenancy._tenant import accept_tenant
-        from defender.runtime.run_tenant import RunTenant
+        from defender.systems.run_tenant import RunTenant
 
 
         def local_runs(root: Path, run_id: str) -> Path:

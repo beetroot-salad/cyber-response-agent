@@ -232,7 +232,7 @@ def _warning_messages(doc: str) -> list[str]:
 @pytest.mark.xfail(
     strict=True,
     reason="rule #18's route-compliance clause is not implemented, and honouring "
-    "'warning' is why: a locus-less warn is dropped by `runtime/tools._addressable`, and "
+    "'warning' is why: a locus-less warn is dropped by `investigation/tools._addressable`, and "
     "a warn WITH a locus lets `fix_row` rewrite the row — which would let a run edit its "
     "own pre-registration to match where it ended up. Recorded at rule #18 in "
     "`defender/docs/investigation-language.md` and as the third 'Open, from #933' item in "

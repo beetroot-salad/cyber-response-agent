@@ -95,7 +95,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
 
 
 def test_world_identities_are_independent_of_episode_and_label(tmp_path):
-    fam = T.mod("runtime.branch._family")
+    fam = T.mod("episodes._family")
     authored = T.declaration(S.family_v2())
     first, _ = fam.accept_family(authored)
     second, _ = fam.accept_family(authored)
@@ -282,7 +282,7 @@ def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_re
 
     assert T.world_id(ep, "b") not in report["archived"]
     with bind(Path(ep)) as bound:
-        failed = outcome.failed_worlds(bound, {}, family=T.sym("runtime.branch._family", "parse_family")(T.family_doc()))
+        failed = outcome.failed_worlds(bound, {}, family=T.sym("episodes._family", "parse_family")(T.family_doc()))
     assert sorted(failed) == ["b"]
     assert failed["b"]["reason"] == outcome.NOT_ARCHIVED
 
@@ -486,7 +486,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
 
 
 def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
-    store_mod = T.mod("runtime.session_store")
+    store_mod = T.mod("records.session_store")
     import threading
 
     from defender.tests.support.storage import _session_store_705 as S

@@ -12,9 +12,9 @@ pytest.importorskip("pydantic_ai")
 
 from defender.hooks import budget_enforcer as be  # noqa: E402
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
-from defender.runtime import circuit_breaker  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.run_state import RunState  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
 
 pytestmark = pytest.mark.e2e

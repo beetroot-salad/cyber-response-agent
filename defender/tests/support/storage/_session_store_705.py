@@ -61,13 +61,13 @@ l-005|2|cmdb-ip|v-006||cmdb|w
 # the two new targets, imported per test
 
 def store_mod():
-    """`defender.runtime.session_store` — M1's module."""
-    return importlib.import_module("defender.runtime.session_store")
+    """`defender.records.session_store` — M1's module."""
+    return importlib.import_module("defender.records.session_store")
 
 
 def selection_mod():
-    """`defender.runtime.selection` — M2's module."""
-    return importlib.import_module("defender.runtime.selection")
+    """`defender.records.selection` — M2's module."""
+    return importlib.import_module("defender.records.selection")
 
 
 # message builders — real ModelMessage objects, never dicts

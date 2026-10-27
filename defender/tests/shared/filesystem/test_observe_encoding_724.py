@@ -15,7 +15,7 @@ from pydantic_ai.messages import (  # noqa: E402
     UserPromptPart,
 )
 
-from defender.runtime import observe  # noqa: E402
+from defender.investigation import observe  # noqa: E402
 
 LONE_SURROGATE = "lead \ud800 x"
 

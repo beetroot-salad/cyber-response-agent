@@ -305,7 +305,7 @@ def elastic_ctx(tmp_path: Path, *, response: dict | None = None):
     constructs a `VerbContext(defender_dir=…, run_dir=…, env=…)` and the transport forks into
     exactly that env — so nothing here patches a module attribute.
     """
-    verbs = mod("runtime.verbs")
+    verbs = mod("systems.verbs")
     bindir = tmp_path / "bin"
     bindir.mkdir(parents=True, exist_ok=True)
     shim = bindir / "docker"

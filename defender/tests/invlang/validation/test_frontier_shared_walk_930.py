@@ -147,7 +147,7 @@ def test_prose_between_blocks_cannot_change_the_document_frontier():
 def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path):
     """CLAIM: `_frontier_recall`'s no-new-fence fast path cannot skip an append that MOVED the
     frontier, when the closing delimiter STRADDLES the join."""
-    from defender.runtime.tools import _frontier_recall
+    from defender.investigation.tools import _frontier_recall
     from defender.skills.invlang.frontier import frontier_from_text
     from defender.tests.support.learning.retrieval._lessons_corpus import (
         _run_copy_main_deps,

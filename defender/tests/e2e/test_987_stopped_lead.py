@@ -28,24 +28,24 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 # `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
 # partially initialized module.
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime import driver, observe, tools_gather  # noqa: E402
-from defender.runtime import session_store  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
-from defender.runtime.query_tool import (  # noqa: E402
+from defender.investigation import driver, observe, tools_gather  # noqa: E402
+from defender.records import session_store  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
+from defender.investigation.query_tool import (  # noqa: E402
     QUERY_DOOR_CLOSED,
     QUERY_NOT_RUN,
 )
-from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import PAYLOAD  # noqa: E402
 from defender.tests.e2e.test_repeat_breaker_807 import GrantScopedVerbs  # noqa: E402
-from defender.runtime.request_ceiling import FINAL_REQUEST  # noqa: E402
-from defender.runtime.tools_gather import (  # noqa: E402
+from defender.investigation.request_ceiling import FINAL_REQUEST  # noqa: E402
+from defender.investigation.tools_gather import (  # noqa: E402
     NO_SUMMARY_FAILED,
     GatherRequest,
 )
@@ -158,7 +158,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     provider is replaced: `build_gather_agent`'s own `make_model` seam hands back a
     `FunctionModel`; the tools, capabilities, instructions and retry policy are the shipped"""
     run_dir = materialize(root, GOLDEN_AB3)
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     # #1106: a run hands MAIN's deps its tenant's record, which every lead inherits.
     deps = replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),

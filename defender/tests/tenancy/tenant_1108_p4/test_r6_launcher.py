@@ -50,7 +50,7 @@ def test_r6_a_failed_childs_words_are_bounded_in_its_summary(tmp_path):
 
 @pytest.mark.parametrize("fault", [ValueError("embedded null"), OSError("no exec")])
 def test_r6_a_spawn_fault_is_a_failed_child_not_a_crash(tmp_path, fault):
-    from defender.runtime.publish_launch import launch_publish
+    from defender.investigation.publish_launch import launch_publish
 
     def spawn(*_a, **_k):
         raise fault
@@ -76,7 +76,7 @@ def test_r6_the_run_records_a_publish_seam_that_raises_anything_as_a_failed_chil
 @pytest.mark.parametrize("line", ["stale:transient", "stale:operator ", "stale:transient   ",
                                   "misconfigured", "misconfigured "])
 def test_r6_a_stale_or_misconfigured_report_without_a_reason_is_a_failed_child(line):
-    from defender.runtime.run_knowledge import read_publish_report
+    from defender.tenancy.run_knowledge import read_publish_report
 
     report = read_publish_report(line)
     assert (report.kind, report.stale_kind) == ("stale", "operator"), report
@@ -94,7 +94,7 @@ def test_r6_a_report_line_is_one_line_whatever_the_detail_says():
 
 def test_r6_the_childs_network_bound_sits_well_inside_the_launchers_budget():
     from defender.learning.author.version_control import publish
-    from defender.runtime import publish_launch
+    from defender.investigation import publish_launch
 
     budget = inspect.signature(publish_launch.launch_publish).parameters["budget"].default
     assert budget >= publish.CHILD_NETWORK_TIMEOUT * 2, (publish.CHILD_NETWORK_TIMEOUT, budget)

@@ -118,7 +118,7 @@ def _answer(system: str, verb: str, params: Mapping[str, Any]) -> Any:
 
 def canned_registry(answer: Callable[[str, str, Mapping[str, Any]], Any] = _answer) -> type:
     """Keep real verb signatures and grants while returning canned backend answers."""
-    from defender.runtime.verbs import ModuleVerbRegistry
+    from defender.systems.verbs import ModuleVerbRegistry
 
     class CannedBodies(ModuleVerbRegistry):
         def verbs(self, system: str) -> Mapping[str, Any]:
@@ -141,8 +141,8 @@ READING_ROLES = ("main", "gather")
 
 def read_policies(run_dir: Path, defender_dir: Path, tenant: Any) -> dict[str, Any]:
     """Compile MAIN and gather read policies with the tenant agent scope."""
-    from defender.runtime.agent_definition import RunScope, compile_policy_for
-    from defender.runtime.driver import MAIN_DEF, gather_def_for
+    from defender.investigation.agent_definition import RunScope, compile_policy_for
+    from defender.investigation.driver import MAIN_DEF, gather_def_for
 
     scope = RunScope(tenant_agent=tenant.agent)
     return {
@@ -154,7 +154,7 @@ def read_policies(run_dir: Path, defender_dir: Path, tenant: Any) -> dict[str, A
 
 def _readable(path: Path, *, run_dir: Path, defender_dir: Path, policy: Any) -> bool:
     """The real gate's answer (`permission.decide_read`) for one file, for one role."""
-    from defender.runtime import permission
+    from defender.investigation import permission
 
     return bool(permission.decide_read(path, run_dir=run_dir, defender_dir=defender_dir,
                                        policy=policy).allow)
@@ -327,7 +327,7 @@ class RoleModel:
 
 def recording_review_stages(recording: Recording) -> Any:
     """Record review prompts while the existing review bundle answers holds."""
-    from defender.runtime.review_roles import ReviewStages
+    from defender.investigation.review_roles import ReviewStages
     from defender.tests.support.runtime.permissions import _review_bundle
 
     def stage(name: str, reply: str) -> Any:
@@ -367,8 +367,8 @@ def _driver_call(recording: Recording, main: RoleModel, gather: RoleModel,
     from pydantic_ai.models import override_allow_model_requests
     from pydantic_ai.models.function import FunctionModel
 
-    from defender.runtime import driver
-    from defender.runtime.providers import BuiltModel
+    from defender.investigation import driver
+    from defender.providers import BuiltModel
     from defender.tests.e2e._replay_harness import _awaiting
 
     main_built = BuiltModel(FunctionModel(_awaiting(main)), None)
@@ -467,8 +467,8 @@ def branch_message_id(source: Any, *, tool: str = "gather") -> int:
     """Find the tool-calling MAIN response for the requested branch tool."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
-    from defender.runtime import branch
-    from defender.runtime import session_store
+    from defender.investigation import branch
+    from defender.records import session_store
 
     store = branch.source_store_if_any(source.run_dir, source_run=source)
     assert store is not None, f"the natural run {source.run_dir} kept no session store"
@@ -533,7 +533,7 @@ def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, in
 
 
 def _resolve(tenant: Any) -> Any:
-    from defender.runtime import run_tenant as run_tenant_mod
+    from defender.systems import run_tenant as run_tenant_mod
 
     return run_tenant_mod.run_tenant_for(tenant, defender_dir=DEFENDER,
                                          dispatches_lead_zero=False)

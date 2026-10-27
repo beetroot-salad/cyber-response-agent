@@ -48,7 +48,7 @@ def _lint() -> ModuleType:
                 "importable): D7's layout lint is not written yet")
 
 
-_CONTEXT = ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py", "runtime/run_tenant.py")
+_CONTEXT = ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py", "systems/run_tenant.py")
 
 
 def _planted(tmp_path: Path) -> Path:

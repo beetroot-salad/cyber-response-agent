@@ -30,8 +30,8 @@ from defender.presentation._page_failed import VisualizeFailed  # noqa: E402
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from defender.runtime.branch._family import ResumeWorld
-    from defender.runtime.run_knowledge import KnowledgeSource
+    from defender.episodes._family import ResumeWorld
+    from defender.tenancy.run_knowledge import KnowledgeSource
 
 _GENERIC_ALERT_STEMS = {"alert"}
 
@@ -231,7 +231,7 @@ def provider_scrubbed_environ() -> dict[str, str]:
     child's environment (`run_env` adds a run's variables on top; the branch launcher's write
     door, which has no run yet, takes it as is). The ONE scrub, so no host child is handed a
     registered provider's key or an operator's issuer token by a caller that forgot to drop it."""
-    from defender.runtime import providers
+    from defender import providers
 
     env = {k: v for k, v in os.environ.items() if not _issuer_variable(k)}
     for var in providers.api_key_vars():

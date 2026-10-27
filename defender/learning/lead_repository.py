@@ -29,7 +29,7 @@ from defender.records import (
     plain_file,
 )
 from defender._text import as_str
-from defender.runtime.circuit_breaker import error_class_for_exit
+from defender.systems.circuit_breaker import error_class_for_exit
 from defender.knowledge._query_rules import is_reserved_query_id
 
 if TYPE_CHECKING:

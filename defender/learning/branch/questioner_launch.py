@@ -46,11 +46,11 @@ from defender.records import (
 
 
 
-from defender.runtime import branch
+from defender.investigation import branch
 
-from defender.runtime.branch import _family
+from defender.episodes import _family
 
-from defender.runtime.branch._family import (
+from defender.episodes._family import (
     Family,
 )
 
@@ -74,7 +74,7 @@ def served_systems(grant: Any) -> list[str]:
     nowhere else. M20: a system is served when the grant admits at least one read verb on it
     other than `health-check` (which reaches no data). The live grant still decides every query
     at query time (M21); this list governs the judge, lessons and the question-writer."""
-    from defender.runtime.verb_dispositions import HEALTH_CHECK
+    from defender.systems.verb_dispositions import HEALTH_CHECK
 
     return sorted({system for system, verb, verb_class in grant.entries
                    if verb_class == "r" and verb != HEALTH_CHECK})
@@ -251,7 +251,7 @@ def _fence_count(source: Run, branch_message_id: int, *, as_of: Any) -> int:
     store falls back to the document's total, as `branch_point_clock` falls back to its last
     mtime.
     """
-    from defender.runtime.branch import BranchSpec, fence_count_at, source_session
+    from defender.investigation.branch import BranchSpec, fence_count_at, source_session
     from defender.skills.invlang.parser import scan_fences
 
     path = source.documents.investigation.path

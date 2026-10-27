@@ -65,13 +65,13 @@ def _routed_passing(*answers: tuple[dict, Any]) -> Any:
 
 def _closing_comment() -> dict:
     """Build the source agent’s tagged closing comment."""
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     return {"comment_id": "c-2", "author": "defender",
             "body": f"{case_ticket.agent_comment_tag(S24.SOURCE_RUN_ID)}\n{CLOSING_MARKER}"}
 
 
 def _closing_tag() -> str:
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     return case_ticket.agent_comment_tag(S24.SOURCE_RUN_ID)
 
 
@@ -466,7 +466,7 @@ def test_1255_a_control_world_whose_oracle_cannot_serve_never_falls_back_to_a_li
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
 def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
         tmp_path: Path, label: str) -> None:
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -499,7 +499,7 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
 def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_posted(
         tmp_path: Path, label: str, post: str) -> None:
-    from defender.runtime import case_ticket
+    from defender.tenancy import case_ticket
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 

@@ -15,8 +15,8 @@ pytest.importorskip("pydantic_ai")
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
 from defender.learning.lead_repository import joined, load_queries  # noqa: E402
 from defender.knowledge import _query_rules  # noqa: E402
-from defender.runtime import record_query  # noqa: E402
-from defender.runtime.record_query import QUERY_ROW_COLUMNS
+from defender.investigation import record_query  # noqa: E402
+from defender.investigation.record_query import QUERY_ROW_COLUMNS
 from defender.knowledge._query_rules import ABOVE_GUARD_QUERY_ID
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.e2e._replay_harness import (  # noqa: E402

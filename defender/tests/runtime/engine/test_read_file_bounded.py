@@ -12,13 +12,13 @@ _DEFENDER = Path(__file__).resolve().parents[3]
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import permission, tools  # noqa: E402
-from defender.runtime.agent_definition import (  # noqa: E402
+from defender.investigation import permission, tools  # noqa: E402
+from defender.investigation.agent_definition import (  # noqa: E402
     ToolSet, compile_policy_for,
 )
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
-from defender.runtime.permission import AgentPolicy  # noqa: E402
+from defender.investigation.permission import AgentPolicy  # noqa: E402
 
 CAP = tools._read_char_cap()
 _PATH = "/run/gather_raw/l-1/0.json"
@@ -74,7 +74,7 @@ def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path
 
 def test_a_captured_payload_is_read_at_the_CAPTURE_ceiling() -> None:
     """The property the shared constant used to carry, kept after #832 split it."""
-    from defender.runtime.payload_view import passthrough_max_bytes
+    from defender.investigation.payload_view import passthrough_max_bytes
 
     assert tools._cap_for(Path("/run/gather_raw/l-1/0.json")) == passthrough_max_bytes()
 

@@ -74,7 +74,7 @@ _GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, **_RETIRED_PROMPT,
     ("as_of", "2026-01-01T00:00:00Z"),
 ])
 def test_branch_spec_refuses_a_mistyped_field_as_branch_error(field_name, bad):
-    from defender.runtime.branch import BranchError, BranchSpec
+    from defender.investigation.branch import BranchError, BranchSpec
 
     with pytest.raises(BranchError, match=rf"{field_name} must be an? \w+, got "):
         BranchSpec(**{**_GOOD, field_name: bad})
@@ -84,7 +84,7 @@ def test_branch_spec_refuses_a_mistyped_field_as_branch_error(field_name, bad):
 
 
 def test_family_fact_refuses_a_non_string_entity_as_family_error():
-    from defender.runtime.branch._family import FamilyError, parse_world
+    from defender.episodes._family import FamilyError, parse_world
 
     with pytest.raises(FamilyError, match=r"worlds\['b'\]\.facts\[0\]\.entities names True"):
         parse_world({"label": "b", "world_id": T.fixture_world_id("b"), "role": "B", "story": "s", "axis": "x",
@@ -98,7 +98,7 @@ def test_family_fact_refuses_a_non_string_entity_as_family_error():
 def test_verb_context_keeps_the_mapping_it_was_handed():
     """A read-only `MappingProxyType` (or the live `os.environ`) must reach the adapter as
     itself, not as a writable snapshot pydantic copied on every `query` call."""
-    from defender.runtime.verbs import VerbContext
+    from defender.systems.verbs import VerbContext
     from defender.tests.support.tenancy import _tenants1106
 
     env = MappingProxyType({"A": "1"})
@@ -111,8 +111,8 @@ def test_verb_context_keeps_the_mapping_it_was_handed():
 
 
 def test_grant_pattern_refuses_a_bare_string():
-    from defender.runtime.permission.grant import Grant, program_shape
-    from defender.runtime.permission.policy import AgentPolicy
+    from defender.investigation.permission.grant import Grant, program_shape
+    from defender.investigation.permission.policy import AgentPolicy
 
     compiled = program_shape("cat")
     assert Grant(program="cat", pattern=compiled).pattern is compiled
@@ -134,7 +134,7 @@ def test_grant_pattern_refuses_a_bare_string():
 
 
 def test_validate_params_names_every_problem_once_in_one_refusal():
-    from defender.runtime.verbs import validate_params
+    from defender.systems.verbs import validate_params
     from defender.kit.verbs import verb
 
     @verb(wrapper_only=("require_closed",))

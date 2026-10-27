@@ -47,7 +47,7 @@ SLOT_IDENT = IDENT_REFINEMENT_KEY
 ATTR_PREFIX = "attrs."
 
 #: The `Locus.block` label for the one block a row-level repair may reach. It must equal the
-#: parse warnings' `f":{block.tag} {block.name}"` label byte for byte, and `runtime.tools`
+#: parse warnings' `f":{block.tag} {block.name}"` label byte for byte, and `investigation.tools`
 #: filters `fix_row`'s repair set on it.
 ATTR_UPDATES_LOCUS = ":R attr_updates"
 
@@ -273,7 +273,7 @@ def _illegal_key_diagnostic(
         message += (
             # Quote the rebuilt row the refusal is about: unattributed, it reads as a verdict on
             # the author's row, printed just below it. No `fix_row` instruction here:
-            # `runtime.tools` appends one under every rendered warn diagnostic.
+            # `investigation.tools` appends one under every rendered warn diagnostic.
             f" — the suggested repair is withheld: rebuilding this row as {rejected!r} "
             f"would not read back as a row of this block ({refusal})"
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.runtime import bash_policy
+from defender.investigation import bash_policy
 
 
 def test_read_deny_covers_secrets_and_groundtruth():

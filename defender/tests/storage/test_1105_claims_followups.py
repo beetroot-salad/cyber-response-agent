@@ -122,10 +122,10 @@ def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
 
 
 @pytest.mark.parametrize(("rel", "text"), [
-    ("runtime/rel2.py", "from .. import records as rr\n\n\ndef f(d):\n    return rr.RunPaths(d)\n"),
+    ("investigation/rel2.py", "from .. import records as rr\n\n\ndef f(d):\n    return rr.RunPaths(d)\n"),
     ("learning/branch/rel1.py",
      "from ... import records\n\n\ndef f(d):\n    return records.RunPaths(d)\n"),
-    ("runtime/rel3.py", "from ..records import ALERT\n"),
+    ("investigation/rel3.py", "from ..records import ALERT\n"),
 ])
 def test_the_layout_lint_resolves_a_relative_import_as_the_absolute_one(tmp_path, rel, text):
     """The xhigh review's case: a layout name reached through a relative import is the same

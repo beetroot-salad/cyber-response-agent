@@ -8,9 +8,9 @@ from pathlib import Path
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
 from defender._paths import adapters_under
-from defender.runtime.system_status import NONE_DOWN
-from defender.runtime.verb_grant import DENY_ALL, VerbGrant
-from defender.runtime.verbs import ModuleVerbRegistry, RosterRead
+from defender.systems.system_status import NONE_DOWN
+from defender.systems.verb_grant import DENY_ALL, VerbGrant
+from defender.systems.verbs import ModuleVerbRegistry, RosterRead
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 ADAPTERS_DIR = adapters_under(DEFENDER_DIR)
