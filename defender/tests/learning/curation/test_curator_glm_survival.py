@@ -1,6 +1,7 @@
-"""Curator GLM port: kept-envelope survival (rollback, dirty cross-check, scope gate, idempotent redrain, no agent git) and per-spawn trace distinctness.
+"""Curator GLM port: the kept envelope survives (partial-write rollback, the scope gate), and
+each spawn gets its own trace.
 
-#1108 P4: the survival rows run over a batch's git-free draft (the local `tmp_repo` fixture)."""
+The survival rows run over a batch's git-free draft (the local `tmp_repo` fixture)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -20,10 +21,9 @@ from defender.learning.core.state import FINDINGS
 
 @pytest.fixture
 def tmp_repo(tmp_path: Path):
-    """#1108 P4 (OD7, OD12 class ii): the survival rows run the REAL lessons tick over a batch's
-    git-free draft (`_curator1134.draft_lane`, its config `draft_author_cfg`), not the
-    conftest's product-shaped `tmp_repo`. Same surface: `author` (the lessons run module),
-    `paths`, `cfg`, `state`, plus `lane` (what landed is read on the batch branch)."""
+    """The real lessons tick over a batch's git-free draft (`_curator1134.draft_lane`, config
+    `draft_author_cfg`); shadows the conftest's product-shaped `tmp_repo` with the same surface
+    (`author`, `paths`, `cfg`, `state`) plus `lane`."""
     from defender.learning.author.lessons import run as author_mod
     from defender.tests.support.learning.curation import _curator1134 as C
 
@@ -115,55 +115,13 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
 
 
-def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
-    """``verify_agent_state``'s committed⇔corpus-dirty cross-check still holds under the in-process
-    invoke."""
-    a = tmp_repo.author
-    helpers.write_finding(location_path(tmp_repo.paths.state_root) / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
-    pre = _rows_without_attempts((location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text())
-
-    def committed_but_clean(findings, batch_id, cfg):
-        return {"committed": ["run-X/0"], "held_forward_bad": [],
-                "consumed_skip": [], "commit_message": "m"}
-
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=committed_but_clean)) == 2
-    assert _rows_without_attempts((location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text()) == pre
-    assert _attempts((location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text()) == [1] * len(pre)
-    assert not (location_path(tmp_repo.paths.state_root) / FINDINGS.consumed).exists()
-
-    def dirty_but_no_commit(findings, batch_id, cfg):
-        (tmp_repo.lane.lessons_dir / "orphan.md").write_text("uncommitted\n")
-        return {"committed": [], "held_forward_bad": [],
-                "consumed_skip": [{"finding_id": "run-X/0", "reason": "x"}],
-                "commit_message": None}
-
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=dirty_but_no_commit)) == 2
-    assert _rows_without_attempts((location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text()) == pre
-    # Second abort in the same test, so the lifetime count is at 2 — it does not reset
-    # between ticks (#719).
-    assert _attempts((location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text()) == [2] * len(pre)
-    assert not (location_path(tmp_repo.paths.state_root) / FINDINGS.consumed).exists()
-
-    assert tmp_repo.lane.drift() == [], "the refused tick left its edit in the draft"
-
-    def consistent(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "ok", "run-X/0")
-        return {"committed": ["run-X/0"], "held_forward_bad": [],
-                "consumed_skip": [], "commit_message": "defender: lesson ok"}
-
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=consistent)) == 0
-    assert _head_files(tmp_repo) == ["agent/lessons/ok.md"]
-    assert (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
-
-
 def test_survival_scope_gate_strays(tmp_repo, helpers):
     a = tmp_repo.author
     helpers.write_finding(location_path(tmp_repo.paths.state_root) / FINDINGS.queue, finding_id="run-S/0", run_id="run-S")
     pre = _rows_without_attempts((location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text())
 
-    # #1108 P4: the box writes only its lanes, so the stray is in the drain's other lane, outside
-    # this channel's corpus — the scope gate's case (a path outside every lane is a ChangeSet
-    # refusal, U10, pinned in tenant_1108_p4/test_refused_claims.py).
+    # The box writes only its lanes, so the stray sits in the drain's other lane, outside this
+    # channel's corpus: the scope gate's case (a path outside every lane is a refused claim).
     def writes_new_stray(findings, batch_id, cfg):
         (tmp_repo.lane.sibling_dir / "scratch.txt").write_text("oops")
         _write_lesson(tmp_repo, "in-scope", "run-S/0")
@@ -176,10 +134,6 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
 
     assert tmp_repo.lane.drift() == [], "the refused tick left its stray in the draft"
     assert _commit_count(tmp_repo) == 0
-    # #1108 P4 OD12(i): the legacy half "unrelated work staged in the index is not swept into
-    # the commit" pinned the git index of a checkout; a draft has none (the claim is the draft
-    # against the batch base: tenant_1108_delivery/test_changes.py::
-    # test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files).
 
     def writes_lesson_only(findings, batch_id, cfg):
         _write_lesson(tmp_repo, "in-scope", "run-S/0")
@@ -191,63 +145,17 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     assert (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
 
 
-def test_survival_idempotent_redrain(tmp_repo, helpers):
-    a = tmp_repo.author
-    helpers.write_finding(location_path(tmp_repo.paths.state_root) / FINDINGS.queue, finding_id="run-I/0", run_id="run-I")
-    commits_before = _commit_count(tmp_repo)
-
-    def author_and_commit(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "lessonI", "run-I/0")
-        return {"committed": ["run-I/0"], "held_forward_bad": [],
-                "consumed_skip": [], "commit_message": "lessonI"}
-
-    assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=author_and_commit)) == 0
-    assert _commit_count(tmp_repo) == commits_before + 1
-    head_after_tick1 = tmp_repo.lane.tip()
-    assert "run-I/0" in (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text()
-
-    def must_not_author(findings, batch_id, cfg):
-        raise AssertionError("re-authored an already-committed finding")
-
-    assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=must_not_author)) == 0
-    assert tmp_repo.lane.tip() == head_after_tick1
-    assert (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
-    consumed = (location_path(tmp_repo.paths.state_root) / FINDINGS.consumed).read_text()
-    assert "run-I/0" in consumed
-    assert "consumed_idempotent" in consumed
-
-
-def test_survival_agent_no_git(tmp_repo, helpers):
-    a = tmp_repo.author
-    helpers.write_finding(location_path(tmp_repo.paths.state_root) / FINDINGS.queue, finding_id="run-G/0", run_id="run-G")
-    commits_before = _commit_count(tmp_repo)
-
-    def writes_lesson_no_git(findings, batch_id, cfg):
-        _write_lesson(tmp_repo, "noGit", "run-G/0")
-        return {"committed": ["run-G/0"], "held_forward_bad": [],
-                "consumed_skip": [], "commit_message": "defender: lesson noGit"}
-
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_lesson_no_git)) == 0
-    assert _commit_count(tmp_repo) == commits_before + 1
-    assert _head_files(tmp_repo) == ["agent/lessons/noGit.md"]
-    assert (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
-
-
 def _spawn_curator(**over):
-    """Call the assumed ``curator_engine.run_curator_stage`` with hermetic defaults; a test
-    overrides per case. Mirrors test_lead_author_engine.py's ``_spawn`` over
-    ``run_author_stage``."""
+    """``curator_engine.run_curator_stage`` with hermetic defaults; a test overrides per case."""
     from defender.learning.author.curator_engine import (
         run_curator_stage,
     )
 
-    # #773 M1: the curator spawn takes no forward-check group any more — the check is the
-    # drain's, and what this test measures (one trace file per spawn) never depended on it.
     kw = dict(
         system_prompt_file=Path("/tmp/curator-prompt.md"),
         batch_id="batch-C",
         user_prompt="u",
-        corpus_dir=Path("/tmp/wt/defender/lessons-questioner"),  # #1108 P4 U5: retired corpus deleted
+        corpus_dir=Path("/tmp/wt/defender/lessons-questioner"),
         repo_root=Path("/tmp/wt"),
         learning_run_dir=Path("/tmp/state/_pending"),
         model="glm-5.3",

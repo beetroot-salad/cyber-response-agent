@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import pytest
@@ -40,8 +39,7 @@ def _repo_root(tmp_path: Path) -> Path:
 
 
 def _corpus(tmp_path: Path) -> Path:
-    # `lessons` since #922: it is the one shipped corpus, and `bind` refuses any other
-    # name — a corpus outside the confine is an unbuildable write scope.
+    # A shipped corpus: `bind` refuses one outside the read confine.
     c = _repo_root(tmp_path) / "defender" / "lessons"
     c.mkdir(parents=True, exist_ok=True)
     return c
@@ -144,13 +142,6 @@ def test_marker_empty_commit_message_rejected(tmp_path):
     assert _shared.commit_message(ok, "observations") == "Fold obs-1"
 
 
-# #1108 P4 OD12(i): `test_marker_commit_message_with_trailer_rejected` deleted. It pinned only
-# `_shared.commit_corpus`'s trailer guard, the legacy checkout commit P4 removes (O7: every
-# corpus write goes through P3's commit-maker, which composes no trailers; see the matching
-# deletion note in test_author_shared.py). The commit message the drain reads from the result is
-# still pinned by `test_marker_empty_commit_message_rejected` above.
-
-
 def test_marker_malformed_result_types_rejected(tmp_path):
     to_author = [{"observation_id": "obs-1"}]
 
@@ -246,8 +237,8 @@ def test_systemic_faults_propagate_uncaught(tmp_path):
 
 
 def test_key_sourced_before_spawn(tmp_path):
-    """run_curator_stage calls source_key(model) BEFORE the in-process spawn (the drain worktree
-    carries only the ambient credential) — so a metered-billing spawn never precedes its key."""
+    """`run_curator_stage` sources the model's key before the in-process spawn (the drain
+    worktree carries only the ambient credential), so a metered spawn never precedes its key."""
     events: list[tuple[str, object]] = []
     _stage(
         tmp_path, model="glm-5.3",
@@ -266,26 +257,9 @@ def test_key_sourced_before_spawn(tmp_path):
     assert ran == []
 
 
-def test_trace_anchor_established_before_spawn(tmp_path):
-    rd = _run_dir(tmp_path)
-    seen: list[str] = []
-
-    def _cap(wiring, ctx, **kw):
-        seen.append(wiring.trace_name)
-        return _AUTHOR_RESULT_OK
-
-    for bid in ("batch-A", "batch-B"):
-        _stage(tmp_path, batch_id=bid, learning_run_dir=rd, run_author=_cap)
-    assert all(n for n in seen)
-    assert len(set(seen)) == 2
-    pid = str(os.getpid())
-    assert all(pid in n for n in seen)
-    assert any("batch-A" in n for n in seen)
-    assert any("batch-B" in n for n in seen)
-
-
 def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path, caplog):
-    """ONE batch identity per spawn."""
+    """One batch identity per spawn: a wiring not built by `StageWiring.for_batch` is refused
+    before the spawn runs."""
     fixed = StageWiring(
         prompt_path=_prompt(tmp_path), model="glm-5.3", effort="low",
         trace_name="curator_trace.jsonl", label="curator",

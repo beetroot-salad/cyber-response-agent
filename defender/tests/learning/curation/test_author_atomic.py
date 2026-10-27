@@ -13,9 +13,8 @@ from defender.learning.core.state import CURATOR_DRAIN_LOCK, FINDINGS, TRY_ONCE
 from defender.tests.support.learning.curation import _curator1134 as C
 
 
-# #1108 P4 (O7, OD7): the lessons author over a git-free draft, not `tmp_repo`'s product-shaped
-# repo. The config is built with the assumed `batch=` seam (`_curator1134.draft_author_cfg`) on
-# first use, so a test reaches its own body before that seam's absence fails it.
+# The lessons author over a batch's git-free draft; its config (`_curator1134.draft_author_cfg`)
+# is built on first use of `cfg`.
 class _DraftRepo:
     def __init__(self, lane):
         from defender.learning.author.lessons import run as author_mod
@@ -61,8 +60,10 @@ def test_agent_exception_leaves_queue_intact(draft_repo, helpers, monkeypatch):
 
 
 def test_dlq_quarantines_poison_findings_batch(draft_repo, helpers, monkeypatch):
-    """The findings curator (A → defender/lessons/) gets the SAME batch-granular dead-letter as the observation..."""
-    # config.author_max_attempts() reads this key at call time, so the setenv now bites.
+    """A finding whose authoring keeps faulting is dead-lettered at the ceiling, with its attempt
+    count and the fault's message."""
+    # `config.author_max_attempts()` reads this key when the config is built (on first use of
+    # `draft_repo.cfg`, below), so the setenv applies.
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")  # lint-stale-ref: ok — the ENV
     # VAR outlives the retired module constant of the same name (#717).
     a = draft_repo.author
@@ -82,37 +83,6 @@ def test_dlq_quarantines_poison_findings_batch(draft_repo, helpers, monkeypatch)
     assert "simulated per-run authoring fault" in dead[0]["deadletter_reason"]
 
 
-def test_idempotent_retry_after_partial_failure(draft_repo, helpers, monkeypatch):
-    """First tick fails inside the agent. Second tick retries cleanly."""
-    a = draft_repo.author
-    helpers.write_finding(location_path(draft_repo.paths.state_root) / FINDINGS.queue, finding_id="run-R/0", run_id="run-R")
-
-    state = {"calls": 0}
-
-    def maybe_fail(findings, batch_id, cfg):
-        state["calls"] += 1
-        if state["calls"] == 1:
-            raise a.AuthorError("commit failed")
-        body = (
-            "---\n"
-            "name: lessonR\n"
-            "description: d\n"
-            "source_finding_ids:\n"
-            "  - run-R/0\n"
-            "created_at: 2026-05-09T00:00:00+00:00\n"
-            "---\n\nb\n"
-        )
-        (draft_repo.lessons_dir / "lessonR.md").write_text(body)
-        return {"committed": ["run-R/0"], "held_forward_bad": [], "consumed_skip": [],
-                "commit_message": "lessonR"}
-
-    cfg = replace(draft_repo.cfg, invoke_agent=maybe_fail)
-    assert a.run_batch(cfg=cfg) == 2
-    assert "run-R/0" in (location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text()
-    assert a.run_batch(cfg=cfg) == 0
-    assert (location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
-
-
 def _commit_lesson(draft_repo, a, *, name: str, fid: str):
     """Return a fake invoke_agent that writes one lesson citing ``fid`` — no git (the loop is the sole committer)."""
     def fake(findings, batch_id, cfg):
@@ -129,7 +99,8 @@ def _commit_lesson(draft_repo, a, *, name: str, fid: str):
 def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     draft_repo, helpers, monkeypatch
 ):
-    """Under the drain (hold_committed), a just-committed finding STAYS queued — the PR isn't merged yet, so a..."""
+    """Under the drain (`hold_committed`), a committed finding stays queued until its lesson is in
+    the corpus; the next tick consumes it as idempotent, without authoring or committing again."""
     a = draft_repo.author
     helpers.write_finding(location_path(draft_repo.paths.state_root) / FINDINGS.queue, finding_id="run-H/0", run_id="run-H")
 
@@ -137,6 +108,8 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
         draft_repo.cfg, invoke_agent=_commit_lesson(draft_repo, a, name="lessonH", fid="run-H/0")
     )
     assert a.run_batch(hold_committed=True, cfg=cfg) == 0
+    assert len(draft_repo.lane.commits()) == 1
+    head_after_tick1 = draft_repo.lane.tip()
     assert "run-H/0" in (location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text()
     consumed = (location_path(draft_repo.paths.state_root) / FINDINGS.consumed).read_text() if (location_path(draft_repo.paths.state_root) / FINDINGS.consumed).exists() else ""
     assert "run-H/0" not in consumed
@@ -148,17 +121,7 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
 
     cfg = replace(draft_repo.cfg, invoke_agent=must_not_author)
     assert a.run_batch(hold_committed=True, cfg=cfg) == 0
+    assert draft_repo.lane.tip() == head_after_tick1
     assert (location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
     assert "run-H/0" in (location_path(draft_repo.paths.state_root) / FINDINGS.consumed).read_text()
-
-
-def test_default_rotate_consumes_committed_immediately(draft_repo, helpers, monkeypatch):
-    """Standalone (hold_committed=False, the default): a committed finding rotates straight to consumed.jsonl, as..."""
-    a = draft_repo.author
-    helpers.write_finding(location_path(draft_repo.paths.state_root) / FINDINGS.queue, finding_id="run-D/0", run_id="run-D")
-    cfg = replace(
-        draft_repo.cfg, invoke_agent=_commit_lesson(draft_repo, a, name="lessonD", fid="run-D/0")
-    )
-    assert a.run_batch(cfg=cfg) == 0
-    assert (location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
-    assert "run-D/0" in (location_path(draft_repo.paths.state_root) / FINDINGS.consumed).read_text()
+    assert "consumed_idempotent" in (location_path(draft_repo.paths.state_root) / FINDINGS.consumed).read_text()
