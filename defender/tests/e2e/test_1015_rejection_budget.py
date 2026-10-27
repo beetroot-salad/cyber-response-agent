@@ -11,8 +11,7 @@ from defender.records import session_store  # noqa: E402
 from defender._agent_role import GATHER_AGENT_ID_PREFIX  # noqa: E402
 from defender.systems.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
 from defender.investigation import record_query as rq  # noqa: E402
-# `wrap_fresh`'s frame grammar and the real store's read channel, both spent from their one
-# home rather than re-spelled here — `_frames680` carries no optional dependency of its own.
+# `wrap_fresh`'s frame grammar and the real store's read channel, imported from their one home.
 from defender.tests.support.learning.curation._frames680 import FRAME_RE  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
@@ -47,7 +46,7 @@ LOUD_PARAM = "Zq7-CANARY-PARAM"
 
 
 def _terminator(r: _Res) -> str | None:
-    """How this lead's gather session ENDED, read out of the real session store the run wrote — the one place the..."""
+    """How this lead's gather session ended (`truncated_by`), read from the session store the run wrote."""
     store = session_store.open_store_for_read(session_store.resolve_store_path(_run_handle_1165(r.run_dir)))
     try:
         rows = sql(
@@ -61,7 +60,7 @@ def _terminator(r: _Res) -> str | None:
 
 
 def _budget_phrase(occurrence: int = B) -> str:
-    """The leading phrase `rejection_detail` gives a budget trip's row — spent from the PRODUCER, not re-spelled."""
+    """The leading phrase `rejection_detail` gives a budget trip's row, taken from the producer."""
     return rq.rejection_detail(RejectionBudgetTrip(occurrence=occurrence, budget=B))
 
 
@@ -77,7 +76,7 @@ def _summary_body(r: _Res) -> str:
 
 
 def _summary_header(r: _Res) -> str:
-    """The HARNESS-AUTHORED half of what main receives:"""
+    """The host-authored notice main receives above the gather summary, which must be non-empty."""
     body = _summary_body(r)
     header, sep, tail = body.partition("\n\n")
     assert sep, (
@@ -89,7 +88,8 @@ def _summary_header(r: _Res) -> str:
 
 
 def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
-    """THE THREE-PART ORACLE."""
+    """Host-ended session, trip row led by the budget phrase, and main's notice EQUAL to the host's
+    two sentences (a substring check would miss a model-authored fragment around them)."""
     assert _terminator(r) == session_store.TRUNCATED_BY_DEAD_END, \
         f"the lead ended as {_terminator(r)!r}, not by the host's own decision"
 
@@ -120,11 +120,16 @@ def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
 # ── O1: the bound holds however the calls differ ───────────────────────────────────────────
 
 
-def test_a_budget_of_distinct_ghosts_ends_the_lead_at_the_schema_placement(tmp_path):
-    """O1 through `wrap_tool_validate` — the argument schema turns the call back, so the row is written from the..."""
+@pytest.mark.parametrize(("placement", "ghost_call"), [
+    ("schema", _bad_args),
+    ("grant", lambda system: q(system, "query", PARAMS)),
+], ids=["schema", "grant"])
+def test_a_budget_of_distinct_ghosts_ends_the_lead_at_either_placement(tmp_path, placement, ghost_call):
+    """Both above-guard placements count toward one budget: the argument schema
+    (`wrap_tool_validate`, its row written from the raw arguments) and the grant check."""
     rec = VerbRecorder()
-    r = _run(tmp_path, run_id="d1015-schema", verbs=elastic_ok(rec), turns=[
-        *[_bad_args(f"ghost{i}") for i in range(B + 3)],
+    r = _run(tmp_path, run_id=f"d1015-{placement}", verbs=elastic_ok(rec), turns=[
+        *[ghost_call(f"ghost{i}") for i in range(B + 3)],
         q("elastic", "query", PARAMS), DONE,
     ])
 
@@ -137,24 +142,8 @@ def test_a_budget_of_distinct_ghosts_ends_the_lead_at_the_schema_placement(tmp_p
     assert rec.calls == [], "the lead ran on past its dead end and executed a later call"
 
 
-def test_a_budget_of_distinct_ghosts_ends_the_lead_at_the_grant_placement(tmp_path):
-    """O1 through the SECOND above-guard placement."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, run_id="d1015-grant", verbs=elastic_ok(rec), turns=[
-        *[q(f"ghost{i}", "query", PARAMS) for i in range(B + 3)],
-        q("elastic", "query", PARAMS), DONE,
-    ])
-
-    rows = _above_guard(r)
-    assert len(rows) == B, \
-        f"the grant placement wrote {len(rows)} rejections against a budget of {B}"
-    assert len({row["system_key"] for row in rows}) == B
-    _assert_budget_stop(r)
-    assert rec.calls == [], "the lead ran on past its dead end"
-
-
 def test_a_successful_query_between_rejections_does_not_refill_the_budget(tmp_path):
-    """O1's "regardless of successful calls in between" — the C3/C4 heart of this issue, and the explicit..."""
+    """The sixth rejection trips the budget despite two successes between; the third query never runs."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1015-interleaved", verbs=elastic_ok(rec), turns=[
         _bad_args("g1"), _bad_args("g2"), q("elastic", "query", {"native_query": "FROM a"}),
@@ -176,7 +165,7 @@ def test_a_successful_query_between_rejections_does_not_refill_the_budget(tmp_pa
 
 
 def test_a_lead_one_rejection_short_of_the_budget_is_untouched(tmp_path):
-    """O5 — the liveness half."""
+    """Paired with a control at exactly the budget, which does stop, so the negatives are not vacuous."""
     below_rec = VerbRecorder()
     below = _run(tmp_path / "below", run_id="d1015-below", verbs=elastic_ok(below_rec), turns=[
         *[_bad_args(f"ghost{i}") for i in range(B - 1)],
@@ -201,14 +190,11 @@ def test_a_lead_one_rejection_short_of_the_budget_is_untouched(tmp_path):
     assert at_rec.calls == [], "the lead at its budget still executed the corrected call"
 
 
-# ── O2: the repeat guard's promise, and its precedence ─────────────────────────────────────
-
-
 # ── O3: the recorded table replays to the same stop, of the same kind ──────────────────────
 
 
 def test_the_replay_of_each_table_agrees_with_the_live_run_on_the_kind_of_stop(tmp_path):
-    """O3 — an operator auditing a recorded run has only `executed_queries.jsonl`, and the stop must be..."""
+    """An auditor has only `executed_queries.jsonl`: each table's replay names the live run's stop."""
     rec = VerbRecorder()
     budget = _run(tmp_path / "budget", run_id="d1015-replay-budget", verbs=elastic_ok(rec),
                   turns=[*[_bad_args(f"ghost{i}") for i in range(B)], DONE])
@@ -244,14 +230,11 @@ def test_the_replay_of_each_table_agrees_with_the_live_run_on_the_kind_of_stop(t
         "the replay refuses a lead the live run let run on"
 
 
-# ── O4: nothing the model wrote crosses into main ──────────────────────────────────────────
-
-
-# ── the arms the adversary's pass added ────────────────────────────────────────────────────
+# ── O2 precedence, O4 (nothing the model wrote crosses into main), C13 ─────────────────────
 
 
 def test_the_repeat_guard_takes_a_stop_that_is_both_a_repeat_and_the_budgets(tmp_path):
-    """PRECEDENCE, on the only table where it is observable — and it is a claim about what MAIN is told, not an..."""
+    """At a third repeat that is also the budget's last rejection, the repeat guard takes the stop."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1015-both", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone"), _bad_args("ghostone"),
@@ -283,7 +266,7 @@ def test_the_repeat_guard_takes_a_stop_that_is_both_a_repeat_and_the_budgets(tmp
 
 
 def test_no_byte_the_model_authored_reaches_main_through_the_grant_placements_stop(tmp_path):
-    """O4 at the SECOND placement."""
+    """Vacuity controls are per column: verb and params reach the table; the system is withheld (#1016)."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1015-grant-leak", verbs=elastic_ok(rec), turns=[
         *[q(f"{LOUD_SYSTEM}-{i}", f"{LOUD_VERB}-{i}",
@@ -319,7 +302,7 @@ def test_no_byte_the_model_authored_reaches_main_through_the_grant_placements_st
 
 
 def test_a_lead_iterating_on_a_declared_systems_parameters_is_not_the_budgets(tmp_path):
-    """C13, LIVE — the design's loudest non-obligation, and the one the predicate's unit arms cannot carry alone."""
+    """Below-guard refusals (bad params, declared system) are not counted; `own_rows` skips lead-0's."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1015-below", verbs=elastic_ok(rec), turns=[
         *[q("elastic", "query", {"native_query": f"FROM t{i}", "nope": i}) for i in range(5)],

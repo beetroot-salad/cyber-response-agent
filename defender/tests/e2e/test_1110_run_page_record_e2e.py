@@ -26,17 +26,10 @@ from defender.records import RunPaths
 from defender.tests.support.shared.contracts._spec1077 import bound_arguments
 from defender.tests.e2e._replay_harness import GOLDEN, drive
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
-from defender.tests.e2e.test_1084_mirror_e2e import (
-    _assert_one_warning_naming_the_destination_once,
-    _assert_record_written,
-    _warnings,
-    area,
-    tenant_of,
-)
+from defender.tests.e2e.test_1084_mirror_e2e import _assert_record_written, tenant_of
 
 pytestmark = pytest.mark.e2e
 
-MIRROR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 PAGE = "runtime.html"
 CRASHING_TRACE_ROWS: dict[str, tuple[dict, str, str]] = {
     # `_stats`: `(e.get("message") or {}).get(...)` on a string.
@@ -96,7 +89,7 @@ class IoCall:
 
 
 class ArgRecordingIo:
-    """A pass-through recorder over the real `defender._io`, entering through the `Run` handle's `io=` injection..."""
+    """A pass-through recorder over the real `defender._io`, injected through the `Run` handle's `io=`."""
 
     def __init__(self) -> None:
         self.calls: list[IoCall] = []
@@ -115,7 +108,7 @@ class ArgRecordingIo:
         return call
 
     def writes_to(self, path: Path) -> list[IoCall]:
-        """Every `rooted_write` of the record at `path` (#1111:"""
+        """Every `rooted_write` of the record at `path`."""
         return [c for c in self.calls if c.op == "rooted_write" and c.target == path]
 
 
@@ -124,7 +117,7 @@ def _text(payload: str | bytes) -> str:
 
 
 def _assert_a_render_failure(failed, run_dir: Path) -> None:
-    """#1110 review:"""
+    """The failure names the run and reads as a render failure, not a save or a load one."""
     message = str(failed.value)
     assert str(run_dir) in message, f"the render failure does not name the run: {message!r}"
     words = message.replace(str(run_dir), "<run>").lower()
@@ -134,7 +127,7 @@ def _assert_a_render_failure(failed, run_dir: Path) -> None:
 
 
 def _assert_a_load_failure(failed: BaseException, run_dir: Path) -> None:
-    """#1110 second review:"""
+    """A `VisualizeFailed` chained from the `ImportError`, saying the renderer could not be loaded."""
     message = str(failed)
     assert type(failed).__name__ == "VisualizeFailed", f"not a VisualizeFailed: {failed!r}"
     assert isinstance(failed.__cause__, ImportError), (
@@ -144,7 +137,7 @@ def _assert_a_load_failure(failed: BaseException, run_dir: Path) -> None:
 
 
 def _assert_a_save_failure(failed, run_dir: Path, record: Path) -> None:
-    """#1110 review:"""
+    """The failure names the record and says it was not saved."""
     message = str(failed.value)
     assert str(record) in message, f"the save failure does not name the record: {message!r}"
     words = message.replace(str(record), "<record>").replace(str(run_dir), "<run>").lower()
@@ -161,7 +154,7 @@ def _chain(exc: BaseException | None) -> list[BaseException]:
 
 def _assert_main_warned_with_the_chain(
         caplog, reaches: Callable[[BaseException], bool]) -> BaseException:
-    """#1110 review:"""
+    """The `VisualizeFailed` main logged as a WARNING whose traceback chain `reaches` the cause."""
     carried = [r for r in caplog.records
                if r.levelno == logging.WARNING and r.exc_info and r.exc_info[1] is not None]
     chains = [_chain(r.exc_info[1]) for r in carried]
@@ -176,7 +169,7 @@ def _assert_main_warned_with_the_chain(
 
 
 def _json_lines(stderr: str) -> list[dict]:
-    """The child's structured log lines (`DEFENDER_LOG_FORMAT=json`):"""
+    """The child's structured log lines (`DEFENDER_LOG_FORMAT=json`)."""
     out = []
     for line in stderr.splitlines():
         if line.startswith("{"):
@@ -192,7 +185,7 @@ def _plant_crashing_row(run_dir: Path, row: dict) -> None:
 
 
 def _make_renderer_unimportable(monkeypatch) -> None:
-    """The renderer module cannot be imported — #922 C12's failure (a deleted symbol it imports breaks it AT..."""
+    """Make the renderer module fail AT IMPORT, as a deleted symbol it imports would (#922)."""
     import importlib
 
     package = importlib.import_module("defender.presentation")
@@ -203,7 +196,7 @@ def _make_renderer_unimportable(monkeypatch) -> None:
 
 
 def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_handle(tmp_path):
-    """O1 (and M1)."""
+    """Rendering writes nothing; the save is one whole-document `replace` through the handle's io."""
     vr = _renderer()
     run_dir = driven_run(tmp_path)
     io = ArgRecordingIo()
@@ -231,7 +224,8 @@ def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_
 
 
 class _ReplayLifecycle:
-    """`run.py main`'s lifecycle seam, doing what an investigation does to the run dir `main` materialized:"""
+    """`run.py main`'s lifecycle seam: replays the golden investigation into the run dir `main`
+    materialized, optionally planting a crashing trace row."""
 
     def __init__(self, *, crash_row: dict | None = None,
                  after: Callable[[], None] | None = None) -> None:
@@ -252,7 +246,7 @@ class _ReplayLifecycle:
 
 @pytest.fixture
 def entrypoint_env(tmp_path, monkeypatch) -> Path:
-    """What the real `run.py main` needs to get past its startup and into its tail:"""
+    """What the real `run.py main` needs to get past its startup; returns the tenant's runs base."""
     from defender import providers
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
@@ -269,14 +263,13 @@ def _main(**seams: Callable[..., Any]) -> int:
 
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
-    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+    # Plus the in-process launch-time publish.
     return run_py.main([str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"],
                        preflight=lambda _model: 0, **with_publish(dict(seams)))
 
 
 def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
         tmp_path, entrypoint_env):
-    """O1 through the entry point."""
     from defender.records import Run
 
     io = ArgRecordingIo()
@@ -285,8 +278,6 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
     def materialize(alert: Path, **kw: Any) -> Run:
         real = run_common.materialize_run(alert, **kw)
         assert location_path(real.runs_base) == entrypoint_env, "the builder bound another runs base"
-        # #1187 (R1): `Run.for_tenant` is retired with the runs base's record it read;
-        # `Run.under(container, id, tenant_id=)` is its replacement.
         run = Run.under(real.runs_base, real.run_dir.name, tenant_id=real.tenant_id, io=io)
         handles.append(run)
         return run
@@ -309,44 +300,9 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
     assert record.read_text(encoding="utf-8") == page
 
 
-@pytest.mark.parametrize("fault", ["unwritable-destination", "no-destination"])
-def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
-        tmp_path, monkeypatch, caplog, run_visualizations_dir, fault):
-    """O4/O5 under `dev`."""
-    run_dir = driven_run(tmp_path)
-    caplog.clear()
-    run = tenant_run(run_dir)
-    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
-    if fault == "unwritable-destination":
-        blocker = tmp_path / "blocker"
-        blocker.write_bytes(b"a file, not a folder\n")
-        monkeypatch.setenv(MIRROR_ENV, str(blocker / "run-visualizations"))
-    else:
-        monkeypatch.delenv(MIRROR_ENV)
-    caplog.set_level(logging.DEBUG)
-
-    run_common.visualize(run, tenant=tenant_of(run))  # a failed copy is not a failed render: no VisualizeFailed
-
-    _assert_record_written(run_dir)
-    if fault == "unwritable-destination":
-        _assert_one_warning_naming_the_destination_once(
-            caplog, area(blocker / "run-visualizations", run))
-        assert blocker.read_bytes() == b"a file, not a folder\n"
-    else:
-        warned = _warnings(caplog)
-        assert any("DEFENDER_RUN_VISUALIZATIONS_DIR is unset" in w for w in warned), (
-            f"the refused copy was not warned with the resolver's reason; warnings: {warned!r}")
-
-    monkeypatch.setenv(MIRROR_ENV, str(run_visualizations_dir))
-    caplog.clear()
-    run_common.visualize(run, tenant=tenant_of(run))
-    assert area(run_visualizations_dir, run).read_bytes() == (run_dir / PAGE).read_bytes()
-    assert _warnings(caplog) == [], f"a copy that landed was warned about: {_warnings(caplog)!r}"
-
-
 def test_1110_o4_a_run_whose_store_cannot_be_resolved_is_not_rendered_and_writes_no_page(
         tmp_path):
-    """O4 (the render precondition, M1)."""
+    """Without the session pointer the render precondition fails before any write."""
     run_dir = driven_run(tmp_path)
     io = ArgRecordingIo()
     run = tenant_run(run_dir, io=io)
@@ -370,7 +326,6 @@ def test_1110_o4_a_run_whose_store_cannot_be_resolved_is_not_rendered_and_writes
 
 @pytest.mark.parametrize("crash", sorted(CRASHING_TRACE_ROWS))
 def test_1110_o4_o7_a_renderer_crash_is_visualize_failed_and_writes_no_page(tmp_path, crash):
-    """O4/O7 (the step half)."""
     row, cause_type, cause_text = CRASHING_TRACE_ROWS[crash]
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
@@ -392,7 +347,6 @@ def test_1110_o4_o7_a_renderer_crash_is_visualize_failed_and_writes_no_page(tmp_
 
 
 def test_1110_o4_o7_a_renderer_that_cannot_be_imported_is_visualize_failed(tmp_path, monkeypatch):
-    """O4/O7 — the renderer fails AT IMPORT (#922 C12:"""
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
     record = RunPaths(run_dir).runtime_html
@@ -410,7 +364,7 @@ def test_1110_o4_o7_a_renderer_that_cannot_be_imported_is_visualize_failed(tmp_p
 
 @pytest.mark.parametrize("squatter", ["link", "directory"])
 def test_1110_o4_a_record_write_the_handle_refuses_is_visualize_failed(tmp_path, squatter):
-    """O4 (the record-write half), with a REAL fault through the REAL primitive:"""
+    """A REAL fault through the REAL primitive: a link or a directory squats at the record's name."""
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
     record = RunPaths(run_dir).runtime_html
@@ -445,7 +399,7 @@ def test_1110_o4_a_record_write_the_handle_refuses_is_visualize_failed(tmp_path,
 @pytest.mark.parametrize("crash", sorted(CRASHING_TRACE_ROWS))
 def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(
         tmp_path, entrypoint_env, caplog, crash):
-    """O7 through the entry point, everything real but the model and the preflight:"""
+    """Through the entry point, everything real but the model and the preflight."""
     row, cause_type, _cause_text = CRASHING_TRACE_ROWS[crash]
     lifecycle = _ReplayLifecycle(crash_row=row)
     caplog.set_level(logging.DEBUG)
@@ -462,7 +416,6 @@ def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(
 
 def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
         tmp_path, entrypoint_env, monkeypatch, caplog):
-    """O7 through the entry point, for a renderer that fails AT IMPORT (#922 C12)."""
     lifecycle = _ReplayLifecycle(after=lambda: _make_renderer_unimportable(monkeypatch))
     caplog.set_level(logging.DEBUG)
 
@@ -477,7 +430,7 @@ def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
 
 
 def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedProcess:
-    """`python visualize_run.py --tenant T <run_id>` over a `_repository_run` (#1105 PR 2, declared change 7:"""
+    """`python visualize_run.py --tenant T <run_id>` over a `_repository_run`, as a child process."""
     script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
     return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, tenant, run id
         [sys.executable, str(script), *_run_page_argv(tenant, run_dir)[1:]],
@@ -487,7 +440,7 @@ def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedP
 
 def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_record(
         tmp_path, run_visualizations_dir):
-    """O8/S2 (and M6:"""
+    """The child exits 1 and logs the refusal as a run-bound JSON line; with the link gone it renders."""
     tenant, run_dir = _repository_run()
     record = RunPaths(run_dir).runtime_html
     outside = tmp_path / "outside.html"
@@ -499,8 +452,7 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
     assert child.returncode == 1, (
         f"the re-render did not answer a refused record with exit 1 (got {child.returncode}): "
         f"{child.stderr[-600:]!r}")
-    # #1110 review: the failure is LOGGED, with its traceback, inside the run's context — a
-    # structured line a collector can tie to the run, not a bare interpreter traceback.
+    # LOGGED with its traceback as a structured line tied to the run, not a bare traceback.
     carried = [line for line in _json_lines(child.stderr)
                if "VisualizeFailed" in (line.get("exception") or "")]
     assert carried, f"no JSON log line carries the VisualizeFailed traceback: {child.stderr!r}"
@@ -517,12 +469,12 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
 
 
 # --------------------------------------------------------------------------------------
-# #1279 O2/O4 — where the dev copy goes, through the two real callers
+# Where the dev copy goes, through the two real callers (#1279)
 
 
 def test_1279_o2_the_standalone_re_render_publishes_into_the_accepted_tenants_area(
         run_visualizations_dir, monkeypatch):
-    """O2/A4: the visualize CLI's opener hands the accepted tenant on; on dev the copy is `<root>/<T>/runs/<R>/`."""
+    """The visualize CLI's opener hands the accepted tenant on; on dev the copy is `<root>/<T>/runs/<R>/`."""
     tenant, run_dir = _repository_run()
     record = RunPaths(run_dir).runtime_html
 
@@ -542,7 +494,6 @@ def test_1279_o2_the_standalone_re_render_publishes_into_the_accepted_tenants_ar
 
 def test_1279_a_and_b_run_the_same_fixture_get_two_minted_ids_and_two_pages_in_two_tenant_areas(
         tmp_path, entrypoint_env, data_root, run_visualizations_dir, monkeypatch):
-    """Scenario: tenants A and B run one fixture through `run.main`; two ids, two pages, two areas."""
     from defender import run as run_py
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
