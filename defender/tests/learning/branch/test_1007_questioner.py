@@ -115,8 +115,7 @@ def test_a_lesson_frontmatter_value_cannot_forge_the_key_the_selector_reads(tmp_
         "the control failed — no lesson reached call 1 at all, so the absence below is a fact "
         "about a section that never rendered rather than about the forgery")
     assert "FORGED-LESSON-BODY" not in prompt, (
-        "a lesson whose frontmatter declares `systems` twice was selected on the SECOND one — "
-        "a model-chosen value became the document's own structure and steered the selector")
+        "a lesson whose frontmatter declares `systems` twice was selected on the second one")
 
 
 def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):

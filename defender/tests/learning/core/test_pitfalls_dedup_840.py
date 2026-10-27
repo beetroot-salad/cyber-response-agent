@@ -79,7 +79,7 @@ def _records(paths: LoopPaths) -> list[dict]:
 def test_one_looping_leads_eight_turns_become_one_record_carrying_its_count(paths):
     executed = [_lead(sql=f"SELECT unnest(data, {i})", query_index=i) for i in range(8)]
     collected = collect_general_failures(executed, Path("reviewer-measure-0807-b"), catalog=[])
-    assert len(collected) == 8, "the collector is per-row and #823 N3 keeps it that way"
+    assert len(collected) == 8, "the collector no longer returns one record per row"
 
     persist.append_pitfalls(collected, state=_state1135.state_for_paths(paths))
     assert len(_pending(paths)) == 8, "the rows are the evidence and all eight are kept"
@@ -244,12 +244,11 @@ def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch)
     records = _records(paths)
     assert len(records) == 1, "attribution still splits one reducer mistake"
     assert records[0]["occurrences"] == 8
-    assert len(records) < 3, "the count alone clears it, so the disjunct is not what fired"
 
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, "the drain never wakes for it"
     calls: list = []
     assert _run_pitfalls(paths, _invoke_spy(calls)) == 0
-    assert calls, "the tick gate refused the incident FK-3 exists to reach"
+    assert calls, "the tick gate refused the attributed reducer record"
     assert [e["surface"] for e in calls[0]] == ["reducer"]
 
 

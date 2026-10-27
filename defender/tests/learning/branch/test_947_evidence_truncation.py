@@ -56,8 +56,7 @@ def _files(root) -> dict[str, bytes]:
 def _launched(arm: S.Driven) -> None:
     refused = S.refused_at_launch(arm)
     assert refused is None, (
-        f"the arm was refused at launch ({refused}) — the source was driven (so it has its fork "
-        "snapshot) and the branch point is a tool-calling MAIN response outside any retry streak")
+        f"the arm was refused at launch: {refused}")
 
 
 def test_the_arm_holds_the_leads_the_branch_point_held_and_no_later_one(tmp_path):

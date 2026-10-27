@@ -301,18 +301,13 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
 
     _seed_queue(paths, [_row("legacy/0", held_reason=_UNRECOGNISED_HOLD)])
     assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
-        f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work; the count is "
-        "reading the reason's prose rather than the field, so any hold whose wording it "
-        "does not recognise — a legacy row, a reworded gate — reads as authorable"
+        f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work"
     )
 
     for wordless in ("", None):
         _seed_queue(paths, [_row(f"legacy/{i}", held_reason=wordless) for i in range(5)])
         assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS) == (0, 5), (
-            f"five rows stamped held_reason={wordless!r} were counted as pending work; the "
-            "count is testing whether the reason is TRUTHY rather than whether the field is "
-            "there, so a holder that had no wording to give leaves its rows waking the drain "
-            "on every tick — O2's own defect, by the one route no gate in the tree spells"
+            f"five rows stamped held_reason={wordless!r} were counted as pending work"
         )
 
     _seed_queue(paths, ["", _row("h/0"), "   ", ""])
@@ -326,9 +321,8 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
         _row("c/0"),
     ])
     assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 6, (
-        "a line that is not a row is work for the drain's unkeyable retirement and must be "
-        "counted — whether it failed to parse at all, or parsed to a list, a null, a string "
-        "or a number, none of which is a row"
+        "a line that is not a row (unparseable, or a list, null, string or number) was not "
+        "counted as work for the unkeyable retirement"
     )
 
 
@@ -387,7 +381,5 @@ def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_agai
 
     _seed_queue(paths, [_row(f"legacy/{i}", held_reason=_UNRECOGNISED_HOLD) for i in range(5)])
     assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
-        f"the wake gate fired for five rows held for {_UNRECOGNISED_HOLD!r}; it is reading "
-        "the reason's wording rather than the field, so the legacy rows this defect strands "
-        "— held by a writer that no longer exists — pin it open exactly as before"
+        f"the wake gate fired for five rows held for {_UNRECOGNISED_HOLD!r}"
     )

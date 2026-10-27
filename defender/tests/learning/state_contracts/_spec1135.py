@@ -5,90 +5,22 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import contextlib
-import errno
 import fcntl
 import json
 import os
 import stat
-import sys
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import LearningState, StateRefused  # noqa: F401 — re-exported: the tests open the handle as `S.LearningState`
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of  # noqa: F401 — the 1135 suite's doors onto the planted run a row names (#1105 PR 2)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
 
-#: The handle's module, as F1 names it.
-STATE_MODULE = "defender.learning.core.state"
-STATE_MODULE_FILE = DEFENDER / "learning" / "core" / "state.py"
-
-
-class _Missing:
-    """Stands in for a name the handle module does not export. NOT a skip: every use raises
-    `ModuleNotFoundError`, so each test fails on its own where it first needs the name, rather
-    than the whole directory failing to collect."""
-
-    def __init__(self, name: str, err: BaseException) -> None:
-        self._name, self._err = name, err
-
-    def _raise(self) -> Any:
-        raise ModuleNotFoundError(
-            f"{STATE_MODULE}.{self._name} cannot be imported — this suite is the executable "
-            f"spec for it (spec_graph_1135-learning-state-handle.yaml). Original: {self._err}"
-        )
-
-    def __getattr__(self, item: str) -> Any:
-        return self._raise()
-
-    def __call__(self, *a: Any, **k: Any) -> Any:
-        return self._raise()
-
-
-# One `try` per name, so an implementation that spells one name differently fails only where
-# that name is used.
-try:
-    from defender.learning.core.state import LearningState  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover — the pre-implementation state
-    LearningState = _Missing("LearningState", _absent)  # type: ignore[assignment,misc]
-try:
-    from defender.learning.core.state import StateRefused  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover
-    StateRefused = _Missing("StateRefused", _absent)  # type: ignore[assignment,misc]
-try:
-    from defender.learning.core.state import Channel  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover
-    Channel = _Missing("Channel", _absent)  # type: ignore[assignment,misc]
-try:
-    from defender.learning.core.state import Claimed  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover
-    Claimed = _Missing("Claimed", _absent)  # type: ignore[assignment,misc]
-
-
-#: Every spelling this suite coins on the handle's module. Renamed here, and only here.
-COINED = (
-    "FINDINGS", "QUESTIONER_FINDINGS", "PITFALLS",
-    "REPO_LOCK", "AUTHOR_DRAIN_LOCK", "LEAD_AUTHOR_DRAIN_LOCK", "LEAD_QUEUE_LOCK",
-    "CURATOR_DRAIN_LOCK", "TRY_ONCE", "BLOCK",
-)
-
-
-def coined(name: str) -> Any:
-    """A module-level value this suite coins on the handle's module (`COINED`)."""
-    assert name in COINED, f"{name} is not one of this suite's coined names"
-    mod = sys.modules.get(STATE_MODULE)
-    if mod is None:
-        raise ModuleNotFoundError(
-            f"{STATE_MODULE} does not exist yet — this suite is the executable spec for it")
-    try:
-        return getattr(mod, name)
-    except AttributeError:
-        raise AssertionError(
-            f"{STATE_MODULE} has no {name} — a name this suite coins (_spec1135.COINED); rename "
-            "it there if the implementation spells it differently") from None
 
 
 def core_fn(name: str) -> Callable[..., Any]:
@@ -99,7 +31,6 @@ def core_fn(name: str) -> Callable[..., Any]:
     fn = getattr(_io, name, None)
     assert callable(fn), f"defender._io.{name} does not exist (D2 adds it beside Held)"
     return fn
-
 
 # ---------------------------------------------------------------------------------------------
 # Roots
@@ -229,15 +160,8 @@ def caught(fn: Callable[[], Any]) -> BaseException | None:
     return None
 
 
-def refusal_class() -> type[BaseException] | None:
-    """`StateRefused` when it is a real exception class (not a `_Missing` stub)."""
-    return StateRefused if isinstance(StateRefused, type) and issubclass(
-        StateRefused, BaseException) else None
-
-
 def is_refusal(exc: BaseException | None) -> bool:
-    cls = refusal_class()
-    return cls is not None and isinstance(exc, cls)
+    return isinstance(exc, StateRefused)
 
 
 def rows_of(answer: Any) -> list[dict]:
@@ -341,8 +265,3 @@ def child_env() -> dict[str, str]:
     inherited = os.environ.get("PYTHONPATH")
     path = os.pathsep.join([str(REPO_ROOT), *([inherited] if inherited else [])])
     return {**os.environ, "PYTHONPATH": path}
-
-
-def errno_name(e: BaseException | None) -> str | None:
-    n = getattr(e, "errno", None)
-    return errno.errorcode.get(n) if isinstance(n, int) else None

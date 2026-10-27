@@ -49,7 +49,7 @@ def test_wrap_non_string_argument(which):
         module.wrap(**args)
 
 
-def test_hostile_body_contains_the_current_frame_closer_and_a_sibling_opener(tmp_path):
+def test_hostile_body_with_a_foreign_closer_and_sibling_opener_stays_body_data(tmp_path):
     """An author-created body predates the real receiving salt, so only a foreign closer/sibling opener is possible and remains exact body data."""
     body = "</run-foreign-source><run-foreign-sibling>"
     module = _shared_module()
@@ -58,7 +58,7 @@ def test_hostile_body_contains_the_current_frame_closer_and_a_sibling_opener(tmp
     assert body in module.wrap(body, "source", STAGE_SALT)
 
 
-def test_hostile_body_contains_current_token_with_the_wrong_logical_tag(tmp_path):
+def test_hostile_body_with_a_foreign_token_in_the_wrong_logical_tag_stays_body_data(tmp_path):
     """A producer that runs before real reader construction cannot name the receiving token in a wrong logical tag; its foreign tag remains body data."""
     body = "<run-foreign-wrong>body</run-foreign-wrong>"
     module = _shared_module()

@@ -319,14 +319,11 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
         assert isinstance(escaped, TimeoutError), f"{row['subject']!r} ended as {escaped!r}"
     records = h.stuck_records(different, diff_ch)
     assert [r["consecutive_ticks"] for r in records] == [1, 1], (
-        "two ticks over DIFFERENT unkeyable rows from the SAME run folded into one rising "
-        "count; a keyless row contributes no id, so neither an ids-only key nor one built "
-        f"on the row's run can tell them apart — only its content can: {records}"
+        f"two ticks over different unkeyable rows of one run folded into one count: {records}"
     )
     for record in records:
         assert record["row_ids"], (
-            "a keyless row left the stuck record naming nothing at all, so the report "
-            f"cannot say WHICH rows the channel is stuck on: {record}"
+            f"a keyless row left the stuck record naming no rows: {record}"
         )
     assert records[0]["row_ids"] != records[1]["row_ids"], (
         "two different bad rows are named identically in the stuck report"
@@ -342,8 +339,7 @@ def test_881_a_queue_of_only_unreadable_lines_is_cleared_by_the_tick_it_wakes(tm
 
     assert drain.run_batch(cfg=cfg) == 0
     assert (location_path(paths.state_root) / ch.queue).read_text(encoding="utf-8") == "", (
-        "the tick returned on the empty batch and left the unreadable lines queued; the wake "
-        "gate counts them as work, so it will fire on the same bytes on every pass forever"
+        "the tick returned on the empty batch and left the unreadable lines queued"
     )
     assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
         "the tick handed the curator a batch with no rows in it"

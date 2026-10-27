@@ -1,4 +1,5 @@
-"""Judge-doc validators' non-empty-string and keyword gates match on what a value RENDERS as: zero-width/NUL-only anchors are rejected, NBSP-padded keywords accepted (#722)."""
+"""The report-disposition keyword gate matches on what a value RENDERS as (an NBSP-padded keyword is
+accepted, a content-less or look-alike one refused), plus the `_text` helpers behind it (#722)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,63 +9,6 @@ import pytest
 from defender._text import as_str, is_content_less, strip_zero_width
 from defender.learning import loop
 from defender.learning.core.config import RunUnprocessable
-
-# Renders as nothing, on both sides of isspace(); the zero-width half is what a `.strip()` gate
-# lets through.
-CONTENT_LESS = [
-    ("ascii-spaces", "   "),
-    ("U+00A0-no-break-space", " "),
-    ("U+3000-ideographic-space", "　"),
-    ("U+200B-zero-width-space", "​"),
-    ("U+FEFF-byte-order-mark", "﻿"),
-    ("U+00AD-soft-hyphen", "­"),
-    ("U+2060-word-joiner", "⁠"),
-    ("U+0000-nul", "\x00"),
-    ("mixed", "​ ﻿\n\x00"),
-]
-_IDS = [t for t, _ in CONTENT_LESS]
-
-
-def _judge_doc(**overrides):
-    """A valid adversarial judge doc — the shape `tests/learning/test_loop.py` pins."""
-    doc = {
-        "outcome": "caught",
-        "outcome_rationale": "Lead l-001 refuted the projection.",
-        "encounter_analysis": "lead-by-lead walkthrough.",
-        "defender_findings": [
-            {
-                "type": "detection-confirmed",
-                "subject_anchor": "l-001",
-                "subject_topic": "falco container scan",
-                "finding": "lead caught the story.",
-                "citations": [{"source": "investigation", "quote": "q"}],
-            }
-        ],
-        "confidence": "high.",
-    }
-    doc.update(overrides)
-    return doc
-
-
-def _actor_observation(**overrides):
-    o = {
-        "type": "misprediction",
-        "subject_anchor": "l-001",
-        "subject_topic": "falco container scan",
-        "observation": "the story assumed the scan was silent.",
-    }
-    o.update(overrides)
-    return o
-
-
-def _environment_observation(**overrides):
-    o = {
-        "alert_rule_ids": ["rule-42"],
-        "relevance_criteria": "hosts in the finance tier.",
-        "fact": "FINANCE-DB runs the nightly export at 02:00.",
-    }
-    o.update(overrides)
-    return o
 
 
 def _report(tmp_path: Path, disposition: str) -> Path:
@@ -78,7 +22,8 @@ def _report(tmp_path: Path, disposition: str) -> Path:
 # the keyword gates — matched on what a value renders as
 
 
-@pytest.mark.parametrize(("tag", "written"), [("clean", "benign")])
+@pytest.mark.parametrize(("tag", "written"), [("clean", "benign"),
+                                             ("nbsp-padded", "\u00a0benign\u00a0")])
 def test_a_report_disposition_is_matched_on_what_it_renders_as(tmp_path, tag, written):
     assert loop.normalize_disposition(_report(tmp_path, written)) == "benign"
 

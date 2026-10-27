@@ -158,11 +158,8 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
         assert needle in str(bad.value)
 
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     base, src = location_path(T.runs_base)(tmp_path, published=True)  # a branch launch pins a published tenant's commit
-    for i, (worlds, _needle) in enumerate(bad_families):
-        # The retired episodes variable, re-pointed per arm; each launch claims a fresh episode.
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-root-{i}"))
+    for worlds, _needle in bad_families:
         spawn = T.FakeSpawn()
         questioner = T.FakeAgent(T.declaration(T.family_doc(worlds=worlds)), *[T.declaration(w) for w in worlds[1:]])
         with pytest.raises(T.refusals()) as refused:

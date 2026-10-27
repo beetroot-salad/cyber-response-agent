@@ -159,8 +159,7 @@ def test_a_two_system_family_names_each_systems_sample_availability_independentl
     assert_set_aside_for_its_sample(built, 1, "the unsampled system")
     assert answer in prompt, "the judge's prompt carries no rendering of the sampled system"
     assert f"system {OTHER}: unavailable — UNAVAILABLE-REASON-MARKER" in prompt, (
-        "the judge's prompt says nothing about the second served system at all — reduced to "
-        "the first, O5's own falsifier")
+        "the judge's prompt says nothing about the second served system")
 
 
 def test_the_judges_sample_is_byte_identical_to_the_questioners_within_one_attempt(
@@ -209,8 +208,7 @@ def test_a_second_attempts_step_2_overwrites_the_first_attempts_samples(
         cli.write_questioner_samples(episode, second)
 
     assert W.read_yaml(ep / W.SAMPLES_NAME) == second, (
-        "a second `Step.QUESTIONER` write did not overwrite — H3 chose overwrite-and-re-derive, "
-        "and an implementation that merges or refuses has changed the decision")
+        "a second `Step.QUESTIONER` write did not overwrite the first")
     assert "FIRST-ATTEMPT" not in (ep / W.SAMPLES_NAME).read_text(encoding="utf-8")
     assert list((ep).glob("samples*.yaml")) == [ep / W.SAMPLES_NAME], (
         "the first attempt's samples survive under a second filename")

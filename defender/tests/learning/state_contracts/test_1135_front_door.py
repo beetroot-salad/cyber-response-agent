@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.learning.core.state import FINDINGS
 from defender.tests.learning.state_contracts import _spec1135 as S
 
 
@@ -26,7 +27,7 @@ def test_the_kept_root_routes_still_resolve(
     assert location_path(config.LoopPaths(repo_root=tmp_path / "repo", state_dir=other).state_root) == other
 
     with S.LearningState.open(paths) as state:
-        channel = S.coined("FINDINGS")
+        channel = FINDINGS
         described = state.describe(channel)
         assert described == str(location_path(tenant.learning) / channel.queue)
         row = {"finding_id": "front-door/0", "run_id": "front-door"}

@@ -10,27 +10,14 @@ from defender.learning.core.state import PITFALLS
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests.support.runtime.engine._declared869 import (  # noqa: F401 — re-exported substrate
-    ADAPTERS_REL,
-    AGENT_CATALOG_REL,
-    AGENT_NESTED_MARKER_RELS,
-    AGENT_SKILLS_REL,
-    CATALOG_REL,
-    SKILLS_REL,
     Spawn,
-    agent_marker_file,
     seed_agent_files,
     seed_product,
     write_agent_marker,
     commit_all,
-    git,
-    head_files,
-    log_lines_naming,
-    loop_log,
-    marker_file,
     pitfall_row,
     read_rows,
     seed_tree,
-    skill_md,
     write,
     write_marker,
 )

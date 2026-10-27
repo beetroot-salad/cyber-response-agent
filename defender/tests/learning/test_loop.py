@@ -149,10 +149,10 @@ def _seams(t) -> dict:
             "start_box": _noop_start_box, "stop_box": _noop_stop_box}
 
 
-def _seed_curator_findings(paths, n: int = 5) -> None:
+def _seed_curator_findings(paths) -> None:
     (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
     with (location_path(paths.state_root) / FINDINGS.queue).open("w") as fh:
-        for i in range(n):
+        for i in range(5):
             fh.write(json.dumps({"finding_id": f"f{i}"}) + "\n")
 
 

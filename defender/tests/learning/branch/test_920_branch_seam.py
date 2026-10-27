@@ -37,13 +37,6 @@ def branch_mod():
     return importlib.import_module("defender.investigation.branch")
 
 
-def _sibling_state(sibling_dir: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
-    """A fresh run state for the sibling at `sibling_dir`, as the driver hands seeding."""
-    from defender.investigation.run_state import RunState
-
-    return RunState(sibling_dir, sibling_dir.name)
-
-
 # the caller contract: fork's seeding and send-role hydration are one number
 
 def test_a_fresh_framework_message_list_underflows_against_a_fork(tmp_path):
@@ -107,14 +100,12 @@ def test_a_fork_at_a_call_bearing_response_hands_that_response_to_the_framework(
 
     assert len(history) == complete_len + 1, (
         f"conversation loading handed the resumed run {len(history)} message(s), not the "
-        f"{complete_len + 1} through the branch response — the call-bearing response was "
-        "dropped, so the framework has no calls to run")
+        f"{complete_len + 1} through the branch response")
     tail_calls = [p.tool_call_id for p in getattr(history[-1], "parts", ())
                   if getattr(p, "part_kind", "") == "tool-call"]
     assert tail_calls == ["c2"], f"the history does not end on the branch response: {history[-1]!r}"
     assert store.last_render_len(child) == len(history), (
-        "the fork's charge and the hydrated history disagree at the branch response — the "
-        "first ingest would append the response a second time, or underflow")
+        "the fork's charge and the hydrated history disagree at the branch response")
 
     added = sel.ingest(store, child, [*history, tool_return_request("query", tool_call_id="c2")],
                        agent_id="main")

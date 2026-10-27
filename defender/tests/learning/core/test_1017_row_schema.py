@@ -26,12 +26,6 @@ from defender.knowledge._query_rules import ABOVE_GUARD_QUERY_ID
 
 LEAD = "l-001"
 
-EXPECTED_COLUMNS = (
-    "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
-    "exit_code", "error_class", "payload_status", "payload_digest", "payload_sha256",
-    "system_key",
-)
-
 QUESTIONER_LEAD_KEYS = frozenset({"lead_id", "goal", "what_to_summarize", "provenance", "queries"})
 QUESTIONER_QUERY_KEYS = frozenset({
     "seq", "system", "verb", "query_id", "params", "exit_code", "error_class",
@@ -45,8 +39,8 @@ SHA_MARKER = "5ha256" * 10 + "feed"
 
 
 def _row(seq: int, **overrides) -> dict:
-    """One full row in every writer column (`EXPECTED_COLUMNS`), the shape a real writer leaves — every key present so a
-    test that DROPS one is stating something about that key and nothing else."""
+    """One full row in every writer column, the shape a real writer leaves — every key present
+    so a test that DROPS one is stating something about that key and nothing else."""
     row = {
         "lead_id": LEAD, "seq": seq, "system": "elastic", "verb": "query",
         "query_id": "elastic.ad-hoc", "params": {"native_query": f"FROM logs {seq}"},
@@ -150,8 +144,7 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
     assert (rows[3].seq, rows[3].system, rows[3].params, rows[3].exit_code) == (3, "None", {}, 64), \
         "the typed view stopped coercing — the equality above is then a tautology"
     assert "system_key" not in rows[1].record(), \
-        "record() invented the coerced `\"\"` into a pre-#871 row — the guard would then read " \
-        "a column the run never wrote"
+        "record() wrote the coerced `\"\"` system_key into a row that never had one"
     assert "error_class" not in rows[2].record(), \
         "record() wrote the surface's DERIVED error_class back into the record"
     # The typed view still coerces and derives, which makes the equality above a discrimination

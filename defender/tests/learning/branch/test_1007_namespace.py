@@ -23,11 +23,9 @@ _BASE = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon", "hos
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both retired root variables, and the learning state the judge appends to, inside
-    `tmp_path`, so a stray read never reaches the developer's or CI's real roots."""
+    """The runs-base variable points inside `tmp_path`, so a stray read never reaches the
+    developer's or CI's real runs folder."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def launch(tmp_path: Path, *, argv_extra=()):
@@ -39,14 +37,6 @@ def launch(tmp_path: Path, *, argv_extra=()):
         argv_extra=argv_extra, oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)),
         verifier=S.passing_verifier())
     return run.rc, run.spawn, run.ep
-
-
-def written_bytes(root: Path) -> str:
-    """Every byte the launcher wrote under the episodes root, as one string: one sweep covers
-    every file surface the operator's string could have reached."""
-    return "\n".join(
-        p.read_text(encoding="utf-8", errors="replace")
-        for p in sorted(root.rglob("*")) if p.is_file())
 
 
 def test_an_episode_is_read_under_one_namespace(tmp_path):

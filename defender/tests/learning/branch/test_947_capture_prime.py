@@ -359,8 +359,6 @@ def test_priming_nothing_is_refused_rather_than_reported(tmp_path, label):
     with pytest.raises(LedgerError):
         _prime(run_dir, root)
 
-    assert not base.is_file(), (
-        "a refused priming left a base file behind — every later sibling opens it, finds "
-        "nothing, and goes live for the whole episode with nothing red anywhere")
+    assert not base.is_file(), "a refused priming left a base file behind"
     with Episode.open(root) as ep, pytest.raises(LedgerError):
         Ledger.for_world(ep, T.fixture_world_id("w1"))

@@ -44,9 +44,9 @@ def _accepted(tmp_path, *, outcome="accepted", reason="every fact world calibrat
     return ep
 
 
-def _archived(tmp_path, worlds=T.WORLDS, **kw):
+def _archived(tmp_path, **kw):
     ep = _accepted(tmp_path)
-    for w in worlds:
+    for w in T.WORLDS:
         T.archived_world(ep, w, **kw)
     return ep
 

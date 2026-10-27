@@ -269,8 +269,6 @@ def test_d10_reader_contract_is_first_framed_user_section(tmp_path, monkeypatch)
 
 def test_d11_lint_rejects_new_raw_prompt_boundary_grammar(tmp_path):
     """The baseline-ratcheted prompt-frame lint reports a new prompt-builder f-string that emits a raw `<tag>`, `## ` heading, or prose `LABEL:` boundary outside `wrap`; a wrap-only file is the clean positive control."""
-    spec = importlib.util.find_spec("tooling.lint.lint_stage_prompt_frames")
-    assert spec is not None, "#680 requires tooling/lint/lint_stage_prompt_frames.py"
     import tooling.lint.lint_stage_prompt_frames as lint
 
     baseline = tmp_path / "baseline.json"

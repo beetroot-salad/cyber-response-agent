@@ -291,17 +291,13 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
 
     stranded = D.pending_by_id(paths, QUESTIONER_FINDINGS)
     assert "ep-1/b/0/0" in stranded, (
-        f"the FAULTING curator's row was consumed anyway: {stranded} — a fault after "
-        "consumption and before authoring retires a finding no lesson was ever written from, "
-        "which is the failure per-curator consumption exists to prevent")
+        f"the faulting curator's row was consumed although no lesson was written: {stranded}")
     assert not D.consumed(paths, QUESTIONER_FINDINGS), (
         "the faulting lane wrote consumed markers for rows it never authored")
 
     stuck = D.stuck_records(paths, QUESTIONER_FINDINGS)
     assert stuck, (
-        f"a {fault_class.__name__} took the questioner curator out of a tick that then committed "
-        "and pushed, and left no durable record of it — A2's third clause is 'and IS RECORDED'; "
-        "a log line in a stream nobody keeps is not a record an operator can read afterwards")
+        f"a {fault_class.__name__} in the questioner curator left no stuck record")
     assert any(r.get("fault_class") == fault_class.__name__ for r in stuck), (
         f"the stuck record names {[r.get('fault_class') for r in stuck]} rather than "
         f"{fault_class.__name__!r} — a record that cannot say WHICH fault stopped the lane "

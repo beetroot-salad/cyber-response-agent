@@ -23,7 +23,6 @@ WITHHELD = "sibling 'b' ran commit cafef00, not the source's deadbee"
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -51,11 +50,11 @@ def _not_graded(ep) -> dict:
     return J.judge_record(ep).get("not_graded") or {}
 
 
-def _withhold(ep, reason: str = WITHHELD) -> None:
+def _withhold(ep) -> None:
     """What `verify_family` leaves when it withholds the stamp: its reason, through the
     production writer."""
     with Episode.open(ep) as episode:
-        T.mod("learning.branch.outcome").write_not_comparable(episode, reason)
+        T.mod("learning.branch.outcome").write_not_comparable(episode, WITHHELD)
 
 
 def _container(ep):

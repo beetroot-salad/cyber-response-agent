@@ -409,11 +409,6 @@ def _agent_must_not_run(*_a, **_kw) -> int:
     raise AssertionError("the agent was spawned on a path that resolves no handoff")
 
 
-def _without_at(text: str) -> str:
-    """The sentinel minus its timestamp line, so two renderings of one sha compare."""
-    return "\n".join(ln for ln in text.splitlines() if not ln.startswith("at: "))
-
-
 @pytest.mark.parametrize("deferred", [False, True], ids=["default-writes", "on_done-defers"])
 def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
     tmp_path: Path, deferred: bool,
@@ -447,7 +442,7 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
         assert _done_sha(run_dir) == sha
         assert _done(run_dir).read_text(encoding="utf-8").endswith("commit_made: True\n")
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file(), \
-        "the pitfalls_collected marker is NOT deferred (O4)"
+        "the pitfalls_collected marker was deferred too"
 
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["default-writes", "on_done-defers"])

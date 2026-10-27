@@ -336,10 +336,9 @@ def test_a_registry_served_host_state_capture_is_never_stamped_with_the_cut_off(
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
         f"the served capture carries no `Z` stamp at all, so nothing below is observed: {payload}")
     assert payload["captured_at"] != T0_Z, (
-        "the served capture is stamped with the world's cut-off T0 — a visible time frozen at "
-        "the fork while every other time the model sees advances (#1255)")
+        "the served capture is stamped with the world's cut-off T0, not the run clock")
     assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
-        "a capture served outside any run is not stamped with the wall clock (C4)")
+        "a capture served outside any run is not stamped with the wall clock")
     assert json.loads(served_rows(reg.ledger)[-1]["payload_text"])["captured_at"] == (
         payload["captured_at"]), "the ledger recorded a different moment from the one served"
 
@@ -444,9 +443,9 @@ def test_no_host_state_capture_is_stamped_with_the_cut_off(tmp_path, verb, param
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
         f"{verb} carries no `Z` capture stamp: {payload}")
     assert payload["captured_at"] != T0_Z, (
-        f"{verb}'s capture is stamped with the world's cut-off T0 (#1255: the run clock stamps)")
+        f"{verb}'s capture is stamped with the world's cut-off T0, not the run clock")
     assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
-        f"{verb}'s capture outside any run is not stamped with the wall clock (C4)")
+        f"{verb}'s capture outside any run is not stamped with the wall clock")
 
 
 @pytest.mark.parametrize(("verb", "params"), STAMPING_VERBS)

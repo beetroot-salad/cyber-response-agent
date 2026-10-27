@@ -12,7 +12,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -1095,7 +1095,7 @@ __all__ = [
     "episode", "episode_view", "fact", "family_arms", "family_doc", "open_source",
     "provenance_record",
     "FakeCapture", "source_capture", "source_stamp", "isolate_learning_state", "LEARNING_STATE_ENV",
-    "lesson_row", "mod", "refusals", "replace", "runs_base",
+    "lesson_row", "mod", "refusals", "runs_base",
     "arm_run_dir", "sibling_run_dir",
     "sym", "world_doc", "fixture_world_id", "world_id", "declaration", "write_family",
 ]

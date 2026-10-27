@@ -188,8 +188,7 @@ def test_a_faulted_family_draw_isolates_and_leaves_the_per_world_rows_intact(
         f"{sorted(clean_rows)} — a family fault changed WHICH worlds were graded")
     assert drifted == {}, (
         f"a faulted family draw changed per-world fields (world -> {{field: (clean, faulted)}}): "
-        f"{drifted} — the family call is an addition to the pass and its failure may not reach "
-        "a per-world row at all")
+        f"{drifted}")
 
 
 def test_the_family_trace_filename_cannot_collide_with_a_worlds_own(tmp_path):

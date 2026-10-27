@@ -59,20 +59,12 @@ from defender.tests.learning.oracle.live_contracts._spec1224 import build_regist
 
 REAL_ADAPTERS = PATHS.adapters_dir
 
-#: The ledger's decision for a control world whose oracle turn served something other than its
-#: base (#1255), spelled as the word itself rather than the ledger's constant.
-RECONSTRUCTED = "reconstructed"
-
 
 @functools.cache
 def _gather_grant():
     """The committed playground tenant's gather grant, projected lazily (no grant is fixed per
     process)."""
     return T1106.fixture_grants().gather
-
-
-GRANTED_ENTRIES = 30
-GRANTED_SYSTEMS = 8
 
 
 # the fake estate: a real adapters directory, with verb bodies that count

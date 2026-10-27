@@ -22,6 +22,7 @@ from defender.learning.core import config, drains, faults
 from defender.learning.core.cli import _run_stage
 from defender.learning.core.config import FatalConfigError, LoopPaths
 from defender.tests.support.shared.filesystem import _umask
+from defender.learning.core.state import AUTHOR_DRAIN_LOCK, BLOCK, CURATOR_DRAIN_LOCK, FINDINGS, LEAD_QUEUE_LOCK, PITFALLS, REPO_LOCK, TRY_ONCE
 from defender.tests.learning.state_contracts import _spec1135 as S
 
 ENV = "DEFENDER_LEARNING_STATE_DIR"
@@ -81,13 +82,22 @@ def _claim_all(state) -> list:
     return list(state.claim("case_id"))
 
 
+def _claimed_case_x(paths: LoopPaths, state=None) -> tuple:
+    """Seed one plain request, `case-x`, and claim it: `(state, claim)`."""
+    S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
+    state = state or S.LearningState.open(paths)
+    claims = _claim_all(state)
+    assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
+    return state, claims[0]
+
+
 def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, caplog):
     # Rejected design: a StateRefused subclassing OSError, which every `except OSError` arm
     # would catch and swallow.
     paths = S.built_paths(tmp_path)
     S.plant(location_path(paths.state_root) / "_pending" / "findings.jsonl", "symlink", target=S.outside(tmp_path))
     state = S.LearningState.open(paths)
-    refused = S.caught(lambda: state.rows(S.coined("FINDINGS")))
+    refused = S.caught(lambda: state.rows(FINDINGS))
 
     assert S.is_refusal(refused), f"a planted queue link did not raise StateRefused: {refused!r}"
     assert not isinstance(refused, OSError), "StateRefused must not be an OSError"
@@ -129,7 +139,7 @@ def test_open_holds_the_resolved_existing_scratch_root(tmp_path: Path):
     state = S.LearningState.open(paths)
     link.unlink()
     link.symlink_to(elsewhere)  # the spelling moves after open; the held root must not
-    state.append(S.coined("PITFALLS"), [_pitfall("p-1")])
+    state.append(PITFALLS, [_pitfall("p-1")])
 
     assert S.jsonl_rows(real / "_pending_pitfalls" / "pitfalls.jsonl") == [_pitfall("p-1")], \
         "the write did not land in the root the spelling named at open"
@@ -144,7 +154,7 @@ def test_open_holds_the_resolved_existing_scratch_root(tmp_path: Path):
 
 @pytest.mark.parametrize("shape", ["missing", "not-a-folder"])
 def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_root: Path,
-                                                         monkeypatch, caplog, shape):
+                                                         caplog, shape):
     from defender import run_common
     from defender.box import _scrub as scrub_mod
     from defender.tests.support.sandbox._spec791 import make_run_dir
@@ -182,13 +192,12 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_ro
         run_state.rmdir()
     if shape == "not-a-folder":
         run_state.write_text("a file, not a folder\n", encoding="utf-8")
-    monkeypatch.setenv(ENV, str(run_state))  # a retired knob: nothing reads it
     answered: list[bool] = []
     enqueued = S.caught(lambda: answered.append(
         run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")))
     assert enqueued is None, f"the run-end enqueue raised {enqueued!r} into the investigation"
     assert answered == [False], f"the run-end enqueue answered {answered!r}"
-    assert any(str(run_state) in r.getMessage() for r in caplog.records), "E1 did not log the tenant root error"
+    assert any(str(run_state) in r.getMessage() for r in caplog.records), "the run-end enqueue did not log the tenant root error"
 
     created = {k for k in S.tree_snapshot(tmp_path) if k not in before and k.split(os.sep)[0]
                not in ("runs", "worktrees")}
@@ -243,7 +252,7 @@ def test_1135_unset_and_empty_state_env_keep_the_explicit_tenant_root(data_root,
     paths = config.LoopPaths.for_tenant(tenant)
     assert location_path(paths.state_root) == location_path(tenant.learning)
     with S.LearningState.open(paths) as state:
-        described = state.describe(S.coined("FINDINGS"))
+        described = state.describe(FINDINGS)
         assert described == str(location_path(tenant.learning) / "_pending" / "findings.jsonl")
     assert sorted(os.listdir(package)) == listing, "opening tenant state changed the package"
 
@@ -266,7 +275,7 @@ def test_a_linked_queue_read_raises_and_never_reads_as_empty(tmp_path: Path, at)
         state = S.LearningState.open(paths)
         answer: list = []
         finished, _, refused = S.within(
-            10, lambda: answer.append(state.rows(S.coined("FINDINGS"))))
+            10, lambda: answer.append(state.rows(FINDINGS)))
         assert finished, "the read blocked on the link's target: it opened and read through the link"
         assert unread(), "the link's target was read: its row is no longer in the pipe"
 
@@ -280,7 +289,7 @@ def test_a_linked_queue_read_raises_and_never_reads_as_empty(tmp_path: Path, at)
 def test_a_plain_queue_reads_its_rows_and_an_absent_one_reads_empty(tmp_path: Path):
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
-    findings = S.coined("FINDINGS")
+    findings = FINDINGS
 
     absent: list = []
     raised = S.caught(lambda: absent.append(state.rows(findings)))
@@ -299,11 +308,7 @@ def test_a_plain_queue_reads_its_rows_and_an_absent_one_reads_empty(tmp_path: Pa
 def test_a_linked_write_target_raises_in_either_mode_and_is_never_slot_taken(tmp_path: Path,
                                                                             mode, at):
     paths = S.built_paths(tmp_path)
-    S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
-    state = S.LearningState.open(paths)
-    claims = _claim_all(state)
-    assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
-    claim = claims[0]
+    state, claim = _claimed_case_x(paths)
     queue = location_path(paths.state_root) / "author-queue"
     target = S.outside(tmp_path, "case-x.json", '{"outside": true}\n')
     if at == "holding-folder":
@@ -331,11 +336,7 @@ def test_a_linked_write_target_raises_in_either_mode_and_is_never_slot_taken(tmp
 
 def test_a_plain_write_lands_in_either_mode(tmp_path: Path):
     paths = S.built_paths(tmp_path)
-    S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
-    state = S.LearningState.open(paths)
-    claims = _claim_all(state)
-    assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
-    claim = claims[0]
+    state, claim = _claimed_case_x(paths)
     queue = location_path(paths.state_root) / "author-queue"
     stamped = {**claim.spec, "attempts": 1}
 
@@ -364,7 +365,7 @@ def test_a_linked_append_target_raises_and_its_target_is_untouched(tmp_path: Pat
         S.plant(location_path(paths.state_root) / "_pending_pitfalls", "symlink", target=target.parent)
 
     state = S.LearningState.open(paths)
-    refused = S.caught(lambda: state.append(S.coined("PITFALLS"), [_pitfall("p-1")]))
+    refused = S.caught(lambda: state.append(PITFALLS, [_pitfall("p-1")]))
 
     assert S.is_refusal(refused), f"append through a planted link answered {refused!r}"
     assert "_pending_pitfalls" in str(refused), "the refusal does not name the channel entry"
@@ -375,7 +376,7 @@ def test_a_plain_append_returns_todays_counts_and_encoding(tmp_path: Path):
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
 
-    pit = state.append(S.coined("PITFALLS"), [_pitfall("p-1"), _pitfall("p-1")])
+    pit = state.append(PITFALLS, [_pitfall("p-1"), _pitfall("p-1")])
     pit_file = location_path(paths.state_root) / "_pending_pitfalls" / "pitfalls.jsonl"
     assert tuple(pit) == (2, 0), f"the read-free pitfalls append answered {pit!r}"
     assert pit_file.read_text(encoding="utf-8") == (json.dumps(_pitfall("p-1")) + "\n") * 2, \
@@ -385,7 +386,7 @@ def test_a_plain_append_returns_todays_counts_and_encoding(tmp_path: Path):
     a, b = _finding("a/0"), _finding("a/1")
     queue.parent.mkdir(parents=True)
     queue.write_text(json.dumps(a) + "\n" + '{"torn": ', encoding="utf-8")
-    answer = state.append(S.coined("FINDINGS"), [a, b], dedup_key="finding_id")
+    answer = state.append(FINDINGS, [a, b], dedup_key="finding_id")
     assert tuple(answer) == (1, 1), f"(appended, malformed) was {answer!r}"
     assert queue.read_text(encoding="utf-8") == (
         json.dumps(a) + "\n" + '{"torn": ' + "\n" + json.dumps(b) + "\n"), \
@@ -436,7 +437,7 @@ def test_a_linked_lock_name_raises_for_a_try_once_role_and_creates_no_target(tmp
     answers: list = []
 
     def take() -> None:
-        with state.lock(S.coined("AUTHOR_DRAIN_LOCK"), wait=S.coined("TRY_ONCE")) as taken:
+        with state.lock(AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
             answers.append(taken)
 
     finished, _, refused = S.within(10, take)
@@ -452,20 +453,20 @@ def test_a_plain_lock_role_is_taken_refused_while_held_and_released(tmp_path: Pa
     state = S.LearningState.open(paths)
     drain_lock = location_path(paths.state_root) / "_pending" / ".lock"
     repo_lock = location_path(paths.state_root) / "_author.lock"
-    try_once = S.coined("TRY_ONCE")
+    try_once = TRY_ONCE
     seen: dict[str, object] = {}
 
     def drain_half() -> None:
-        with state.lock(S.coined("CURATOR_DRAIN_LOCK"), wait=try_once) as taken:
+        with state.lock(CURATOR_DRAIN_LOCK, wait=try_once) as taken:
             seen["taken"] = taken
             seen["made"] = S.entry_kind(drain_lock)
-            with state.lock(S.coined("CURATOR_DRAIN_LOCK"), wait=try_once) as again:
+            with state.lock(CURATOR_DRAIN_LOCK, wait=try_once) as again:
                 seen["again"] = again
         seen["free_after"] = S.entry_kind(drain_lock) == "file" and S.flock_free(drain_lock)
 
     def repo_half() -> None:
-        with state.lock(S.coined("REPO_LOCK"), wait=5):
-            seen["deadline"] = S.caught(lambda: state.lock(S.coined("REPO_LOCK"), wait=0.3)
+        with state.lock(REPO_LOCK, wait=5):
+            seen["deadline"] = S.caught(lambda: state.lock(REPO_LOCK, wait=0.3)
                                         .__enter__())
         seen["repo_free_after"] = S.entry_kind(repo_lock) == "file" and S.flock_free(repo_lock)
 
@@ -497,7 +498,7 @@ def test_a_plain_lock_role_is_taken_refused_while_held_and_released(tmp_path: Pa
         holder = threading.Thread(target=hold_then_release, daemon=True)
         holder.start()
         assert holding.wait(5), "the other holder never took the lead queue lock"
-        with state.lock(S.coined("LEAD_QUEUE_LOCK"), wait=S.coined("BLOCK")):
+        with state.lock(LEAD_QUEUE_LOCK, wait=BLOCK):
             seen["block_taken_at"] = time.monotonic()
             seen["block_holds"] = not S.flock_free(lead_lock)
         holder.join(5)
@@ -526,7 +527,7 @@ def test_1135_a_zero_repo_lock_wait_is_try_once(tmp_path: Path, monkeypatch):
     assert wait == 0, f"the knob read {wait!r}, not 0"
 
     def take() -> str:
-        with state.lock(S.coined("REPO_LOCK"), wait=wait):
+        with state.lock(REPO_LOCK, wait=wait):
             return "taken"
 
     with S.held_flock(location_path(paths.state_root) / "_author.lock"):
@@ -644,9 +645,7 @@ def test_every_core_refusal_shape_surfaces_as_state_refused(tmp_path: Path, verb
         folder = location_path(paths.state_root) / "_pending"
         leaf = folder / "findings.jsonl"
     else:
-        S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
-        claims = _claim_all(state)
-        assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
+        _, claim = _claimed_case_x(paths, state)
         folder = location_path(paths.state_root) / "author-queue" / "inflight"
         leaf = folder / "case-x.json"
         leaf.unlink()
@@ -663,9 +662,9 @@ def test_every_core_refusal_shape_surfaces_as_state_refused(tmp_path: Path, verb
 
     answer: list = []
     if verb == "rows":
-        escaped = S.caught(lambda: answer.append(state.rows(S.coined("FINDINGS"))))
+        escaped = S.caught(lambda: answer.append(state.rows(FINDINGS)))
     else:
-        escaped = S.caught(lambda: answer.append(state.stamp(claims[0], {"attempts": 1})))
+        escaped = S.caught(lambda: answer.append(state.stamp(claim, {"attempts": 1})))
 
     assert not isinstance(escaped, OSError), f"the core's refusal escaped as {escaped!r}"
     assert S.is_refusal(escaped), f"{verb} over a {where} {shape} answered {answer!r} / {escaped!r}"
@@ -675,16 +674,13 @@ def test_every_core_refusal_shape_surfaces_as_state_refused(tmp_path: Path, verb
 
 def test_ordinary_io_errors_are_not_converted_to_refusals(tmp_path: Path):
     paths = S.built_paths(tmp_path)
-    S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
-    state = S.LearningState.open(paths)
-    claims = _claim_all(state)
-    assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
+    state, claim = _claimed_case_x(paths)
     fresher = S.seed_request(paths, "case-x", S.curation_run_dir("run-b"))  # a re-ask mid-serve
     body = fresher.read_bytes()
-    answer = state.requeue(claims[0])
+    answer = state.requeue(claim)
     assert answer is False, f"a requeue into an occupied slot answered {answer!r}"
     assert fresher.read_bytes() == body, "the requeue overwrote the fresher request"
-    state.done(claims[0])
+    state.done(claim)
     fresher.unlink()
 
     S.seed_request(paths, "case-p", S.curation_run_dir("run-p"))
@@ -745,7 +741,7 @@ def test_a_refused_ledger_stops_rotate_before_the_queue_is_replaced(tmp_path: Pa
     S.plant(location_path(paths.state_root) / "_pending" / "consumed.jsonl", "symlink", target=ledger_target)
 
     state = S.LearningState.open(paths)
-    refused = S.caught(lambda: state.rotate(S.coined("FINDINGS"), [keep], [done], "abc123",
+    refused = S.caught(lambda: state.rotate(FINDINGS, [keep], [done], "abc123",
                                             timeout=5))
 
     assert S.is_refusal(refused), f"rotate over a planted ledger answered {refused!r}"
@@ -814,7 +810,7 @@ def test_open_lock_at_opens_a_plain_lock_without_truncating(tmp_path: Path):
         fcntl.flock(existing.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         state = S.LearningState.open(paths)
         finished, _, held_out = S.within(
-            10, lambda: state.lock(S.coined("REPO_LOCK"), wait=0).__enter__())
+            10, lambda: state.lock(REPO_LOCK, wait=0).__enter__())
         assert finished, "the handle's repo lock blocked on a zero wait"
         assert isinstance(held_out, TimeoutError), \
             "the handle's repo lock role is not the lock file open_lock_at opens at _author.lock"

@@ -20,11 +20,9 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both retired root variables and the scratch learning state point inside `tmp_path`, so a
-    stray read never reaches the developer's or CI's real roots."""
+    """The runs-base variable points inside `tmp_path`, so a stray read never reaches the
+    developer's or CI's real runs folder."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def _cli():
@@ -52,9 +50,6 @@ def _verify(ep: Path, plant: Any = T.arm_run_dir, **kw: Any) -> dict:
     with Episode.open(ep) as episode:
         return _cli().verify_family(episode, T.family_arms(episode, T.WORLDS), **kw)
 
-
-#: A commit no fixture, no message and no argv could carry by accident.
-ANCHOR = "c0ffee976anchor"
 
 #: The source run's one captured call and its answer (the live estate answers it the same).
 QUERY = S.query_params("user:alice")

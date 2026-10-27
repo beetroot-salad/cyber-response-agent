@@ -29,6 +29,8 @@ from defender.learning.core.config import (
     StageAbort,
 )
 from defender.tests.support.learning.curation import _drain719 as D
+from defender.learning.core.state import (
+    AUTHOR_DRAIN_LOCK, CURATOR_DRAIN_LOCK, FINDINGS, REPO_LOCK, TRY_ONCE)
 from defender.tests.learning.state_contracts import _spec1135 as S
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     BoxSpy,
@@ -138,11 +140,10 @@ def _queue(root: Path) -> Path:
     return root / "_pending" / "findings.jsonl"
 
 
-def _seed(root: Path, findings: list[dict], questioner: list[dict] | None = None) -> None:
+def _seed(root: Path, findings: list[dict]) -> None:
     """Seed both channels' queue files directly (the fixture's write, not the handle's)."""
     S.write_jsonl(_queue(root), findings)
-    S.write_jsonl(root / "_pending" / "questioner_findings.jsonl",
-                  [_world_row()] if questioner is None else questioner)
+    S.write_jsonl(root / "_pending" / "questioner_findings.jsonl", [_world_row()])
 
 
 def _tick(t: Any, paths: LoopPaths, *, trigger_author: Any = None) -> tuple[int, BoxSpy]:
@@ -167,7 +168,7 @@ def _stuck(root: Path, queue: str = "findings") -> list[dict]:
 def _handle_rows(paths: LoopPaths) -> list[dict]:
     """The findings queue read back through the handle's `rows` verb."""
     state = S.LearningState.open(paths)
-    return S.rows_of(state.rows(S.coined("FINDINGS")))
+    return S.rows_of(state.rows(FINDINGS))
 
 
 def test_a_refusal_in_the_first_curator_halts_the_tick_with_exit_2(tmp_path, world, caplog):
@@ -186,9 +187,7 @@ def test_a_refusal_in_the_first_curator_halts_the_tick_with_exit_2(tmp_path, wor
     assert any("consumed.jsonl" in line for line in critical), \
         f"no CRITICAL line names the refused entry: {critical}"
     displaced = [line for line in critical if line.startswith("...it displaced")]
-    assert not displaced, (
-        "the halt printed a second CRITICAL line that labels the converted core error a "
-        f"displaced fault (JF15: no new line): {displaced}")
+    assert not displaced, f"the halt also logged the refusal as a displaced fault: {displaced}"
     assert S.entry_kind(ledger) == "link", "the planted entry was not left in place"
     assert os.readlink(ledger) == str(target), "the planted entry was re-pointed"
     assert target.read_bytes() == target_bytes, "the rotation wrote through the planted link"
@@ -331,10 +330,11 @@ def test_1135_locks_of_a_halted_tick_are_free_for_the_next_tick(tmp_path, world,
         assert S.flock_free(root / name), f"the halted tick still holds {name}"
 
     state = S.LearningState.open(paths)
-    for role, wait in (("REPO_LOCK", 0), ("AUTHOR_DRAIN_LOCK", S.coined("TRY_ONCE")),
-                       ("CURATOR_DRAIN_LOCK", S.coined("TRY_ONCE"))):
-        def take(role: str = role, wait: Any = wait) -> Any:
-            with state.lock(S.coined(role), wait=wait) as taken:
+    for role, lock, wait in (("REPO_LOCK", REPO_LOCK, 0),
+                             ("AUTHOR_DRAIN_LOCK", AUTHOR_DRAIN_LOCK, TRY_ONCE),
+                             ("CURATOR_DRAIN_LOCK", CURATOR_DRAIN_LOCK, TRY_ONCE)):
+        def take(lock: Any = lock, wait: Any = wait) -> Any:
+            with state.lock(lock, wait=wait) as taken:
                 return taken
         finished, taken, error = S.within(10, take)
         assert finished, f"{role}: the take did not return within 10 s after the halt"
@@ -455,7 +455,7 @@ def test_1135_ordinary_write_failure_at_each_phase_under_the_stuck_guard(
     else:
         assert [r.get("finding_id") for r in queued] == [held["finding_id"]], \
             "the held row was not written back before the held-report failure"
-    assert S.rows_of(S.LearningState.open(paths).rows(S.coined("FINDINGS"))) == queued, \
+    assert S.rows_of(S.LearningState.open(paths).rows(FINDINGS)) == queued, \
         "the queue read back through the handle disagrees with the queue on disk"
 
 
@@ -480,9 +480,7 @@ def test_1135_a_deadline_lock_name_is_a_planted_entry_when_run_batch_takes_the_r
     assert any("_author.lock" in m for m in critical), \
         "no CRITICAL line names the refused lock entry"
     displaced = [m for m in critical if m.startswith("...it displaced")]
-    assert not displaced, (
-        "the halt printed a second CRITICAL line that labels the converted core error a "
-        f"displaced fault (JF15: no new line): {displaced}")
+    assert not displaced, f"the halt also logged the refusal as a displaced fault: {displaced}"
     assert S.entry_kind(lock) == "link", "the planted lock entry was not left in place"
     assert os.readlink(lock) == str(target), "the planted lock entry was re-pointed"
     assert _queue(root).read_bytes() == queue_bytes, "the queue was touched"
@@ -531,6 +529,7 @@ from pathlib import Path
 spec = json.loads(sys.argv[1])
 from defender.learning.core.config import LoopPaths
 from defender.tests.learning.state_contracts import _spec1135 as S
+from defender.learning.core.state import AUTHOR_DRAIN_LOCK, FINDINGS, TRY_ONCE
 import defender.run_common as run_common
 
 lines = []
@@ -558,17 +557,17 @@ def cell(name, root):
             return out
         state = S.LearningState.open(paths)
         if name == "append":
-            out["answer"] = repr(state.append(S.coined("FINDINGS"), [spec["row"]],
+            out["answer"] = repr(state.append(FINDINGS, [spec["row"]],
                                               dedup_key="finding_id"))
         elif name in ("rotate", "rotate_unreadable"):
-            state.rotate(S.coined("FINDINGS"), [], [spec["row"]], None, timeout=1)
+            state.rotate(FINDINGS, [], [spec["row"]], None, timeout=1)
         elif name == "move":
             out["answer"] = [repr(c) for c in state.claim("case_id")]
         elif name == "lock":
-            with state.lock(S.coined("AUTHOR_DRAIN_LOCK"), wait=S.coined("TRY_ONCE")) as taken:
+            with state.lock(AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
                 out["answer"] = repr(taken)
         elif name == "read":
-            out["answer"] = repr(state.rows(S.coined("FINDINGS")))
+            out["answer"] = repr(state.rows(FINDINGS))
     except BaseException as e:  # a refusal is not an `Exception`
         out.update(raised=type(e).__name__, errno=getattr(e, "errno", None),
                    refusal=S.is_refusal(e), oserror=isinstance(e, OSError))
@@ -640,11 +639,10 @@ def _assert_an_unreadable_queue_never_reads_as_empty(
     for name in ("read", "rotate_unreadable"):
         got = results[name]
         assert got["raised"] is not None, (
-            f"{name}: a queue that cannot be read answered {got['answer']!r} instead of failing "
-            "(JF2 A: an ordinary failure, never an empty read)")
+            f"{name}: a queue that cannot be read answered {got['answer']!r} instead of failing")
         assert got["refusal"] is False, f"{name}: an ordinary read failure became a StateRefused"
         assert got["oserror"] is True, \
-            f"{name}: the unreadable queue's failure is not an OSError on today's route: {got}"
+            f"{name}: the unreadable queue's failure is not an OSError: {got}"
         assert got["answer"] is None, f"{name}: the failed read still answered {got['answer']!r}"
     assert after.get("unreadable_queue") == "".join(
         json.dumps(r) + "\n" for r in _unreadable_queue_rows(row)).encode(), (
@@ -706,7 +704,7 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
         def read_back() -> None:
             repo = base / "repo"
             rotated = S.LearningState.open(LoopPaths(repo_root=repo, state_dir=Path(cells["rotate"])))
-            after["queue"] = S.rows_of(rotated.rows(S.coined("FINDINGS")))
+            after["queue"] = S.rows_of(rotated.rows(FINDINGS))
             claimed = S.LearningState.open(LoopPaths(repo_root=repo, state_dir=Path(cells["move"])))
             after["queued"] = claimed.has_requests()
 

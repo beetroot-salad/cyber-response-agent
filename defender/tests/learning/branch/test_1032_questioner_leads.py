@@ -295,10 +295,8 @@ def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_w
 
 @pytest.fixture
 def launcher_roots(tmp_path, monkeypatch):
-    """Both retired root variables pointed inside `tmp_path`, as `test_947_triplet_launcher`
-    does, so a stray read of either stays inside the test."""
+    """The runs-base variable pointed inside `tmp_path`, so a stray read stays inside the test."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
 
 
 def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, launcher_roots):

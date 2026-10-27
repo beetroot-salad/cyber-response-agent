@@ -17,11 +17,9 @@ from defender.tests.learning.branch import test_976_family_anchor as A
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both retired root variables and the scratch learning state point inside `tmp_path`, so a
-    stray read never reaches the developer's or CI's real roots."""
+    """The runs-base variable points inside `tmp_path`, so a stray read never reaches the
+    developer's or CI's real runs folder."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def _cli():

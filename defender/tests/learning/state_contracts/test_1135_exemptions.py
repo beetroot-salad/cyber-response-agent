@@ -42,20 +42,14 @@ from defender.records import RunPaths
 from defender.tests.learning.state_contracts import _spec1135 as S
 from defender.learning.core.state import FINDINGS, LEAD_QUEUE_LOCK, PITFALLS, QUESTIONER_FINDINGS
 
-ENV = "DEFENDER_LEARNING_STATE_DIR"
-
 #: A marker no page or log can contain unless it read the planted link's target.
 LEAKED = "outside-leak-1135"
 
 
-def _judge_roots(tmp_path: Path, monkeypatch, root: Path) -> Path:
-    """The judge's three retired root knobs, set inside `tmp_path` as decoys: the grade opens the
-    request tenant's own roots and reads none of them. Returns the runs base."""
-    runs_base = tmp_path / "defender-runs"
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(runs_base))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(ENV, str(root))
-    return runs_base
+def _judge_roots(tmp_path: Path, monkeypatch) -> None:
+    """Point the runs-base knob inside `tmp_path`, so a stray read never reaches a real runs
+    folder (the grade itself opens the request tenant's own roots)."""
+    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
 
 
 def _gradable_episode(tmp_path: Path) -> Path:
@@ -114,7 +108,6 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     scrub_mod.scrub(run_dir)
     paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=run_dir.parent.parent / "learning")
     location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv(ENV, str(location_path(paths.state_root)))  # a retired knob: nothing reads it
     case_id = case_ref(RunPaths(run_dir).alert.read_bytes())
 
     if at == "queue-folder":
@@ -161,7 +154,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
         "the unplanted enqueue raised"
     assert answered == [True], f"the unplanted enqueue answered {answered!r}"
     assert S.entry_kind(location_path(paths.state_root) / "author-queue" / f"{case_id}.json") == "file", \
-        "the unplanted request is not at author-queue/<case_id>.json (R14)"
+        "the unplanted request is not at author-queue/<case_id>.json"
     assert S.LearningState.open(paths).has_requests(), \
         "the handle does not see the request the run-end enqueue wrote"
 
@@ -178,8 +171,7 @@ def test_e2_the_queue_page_counts_a_refused_sidecar_unreadable(tmp_path: Path):
     seeded = S.tree_snapshot(tmp_path)
     before = _page(paths)
     assert S.tree_snapshot(tmp_path) == seeded, (
-        "building the page wrote to disk: the torn delivery record was quarantined or rewritten "
-        "(JF17: that is the drain's verb, never the page's)")
+        "building the page quarantined or rewrote the torn delivery record")
     assert before["quarantine"]["deliveries"]["unreadable"] >= 1, \
         f"the page did not read the torn delivery record: {before['quarantine']['deliveries']}"
 
@@ -198,15 +190,15 @@ def test_e2_the_queue_page_counts_a_refused_sidecar_unreadable(tmp_path: Path):
     expected = copy.deepcopy(before)
     _channel(expected, "findings")["unreadable"] += 1
     assert page == expected, "a field of the page contract other than the unreadable count changed"
-    assert S.tree_snapshot(tmp_path) == on_disk, "building the page wrote to disk (JF17)"
+    assert S.tree_snapshot(tmp_path) == on_disk, "building the page wrote to disk"
     assert os.readlink(planted) == str(target), "the planted link was changed"
 
     state = S.LearningState.open(paths)
     answer: list = []
-    read = S.caught(lambda: answer.append(state.deadletter_rows(S.coined("FINDINGS"))))
+    read = S.caught(lambda: answer.append(state.deadletter_rows(FINDINGS)))
     assert read is None, f"the display read raised the refusal instead of answering it ({read!r})"
     assert LEAKED not in repr(answer), "the display read answered the link target's rows"
-    kept = [r.get("finding_id") for r in S.rows_of(state.deadletter_rows(S.coined("QUESTIONER_FINDINGS")))]
+    kept = [r.get("finding_id") for r in S.rows_of(state.deadletter_rows(QUESTIONER_FINDINGS))]
     assert kept == ["ep-2/c/0/0"], f"the plain graveyard beside the refused one reads {kept}"
 
 
@@ -222,7 +214,7 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
         planted = S.plant(root / FINDINGS.queue, "symlink", target=target)
     elif root.exists():
         root.rmdir()
-    _judge_roots(tmp_path, monkeypatch, root)
+    _judge_roots(tmp_path, monkeypatch)
     archived = S.tree_snapshot(ep)
 
     caplog.set_level(logging.INFO)
@@ -243,7 +235,7 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
             "the grade appended through the planted link"
         assert S.entry_kind(planted) == "link", "the planted link was replaced or removed"
         assert os.readlink(planted) == str(target), "the planted link was re-pointed"
-        reread = S.caught(lambda: S.LearningState.open(paths).rows(S.coined("FINDINGS")))
+        reread = S.caught(lambda: S.LearningState.open(paths).rows(FINDINGS))
         assert S.is_refusal(reread), f"the handle's read of the linked queue answered {reread!r}"
     else:
         named = [r for r in warned if any(isinstance(e, FatalConfigError)
@@ -320,15 +312,15 @@ def test_1135_the_failed_folder_is_a_planted_entry_when_the_page_lists_failed_re
 
 def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, monkeypatch):
     paths = S.built_paths(tmp_path)
-    _judge_roots(tmp_path, monkeypatch, location_path(paths.state_root))
+    _judge_roots(tmp_path, monkeypatch)
     ep = _gradable_episode(tmp_path)
     state = S.LearningState.open(paths)
 
     graded = S.caught(lambda: J.grade_at(ep, judge=_model(), draws=1, state=state))
-    assert graded is None, f"grade_episode did not grade on the handle it was handed (RF5): {graded!r}"
+    assert graded is None, f"grade_episode did not grade on the handle it was handed: {graded!r}"
     record = J.judge_record(ep)
-    findings = state.describe(S.coined("FINDINGS"))
-    questioner = state.describe(S.coined("QUESTIONER_FINDINGS"))
+    findings = state.describe(FINDINGS)
+    questioner = state.describe(QUESTIONER_FINDINGS)
     assert isinstance(findings, str), f"describe(FINDINGS) is not a string: {findings!r}"
     assert findings == os.path.realpath(location_path(paths.state_root) / FINDINGS.queue), \
         f"describe(FINDINGS) is not the queue's absolute path string: {findings!r}"

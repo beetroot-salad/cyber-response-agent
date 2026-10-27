@@ -27,10 +27,9 @@ TOKEN_B = T.fixture_world_id("b")
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both retired root variables point inside `tmp_path`, so a stray read never reaches the
-    developer's or CI's real roots."""
+    """The runs-base variable points inside `tmp_path`, so a stray read never reaches the
+    developer's or CI's real runs folder."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
 
 
 def _run():
@@ -178,7 +177,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen == [], "a sibling reached the curation lane"
     assert rec.kwargs["run_dir"] == ep / "runs" / roster[T.world_id(ep, "b")], (
-        "the sibling did not run at its roster id (#1187 declared change 2)")
+        "the sibling did not run at its roster id")
 
 
 # threading the world through the run

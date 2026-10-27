@@ -182,8 +182,7 @@ def test_a_failed_write_leaves_no_memo_behind_it(tmp_path):
                 payload_text='{"owner": "never landed"}', source=BASE, world_id=None))
 
         assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) is None, (
-            "the payload is memoized with no row behind it — every later call for this key serves "
-            "bytes the table cannot account for, and any other process serves something else")
+            "the payload is memoized with no ledger row behind it")
 
 
 def test_two_staged_calls_for_one_question_pair_on_the_asked_form(tmp_path):

@@ -19,9 +19,6 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     remote_branches, touched)
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, git, published_tenant
 
-ENV = "DEFENDER_LEARNING_STATE_DIR"
-
-
 def _finding_ids(rows: list[dict]) -> list[str]:
     return [r["finding_id"] for r in rows]
 
@@ -40,10 +37,7 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
 
 
 def _spine(t, tmp_path: Path, paths, monkeypatch) -> None:
-    runs_base = tmp_path / "defender-runs"
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(runs_base))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(ENV, str(location_path(paths.state_root)))
+    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     channel = FINDINGS
 
@@ -56,7 +50,7 @@ def _spine(t, tmp_path: Path, paths, monkeypatch) -> None:
             default=J.as_reply_text(J.reply_doc()),
             family_default=J.as_reply_text(J.family_reply())),
         draws=1, state=state))
-    assert graded is None, f"grade_episode did not grade on the handle it was handed (RF5): {graded!r}"
+    assert graded is None, f"grade_episode did not grade on the handle it was handed: {graded!r}"
     record = J.judge_record(ep)
 
     # hop 1: the judge's record says how many rows it enqueued, and the queue carries them
@@ -68,7 +62,7 @@ def _spine(t, tmp_path: Path, paths, monkeypatch) -> None:
         f"the graded episode did not put its rows on the shared queue: {queued}"
     assert {r["direction"] for r in D.pending(paths, channel)} == {"family"}, \
         "the spine's producer is the family judge; a non-family row means the partition is not driven"
-    assert _finding_ids(S.rows_of(state.rows(S.coined("FINDINGS")))) == queued, \
+    assert _finding_ids(S.rows_of(state.rows(FINDINGS))) == queued, \
         "the handle does not read the rows the grade enqueued"
 
     # hop 2: the batch the curator's model call receives is exactly those rows
@@ -144,5 +138,5 @@ def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_pa
 
     assert 0.8 <= observed[1] < 3.0, f"the 1s deadline was not what ended the wait: {observed}"
     assert 3.2 <= observed[4] < 8.0, f"the 4s deadline was not what ended the wait: {observed}"
-    held = S.rows_of(S.LearningState.open(paths).rows(S.coined("FINDINGS")))
+    held = S.rows_of(S.LearningState.open(paths).rows(FINDINGS))
     assert held == rows, f"the handle reads {held}, not the queue the skipped ticks left intact"
