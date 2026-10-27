@@ -22,7 +22,7 @@ def _payload_cap_lifted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(S.CAP_KNOB, str(_UNCAPPED))
 
 
-#: The words A2/M2 require on the aligned lead view and the fact surfaces (`S.COINED`).
+#: The words the aligned lead view and the fact surfaces must carry (`S.COINED`).
 HEURISTIC = S.COINED["label.heuristic"]
 BASELINE = S.COINED["label.baseline"]
 
@@ -30,14 +30,14 @@ CTL, WB, WC = "ctl", "wb", "wc"
 LABELS = (CTL, WB, WC)
 _UNCAPPED = 10_000_000
 
-#: M3's sections, each found by its COINED host-text title (`S.COINED["title.<section>"]`),
-#: outside every untrusted frame (A10).
+#: The prompt's sections, each found by its host-text title (`S.COINED["title.<section>"]`),
+#: outside every untrusted frame.
 SECTIONS = ("header", "contrast", "surfaces", "aligned", "references", "focus", "noise")
 
 #: A pre-flight drift entry (the noise context is pre-flight's record alone, drift overlay).
 DRIFT_MARK = "MARK-preflight-drift"
 #: The episode id of a second, separately graded family in one test (finding ids carry it).
-SECOND_EPISODE_ID = fixture_uuid("fresh-case-n60")  # a UUID, as every episode id after #1187
+SECOND_EPISODE_ID = fixture_uuid("fresh-case-n60")  # a UUID, like every episode id
 
 
 def _title(section: str) -> str:
@@ -353,7 +353,6 @@ _UNGRADABLE = {
 
 @pytest.mark.parametrize("kind", sorted(_UNGRADABLE))
 def test_1234_ungradable_planted_world_is_in_no_reference_set(tmp_path: Path, kind: str) -> None:
-    # rejected: grading on a thinned, flagged or partial run set (X5)
     fields, reason_word = _UNGRADABLE[kind]
     wx = {"role": "D", "calls": [_call("l-777", params=_q(f"user:alice {S.marker('wx', 'call')}"))],
           **fields}

@@ -16,12 +16,8 @@ from defender.tests.support.learning.core._state1135 import env_state
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both CONFIGURED roots point inside `tmp_path` for every scenario in this file.
-
-    Without it a scenario takes its runs base from `tmp_path` and its episode dir from the
-    production resolver, so `episode_dir_for` answers about the developer's and CI's REAL roots
-    and the assertions compare two different trees.
-    """
+    """Point the runs, episodes and learning-state roots inside `tmp_path`; otherwise the
+    production resolver answers about the real roots."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
@@ -32,7 +28,7 @@ def _cli():
 
 
 def _tenant_paths():
-    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    """The tenant `T.runs_base` (or `d9_tenant`) already created."""
     return T.current_tenant()
 
 
@@ -40,26 +36,21 @@ _EMPTY: dict = {"rows": []}
 
 
 class _LazySibling(J.FakeSibling):
-    """`J.FakeSibling`, its episode directory resolved when the launcher first starts a child
-    (the launcher names the directory; the test does not). #1187: `J.FakeSibling` itself now
-    finds the episode from each child's `--tenant` and `--episode` (the launcher mints the id),
-    so this is the plain double, kept under its name for the scenarios that construct it."""
+    """The plain `J.FakeSibling` (it finds each child's episode from `--tenant`/`--episode`),
+    kept under this name for the scenarios that construct it."""
 
 
 def _launch_judge() -> J.FakeJudge:
-    """A judge double answering in the launched family's own served systems (#1224's fixture
+    """A judge double answering in the launched family's own served systems (the fixture
     tenant serves `idp`, not the archived fixtures' `elastic`)."""
     return J.scripted_judge(default=J.as_reply_text(J.reply_doc(systems=["idp"])))
 
 
 def _launch(tmp_path, *, judge=None, spawn=None, **seams):
-    """Drive ONE whole episode through the real launcher, judge included.
-
-    The judge is reached through `cli.main`'s injected `judge=` seam and never by patching a
-    module attribute: the design named no seam for the judge's model call, so the seam is part
-    of the contract and driving every launcher scenario through it is what discharges it.
-    #1224: the launch runs over the live-oracle suite's fixture tenant, with a pre-flight
-    oracle that serves the one captured call unchanged.
+    """Drive one whole episode through the real launcher, the judge reached through
+    `cli.main`'s injected `judge=` seam (never a patched module attribute). The launch runs over
+    the live-oracle suite's fixture tenant, whose pre-flight oracle serves the one captured call
+    unchanged.
     """
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
@@ -76,8 +67,8 @@ def _launch(tmp_path, *, judge=None, spawn=None, **seams):
 
 
 def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
-    # A family-level plan pointer remains resolvable with the launcher's newly minted world
-    # ids. The default investigator fixture cites fixed world ids and queues nothing here.
+    # A world finding citing a family-level plan pointer resolves under the launcher's minted
+    # world ids; the default investigator finding cites fixed ids and would queue nothing.
     judge = J.scripted_judge(default=J.as_reply_text(J.reply_doc(
         systems=["idp"], findings=[J.finding_doc(
             subject="world", bucket="incoherent", systems=["idp"])])))
@@ -91,19 +82,15 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
         assert J.draw_files(ep, label), f"world {label} has no per-draw reply on disk"
 
     grade = J.judge_record(ep)
-    # #1234: the episode word is retired (A17); what the record carries for each graded world
-    # is its row and its A6 commit state.
     assert [row["world"] for row in grade["worlds"]] == ["b", "c"], (
         "the family record carries no row per graded world")
     assert all(row.get("state") == "queued" for row in grade["worlds"]), (
         "a graded world's row was not committed")
-    # #1007 M5 adds ONE MORE caller (the family-level draw) beside the per-world ones — one
-    # call per world per draw, PLUS one call per draw for the family.
     assert judge.calls == (len(graded) + 1) * grade["draws"]["configured"], (
         "one model call per world per draw plus one per-draw family call is the contract; the "
         "seam saw a different count")
-    # #1186 O2: exercise the launcher's real state construction, rather than grade_at(state=).
-    # Its source episode belongs to this tenant; the ambient override is a decoy.
+    # The launcher builds the episode tenant's own state; the ambient state-dir override is a
+    # decoy that must stay untouched.
     tenant_learning = ep.parent.parent / "learning"
     assert grade["world_enqueued_rows"] > 0, "positive control: the launcher queued no findings"
     assert Path(grade["enqueued_to"]) == tenant_learning / FINDINGS.queue
@@ -164,8 +151,7 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     assert second.calls == 0, "a second grade ran over an episode already graded"
     assert (ep / "judge.yaml").read_text(encoding="utf-8") == before
 
-    # J11: readability, not just presence — a `judge.yaml` that cannot be read back as a family
-    # grade is not evidence that the episode was graded.
+    # An unreadable `judge.yaml` is not evidence of a grade: the pass refuses, not skips.
     (ep / "judge.yaml").write_text("\x00not: [a, family, grade", encoding="utf-8")
     third = J.scripted_judge()
     with pytest.raises(J.refusals()):
@@ -194,9 +180,8 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
     assert outside.read_text(encoding="utf-8") == "untouched\n"
 
-    # POSITIVE CONTROL, same episode, same channel: with neither link the same grade lands both
-    # sinks as plain files — so each refusal above was the link's, not the episode failing to
-    # open at all (which a bare `pytest.raises(J.refusals())` would also accept; #1187 sweep).
+    # Positive control: with neither link the same grade lands both sinks as plain files, so
+    # each refusal above was the link's, not the episode failing to open.
     (draw_dir / "0.yaml").unlink()
     J.grade_at(ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
     assert (ep / "judge.yaml").is_file(), "control: the unlinked grade wrote no judge.yaml"
@@ -222,7 +207,7 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
     queue_dir = tmp_path / "second" / "queue"
     queue_dir.mkdir(parents=True, exist_ok=True)
     # An enqueue that cannot land: the queue's holding folder is a regular file (a permission
-    # bit would not bind a root test runner, and the handle owns the root's layout now).
+    # bit would not bind a root test runner).
     (queue_dir / "_pending").write_text("not a directory", encoding="utf-8")
     refused = LearningState.open(LoopPaths(repo_root=tmp_path / "second", state_dir=queue_dir))
     # `StateRefused` is deliberately not an `OSError`, so it is not folded into `JudgeRefused`.

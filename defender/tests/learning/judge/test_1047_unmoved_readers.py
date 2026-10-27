@@ -41,9 +41,7 @@ def test_a_cut_short_world_files_no_finding_and_its_reason_travels_on_its_row_un
 
 
 def _all_cut_short(tmp_path):
-    """An episode whose every non-control world was cut short — the degenerate case fork F-J waived
-    as a known, recorded gap (it computes `verdict_word` normally but degrades its alert key and
-    family pattern to generic fallbacks)."""
+    """An episode whose every non-control world was cut short."""
     return S.cut_short_episode(tmp_path, cut={"b": "request-limit", "c": "aborted"})
 
 
@@ -56,11 +54,9 @@ def test_sibling_union_still_short_circuits_when_the_gradable_set_is_empty(tmp_p
 
 
 def test_pass_lessons_commit_still_returns_none_when_the_gradable_set_is_empty(tmp_path):
-    """`_pass_lessons_commit` still returns `None` on an empty gradable set — probe #28's finding,
-    pinned rather than left as a tolerance nothing tests."""
     judge = S.mod("learning.judge")
     ep = _all_cut_short(tmp_path)
-    bound = S.mod("_io").bind(ep)  # #1049: the resolver takes the pass's bound, not the root
+    bound = S.mod("_io").bind(ep)  # the resolver takes the pass's bound, not the root
     assert judge._pass_lessons_commit(bound, []) is None
     assert judge._pass_lessons_commit(bound, [T.world_id(ep, label) for label in ("b", "c")]) is not None, (
         "the control failed: the commit resolver answered None for worlds that do carry a "

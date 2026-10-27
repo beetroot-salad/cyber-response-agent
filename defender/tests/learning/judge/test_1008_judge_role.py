@@ -15,7 +15,7 @@ JUDGE_ROLE_PROMPT = T.DEFENDER / "learning" / "judge" / "role.md"
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """The three configured roots, pointed at this test's own tree — the #921 fixture verbatim."""
+    """The three configured roots, pointed at this test's own tree."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
@@ -43,8 +43,6 @@ def _grant_gate():
 
 
 def test_1008_the_family_judge_is_registered_under_its_own_role_key():
-    """The judge's definition is registered under `AgentRole.JUDGE`, and it is NOT the questioner's
-    object."""
     AgentRole = _role()
     AGENTS = _agents()
     JUDGE_DEF = _judge_def()
@@ -62,8 +60,7 @@ def test_1008_the_family_judge_is_registered_under_its_own_role_key():
 
 
 def test_1008_the_real_selection_step_builds_the_judges_agent_with_no_tool_at_all(tmp_path):
-    """THE SELECTION STEP, driven: `build_stage_agent(JudgeDeps, …)` — the function that turns a
-    deps type into an agent by looking `type(deps).role` up in `AGENTS` — builds."""
+    """`build_stage_agent(JudgeDeps, …)`, which looks `type(deps).role` up in `AGENTS`, builds."""
     from pydantic_ai.models.function import FunctionModel
 
     from defender.learning._pydantic_stage import build_stage_agent
@@ -114,7 +111,7 @@ def test_1008_the_real_selection_step_builds_the_judges_agent_with_no_tool_at_al
 
 
 def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
-    """THE ORCHESTRATION HALF, driven through the real `grade_episode`."""
+    """The orchestration half, through the real `grade_episode`."""
     AgentRole = _role()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     judge = J.scripted_judge()
@@ -159,8 +156,7 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     assert "judge" in policy.deny_reason.casefold(), (
         f"the judge's refusal never names the judge: {policy.deny_reason!r} — a refusal in "
         "this role's own words says which role is refusing")
-    # ...and it says what this role IS, not merely which role it is. A refusal that names the
-    # judge and describes nothing tells the model nothing about why the door is shut.
+    # ...and says what the role is, not only which role refuses.
     assert "episode" in policy.deny_reason.casefold(), (
         f"the judge's refusal never says what it is refusing ABOUT: {policy.deny_reason!r} — "
         "this role grades an archived episode that the host inlined in its prompt, and that is "
@@ -198,8 +194,9 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
 
 
 def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
-    """The judge holds nothing on any surface a definition can open: no tool lane, no verb entry, no
-    bash grant, no declared read root, no read shape and no write root."""
+    """The judge holds nothing on any surface a definition can open. Its resolved read roots
+    still include the defender tree (the gate's default base: `read_confine` is empty), so "no
+    read root" is a claim about the definition's field, not about the gate."""
     compile_policy_for = T.sym("investigation.permission", "compile_policy_for")
     JUDGE_DEF = _judge_def()
 

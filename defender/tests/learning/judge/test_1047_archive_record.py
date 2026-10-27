@@ -1,4 +1,4 @@
-"""#1047 O3 — each archived world carries a HOST-WRITTEN record of how its run ended."""
+"""#1047 — each archived world carries a host-written record of how its run ended."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -56,8 +56,6 @@ def test_the_worlds_exit_class_is_read_from_a_source_no_box_can_write(tmp_path):
 
 
 def test_a_forged_run_end_file_in_the_run_dir_is_never_the_archived_one(tmp_path):
-    """A run dir holding a file at the archived record's own name is archived with the host's own
-    record, byte-for-byte — the planted file's content never appears in worlds/<label>/."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="aborted")
     forged = {"truncated_by": "request-limit", "closed_before_cut": True, "forged": True}
@@ -72,8 +70,8 @@ def test_a_forged_run_end_file_in_the_run_dir_is_never_the_archived_one(tmp_path
 
 def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_guarded_seam(
         tmp_path):
-    """A pre-existing REGULAR FILE at `worlds/<label>/run_end.json` is overwritten with the host's
-    own record; a pre-existing HARD LINK there is refused rather than written through."""
+    """A regular file at the destination is overwritten with the host's record; a hard link
+    there is refused, not written through."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="budget")
     dest = ep / "worlds" / T.world_id(ep, "b")
@@ -168,8 +166,7 @@ def test_a_symlink_planted_inside_the_run_dir_at_the_sidecars_basename_is_not_re
 
 
 def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path):
-    """NOT reachable: the investigation box mounts exactly the run dir (rw), the defender dir (ro)
-    and a tmpfs (claims h23, n2), and the sidecar's parent is not bound."""
+    """The box's one writable bind is the run dir; the sidecar sits beside it, outside the bind."""
     from defender.box._lifecycle import _create_argv, _run_lane_mounts
     from defender.box._spec import BoxSpec
 
@@ -185,8 +182,8 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
     assert writable == [str(run_dir)], (
         f"the box's writable binds are {writable}; O3's whole argument is that there is "
         "exactly one and it is the run dir")
-    # #1255 (design rev 4, P1): the box sees that bind at the model view's `/runs/current`; the
-    # sidecar's containment is judged on the bind's host SOURCE, which is the run dir.
+    # The box sees that bind at `/runs/current`; containment is judged on the bind's host
+    # source, the run dir.
     assert [spec.split("target=", 1)[1].split(",", 1)[0] for spec in rw_specs] == [
         "/runs/current"], rw_specs
     assert not str(sidecar).startswith(str(run_dir) + "/"), (
@@ -199,17 +196,16 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
         tmp_path):
     ep = S.episode(tmp_path)
     cli = S.mod("learning.branch.cli")
-    runs = ep / "runs"  # the siblings' container (#1105 PR 2: `cli.sibling_runs_base` is gone)
+    runs = ep / "runs"  # the siblings' container
     written: dict[str, object] = {}
     faults: list[BaseException] = []
 
     def spawn(argv, *, env=None, **_kw):
-        # `start_family` records a thread that died as a NON-ZERO exit rather than re-raising,
-        # so a fault in here would otherwise reach the assertions below as "the launcher fanned
-        # nothing" — a message about the wrong thing.
+        # `start_family` records a dead thread as a non-zero exit, not a raise: keep the fault
+        # so it is re-raised below instead of reading as "the launcher fanned nothing".
         try:
             label = next(argv[i + 1] for i, tok in enumerate(argv) if tok == "--world")
-            # #1187: the child's run folder is the arm id the roster names for its label.
+            # The child's run folder is the arm id the roster names for its label.
             run_dir = runs / T.read_roster(ep)[T.world_id(ep, label)]
             run_dir.mkdir(parents=True, exist_ok=True)
             S.plant_sidecar(run_dir, truncated_by="aborted")
@@ -220,8 +216,8 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
         return 0
 
     with Episode.open(ep) as episode:
-        # #1105 PR 2: the launcher makes the container (with the tenant's record) before the
-        # first sibling; `start_family` no longer does.
+        # The launcher makes the container (with the tenant's record) before the first
+        # sibling; `start_family` does not.
         T.episode_view(episode)
         cli.start_family(episode, [T.world_id(ep, label) for label in ("b", "c")], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID)
     if faults:
@@ -246,8 +242,8 @@ def _deps(tmp_path):
 
 
 def test_run_end_write_happens_even_for_a_run_that_ended_cleanly(tmp_path):
-    """The sidecar write is UNCONDITIONAL for every run THAT REACHES THE AGENT LOOP: a clean run
-    writes {"truncated_by": null}."""
+    """The sidecar write is unconditional once a run reaches the agent loop: a clean run writes
+    `truncated_by: null`."""
     deps, run_dir = _deps(tmp_path)
     _run, end, _reason = S.drive(deps, S.clean_model())
     assert end.truncated_by is None, "the clean model did not produce a clean run"
@@ -303,8 +299,8 @@ def test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_report(tmp_p
 
 
 def test_one_world_is_cut_short_while_a_sibling_archive_is_refused(tmp_path):
-    """World b archives and grades per its own exit class independently of world c's refusal: the
-    archive's refuse-and-report is per-world and per-entry (flagged fact F6), not per-episode."""
+    """The archive refuses per world, not per episode: world c's planted link does not cost
+    world b its record."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b", "c"))
     # Archive order is by opaque UUID: arrange the clean world before the refused one.
     first, second = sorted(T.world_id(ep, label) for label in ("b", "c"))
@@ -325,8 +321,8 @@ def test_one_world_is_cut_short_while_a_sibling_archive_is_refused(tmp_path):
 
 def test_a_run_dir_emptied_or_corrupted_by_the_box_at_run_end_still_grades_a_genuinely_cut_short_world_correctly(
         tmp_path):
-    """A run dir the box emptied or corrupted at run end still grades a genuinely cut-short world
-    correctly: the exit class was captured host-side, beside the run dir, not inside it."""
+    """The exit class is captured host-side, beside the run dir, so emptying the run dir cannot
+    lose it."""
     import shutil
 
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
@@ -344,8 +340,8 @@ def test_a_run_dir_emptied_or_corrupted_by_the_box_at_run_end_still_grades_a_gen
 
 def test_a_path_traversal_style_value_written_by_the_box_anywhere_in_the_run_dir_cannot_make_any_host_side_write_for_this_feature_land_outside_the_run_dirs_own_bind(
         tmp_path):
-    """No host-side path for this feature is derived from box-writable content — every path is
-    host-held — so a traversal-shaped value planted in the run dir moves no write."""
+    """Every host-side path here is host-held, so a traversal-shaped value planted in the run
+    dir moves no write."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="aborted")
     escape = "../../../../tmp/defender-1047-escape.json"

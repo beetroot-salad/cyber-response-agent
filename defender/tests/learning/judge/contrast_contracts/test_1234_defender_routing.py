@@ -16,8 +16,8 @@ MEASURED = S.COINED["row.measured"]
 CITATIONS = S.RULED["row.citations"]
 
 
-#: The family words and the per-world reply word the change retires (`_vocab.JUDGE_OUTCOME_ENUM`
-#: and `run._REPLY_OUTCOME_ENUM` at 463833df; design C2, C3, C3b), and the names that carried them.
+#: The retired family words and per-world reply word (`JUDGE_OUTCOME_ENUM`,
+#: `_REPLY_OUTCOME_ENUM`), and the names that carried them.
 OUTCOME_WORDS = frozenset({"caught", "corpus-contradiction", "discard", "survived",
                            "undecidable", "gradable"})
 RETIRED_NAMES = frozenset({*S.RETIRED_RECORD_FIELDS, *S.RETIRED_ENUMS,
@@ -47,8 +47,7 @@ def _queues_text(state: Any = None) -> str:
 
 
 def _user_mentions(where: Any, finding_id: str, claim: str) -> bool:
-    """Does judge.yaml's user section carry this finding (its id or its claim)? Which list it
-    sits in is F2's; that it is there is the demand (`S.in_user_record`)."""
+    """Does judge.yaml's user section carry this finding, by id or claim (`S.in_user_record`)?"""
     return S.in_user_record(where, finding_id, claim)
 
 
@@ -61,7 +60,7 @@ def _calls(label: str, *extra: S.CallRow) -> list[S.CallRow]:
 
 
 def _served(built: S.Built, label: str, call: int) -> str:
-    """A1's served pointer at world `label`'s `call`-th own call's ledger row."""
+    """A served pointer at world `label`'s `call`-th own call's ledger row."""
     return built.served(label, built.served_row(label, call))
 
 
@@ -278,8 +277,7 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
     for name in ("j3-pair", "j3-world"):
         assert S.lane_of(built, fid[name]) == S.LANES["user_record"], name
         assert _user_mentions(built, fid[name], m[name]), name
-    # #1255 G4/G6 (flipped from "each own denial row carries the id of its `refused` ledger
-    # row"): the table carries no id; the join is the host's, observed where the judge reads it.
+    # The table carries no id; the join is the host's, observed where the judge reads it.
     key = S.COINED["ctx.contrast"]
     for label, rows in tables.items():
         own_denials = [i for i, r in enumerate(rows)

@@ -19,15 +19,15 @@ LABELS = (CTL, FOCUS, SIB)
 
 CUT_RE = re.compile(S.COINED["re.cut"], re.IGNORECASE)
 CAP_REASON_RE = re.compile(S.COINED["re.cap_reason"], re.IGNORECASE)
-#: d00a's one reason slot on a gradable world's row: a world refused at prompt build (A9) or
-#: never answered well-formed (L15) is not measured, and says why there.
+#: A gradable world's one reason slot: a world refused at prompt build or never answered
+#: well-formed is not measured, and says why there.
 MEASURED = S.COINED["row.measured"]
 NOT_MEASURED_REASON = S.COINED["row.not_measured_reason"]
 
 #: A cap no prompt in this file approaches: the uncapped control.
 AMPLE = 100_000_000
-#: Fixed bulk (bytes) for the cap scenarios (d04c): each reference run's report, the judged
-#: world's own report, and pre-flight's reason (section 7).
+#: Fixed bulk (bytes) for the cap scenarios: each reference run's report, the judged world's
+#: own report, and pre-flight's reason (section 7).
 REF_BULK = 300_000
 FOCUS_BULK = 120_000
 NOISE_BULK = 200_000
@@ -48,8 +48,8 @@ class _Frame:
 
 @functools.lru_cache(maxsize=64)
 def _frames(text: str) -> tuple[_Frame, ...]:
-    """Every closed untrusted frame, in order (see the module docstring); cached, since the
-    label readers re-read one prompt once per frame."""
+    """Every closed untrusted frame (`<run-<salt>-untrusted>…</run-<salt>-untrusted>`), in
+    order; cached, since the label readers re-read one prompt once per frame."""
     out: list[_Frame] = []
     pos = 0
     while (m := _OPEN_TAG.search(text, pos)) is not None:
@@ -105,7 +105,7 @@ def _holding(text: str, payload: str) -> list[_Frame]:
 
 
 def _owner(text: str, frame: _Frame, labels: tuple[str, ...]) -> str | None:
-    """The run label the host text names last before `frame` opens (A10: labels outside)."""
+    """The run label the host text names last before `frame` opens (labels sit outside)."""
     best, best_at = None, -1
     for start, seg in _gaps(text):
         if start >= frame.open_at:
@@ -156,8 +156,8 @@ def _near(text: str, payload: str) -> str:
 
 
 def _refused_reason(where: Any, label: str) -> str:
-    """The reason a world refused at prompt build gives (A9): it is not measured, and d00a's
-    one reason slot says why."""
+    """The reason a world refused at prompt build gives: it is not measured, and its one reason
+    slot says why."""
     row = S.row(where, label)
     assert row.get(MEASURED) is False, f"world {label} reads as measured: {row}"
     return str(row.get(NOT_MEASURED_REASON) or "")
@@ -295,8 +295,8 @@ def _rewrite_manifest(ep: Path, edit: Callable[[dict], None]) -> None:
 
 def _load_refusal(ep: Path) -> BaseException | None:
     """`load_family` over the episode's manifest: the `FamilyError` it raised, or `None`. The
-    expected id is the episode's own folder name (#1187 R5: a required keyword; review-4 F36),
-    so a refusal here is the manifest's, never a missing argument's."""
+    expected id is the episode's own folder name (a required keyword), so a refusal here is the
+    manifest's, never a missing argument's."""
     load = S.sym(S.FAMILY_LOADER, "load_family")
     with S.mod("_io").bind(ep) as bound:
         return _raised(S.sym(S.FAMILY_LOADER, "FamilyError"),
@@ -751,8 +751,7 @@ def test_1234_hostile_run_text_reaches_the_wire_log_and_page_unframed(tmp_path):
 
 
 def _titled(title: str, body: str) -> Any:
-    """`titled_section(title, body)`, threading the message salt when its revised seam takes
-    one (the `_frames680._with_salt` idiom)."""
+    """`titled_section(title, body)` with a fixed message salt and the `untrusted` tag."""
     _prompt = S.mod(S.PROMPT)  # the shared stage contract, `defender.learning._prompt`
     fn = _prompt.titled_section
     params = inspect.signature(fn).parameters

@@ -45,16 +45,15 @@ def q(system: str, verb: str, params: Mapping[str, Any]) -> Any:
 
 def reject_turn() -> Any:
     """A call the query tool rejects before any system is reached (an unknown verb): an exit-64
-    table row, no ledger row (JP-02 "TABLE-ONLY rows")."""
+    table row, no ledger row."""
     return q("idp", "no_such_verb", {})
 
 
 class _Between:
-    """One gather-model turn preceded by a host-side action fired when the model ASKS for it —
-    after the previous call's two records were written (ledger before table, JP-01), before this
-    call is made. `make` builds the turn lazily (a reducer turn needs the run's own payload
-    path). The action only injects: a fault planted, or the estate recovering (AP-01a,
-    JP-02 `s_lw_realerror`). It decides nothing."""
+    """One gather-model turn preceded by a host-side action fired when the model asks for it:
+    after the previous call's two records were written (ledger before table), before this call
+    is made. `make` builds the turn lazily (a reducer turn needs the run's own payload path).
+    The action only injects (a fault planted, or the estate recovering); it decides nothing."""
 
     def __init__(self, turn: Any = None, *, before: Callable[[], Any] | None = None,
                  make: Callable[[], Any] | None = None) -> None:
@@ -72,7 +71,7 @@ class _Between:
 
 def _arms(label: str) -> list[tuple[Path, str]]:
     """`(episode folder, arm id)` for `label` in every episode under the tenant's episodes
-    folder that has a roster naming it (#1187: the arm is at the roster's id)."""
+    folder that has a roster naming it (the arm folder is the roster's id)."""
     out = []
     for ep in sorted(S.episodes_root().iterdir()) if S.episodes_root().is_dir() else []:
         arm = S.T.read_roster(ep).get(S.T.world_id(ep, label))
@@ -88,14 +87,14 @@ def _run_dir(label: str) -> Path:
 
 def reducer_make(label: str = "b") -> Callable[[], Any]:
     """A failing terminal reduce (`cat <payload> | defender-sql …`) over the newest payload this
-    run wrote: the real `_record_shim_failure` appends a `∅.bash-shim` row (observed in a
-    sibling by this writer's smoke: exit 69 `EXIT_NO_RUNTIME`, recorded infra; where duckdb is
-    installed, the missing table fails the reduce the same way)."""
+    run wrote, so the real `_record_shim_failure` appends a `∅.bash-shim` row (exit 69
+    `EXIT_NO_RUNTIME` without duckdb; with it, the missing table fails the reduce the same
+    way)."""
     def make() -> Any:
         run_dir = _run_dir(label)
         raw = run_dir / "gather_raw" / "l-001"
         payload = max(raw.glob("*.json"), key=lambda p: int(p.stem))
-        # #1255 P1 (slice B): the gather model names the payload by its model path,
+        # The gather model names the payload by its model path,
         # `/runs/current/gather_raw/l-001/<n>.json`, never the arm's host run folder.
         return S.S24.replay_harness().Turn(tool_calls=[("bash", {
             "command": f"cat {model_path(payload, run_dir=run_dir)} | defender-sql "
@@ -128,13 +127,13 @@ def altering(*markers: str, name: str = "oracle-b") -> Any:
 
 
 def j3(src: Path) -> None:
-    """J3's inherited `∅.denied` row in the source (one pre-branch sentinel)."""
+    """One inherited pre-branch `∅.denied` sentinel in the source."""
     S.capture_sentinel(src)
 
 
 def j3_and_lead_zero(src: Path) -> None:
-    """J3's row plus a lead-zero row (`l-000`, lead zero's own system `elastic`) in the source;
-    the real seed copies both into every sibling (this writer's smoke: `l-000` is held)."""
+    """`j3`'s row plus a lead-zero row (`l-000`, on lead zero's own system `elastic`) in the
+    source; the real seed copies both into every sibling."""
     S.capture_sentinel(src)
     S.capture_sentinel(src, lead="l-000", seq=0, system="elastic", verb="query",
                        query_id="elastic.query", exit_code=0,
@@ -148,8 +147,8 @@ def estate(tmp_path: Path, withheld: Iterable[tuple[str, str]] = (("edr", "looku
 def launch(tmp_path: Path, est: Any = None, *,
            after_source: Callable[[Path], None] | None = j3, calls: Any = None,
            **worlds: Any) -> Any:
-    """`S.real_family` over `est` (default: edr lookup withheld) with per-world scripts and
-    J3's sentinel in the source unless told otherwise (`after_source=None`: none)."""
+    """`S.real_family` over `est` (default: edr lookup withheld) with per-world scripts and the
+    `j3` sentinel in the source unless told otherwise (`after_source=None`: none)."""
     return S.real_family(tmp_path, dict(worlds),
                          estate=est if est is not None else estate(tmp_path),
                          after_source=after_source, calls=calls)
@@ -524,8 +523,8 @@ def test_1234_outage_rows_and_the_user_record(tmp_path: Path) -> None:
 
 
 def _cut_short_family(tmp_path: Path, variant: str) -> tuple[Any, str, str]:
-    """One of s_AN01's three failed writes: b's served ledger, b's query table, or the
-    control's served ledger. Returns the family, the run whose write failed and its record."""
+    """One of three failed writes: b's served ledger, b's query table, or the control's served
+    ledger. Returns the family, the run whose write failed and its record."""
     est = estate(tmp_path)
     est.answer("idp", "query", CAROL, S.BASE_ANSWER)
     if variant == "ledger":
@@ -703,7 +702,7 @@ def test_1234_two_leads_calls_at_once_leave_intact_distinct_ledger_and_table_row
     assert all(ledger_ids), "five calls, five ids"
     assert len(set(ledger_ids)) == 5, "five calls, five ids"
     assert len(table) == 5, "a table row per call"
-    # #1255 G4/G6: the table carries no id; the exact join is the host's, read by the judge.
+    # The table carries no id; the exact join is the host's, read by the judge.
     rows = built.table_rows("b")
     b = _contrast(S.render_context(built, "b"), "b")
     assert list(_field(b, "contrast.unserved")) == [], (

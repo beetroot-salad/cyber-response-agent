@@ -121,7 +121,7 @@ def _text_outside(pg: E.Page, *, skip_ids: tuple[str, ...] = ("sec-stages",),
                   skip_classes: tuple[str, ...] = ()) -> str:
     """The page's rendered text with the named sections and element classes left out, so a
     record field the page also echoes elsewhere (the wire-log view in `sec-stages`, a finding
-    row, a world's call list) cannot stand in for the section a demand names."""
+    row, a world's call list) cannot stand in for the section under test."""
     parts: list[str] = []
     skipped = set(skip_classes)
 
@@ -428,7 +428,7 @@ def test_1234_user_record_across_a_rerun_keeps_earlier_named_gaps_once(tmp_path:
 
 def _six_findings(built: S.Built, draw: int, *, drops: bool) -> dict:
     """One draw filing three investigator findings, two world findings and one gap (indices
-    0-5 in A13's one index space). With `drops`, investigator finding 1 cites only missing
+    0-5 in the one index space). With `drops`, investigator finding 1 cites only missing
     files (unresolved) and world finding 3 cites only c's report (names only another run);
     without, both resolve as b's. Each finding's claim (or the gap's `what`) is its marker."""
     m = lambda i: S.marker("b", f"d{draw}-i{i}")  # noqa: E731 — one spelling per finding

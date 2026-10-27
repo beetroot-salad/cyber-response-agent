@@ -1,4 +1,4 @@
-"""#1047 O2 — the ticket lane decides per exit class, from a source the box cannot write."""
+"""#1047 — the ticket lane decides per exit class, from a source the box cannot write."""
 from __future__ import annotations
 
 import json
@@ -44,8 +44,7 @@ def test_a_request_limit_run_records_unresolved(tmp_path):
 
 
 def test_a_budget_kill_leaves_its_ticket_open_and_makes_no_call(tmp_path):
-    """A run killed by the budget leaves its ticket open and makes no call at all — the missing
-    report IS the escalation, and that stays true once the lane keys on the exit class."""
+    """The missing report is itself the escalation, so the budget arm makes no call."""
     for report in (False, True):
         run_dir = S.closed_run_dir(tmp_path / f"report-{report}", report=report)
         fake = S.record_ticket(run_dir, truncated_by="budget")
@@ -55,8 +54,6 @@ def test_a_budget_kill_leaves_its_ticket_open_and_makes_no_call(tmp_path):
 
 
 def test_a_run_that_was_not_cut_short_still_records_off_its_report(tmp_path):
-    """A run with no exit class recorded records its ticket from the report — the ordinary
-    completed run is untouched by this change."""
     run_dir = S.closed_run_dir(tmp_path, disposition="malicious")
     fake = S.record_ticket(run_dir, truncated_by=None)
     assert fake.transitions == []
@@ -100,7 +97,7 @@ def test_a_run_with_no_exit_class_and_no_usable_report_records_that_and_proposes
         assert (S.receipt(run_dir) or {}).get("ok") is True
 
 
-# F-A — the exit class and a genuine model verdict, together
+# the exit class and a genuine model verdict, together
 
 
 def test_a_ticket_for_a_run_that_closed_and_was_then_cut_short(tmp_path):
@@ -147,7 +144,7 @@ def test_a_forced_close_set_exit_whose_own_forced_close_failed_leaves_the_ticket
 
 def test_a_failed_note_call_never_breaks_the_run_and_is_recorded_in_the_receipt(tmp_path):
     """A note call that fails is swallowed — the run never breaks over it — and the outcome is
-    written into `ticket_write.json` either way (fork F-L, auto, §7 round 2)."""
+    written into `ticket_write.json` either way."""
     ok_dir = S.closed_run_dir(tmp_path / "ok", report=False)
     S.record_ticket(ok_dir, truncated_by="aborted")
     ok = S.receipt(ok_dir)
@@ -222,7 +219,7 @@ def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_
     for exit_class, expect in (("request-limit", "records"), ("aborted", "notes")):
         run_dir = S.closed_run_dir(tmp_path / exit_class, disposition="unresolved",
                                    report=expect == "records")
-        # #1107 moved the receipt beside the run dir; forged at its name there.
+        # The receipt sits beside the run dir; forge it at its name there.
         S.receipt_path(run_dir).write_text(
             json.dumps({"key": run_dir.name, "status": "closed", "ok": True,
                         "url": "http://tickets.test/tickets/forged"}), encoding="utf-8")
@@ -232,7 +229,7 @@ def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_
             "the real call")
 
 
-# #767 O1 — the host never transitions; the store's `closed` is a person's word
+# the host never transitions; the store's `closed` is a person's word (#767)
 
 
 def test_no_exit_class_transitions_the_ticket(tmp_path):

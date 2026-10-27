@@ -1,4 +1,4 @@
-"""#922 — O3: the cross-cutting invariants keep a witness the guard can still see."""
+"""#922 — the cross-cutting invariants keep a witness the guard can still see."""
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
@@ -134,20 +134,15 @@ def test_922_the_registrys_deny_all_roles_really_grant_nothing():
             "holds no run scope at all, so a lane here is a lane nothing can bound")
         assert not defn.verb_grant.entries, (
             f"{role.name}'s definition carries verb-grant entries with no verb-bearing bit")
-    # The positive control: the iterator DOES report lanes when a role holds them, so the empty
-    # tuples above are a fact about the swept deny-all roles and not about a broken iterator.
+    # Positive control: the iterator does report a role's lanes, so the empty tuples above are
+    # not a broken iterator.
     assert tuple(effective_tools_for(AGENTS[AgentRole.MAIN])), (
         "positive control: ToolSet.__iter__ reports nothing even for MAIN")
 
 
 def lead_author_deps(tmp_path: Path):
-    """LEAD_AUTHOR bound over a synthetic worktree, with one extra declared root.
-
-    LEAD_AUTHOR is the witness the cutover leaves standing: it is a LEARNING-side role (so the
-    property stays observed where the old stages observed it), it holds the `read` lane, and it
-    survives the cut. The old judge's benign leg — `_frames680._judge_deps`, today's witness for
-    this property — does not.
-    """
+    """LEAD_AUTHOR bound over a synthetic worktree, with one extra declared root: the witness for
+    the read-lane properties, as a learning-side role that holds the `read` lane."""
     run_dir = tmp_path / "learning-run"
     defender_dir = tmp_path / "tree" / "defender"
     declared = tmp_path / "declared"

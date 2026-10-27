@@ -1,4 +1,4 @@
-"""Shared machinery for #921's family-judge spec — NO test scripts."""
+"""Shared fixtures and fakes for the family-judge tests (#921); no tests here."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
@@ -44,55 +44,43 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
     write_family,
 )
 
-#: The canonical identity of one question — `_query_rules._request_key`'s function, which the
-#: ledger, the episode's pair key and the review's own drift list all mint through. Re-exported
-#: so a fixture that has to plant a recorded key mints it the way the recorder does rather than
-#: hand-writing a `json.dumps` that matches only by luck of dict order.
 from defender.tests.support.storage._alert_plant import plant_alert, plant_source_copy  # noqa: E402
+#: `request_key` (one question's canonical identity) is re-exported so a fixture planting a
+#: recorded key mints it as the recorder does, not by a `json.dumps` that matches by dict-order luck.
 from defender.learning.branch.ledger import request_key  # noqa: E402
 from defender import _yaml
 
 #: The system the fixtures' worlds query and the default reply blames. One of
-#: `_triplet_947.SERVED_SYSTEMS`, so the host's `lead-set` rule (M20) admits a reply naming it.
+#: `_triplet_947.SERVED_SYSTEMS`, so the host's `lead-set` rule admits a reply naming it.
 HOLDING_SYSTEM = "elastic"
 
-#: The alert every trial of this family investigates. The sibling union is keyed on it, and it
-#: is model-writable by construction (run1/G9), which is why the union's own demands drive it
-#: as data rather than trusting it.
+#: The alert every trial of this family investigates.
 ALERT_ID = "v2-cross-tier-ssh-pivot"
-#: The alert every judge fixture investigates, as bytes: the episode's launch copy and the runs
-#: that are trials of it hold exactly these (#1222 — a trial is a run whose record's digest is
-#: the episode's).
+#: `ALERT_ID`'s alert as bytes: the episode's launch copy and its trial runs hold exactly these
+#: (#1222: a trial is a run whose record's digest is the episode's).
 ALERT_RAW = json.dumps({"alert_id": ALERT_ID, "rule": {"id": ALERT_ID}}).encode("utf-8")
 
-#: The learning loop's state root — the tree the shared findings queue lives under. Named here
-#: because every scenario in this suite has to point it inside its own `tmp_path`: the judge's
-#: appender writes to the ONE configured queue, so a suite that left this unset would append a
-#: hundred fixtures' rows into the developer's (and CI's) real `learning/_pending/`.
+#: The learning state root, under which the shared findings queue lives. Every scenario points
+#: it inside its own `tmp_path`: left unset, the judge's appender would write fixture rows into
+#: the real `learning/_pending/` queue.
 STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
-#: The judge's three operator knobs (J15). Spelled WITHOUT a `DEFENDER_` prefix, because
-#: run1/G23 executed the convention every new knob inherits: `QUESTIONER_EFFORT`, not
-#: `DEFENDER_QUESTIONER_EFFORT` — a judge knob spelled with one would be unsettable.
+#: The judge's operator knobs, spelled without a `DEFENDER_` prefix (like `QUESTIONER_EFFORT`).
 DRAWS_KNOB = "JUDGE_DRAWS"
 MODEL_KNOB = "JUDGE_MODEL"
 EFFORT_KNOB = "JUDGE_EFFORT"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
-#: #1234 A12: the host-written call id of one investigator call. A served-ledger row carries
-#: it; since #1255 (G4) the query-table row does not — the host-only call-join record
-#: (`CALL_JOIN`) names it for the row's `(lead_id, seq)`.
+#: The host-written id of one investigator call. A served-ledger row carries it; a query-table
+#: row does not: the host-only call-join record (`CALL_JOIN`) names it for the row's
+#: `(lead_id, seq)`.
 CALL_ID = "call_id"
 
-#: The facts a world's row carries off its own archived record (`family.read_world`), all
-#: from X's own ledger, investigation and report. Spelled once so a scenario naming one cannot
-#: drift. (#1224 retired the mechanical pass's `holding_queried` / `scope_discriminated` /
-#: `doctored_answer_served`: the judge MODEL now decides each world's bucket.)
+#: The facts a world's row carries off its own archived ledger, investigation and report
+#: (`family.read_world`). The judge model, not these facts, decides each world's bucket.
 PER_WORLD_FACTS = ("verdict", "resolution_moved", "malformed_rows", "served_nothing")
 
-#: The DEFENDER-lane row's own fifteen keys (`enqueue.build_finding_row`): twelve at #921,
-#: plus `subject` (#1007 O1/M6); #1234 removed `judge_outcome` (A4) and added
-#: `contrast_evidence`, `on_verdict_path` and `world_label_doubted` (design M4, d00d).
+#: The DEFENDER-lane row's fifteen keys (`enqueue.build_finding_row`).
 ROW_KEYS = (
     "schema_version", "finding_id", "run_id", "alert_rule_key", "direction", "subject", "type",
     "subject_anchor", "subject_topic", "finding", "citations", "source_run_dir",
@@ -101,7 +89,7 @@ ROW_KEYS = (
 
 
 # --------------------------------------------------------------------------------------
-# The ledger — the amendment's mechanism, as rows on disk.
+# The served ledger, as rows on disk.
 # --------------------------------------------------------------------------------------
 
 
@@ -110,11 +98,10 @@ def ledger_row(*, source: str, system: str = HOLDING_SYSTEM, verb: str = "esql",
                asked_params: dict | None = None, payload: str = '{"hits": []}') -> dict:
     """One `ServedCall.row()`-shaped ledger row.
 
-    `world_label=None` spells the FAMILY tier (`world_id: null`), which `record` pairs with
-    `base`/`captured` and refuses for any applier decision. The composed token is what a world
-    row carries — never the short archive label (G5) — so a reader that opens
-    `served/<label>.jsonl` finds nothing, which is the coverage finding this shape exists to
-    make reachable.
+    `world_label=None` spells the family tier (`world_id: null`), which `record` pairs with
+    `base`/`captured` and refuses for any applier decision. A world row carries the composed
+    world token, never the short archive label, so a reader opening `served/<label>.jsonl`
+    finds nothing.
     """
     row: dict[str, Any] = {
         "system": system, "verb": verb,
@@ -129,7 +116,7 @@ def ledger_row(*, source: str, system: str = HOLDING_SYSTEM, verb: str = "esql",
 
 
 def oracle_row(world_label: str = "b", *, scope_ok: bool = True) -> dict:
-    """An `oracle` row: world `world_label`'s live oracle answered this call (#1224).
+    """An `oracle` row: world `world_label`'s live oracle answered this call.
 
     `scope_ok=False` drops the window and scope key from the asked params, the shape of a query
     that did not discriminate.
@@ -139,8 +126,7 @@ def oracle_row(world_label: str = "b", *, scope_ok: bool = True) -> dict:
     return ledger_row(source="oracle", world_label=world_label, params=params)
 
 
-#: The pre-#1224 name, kept for its importers: the `staged` decision it spelled is retired with
-#: cluster staging, and a world's own answer is now the oracle's.
+#: Old name kept for its importers: a world's own answer is the oracle's (no `staged` source).
 staged_row = oracle_row
 
 
@@ -161,14 +147,11 @@ def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
     return path
 
 
-#: #1255 G4/G6 (design rev 4, "Query ids"): an archived world's host-only CALL-JOIN record.
-#: The model-readable query table carries no call id; the join between a table row and the
-#: served-ledger rows that answered it is a record keyed by the row's `(lead_id, seq)` holding
-#: the call id. A live run keeps it beside its run folder, outside the box's mount
-#: (`<run_id>.call-join.jsonl`); the archive copies it into `worlds/<X>/` under this name, and
-#: the judge reads its own-versus-inherited test and the ledger join from it. The reference
-#: shape's spelling, named ONCE here for every hand-built archive (`_spec1234.family`,
-#: `_spec1224.write_call_table`, and the suites that merge rows into an archived world).
+#: An archived world's host-only call-join record (#1255). The model-readable query table
+#: carries no call id; this record, keyed by a table row's `(lead_id, seq)`, holds it, and the
+#: judge reads the own-versus-inherited test and the ledger join from it. A live run keeps it
+#: beside its run folder, outside the box's mount (`<run_id>.call-join.jsonl`); the archive
+#: copies it into `worlds/<X>/` under this name, spelled once for every hand-built archive.
 CALL_JOIN = "call_join.jsonl"
 
 
@@ -180,11 +163,9 @@ def call_join_entry(lead_id: str, seq: int, call_id: Any) -> dict:
 
 def write_call_join(world_dir: Path, entries: Iterable[Mapping[str, Any]], *,
                     append: bool = False) -> Path:
-    """Land world `world_dir`'s call-join record (`CALL_JOIN`): one line per OWN row of the
-    run's query table that carries an id — never one for a row seeded from the source (an
-    inherited row is one the join does not name). The file is written even when no entry is
-    given (a run with no call of its own). `append=True` adds to an existing record, for a
-    scenario that merges rows into an archived world."""
+    """Land world `world_dir`'s call-join record (`CALL_JOIN`): one line per own query-table
+    row that carries an id, none for a row inherited from the source. The file is written even
+    with no entry (a run with no call of its own); `append=True` adds to an existing record."""
     from defender._io import append_jsonl
 
     path = Path(world_dir) / CALL_JOIN
@@ -211,13 +192,9 @@ def read_call_join(world_dir: Path) -> list[dict]:
 def review_record(episode_dir: Path, *, outcome: str = "accepted",
                   decision: str = "accepted", reason: str | None = None,
                   worlds: dict | None = None) -> Path:
-    """A PRE-ORACLE `review.yaml` — the record the retired replay review left (one
-    `episode.outcome` key holding `Step.VERIFY`'s word, `decision` beside it).
-
-    No reader grades off it any more (#1224 moved the episode outcome to pre-flight's
-    `outcome.yaml`, `outcome_record`); it is planted to pin that an old archive's review
-    record is NOT read as an outcome.
-    """
+    """A pre-oracle `review.yaml` (the retired replay review's record), planted to pin that an
+    old archive's review record is not read as an outcome; that is pre-flight's `outcome.yaml`
+    (`outcome_record`)."""
 
     ep = Path(episode_dir)
     doc = {
@@ -237,11 +214,9 @@ def review_record(episode_dir: Path, *, outcome: str = "accepted",
 
 def comparable_family_stamp(episode_dir: Path, *, commit: str = "deadbee") -> Path | None:
     """The episode-root family stamp (`provenance.json`) `verify_family` writes when every
-    sibling agreed — the shape `cli._write_family_stamp` leaves, read back through
-    `archive.read_family_stamp`. A stamp already present is kept (a scenario that wrote its
-    own stamp means that one). PR #1232 round 7: the judge grades, and the episode readers
-    compare, only a family carrying this stamp, so every builder of a COMPARABLE accepted
-    family plants it; a scenario modelling a non-comparable family passes `family_stamp=False`.
+    sibling agreed, read back through `archive.read_family_stamp`; a stamp already present is
+    kept. The judge grades, and the episode readers compare, only a stamped family, so every
+    builder of a comparable accepted family plants it (`family_stamp=False` opts out).
     """
     from defender.records._episode_handle import Episode
     from defender.records._episode_paths import LAYOUT
@@ -263,16 +238,14 @@ def comparable_family_stamp(episode_dir: Path, *, commit: str = "deadbee") -> Pa
 
 def outcome_record(episode_dir: Path, outcome: str = "accepted", *, reason: str = "",
                    unservable: list[dict] | None = None, family_stamp: bool = True) -> Path:
-    """Pre-flight's `outcome.yaml` (#1224) — the record the judge's gate reads — written
-    through the production writer (`learning/branch/outcome.py::write_outcome`).
+    """Pre-flight's `outcome.yaml`, the record the judge's gate reads, written through the
+    production writer (`learning/branch/outcome.py::write_outcome`).
 
     A word that writer refuses (a retired one such as `incomplete`, or a misspelling) is
-    written raw, because the gate's own handling of it is what such a scenario is about. A
-    record already present is replaced: the exclusive create belongs to pre-flight, and a
-    fixture restating the outcome is not a second pre-flight.
-
-    An `accepted` record also gets `verify_family`'s family stamp (`comparable_family_stamp`)
-    unless `family_stamp=False`: an accepted, comparable family is what this builder means.
+    written raw: the gate's handling of it is what such a scenario tests. A record already
+    present is replaced (a fixture restating the outcome is not a second pre-flight). An
+    `accepted` record also gets the family stamp (`comparable_family_stamp`) unless
+    `family_stamp=False`.
     """
     from defender.records._episode_handle import Episode
     from defender.learning.branch.outcome import OUTCOMES, write_outcome
@@ -298,11 +271,10 @@ def archived_judge_world(  # noqa: PLR0913 — one builder with one independentl
     gather_summaries: bool = True, commit: str | None = "deadbee",
     dirty: bool | None = False,
 ) -> Path:
-    """One `worlds/<X>/` carrying the four #947 artifacts PLUS D7's three new inputs.
-
-    `gather_summaries/`, `lessons_loaded.jsonl` and `alert.json` are what M7 adds and what the
-    render reads instead of the sibling's run dir, which #947's D3 says may be gone. Each is
-    independently suppressible, because J5's tier rule turns on exactly which input is absent.
+    """One `worlds/<X>/` with the four #947 artifacts plus `gather_summaries/`,
+    `lessons_loaded.jsonl` and `alert.json`, which the render reads instead of the sibling's
+    run dir (that may be gone). Each input is independently suppressible because the
+    ungradable-tier rule turns on exactly which one is absent.
     """
     world = archived_world(Path(episode_dir), world_id, disposition=disposition,
                            commit=commit, dirty=dirty)
@@ -376,8 +348,8 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
         elif label != "a":
             write_ledger(ep, label, [])
         if label in planted:
-            # #1234 A3: a planted world's built layer (`oracle/<X>/`) is part of what it is
-            # judged on — no directory is a malformed world; an empty one is an empty store.
+            # A planted world is judged on its built layer (`oracle/<X>/`) too: no directory
+            # is a malformed world; an empty one is an empty store.
             (ep / "oracle" / world_id(ep, label)).mkdir(parents=True, exist_ok=True)
     outcome_record(ep, outcome, family_stamp=family_stamp)
     from defender.tests.support.learning.branch import _triplet_947
@@ -397,11 +369,10 @@ def scripted_judge(**kw: Any) -> FakeJudge:
 
 
 def judge_runs(tenant_id: str | None = None, *, data_root: Path | None = None) -> Any:
-    """The runs repository the judge is handed (#1105 PR 2: `grade_episode(runs, episode_id)`):
-    an accepted tenant — `tenant_id` under `data_root` (default: this test's
-    `DEFENDER_DATA_ROOT`), or that root's one tenant (`_triplet_947.current_tenant`). The judge
-    reads only the episode, never the tenant's runs (J3); #1187 (O8/O9) opens that episode at
-    `<data root>/<T>/episodes/<id>`, under the tenant the repository holds."""
+    """The runs repository `grade_episode(runs, episode_id)` is handed: tenant `tenant_id`
+    under `data_root` (default: this test's `DEFENDER_DATA_ROOT`), or that root's one tenant
+    (`_triplet_947.current_tenant`). The judge reads only the episode, at
+    `<data root>/<T>/episodes/<id>`, never the tenant's runs."""
     if tenant_id is None:
         return current_tenant().runs_repository()
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
@@ -412,12 +383,10 @@ def judge_runs(tenant_id: str | None = None, *, data_root: Path | None = None) -
 
 def episode_location(episode_dir: Path) -> tuple[Path, str]:
     """`(data root, tenant id)` of the tenant whose `<data root>/<T>/episodes/` holds
-    `episode_dir` (#1187 Layout A: an episode is reached by id only under its tenant, so where it
-    sits names its tenant). The data root is the folder above the tenant's — this test's
-    `DEFENDER_DATA_ROOT`, or a data root a scene set up of its own (several same-id episodes in
-    one test each need one). A folder anywhere else, or under a folder holding no tenant row, is
-    a fixture bug (no door can reach it by id), raised here rather than met as a confusing
-    "absent" refusal further in."""
+    `episode_dir`: an episode is reached by id only under its tenant. The data root is this
+    test's `DEFENDER_DATA_ROOT` or one a scene set up of its own (several same-id episodes in one
+    test each need one). An episode anywhere else is a fixture bug, raised here rather than met
+    as a confusing "absent" refusal further in."""
     episode_dir = Path(episode_dir).absolute()
     container = episode_dir.parent
     tenant_dir = container.parent
@@ -441,25 +410,23 @@ def episode_runs_for(episode_dir: Path) -> Any:
 
 
 def through_view(episode_dir: Path, reader: Any, *args: Any, **kw: Any) -> Any:
-    """`reader(view, *args, **kw)` over the episode's WALKED view — `runs.episode(<id>)` of the
-    tenant whose `<T>/episodes/` holds `episode_dir` (`episode_runs_for`) — the view closed
-    after. Review-3 F32 ruling (#1187 S-iso, recheck S2): the episode's readers
-    (`episode.delta_o(view, *, invoke=)`, `episode.verdicts(view)`) take the walked view and no
-    `Path`; a bare path carries no tenant, so it cannot go through the tenant's walk."""
+    """`reader(view, *args, **kw)` over the episode's walked view (`walked_view`), closed
+    after. The episode's readers (`episode.delta_o`, `episode.verdicts`) take that view, not a
+    `Path`: a bare path carries no tenant to walk."""
     with walked_view(episode_dir) as view:
         return reader(view, *args, **kw)
 
 
 def walked_view(episode_dir: Path) -> Any:
-    """The episode's WALKED view (`runs.episode(<id>)` of the tenant whose `<T>/episodes/`
-    holds `episode_dir`), to use as a context manager — for a door that takes the view's held
-    episode (`cli.preflight_replay(view.episode, ...)`, review-3 F32 ruling)."""
+    """The episode's walked view (`runs.episode(<id>)` of the tenant holding `episode_dir`), as
+    a context manager, for a door that takes the view's held episode
+    (`cli.preflight_replay(view.episode, ...)`)."""
     episode_dir = Path(episode_dir)
     return episode_runs_for(episode_dir).episode(episode_dir.name)
 
 
 def render_at(episode_dir: Path, label: str, **kw: Any) -> Any:
-    """Call the real judge renderer through its repository's walked bound reader (#1187)."""
+    """Call the real judge renderer through its repository's walked bound reader."""
     episode_dir = Path(episode_dir)
     with episode_runs_for(episode_dir).episode_files(episode_dir.name) as episode:
         return mod("learning.judge.render").render(
@@ -467,7 +434,7 @@ def render_at(episode_dir: Path, label: str, **kw: Any) -> Any:
 
 
 def read_manifest_at(episode_dir: Path) -> dict:
-    """Read the manifest through its walked handle, held to that episode's id (#1187)."""
+    """Read the manifest through its walked handle, held to that episode's id."""
     episode_dir = Path(episode_dir)
     with episode_runs_for(episode_dir).episode_files(episode_dir.name) as episode:
         return mod("learning.judge.family").read_manifest(
@@ -475,29 +442,27 @@ def read_manifest_at(episode_dir: Path) -> dict:
 
 
 def read_grade_at(episode_dir: Path) -> Any:
-    """Read the real grade through its tenant repository's walked episode handle (#1187)."""
+    """Read the real grade through its tenant repository's walked episode handle."""
     episode_dir = Path(episode_dir)
     with episode_runs_for(episode_dir).episode_files(episode_dir.name) as episode:
         return mod("learning.judge").read_grade(episode)
 
 
 def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
-    """`learning.judge.grade_episode(runs, episode_dir.name, **kw)` — the judge's one entry
-    point, by id: `runs` (default: the repository of the tenant whose `<T>/episodes/` holds
-    `episode_dir`, `episode_runs_for`) and the episode `episode_dir` names. Every keyword passes
-    through unchanged; nothing is defaulted, and no environment is set (#1187 O9)."""
+    """`learning.judge.grade_episode(runs, episode_dir.name, **kw)`, the judge's one entry
+    point. `runs` defaults to the repository of the tenant holding `episode_dir`
+    (`episode_runs_for`). Every keyword passes through unchanged; nothing is defaulted, and no
+    environment is set."""
     episode_dir = Path(episode_dir)
     repository = episode_runs_for(episode_dir) if runs is None else runs
-    kw.pop("runs_base", None)  # The same-alert union retired in #1105 PR 2 (J3).
+    kw.pop("runs_base", None)  # Some callers still pass it; `grade_episode` takes none.
     return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
 
 
 def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any) -> Any:
-    """`learning.judge.grade_episode` over the episode at `episode_dir` (`grade_at`) — the one
-    grading entry point since #1224 retired the offline `grade_family`. `judge=None` is
-    `scripted_judge()`. With no state argument, this test helper injects an explicit scratch
-    handle when configured, otherwise the episode tenant's prepared learning state. This
-    does not exercise the launcher's production state selection."""
+    """`grade_at` with `judge=None` meaning `scripted_judge()`. With no `state`, it injects the
+    scratch state when `STATE_DIR_ENV` is set, otherwise the episode tenant's prepared learning
+    state; the launcher's production state selection is not exercised."""
     if state is None:
         from defender.tests.support.learning.core._state1135 import env_state
 
@@ -543,11 +508,9 @@ def word_of(grade: Any) -> str:
 
 
 def enqueued_rows(record: dict) -> list[dict]:
-    """The finding rows a grade appended, read back off the queue file the record NAMES.
-
-    The record carries `enqueued_to` because "the rows landed" is only observable if something
-    says where: the findings queue is a shared sink with several writers, and a test that
-    guessed its path would be asserting about a file the pass may never have opened.
+    """The finding rows a grade appended, read back off the queue file the record names
+    (`enqueued_to`): the queue is a shared sink, and a guessed path may be a file the pass never
+    opened.
     """
     path = Path(record["enqueued_to"])
     if not path.exists():
@@ -557,13 +520,8 @@ def enqueued_rows(record: dict) -> list[dict]:
 
 
 def draw_files(episode_dir: Path, world_label: str) -> list[Path]:
-    """`worlds/<X>/judge/<n>.yaml`, in numeric order.
-
-    NUMERIC, which is what `enqueue.draws_on_disk` means by "draw order" and is why it keys on
-    `int(path.stem)`. Sorted by the STEM this helper disagreed with the production reader the
-    moment a scenario asked for ten draws — `['0','1','10','11','2', ...]` — so an assertion
-    indexed off this list was paired with a different draw's document than the code under test
-    had read."""
+    """`worlds/<X>/judge/<n>.yaml`, in numeric order: `enqueue.draws_on_disk`'s draw order. A
+    text sort would put `10` before `2` and pair an indexed assertion with the wrong draw."""
     d = (Path(episode_dir) / "judge" if world_label == "family" else
          Path(episode_dir) / "worlds" / world_id(episode_dir, world_label) / "judge")
     if not d.is_dir():
@@ -579,10 +537,8 @@ def draw_doc(episode_dir: Path, world_label: str, draw: int) -> dict:
 
 
 def wire_logs(episode_dir: Path) -> list[Path]:
-    """Every per-call trace `run_stage` leaves under the episode's wire-log directory (G11).
-
-    The THIRD write sink, which the design's own security census names as two.
-    """
+    """Every per-call trace `run_stage` leaves under the episode's wire-log directory (a third
+    write sink, beside `judge.yaml` and the draw files)."""
     d = Path(episode_dir) / "wire_logs"
     return sorted(d.glob("*_trace.jsonl")) if d.is_dir() else []
 
@@ -592,15 +548,13 @@ def wire_logs(episode_dir: Path) -> list[Path]:
 # --------------------------------------------------------------------------------------
 
 
-#: #1234 A1: the default investigator finding's `contrast_evidence` — one report per default
-#: world of `accepted_episode` (`a`, `b`, `c`). Whichever planted world a scripted reply
-#: answers, the list holds a conduct pointer in that world and one in another usable run, the
-#: two-run pair the resolver requires (`pointers.Assessment.has_two_run_pair`); a pointer at a
-#: run outside the call's scope is merely unresolved, never the finding's drop.
+#: The default investigator finding's `contrast_evidence`: one report per default world of
+#: `accepted_episode` (`a`, `b`, `c`), so whichever world a scripted reply answers, the list
+#: holds the two-run pair the resolver requires (`pointers.Assessment.has_two_run_pair`). A
+#: pointer at a run outside the call's scope is merely unresolved, never the finding's drop.
 DEFAULT_CONTRAST = tuple(f"worlds/{fixture_world_id(label)}/report.md" for label in ("a", "b", "c"))
-#: #1234 A1/A15: the default world finding's `evidence` — the manifest's family-level
-#: discriminator, a plan pointer that names no run, so the finding routes to the questioner
-#: lane from any world's draw.
+#: The default world finding's `evidence`: the manifest's discriminator, a plan pointer naming
+#: no run, so the finding routes to the questioner lane from any world's draw.
 DEFAULT_WORLD_EVIDENCE = ("family.yaml#discriminator",)
 #: The routing key `reply_doc` splits a findings list on; never written into a reply.
 SUBJECT = "subject"
@@ -614,14 +568,13 @@ def finding_doc(*, bucket: str = "lead-set", subject: str = "defender",  # noqa:
                 discriminator_related: bool = True,
                 systems: list[str] | None = None,
                 on_verdict_path: bool = True) -> dict:
-    """One filed finding in the #1234 reply shape, tagged with its `subject` for `reply_doc`.
+    """One filed finding, tagged with its `subject` for `reply_doc`.
 
-    `subject: "defender"` (the default) is an INVESTIGATOR finding: `evidence` fills its
-    `contrast_evidence` (default `DEFAULT_CONTRAST`) and `on_verdict_path` its boolean.
-    `subject: "world"` is a WORLD finding: `evidence` (default `DEFAULT_WORLD_EVIDENCE`) and its
-    own `systems` (default `[HOLDING_SYSTEM]`). `anchor` and `topic` are what `subject_anchor` /
-    `subject_topic` fill from. `discriminator_related` is accepted for its callers and written
-    nowhere: the amended finding carries no such field."""
+    `subject: "defender"` (the default) is an investigator finding: `evidence` fills its
+    `contrast_evidence` (default `DEFAULT_CONTRAST`). `subject: "world"` is a world finding:
+    `evidence` (default `DEFAULT_WORLD_EVIDENCE`) and `systems` (default `[HOLDING_SYSTEM]`).
+    `anchor` and `topic` fill `subject_anchor` / `subject_topic`. `discriminator_related` is
+    accepted for its callers and written nowhere: the finding has no such field."""
     del discriminator_related
     doc: dict[str, Any] = {SUBJECT: subject, "bucket": bucket, "claim": claim,
                            "root_cause": root_cause, "anchor": anchor, "topic": topic}
@@ -659,16 +612,15 @@ def reply_doc(*, episode_outcome: str | None = None, findings: list[dict] | None
               passes: bool = True, noise_floor_note: str = "one trial, no replicate",
               bucket: str | None = "lead-set", systems: list[str] | None = None,
               gaps: list[dict] | None = None, **over: Any) -> dict:
-    """One world-scope reply in the #1234 shape: the world's `bucket` and `systems`, the three
-    filed lists (`investigator_findings`, `world_findings`, `gaps`) and the three pass tables
+    """One world-scope reply: the world's `bucket` and `systems`, the three filed lists
+    (`investigator_findings`, `world_findings`, `gaps`) and the three pass tables
     (`passes=False` drops them).
 
-    `findings` (default one `finding_doc()`) is split into the two finding lists by each
-    finding's `subject` (`_filed`). `bucket=None` omits both `bucket` and `systems`; the
-    default `systems` is the family's `HOLDING_SYSTEM`, which `_triplet_947.SERVED_SYSTEMS`
-    serves, so the host's `lead-set` rule (M20) admits the default reply. `episode_outcome`
-    is retired (A17) and written only when a scenario passes one — the reply is then refused
-    by that name. A family-scope reply is `family_reply`."""
+    `findings` (default one `finding_doc()`) is split into the two finding lists by `subject`
+    (`_filed`). `bucket=None` omits both `bucket` and `systems`; the default `systems`
+    (`HOLDING_SYSTEM`) is served, so the host's `lead-set` rule admits the default reply.
+    `episode_outcome` is a retired key, written only when passed, so the reply is refused by
+    that name. A family-scope reply is `family_reply`."""
     investigator, world = _filed(findings if findings is not None else [finding_doc()])
     doc: dict[str, Any] = {"noise_floor_note": noise_floor_note}
     if episode_outcome is not None:
@@ -688,10 +640,10 @@ def reply_doc(*, episode_outcome: str | None = None, findings: list[dict] | None
 def family_reply(*, verdict_word: str | None = None, findings: list[dict] | None = None,
                  passes: bool = True, noise_floor_note: str = "the family as a whole",
                  **over: Any) -> dict:
-    """One family-scope reply (#1234): family-scope `world_findings` only (none by default; a
+    """One family-scope reply: family-scope `world_findings` only (none by default; a
     `subject: defender` finding passed here is filed under `investigator_findings`, a world-only
-    key the validator refuses on a family reply). `verdict_word` is retired (A17) and written
-    only when a scenario passes one — the reply is then refused by that name."""
+    key the validator refuses on a family reply). `verdict_word` is a retired key, written only
+    when passed, so the reply is refused by that name."""
     investigator, world = _filed(findings if findings is not None else [])
     doc: dict[str, Any] = {"noise_floor_note": noise_floor_note, "world_findings": world}
     if investigator:
@@ -709,14 +661,10 @@ FAMILY_AGENT_PREFIX = "judge:family:"
 
 
 def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
-    """A `JudgeReply` document as the TEXT a model seam returns — BARE, the one shape the
-    parser accepts (#1018).
-
-    `malformed=` names a reply SHAPE, each spelling citing the claim that observed it:
-    `"not-a-mapping"` and `"lookalike-bucket"` (dispositions §1's consensus rows). The
-    `"fenced-with-prose"` spelling (C12) is retired: under #1018 that shape is a refusal, not a
-    reply to be recovered, and the tests that pin it build the text themselves
-    (`tests/shared/contracts/test_1018_reply_document.py`).
+    """A `JudgeReply` document as the bare text a model seam returns, the one shape the parser
+    accepts (#1018). `malformed=` names a broken shape: `"not-a-mapping"` or
+    `"lookalike-bucket"`. (A fenced reply is a refusal; tests pinning it build the text
+    themselves.)
     """
 
     if malformed == "not-a-mapping":
@@ -741,9 +689,8 @@ class FakeJudge:
     fault: Fault = CLEAN
     #: A default reply for scenarios whose subject is not the reply's content.
     default: str | None = None
-    #: #1224: the reply to the FAMILY-scope call (`judge:family:<n>`), which then never draws
-    #: on `replies`/`default`. `None` keeps the old routing: the family call takes the next
-    #: scripted reply like any other. Recorded in `prompts` like every call.
+    #: The reply to the family-scope call (`judge:family:<n>`), which then never draws on
+    #: `replies`/`default`; `None` routes the family call like any other.
     family_default: str | None = None
     prompts: list[str] = field(default_factory=list)
     agent_ids: list[str] = field(default_factory=list)
@@ -768,11 +715,9 @@ class FakeJudge:
 
     @staticmethod
     def _unprocessable(message: str, cause: str) -> BaseException:
-        """The one class both failure modes surface as (P9), with its `__cause__` attached.
-
-        The message prefix and the cause are the ONLY things that separate the two arms —
-        `did not complete: TimeoutError()` against `failed: TransportFault(…)` — which is the
-        whole of P9's finding and the reason a draw handler cannot branch on type.
+        """The one class both failure modes surface as, with `__cause__` attached: only the
+        message prefix and the cause tell a timeout from a transport fault, so a draw handler
+        cannot branch on type.
         """
         unprocessable = sym("learning.core.config", "RunUnprocessable")
         inner: BaseException = TimeoutError() if cause == "TimeoutError" else RuntimeError(cause)
@@ -803,8 +748,8 @@ class FakeSibling:
         self.dispositions = dict(dispositions or {})
         self.scrub_ran = scrub_ran
         self.commit = commit
-        # #1204: the knowledge revision each sibling's stamp carries — left out, the stamp
-        # builder's own default (the one the fixture source and live capture carry too).
+        # The knowledge revision each sibling's stamp carries; left out, the stamp builder's
+        # default.
         self.stamp_fields: dict[str, Any] = (
             {} if knowledge is _STAMP_DEFAULT else {"knowledge": knowledge})
         self.launches: list[dict[str, Any]] = []
@@ -854,13 +799,8 @@ class FakeSibling:
             json.dumps({"lesson_name": "L1", "loaded_at": "2026-07-28T17:00:00Z",
                         "path": "defender/lessons/L1.md"}) + "\n", encoding="utf-8")
         plant_alert(run_dir, ALERT_RAW)
-        # A real sibling that queried nothing still leaves its own (empty) served ledger behind
-        # — `Ledger` has exactly one writer per world file, and this is what a quiet world's own
-        # ledger looks like. Writing NOTHING here (as opposed to writing zero rows) is a
-        # different, ungradable state under J5's tier rule (absent input, not an empty one), so
-        # a scenario that wants THAT state names it by constructing its own `FakeSibling` with
-        # `ledgers={label: None}` is not representable — every launch this fake drives leaves a
-        # served ledger, empty or not, the same as a real completed sibling does.
+        # A real sibling that queried nothing still leaves an empty served ledger. An absent
+        # ledger is a different, ungradable state, which this fake never produces.
         write_ledger(ep, label, self.ledgers.get(label) or [])
         return self.exits.get(label, 0)
 
@@ -887,11 +827,8 @@ def _world_arg(argv: list[str]) -> str | None:
 class FakeGitShow:
     """`_git.git_show_file`, as the render's injected `git_show=` seam.
 
-    P1, EXECUTED: the real function RAISES NOTHING — a fabricated rev and a real-rev/absent-path
-    both return plain `None`, indistinguishable from each other and from a legitimately empty
-    lesson body. This fake returns `None` the same way and records every `(rev, path)` it was
-    asked for, so "the ref was resolved once per pass and threaded" is an observation rather
-    than an inspection.
+    Like the real function it raises nothing: a bad rev and an absent path both return `None`.
+    It records every `(rev, path)` asked, so a test observes which ref the pass threaded.
     """
 
     bodies: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -907,13 +844,9 @@ class FakeGitShow:
 
 
 def refusals() -> tuple[type[BaseException], ...]:
-    """Every class a refusal in THIS design may be — and NEVER bare `Exception`.
-
-    `pytest.raises(Exception)` is the shape that turns a spec suite green on its own absence: a
-    module the design has not built yet raises `ModuleNotFoundError`, which is an `Exception`,
-    so the assertion passes while proving nothing. Every refusal assertion in this suite names
-    this tuple instead, and because it is EVALUATED before the `raises` block opens, a missing
-    target fails the test at the call rather than satisfying it.
+    """Every class a refusal here may be, never bare `Exception` (which a `ModuleNotFoundError`
+    would satisfy). The tuple is evaluated before the `raises` block opens, so a missing target
+    fails the test rather than satisfying it.
     """
     from defender.configuration._env import FatalConfigError
     from defender.learning.branch.episode import EpisodeError

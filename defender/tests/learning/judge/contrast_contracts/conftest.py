@@ -1,12 +1,9 @@
 """#1234 suite fixtures: the configured roots every scenario needs.
 
-The judge opens its episode by id under its tenant's `<data root>/<T>/episodes/` (#1187 O9: no
-configured episodes root; the data root, `DEFENDER_DATA_ROOT`, is already a fresh tmp dir per
-test, `defender/tests/conftest.py`), appends to the learning-state queues under
-`DEFENDER_LEARNING_STATE_DIR` (by default inside the checkout), and a real-path sibling reads its
-oracle rate from `ORACLE_RATE`. Both are pointed under the test's own `tmp_path` for every test in
-this directory, so no scenario passes or fails on the ambient environment and none writes outside
-its tmp dir.
+Episodes live under the per-test `DEFENDER_DATA_ROOT` (`defender/tests/conftest.py`). Here every
+test also points the learning-state queues (`DEFENDER_LEARNING_STATE_DIR`, by default inside the
+checkout) under its own `tmp_path` and sets a fast `ORACLE_RATE` for real-path siblings, so no
+scenario depends on or writes to the ambient environment.
 """
 from __future__ import annotations
 

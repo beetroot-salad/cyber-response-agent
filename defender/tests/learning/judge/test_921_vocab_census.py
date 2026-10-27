@@ -1,4 +1,4 @@
-"""#921 — the outcome vocabulary, the 08-16 fixture, and the corrected write census."""
+"""#921 — the judge's wire log, which holds the framed prompt, is unreadable from a box."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
