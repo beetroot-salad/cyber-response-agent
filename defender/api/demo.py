@@ -116,7 +116,8 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
             people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
     identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock,
-                               bootstrap=Bootstrap(administrators=(), tenants={}))
+                               bootstrap=Bootstrap(administrators=(), tenants={}),
+                               session_idle_limit=_SESSION_LIFETIME)
     return ApiDeps(
         identity=identity,
         frontend_origin=frontend_origin,

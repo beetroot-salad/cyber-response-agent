@@ -106,6 +106,7 @@ class IdentityService:
         self, repo: IdentityRepository, *, signin: SignInPort, mail: MailPort,
         clock: Callable[[], _dt.datetime], bootstrap: Bootstrap,
         send_interval: _dt.timedelta = _dt.timedelta(seconds=30),
+        session_idle_limit: _dt.timedelta = SESSION_IDLE_LIMIT,
     ) -> None:
         self._repo = repo
         self._signin = signin
@@ -113,6 +114,7 @@ class IdentityService:
         self._clock = clock
         self._bootstrap = bootstrap
         self.send_interval = send_interval
+        self._session_idle_limit = session_idle_limit
         self._listed = frozenset(
             {e.strip().lower() for e in bootstrap.administrators}
             | {e.strip().lower() for emails in bootstrap.tenants.values() for e in emails})
@@ -335,7 +337,7 @@ class IdentityService:
             raise NotAuthenticated("sign in")
         session = self._repo.session_by_value(value)
         now = self._clock()
-        if session is None or now >= session.expires_at or now - session.last_seen_at > SESSION_IDLE_LIMIT:
+        if session is None or now >= session.expires_at or now - session.last_seen_at > self._session_idle_limit:
             raise NotAuthenticated("sign in")
         user = self._repo.user(session.user_id)
         if user is None or user.status != "active":

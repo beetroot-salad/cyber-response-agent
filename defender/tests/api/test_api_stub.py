@@ -1130,6 +1130,18 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
     assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
 
 
+def test_a_demo_session_outlasts_the_production_idle_limit() -> None:
+    """The printed demo sessions keep working through a night unused; only their own lifetime ends them."""
+    clock = {"now": NOW}
+    deps = demo_deps((DEMO_ONE,), lambda: clock["now"])
+    client = TestClient(create_app(deps), base_url=BASE)
+    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
+    clock["now"] = NOW + _dt.timedelta(days=3)
+    assert client.get("/me", headers=auth).status_code == 200
+    clock["now"] = NOW + _dt.timedelta(days=366)
+    assert client.get("/me", headers=auth).status_code == 401
+
+
 def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
     """DC-4: the demo has no Keycloak; `/auth/login` answers a 503 problem, never a redirect."""
     client = TestClient(create_app(demo_deps((DEMO_ONE,), lambda: NOW)), base_url=BASE)
