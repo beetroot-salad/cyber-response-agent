@@ -1,9 +1,9 @@
 """O4 — one owner of the knowledge layout, by symbol (#1108 P4).
 
-A symbol-resolved census, not a spelling grep (P4-C2 was lexical; the design owes this one).
-Every reference in production source is resolved through `tooling/lint/_astlib.py`'s scope
-tree (imports, `import ... as`, from-imports, attribute chains, function-local imports) and
-then through `reexport_origin` (a re-export through a package door lands on its definition).
+A symbol-resolved census, not a spelling grep. Every reference in production source is resolved
+through `tooling/lint/_astlib.py`'s scope tree (imports, `import ... as`, from-imports, attribute
+chains, function-local imports) and then through `reexport_origin` (a re-export through a package
+door lands on its definition).
 A reference that resolves to a banned layout symbol is a hit, wherever it sits, unless the
 allowlist below names its module and the symbol, with a reason.
 
@@ -26,8 +26,8 @@ _astlib = import_lint_lib("_astlib")
 _K = "defender.knowledge._knowledge"
 _P = "defender._paths"
 
-#: The corpus accessors `DefenderPaths` carried as pass-throughs to the knowledge layout
-#: (`_paths.py:66-110` at base). Banned on `PATHS`, on the class, and (structurally) absent.
+#: The corpus accessors `DefenderPaths` once passed through to the knowledge layout: banned on
+#: `PATHS` and on the class, and structurally absent.
 CORPUS_ACCESSORS = (
     "knowledge", "lessons_dir", "lessons_questioner_dir", "catalog_dir", "skills_dir",
     "catalog_rel", "skills_rel", "lessons_dir_rel", "lessons_questioner_dir_rel",
@@ -40,7 +40,7 @@ BANNED: dict[str, str] = {
     f"{_K}.KnowledgePaths.of_defender_dir": "knowledge rooted in a code tree (of_defender_dir)",
     **{f"{_P}.PATHS.{a}": f"PATHS.{a}" for a in CORPUS_ACCESSORS},
     **{f"{_P}.DefenderPaths.{a}": f"DefenderPaths.{a}" for a in CORPUS_ACCESSORS},
-    # The import-time corpus constants O4 names, by their defining module (P4-C2's sites).
+    # The import-time corpus constants, by their defining module.
     "defender.investigation.lessons_engine.lessons_fm.LESSONS_DIR": "lessons_fm.LESSONS_DIR",
     "defender.investigation.lessons_engine.lessons_frontier.DEFAULT_CORPUS": "lessons_frontier.DEFAULT_CORPUS",
     "defender.hooks.inject_system_skill_description.SKILLS_DIR": "inject_system_skill_description.SKILLS_DIR",
@@ -53,10 +53,9 @@ BANNED: dict[str, str] = {
     "defender.cli.learning.revert_lesson.LESSONS_REL": "revert_lesson.LESSONS_REL",
     "defender.cli.learning.trace_lesson.LESSONS_DIR": "trace_lesson.LESSONS_DIR",
     "defender.presentation.visualize_runtime._LESSONS_PATHSPEC": "visualize_runtime._LESSONS_PATHSPEC",
-    # O-B: the stamp is the commit of the export actually copied, never the clone's HEAD, and
-    # O4 names both captures (run start, the branch CLI's live capture). They read a clone's
-    # checked-out commit; no production caller remains (their own module calls the one from the
-    # other by bare name, which is not a reference to the import).
+    # The stamp is the copied export's commit, never the clone's HEAD, so both clone-HEAD
+    # captures are banned (their own module calling one from the other by bare name is not a
+    # reference to the import).
     "defender.records._provenance.capture_run": "capture_run (stamps the clone's HEAD)",
     "defender.records._provenance.capture_knowledge": "capture_knowledge (reads the clone's HEAD)",
 }
@@ -74,8 +73,8 @@ KNOWLEDGE_PATHS = f"{_K}.KnowledgePaths"
 PRODUCT_JOIN = "<call-time product-tree join>"
 ALL = frozenset(BANNED) | {KNOWLEDGE_PATHS, "<import-time join>", PRODUCT_JOIN}
 
-#: Modules allowed to reference banned symbols — `{module path under the repo: (symbols, kinds,
-#: reason)}`. Nothing else: `_paths.py` is deliberately a red site (its accessors go).
+#: Modules allowed to reference banned symbols: `{module path under the repo: (symbols, kinds,
+#: reason)}`.
 ALLOWLIST: dict[str, tuple[frozenset[str], frozenset[str], str]] = {
     "defender/knowledge/_knowledge.py": (
         ALL, frozenset({"ref", "import", "join"}),
@@ -85,13 +84,10 @@ ALLOWLIST: dict[str, tuple[frozenset[str], frozenset[str], str]] = {
         "the owner package's door may re-export; a re-export binding reads nothing, and every "
         "reader through the door resolves to the definition and is judged where it reads"),
 }
-#: The judge's pre-move branch (O6): a run whose code commit's tree has
-#: `defender/lessons/<name>.md` is read from the product repo at that commit, through
-#: `CHECKOUT_KNOWLEDGE` — the one place the design keeps it (`KnowledgePaths` data model). The
-#: branch is the judge's lesson-body reader, `learning/judge/render.py` (P4-C6: `render.py:368-
-#: 393`; at base `_lesson_paths_for`, `render.py:440-445`, is its one `CHECKOUT_KNOWLEDGE`
-#: reference). One module, not the package; a function-level pin would freeze a name the
-#: design does not give.
+#: The judge's pre-move branch (O6): a run whose code commit holds `defender/lessons/<name>.md`
+#: is read from the product repo at that commit through `CHECKOUT_KNOWLEDGE`, the one place it
+#: stays. Pinned to the module, not the package or a function (which would freeze a name the
+#: design does not give).
 JUDGE_MODULE = "defender/learning/judge/render.py"
 JUDGE_SYMBOLS = frozenset({f"{_K}.CHECKOUT_KNOWLEDGE"})
 
@@ -312,8 +308,8 @@ def _allowed(hit: Hit) -> bool:
     return hit.path == JUDGE_MODULE and hit.symbol in JUDGE_SYMBOLS
 
 
-#: Production source: the whole `defender/` package (hooks and cli included — the design's
-#: list names both) except tests, and the evals harness at the repo root.
+#: Production source: the whole `defender/` package except tests, and the evals harness at the
+#: repo root.
 _EXCLUDED = (".venv", "__pycache__", "node_modules", "tests", "docs")
 _TREES = (("defender", DEFENDER), ("evaluations", WORKTREE / "evaluations"))
 
@@ -331,11 +327,9 @@ def production_hits() -> list[Hit]:
 
 
 def test_no_production_module_outside_the_owner_reaches_the_product_layout():
-    """O4: outside `KnowledgePaths`' module (and `CHECKOUT_KNOWLEDGE` in the judge's pre-move
-    branch), no production module references `CHECKOUT_KNOWLEDGE`, `of_defender_dir`,
-    `PATHS`/`DefenderPaths` corpus accessors or an import-time corpus constant, and no module
-    joins a corpus name onto a root at import time or builds a `KnowledgePaths` at import
-    time. Resolved by symbol: an aliased import or a door re-export is the same symbol."""
+    """Outside the allowlist, no production module references a `BANNED` symbol, joins a corpus
+    name onto a root at import time or builds a `KnowledgePaths` at import time, however the
+    symbol is spelled (an aliased import or a door re-export is the same symbol)."""
     hits = [str(h) for h in production_hits() if not _allowed(h)]
     assert hits == [], (
         f"{len(hits)} production reference(s) to the product-tree knowledge layout; each "
@@ -356,10 +350,9 @@ def _symbols(hits: list[Hit]) -> set[tuple[int, str, str]]:
 
 
 def test_the_resolver_catches_aliased_imports_attribute_chains_and_door_reexports(tmp_path):
-    """O4 positive control: the census flags an aliased class method, a module alias reaching
-    `PATHS.<accessor>`, a function-local import, an attribute chain below a banned symbol, a
-    from-import of an import-time constant, and a renamed re-export through a package door —
-    each is the banned symbol under another spelling."""
+    """Positive control: an aliased class method, a module alias reaching `PATHS.<accessor>`, a
+    function-local import, a chain below a banned symbol, a from-imported import-time constant
+    and a renamed door re-export are each the banned symbol under another spelling."""
     door = tmp_path / "defender" / "door"
     door.mkdir(parents=True)
     (door / "__init__.py").write_text(
@@ -391,10 +384,9 @@ def test_the_resolver_catches_aliased_imports_attribute_chains_and_door_reexport
 
 
 def test_the_census_catches_import_time_corpus_joins_but_not_call_time_ones():
-    """O4: a corpus name joined onto a root at import time (by the layout's own constant or as
-    a literal, by `/`, `joinpath` or `os.path.join`, or in a default argument), and a
-    `KnowledgePaths` built at import time, are hits; the same join inside a function body —
-    a function of an agent root — is not."""
+    """A corpus name joined onto a root at import time (constant or literal; `/`, `joinpath`,
+    `os.path.join` or a default argument) and a `KnowledgePaths` built at import time are hits;
+    the same join inside a function body, a function of an agent root, is not."""
     hits = _scan_synthetic(
         "import os\n"                                                          # 1
         "from pathlib import Path\n"                                           # 2
@@ -419,9 +411,9 @@ def test_the_census_catches_import_time_corpus_joins_but_not_call_time_ones():
 
 
 def test_the_census_does_not_flag_a_shadowing_local_or_the_owner_type():
-    """O4 negative control on the same channel: a local that shadows a banned name, an
-    unrelated module's same-named attribute, and `KnowledgePaths(...)` built from a root at
-    call time are not hits — the census resolves bindings, it does not match spellings."""
+    """Negative control: a local shadowing a banned name, an unrelated module's same-named
+    attribute and a call-time `KnowledgePaths(...)` are not hits: the census resolves bindings,
+    not spellings."""
     hits = _scan_synthetic(
         "from defender.knowledge._knowledge import KnowledgePaths\n"           # 1
         "import other_pkg as PATHS\n"                                          # 2
@@ -435,9 +427,8 @@ def test_the_census_does_not_flag_a_shadowing_local_or_the_owner_type():
 
 
 def test_the_allowlist_admits_only_its_named_symbols_and_kinds():
-    """O4: the allowlist is not a module-wide pass: the door may re-export but not read, and the
-    judge's pre-move module may name `CHECKOUT_KNOWLEDGE` but no other banned symbol, and no
-    other judge module may name it."""
+    """The allowlist is not a module-wide pass: the door may re-export but not read, and only the
+    judge's pre-move module may name `CHECKOUT_KNOWLEDGE`, and no other banned symbol."""
     door_read = Hit("defender/knowledge/__init__.py", 1, f"{_K}.CHECKOUT_KNOWLEDGE", "ref")
     door_export = Hit("defender/knowledge/__init__.py", 1, f"{_K}.CHECKOUT_KNOWLEDGE", "import")
     judge_ck = Hit("defender/learning/judge/render.py", 1, f"{_K}.CHECKOUT_KNOWLEDGE", "ref")
@@ -451,10 +442,9 @@ def test_the_allowlist_admits_only_its_named_symbols_and_kinds():
 
 
 def test_the_census_follows_dynamic_lookups_and_aliases():
-    """O4 (review R-I7): `importlib.import_module("<m>").X`, `getattr(<module>, "X")`, a
-    module bound to a module-level or local name, a local alias of `PATHS`, and a reference
-    to the clone-HEAD captures (`capture_run`, `capture_knowledge`) are each the banned
-    symbol; a `getattr` on an untyped value is not."""
+    """`importlib.import_module("<m>").X`, `getattr(<module>, "X")`, a module bound to a
+    module-level or local name, a local alias of `PATHS`, and the clone-HEAD captures are each
+    the banned symbol; a `getattr` on an untyped value is not."""
     hits = _scan_synthetic(
         "import importlib\n"                                                            # 1
         "import defender.knowledge._knowledge as k\n"                                   # 2
@@ -486,11 +476,9 @@ def test_the_census_follows_dynamic_lookups_and_aliases():
 
 
 def test_the_census_catches_a_call_time_product_tree_join():
-    """O4 / O-TEXT (review R-I7): a path built at call time that spells the product tree's
-    knowledge — `REPO_ROOT / "defender" / "lessons"`, `DEFENDER_DIR / "skills" / "cmdb"`,
-    `os.path.join(root, "defender/skills/gather/queries")`, `.joinpath("defender", "lessons")`
-    — is a hit; a join onto an agent root, a product skill, and a system name held in a
-    variable are not (the O1 layout test is the backstop for those)."""
+    """A path built at call time that spells the product tree's knowledge (by `/`,
+    `os.path.join` or `.joinpath`) is a hit; a join onto an agent root, a product skill, and a
+    system name held in a variable are not (`test_layout.py` is the backstop for those)."""
     hits = _scan_synthetic(
         "import os\n"                                                                   # 1
         "from defender._git import REPO_ROOT\n"                                         # 2
@@ -509,19 +497,17 @@ def test_the_census_catches_a_call_time_product_tree_join():
 # --- what the resolver cannot reach, closed structurally ---------------------------------------
 
 def test_defender_paths_carries_no_corpus_accessor():
-    """O4: `DefenderPaths` (and so every subclass, `LoopPaths` included) has no corpus
-    accessor. An attribute on a value (`paths.lessons_dir_rel`, `getattr(paths, "lessons_dir")`
-    as `config.py:55` does) is beyond a symbol resolver; an accessor that does not exist is
-    beyond every receiver."""
+    """`DefenderPaths` (so every subclass, `LoopPaths` included) has no corpus accessor: an
+    attribute read on a value is beyond a symbol resolver, but an accessor that does not exist
+    is beyond every receiver."""
     from defender._paths import DefenderPaths
     present = [name for name in CORPUS_ACCESSORS if hasattr(DefenderPaths, name)]
     assert present == [], f"DefenderPaths still carries corpus accessors: {present}"
 
 
 def test_the_author_config_carries_no_product_corpus_spelling():
-    """O4 (author `corpus_dir_rel`): no author config dataclass carries a corpus spelling
-    relative to the product repo — the author writes a draft's `agent/`, located by
-    `KnowledgePaths`, not a `defender/lessons/` pathspec."""
+    """No author config dataclass carries `corpus_dir_rel`: the author writes a draft's `agent/`,
+    located by `KnowledgePaths`, not a `defender/lessons/` pathspec."""
     config = importlib.import_module("defender.learning.author._config")
     carriers = [name for name, value in vars(config).items()
                 if dataclasses.is_dataclass(value) and isinstance(value, type)
@@ -529,11 +515,10 @@ def test_the_author_config_carries_no_product_corpus_spelling():
     assert carriers == [], f"author config still carries corpus_dir_rel: {carriers}"
 
 
-# --- amendment 2's census: readers of the clone in the run process ------------------------------
+# --- readers of the clone in the run process ----------------------------------------------------
 
 #: The accepted tenant's clone accessors (`_TenantLayout.knowledge/settings/agent`: the clone and
-#: its working-tree halves). The data model says the working tree is read by nothing in
-#: production, and P-3 that the run process never touches the clone.
+#: its working-tree halves), which the run process never reads.
 TENANT = "defender.tenancy._tenant.Tenant"
 RUN_TENANT = "defender.systems.run_tenant.RunTenant"
 CLONE_ATTRS = frozenset({"knowledge", "settings", "agent"})
@@ -555,8 +540,8 @@ def static_import_closure(entries: tuple[str, ...], root: Path = DEFENDER) -> di
     """Every `defender` module reachable from `entries` through an import statement — module
     level or function local, absolute or relative — mapped to the module that first imported
     it. Also follows a string naming a `defender` module when it is the argument of an
-    `importlib.import_module` / `__import__` call — never a module merely NAMED (to spawn a
-    child with `-m`, which is the separate process P-3 asks for, not an import)."""
+    `importlib.import_module` / `__import__` call; never a module merely named (to spawn a child
+    with `-m`, a separate process, not an import)."""
     seen: dict[str, str | None] = {e: None for e in entries}
     queue = list(entries)
     while queue:
@@ -790,10 +775,9 @@ def _clone_reads(rel: str, tree: ast.Module, module: str, package: str,
 
 
 def test_the_run_process_reads_nothing_from_the_tenant_clone():
-    """O4 (amendment 2's census) / P-1 / P-3: in the run process's static import closure,
-    outside `tenancy/`, no code reads the accepted tenant's clone — `Tenant.knowledge`,
-    `.settings` or `.agent` — directly or through `RunTenant.tenant`. Settings, knowledge and
-    the stamp come from the run copy of one export (O-B)."""
+    """In the run process's static import closure, outside `tenancy/`, no code reads the
+    accepted tenant's clone (`Tenant.knowledge`, `.settings`, `.agent`), directly or through
+    `RunTenant.tenant`: the run reads only its copy of one export."""
     closure = static_import_closure(RUN_ENTRIES)
     typer = _Typer()
     reads: list[str] = []
@@ -817,7 +801,7 @@ def _planted_clone_reads(source: str) -> list[int]:
 
 
 def test_the_clone_reader_census_sees_typed_receivers():
-    """Positive control for the clone-reader census (review R-I5): a `Tenant` reached through
+    """Positive control for the clone-reader census: a `Tenant` reached through
     a plain, `X | None`, `Optional[X]` or string annotation, a `RunTenant`'s `tenant` field,
     an unannotated local assigned from a producer (`accept_tenant`, a `RunTenant` method or
     field), an alias of an alias, a stored attribute (`self.rt.tenant`), a planted class's

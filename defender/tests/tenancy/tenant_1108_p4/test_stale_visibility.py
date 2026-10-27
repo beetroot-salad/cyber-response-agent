@@ -1,18 +1,12 @@
-"""#1108 P4 slice S-C — O-WARN (U8): a run that used stale tenant knowledge says so wherever its
-result is read. This module holds the ticket write-back and the API halves (the run page's banner
-is `test_run_page.py`, which imports the run-record helpers below).
+"""#1108 P4 O-WARN: a run that used stale tenant knowledge says so wherever its result is read;
+here the ticket write-back and the API (the run page's banner is `test_run_page.py`, which
+imports the run-record helpers below).
 
-- Ticket write-back: EVERY comment the run posts (verdict, unreadable-report and escalation
-  branches alike) carries ONE fixed sentence: the investigation used the tenant's knowledge as of
-  an earlier version, newer approved knowledge could not be loaded, the commit id, and the kind in
-  customer words (temporary vs. awaiting operator action) — never the raw reason. Fresh and pinned
-  runs carry no sentence. Observed on the payload the ticket store fake CAPTURES (inbound).
-- API: `Investigation.knowledge = {status: current|stale|pinned, commit, stale_kind:
-  transient|operator|null}`, carried through the store port and exercised by the stub's records.
-
-The sentence's wording is not frozen: it is recovered as "what the stale comment adds to the fresh
-comment of the same run", then held to the design's properties (one sentence, the same on every
-branch, names the commit and the kind, leaks no reason).
+Every comment a stale run posts (verdict, unreadable-report and escalation branches) carries one
+fixed sentence naming the commit used and the kind in customer words (temporary vs awaiting
+operator action), never the raw reason; fresh and pinned runs carry none. The wording is not
+frozen: it is recovered as what the stale comment adds to the same run's fresh comment, then held
+to those properties. The API serves `Investigation.knowledge = {status, commit, stale_kind}`.
 """
 from __future__ import annotations
 
@@ -35,18 +29,15 @@ from defender.tests.support.runtime.engine._spec767 import (
 )
 
 # ---------------------------------------------------------------------------------------------
-# The run record's `knowledge_source` (O-STALE; slice S-B produces it at run start, this slice
-# owns what its readers do with it). ONE place spells its shape, so the open representation
-# question below is a one-line change for every S-C test.
+# The run record's `knowledge_source`, spelled in one place.
 # ---------------------------------------------------------------------------------------------
 
-#: The run record's vocabulary (design O-STALE). The API says `current` where the record says
-#: `fresh` (pinned on production by `test_o_warn_api_maps_the_run_records_knowledge_source_*`).
+#: The run record's vocabulary; the API says `current` where the record says `fresh`.
 RECORD_KINDS = ("fresh", "stale", "pinned")
 STALE_KINDS = ("transient", "operator")
 
 #: Commits as the knowledge reader accepts them (40 lowercase hex). Distinct per role, and never
-#: anything a page or comment shows today, so finding one in the output means a reader put it there.
+#: anything a page or comment otherwise shows, so finding one in the output means a reader put it there.
 STALE_COMMIT = "5e7a11c0ffee5e7a11c0ffee5e7a11c0ffee5e7a"
 FRESH_COMMIT = "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5"
 PINNED_COMMIT = "91aced0091aced0091aced0091aced0091aced00"
@@ -65,24 +56,19 @@ RAW_REASON = {
 REASON_FRAGMENTS = ("https://", "bao.dev.invalid", ":8200", "approle", "timed out",
                     "ConnectTimeout", "permission denied", "secret_id", "7f3e91c2")
 
-#: The customer words for each stale kind (design O-WARN: "temporary vs. awaiting operator
-#: action"), as case-insensitive stems.
+#: The customer words for each stale kind ("temporary" vs "awaiting operator action"), as
+#: case-insensitive stems.
 CUSTOMER_WORD = {"transient": "temporar", "operator": "operator"}
 
-#: How much of a commit id a reader must show to have "named the commit": git's own short form.
-#: The full id satisfies it too. (Reported: the design says "the commit id"; a prefix is accepted.)
+#: How much of a commit id a reader must show to have named the commit: git's short form (the
+#: full id satisfies it too).
 SHORT_COMMIT = 7
 
 
 def knowledge_source(kind: str, *, stale_kind: str | None = None, commit: str | None = None,
                      reason: str | None = None) -> dict[str, Any]:
-    """The run record's `knowledge_source` as its wire mapping (design O-STALE:
-    `{kind: fresh|stale|pinned, commit, reason}`).
-
-    GAP (reported, not settled by the design): where a stale record's transient/operator kind
-    lives. Chosen HERE ONLY, so the choice is one edit: a `stale_kind` key beside `kind`, present
-    for `stale` records, mirroring the API's field. Alternatives: `kind: "stale:transient"`, as
-    the child reports it; or the reason prefixed with the kind."""
+    """The run record's `knowledge_source` mapping: `{kind, commit, reason}`, plus `stale_kind`
+    for a stale record."""
     assert kind in RECORD_KINDS, kind
     if kind == "stale":
         assert stale_kind in STALE_KINDS, stale_kind
@@ -98,32 +84,29 @@ def knowledge_source(kind: str, *, stale_kind: str | None = None, commit: str | 
 
 
 def host_record_path(run_dir: Path) -> Path:
-    """The HOST-HELD knowledge-source record (U12): a sidecar beside the run dir, keyed by the
-    run's id, like the ticket receipt (`RunPaths.ticket_write`, `<run_id>.ticket-write.json`).
-    ASSUMED SEAM (reported): `RunPaths(run_dir).knowledge_source(runs_base=None)` ->
-    `<runs base>/<run_id>.knowledge-source.json`, JSON `{kind, commit, stale_kind?, reason}`."""
+    """The host-held knowledge-source record: a sidecar beside the run dir, keyed by the run's
+    id, like the ticket receipt."""
     from defender.records import RunPaths
 
     return Path(RunPaths(run_dir).knowledge_source())
 
 
 def write_host_record(run_dir: Path, source: dict[str, Any]) -> Path:
-    """Plant the host record as run start leaves it (slice S-B writes it; every reader reads it)."""
+    """Plant the host record as run start leaves it."""
     path = host_record_path(run_dir)
     path.write_text(json.dumps(source, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
 def stamp_view(source: dict[str, Any]) -> dict[str, Any]:
-    """What the box-readable provenance stamp may carry of a knowledge source (OD17): kind,
-    commit, stale kind — never the raw reason."""
+    """A knowledge source as the box-readable stamp may carry it: without the raw reason."""
     return {k: v for k, v in source.items() if k != "reason"}
 
 
 def stamp_knowledge_source(run_dir: Path, source: dict[str, Any] | None) -> None:
     """Write `source` as the `knowledge_source` field of the run's provenance stamp, keeping every
-    other field; `None` removes it. The stamp sits in the box's rw bind (OD17: informational,
-    authoritative for no reader), so the tests use this to play the BOX rewriting it."""
+    other field; `None` removes it. The stamp sits in the box's rw bind (informational,
+    authoritative for no reader), so tests use this to play the box rewriting it."""
     from defender.records import RunPaths
 
     path = RunPaths(run_dir).provenance
@@ -148,10 +131,9 @@ def _ws(text: str) -> str:
 # Ticket write-back
 # ---------------------------------------------------------------------------------------------
 #
-# Entry: the REAL `ticket_writer.record_case_ticket` through its one store seam
-# (`TicketWriterDeps.request` = `FakeStore`, which records every call it is handed). The run's
-# knowledge source is the HOST record beside the run dir (U12, `write_host_record`), never the
-# box-writable stamp. `test_run_main_*` below drive the run-start wiring that writes it.
+# Entry: the real `ticket_writer.record_case_ticket` through its store seam (`FakeStore` records
+# every call). The run's knowledge source is the host record beside the run dir, never the
+# box-writable stamp; `test_run_main_*` below drive the run-start wiring that writes it.
 
 #: The three branches a posted comment can take (`ticket_writer._build_comment_payload` and the
 #: aborted arm of `record_case_ticket`): run-dir report text (None: a readable verdict) and the
@@ -212,8 +194,8 @@ def _stale_sentence(tmp_path: Path, stale_kind: str) -> str:
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
 def test_o_warn_a_stale_runs_verdict_comment_carries_the_fixed_sentence_naming_commit_and_kind(
         tmp_path, monkeypatch, stale_kind):
-    """O-WARN: a stale run's verdict comment adds one sentence to what a fresh run posts; it
-    names the commit used and the kind in customer words, and no part of the raw reason."""
+    """A stale run's verdict comment adds one sentence to what a fresh run posts; it names the
+    commit used and the kind in customer words, and no part of the raw reason."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path, stale_kind)
 
@@ -235,8 +217,8 @@ def test_o_warn_a_stale_runs_verdict_comment_carries_the_fixed_sentence_naming_c
 
 def test_o_warn_transient_and_operator_sentences_differ_and_each_is_fixed_per_kind(
         tmp_path, monkeypatch):
-    """O-WARN: the sentence is fixed per (kind, commit) — the same whatever the reason text —
-    and the two kinds read differently."""
+    """The sentence is fixed per (kind, commit), the same whatever the reason text, and the two
+    kinds read differently."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     first = {k: _stale_sentence(tmp_path / f"a-{k}", k) for k in STALE_KINDS}
     assert first["transient"] != first["operator"], (
@@ -256,8 +238,8 @@ def test_o_warn_transient_and_operator_sentences_differ_and_each_is_fixed_per_ki
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
 def test_o_warn_every_comment_branch_carries_the_same_stale_sentence(
         tmp_path, monkeypatch, branch, stale_kind):
-    """O-WARN: the unreadable-report and escalation comments carry the very sentence the
-    verdict comment carries; the fresh comment on the same branch carries none of it."""
+    """The unreadable-report and escalation comments carry the very sentence the verdict
+    comment carries; the fresh comment on the same branch carries none of it."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path / "verdict", stale_kind)
 
@@ -278,8 +260,8 @@ def test_o_warn_every_comment_branch_carries_the_same_stale_sentence(
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
 def test_o_warn_the_sentence_survives_the_wire_bound_on_a_long_verdict(
         tmp_path, monkeypatch, stale_kind):
-    """O-WARN: "every comment carries" holds when the narrative fills the 4096-byte wire bound,
-    which cuts from the end: the sentence is still whole in the posted body."""
+    """The sentence stays whole when the narrative fills the 4096-byte wire bound, which cuts
+    from the end."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path / "short", stale_kind)
 
@@ -302,8 +284,6 @@ def test_o_warn_the_sentence_survives_the_wire_bound_on_a_long_verdict(
 @pytest.mark.parametrize("kind", ["fresh", "pinned"])
 def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
         tmp_path, monkeypatch, branch, kind):
-    """O-WARN: fresh and pinned runs carry no sentence: each branch posts exactly the comment it
-    posts today (the shipped host sentences / the mapping's verdict rendering)."""
     from defender.tenancy import case_ticket
 
     use_mapping(monkeypatch, tmp_path / "dfn")
@@ -324,10 +304,9 @@ def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
 
 def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
         tmp_path, monkeypatch):
-    """O-WARN, danger lens (principles §1, U12): the stamp sits in the box's rw bind, so the
-    customer-facing comment reads the host record, never the stamp. A fresh run whose box planted
-    a stale stamp (with a commit and reason of its choosing) posts exactly today's fresh comment;
-    the same planted run whose host record is stale posts the host's commit, not the planted one."""
+    """The stamp sits in the box's rw bind, so the comment reads the host record, never the
+    stamp: a fresh run whose box planted a stale stamp posts the plain fresh comment, and a stale
+    host record's commit wins over the planted one."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     planted_commit = "badc0debadc0debadc0debadc0debadc0debadc0"
     planted = knowledge_source("stale", stale_kind="operator", commit=planted_commit,
@@ -356,9 +335,7 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
 # --- the wiring: run.py hands the run's knowledge source to the writer and the page ----------
 
 def _stale_outcome(stale_kind: str, reason: str) -> str:
-    """What the launch-time publish reports for a stale launch (design O-STALE: the child
-    reports `stale:<kind> <reason>`). ASSUMED (reported; slice S-B owns the `publish=` seam's
-    return type): the seam returns the child's report line."""
+    """The `publish=` seam's report line for a stale launch."""
     return f"stale:{stale_kind} {reason}"
 
 
@@ -366,16 +343,10 @@ def _stale_outcome(stale_kind: str, reason: str) -> str:
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
 def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_record(
         tmp_path, monkeypatch, p4_tenant, stale_kind):
-    """O-WARN through `run.main`: a launch whose publish reports stale runs on `current`; run
-    start writes the HOST record beside the run dir (U12) carrying kind, commit and raw reason;
-    the comment the run posts (captured by the store fake) and the saved run page say so, naming
-    the commit actually used; NO file the box can read carries the raw reason — scanned over the
-    box window (at lifecycle start: the run dir, stamp included, and every run copy's `stage/`
-    under `<T>/run-knowledge/`, the part U9 mounts; a copy's host-only `settings/` is not box
-    readable). The saved `runtime.html` is written after the box stops and is an operator
-    surface (OD21): it may, and here must, show the raw reason.
-    Seams: `publish=` (design O11), `ticket_writer=` (the real writer bound to the fake store),
-    `lifecycle`/`preflight`/`enqueue` recorders."""
+    """Through `run.main`, a stale launch runs on `current` and run start writes the host record
+    (kind, commit, raw reason); the posted comment and the saved run page name the commit used,
+    while no file the box can read carries the raw reason. The saved `runtime.html`, written
+    after the box stops, is an operator surface and must show it (OD21)."""
     from functools import partial
 
     from defender.investigation import ticket_writer
@@ -397,9 +368,9 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     box_readable: dict[str, bytes] = {}
 
     def before_lifecycle(run_dir: Path) -> None:
-        # The box window: everything under the run dir is what the box can read (and write),
-        # plus every run copy's `stage/` (U9: the only part of a copy the box mounts). A copy's
-        # `settings/` is host-only and legitimately carries the fixture's `https://` endpoints.
+        # The box window: everything under the run dir, plus every run copy's `stage/` (the only
+        # part of a copy the box mounts). A copy's `settings/` is host-only and legitimately
+        # carries the fixture's `https://` endpoints.
         from defender.tests.tenancy.tenant_1108_p4._s_b_support import run_copies
 
         stages = sorted(run_copies(p4_tenant).glob("*/stage"))
@@ -438,7 +409,7 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     assert host.get("reason") == RAW_REASON[stale_kind], (
         f"the host record does not keep the child's raw reason for operators: {host}")
     stamp = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
-    if "knowledge_source" in stamp:  # OD17: optional, informational, never the reason
+    if "knowledge_source" in stamp:  # optional, informational, never the reason
         assert "reason" not in stamp["knowledge_source"], stamp
 
     assert box_readable, "fixture: the box window saw no run-dir files"
@@ -499,13 +470,10 @@ TAMPERED_COMMIT = "0ddba110ddba110ddba110ddba110ddba110ddba"
 @pytest.mark.parametrize("tamper", ["suppress", "forge"])
 def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_record(
         tmp_path, p4_tenant, tamper):
-    """O-WARN through `run.main`, danger lens (R-I4): the box can rewrite the run record's
-    `knowledge_source` while the investigation runs (the lifecycle stand-in does exactly that).
-    The posted comment follows the host's launch outcome both ways:
-    - suppress: the launch was stale (transient), the box rewrites the record to fresh -> the
-      comment still carries the stale sentence naming the commit the run used;
-    - forge: the launch was fresh, the box rewrites the record to stale (operator) naming a
-      commit of its own -> the comment is exactly today's fresh comment."""
+    """The box can rewrite the stamp's `knowledge_source` mid-run (the lifecycle stand-in does);
+    the comment follows the host's launch outcome both ways: a stale launch rewritten to fresh
+    still posts the stale sentence (suppress), and a fresh launch rewritten to stale posts
+    the plain fresh comment (forge)."""
     from functools import partial
 
     from defender import run as run_py
@@ -640,8 +608,8 @@ CASES = [("stale", "transient"), ("stale", "operator"), ("current", None), ("pin
 
 @pytest.mark.parametrize(("status", "stale_kind"), CASES)
 def test_o_warn_api_serves_investigation_knowledge_through_the_store_port(status, stale_kind):
-    """O-WARN (API): an investigation's `knowledge` reaches `GET /investigations/{id}` and the
-    list as the store holds it: status, the commit used, and the stale kind (null unless stale)."""
+    """An investigation's `knowledge` reaches `GET /investigations/{id}` and the list as the
+    store holds it."""
     inv = _investigation(f"inv-{status}-{stale_kind}", _knowledge(status, stale_kind))
     client = _client(inv)
     one = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH)
@@ -652,8 +620,8 @@ def test_o_warn_api_serves_investigation_knowledge_through_the_store_port(status
 
 
 def test_o_warn_api_knowledge_vocabulary_is_the_apis_not_the_run_records():
-    """O-WARN (API): the wire model refuses the run record's words (`fresh`, `stale:transient`)
-    and an unknown stale kind; it accepts each of the API's own words (positive control)."""
+    """The wire model refuses the run record's words (`fresh`, `stale:transient`) and an unknown
+    stale kind; it accepts each of the API's own words (positive control)."""
     from pydantic import ValidationError
 
     for bad in ({"status": "fresh", "commit": FRESH_COMMIT, "stale_kind": None},
@@ -665,7 +633,7 @@ def test_o_warn_api_knowledge_vocabulary_is_the_apis_not_the_run_records():
         assert _investigation("inv-ok", _knowledge(status, stale_kind)).knowledge is not None
 
 
-#: Run record -> what the API serves, per the design (O-STALE record vocabulary, O-WARN wire).
+#: Run record -> what the API serves.
 RECORD_TO_WIRE = [
     (knowledge_source("fresh"), _knowledge("current")),
     (knowledge_source("stale", stale_kind="transient"), _knowledge("stale", "transient")),
@@ -678,16 +646,10 @@ RECORD_TO_WIRE = [
                          ids=["fresh", "stale-transient", "stale-operator", "pinned"])
 def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_the_store(
         tmp_path, record, wire):
-    """O-WARN (API): the store turns the run record's `knowledge_source` into the API's
-    `knowledge` — fresh -> current, stale -> stale + its kind, pinned -> pinned, the commit
-    carried, the raw reason dropped — and the route serves it. Exercised on the stub store.
-
-    ASSUMED SEAM (reported): `InMemoryStore.add_run_knowledge(tenant_id, investigation_id,
-    record_text: str | None)` — the stub's seeding entry for a run's record (the `add_*` family;
-    not a port method), applying the store's record->wire rule the port states. It is handed the
-    HOST record (U12) as its file's text, raw reason included (`None`: no record), so the
-    fail-closed rule for a missing or corrupt record (OD22) is the store's too."""
-    # A placeholder the mapping must replace (whatever `knowledge`'s nullability turns out to be).
+    """The store maps the host record's text (raw reason included) to the API's `knowledge`,
+    carrying the commit and stale kind and dropping the reason, and the route serves it. Seeded
+    through the stub's `InMemoryStore.add_run_knowledge`, which applies the port's rule."""
+    # A placeholder the mapping must replace.
     inv = _investigation("inv-mapped", {"status": "pinned", "commit": "0" * 40, "stale_kind": None})
     client = _client(inv)
     store = client.app.state.deps.investigations
@@ -703,8 +665,8 @@ def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_th
 
 
 def test_o_warn_api_published_contract_declares_the_knowledge_field():
-    """O-WARN (API): `/openapi.json` declares `Investigation.knowledge` with exactly the
-    statuses current/stale/pinned and stale kinds transient/operator (or null)."""
+    """`/openapi.json` declares `Investigation.knowledge` with exactly the statuses
+    current/stale/pinned and stale kinds transient/operator (or null)."""
     doc = _client().get("/openapi.json").json()
     schemas = doc["components"]["schemas"]
     inv = schemas.get("Investigation") or schemas["Investigation-Output"]
@@ -737,8 +699,8 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
 
 
 def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
-    """O-WARN (API): the stub's fake records exercise the field — the demo store serves at least
-    one stale investigation with its kind and one current one."""
+    """The demo store serves at least one stale investigation with its kind and one current
+    one."""
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
@@ -759,12 +721,12 @@ def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
 
 
 # ---------------------------------------------------------------------------------------------
-# OD22' (fail closed where a record should exist)
+# OD22: fail closed only where a record should exist
 #   (1) an investigation with no run yet: API `knowledge: null`;
-#   (2) a run with no host record AND no `knowledge_source` in its stamp (a pre-P4 run, never
-#       rewritten): no banner, API null, ticket unchanged;
-#   (3) host record missing while the stamp carries `knowledge_source`, or the record is
-#       unparseable: unreadable -> stale / operator, no commit.
+#   (2) a pre-P4 run (no host record, no `knowledge_source` in its stamp): no banner, API null,
+#       ticket unchanged;
+#   (3) host record missing while the stamp names a source, or unparseable: stale/operator, no
+#       commit.
 # ---------------------------------------------------------------------------------------------
 
 #: Case (3): how the host record fails while a record should exist (the stamp names a source).
@@ -793,9 +755,8 @@ def plant_pre_p4_run(run_dir: Path) -> None:
 @pytest.mark.parametrize("how", list(UNREADABLE_RECORDS))
 def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_commit_on_the_ticket(
         tmp_path, monkeypatch, how):
-    """OD22' (3): where a host record should exist but is missing or corrupt, the ticket claims
-    no freshness: the comment adds the operator-kind sentence (awaiting operator action) and names
-    no commit id. Control: the same run with a fresh record posts today's comment."""
+    """Case (3): the ticket claims no freshness: the comment adds the operator-kind sentence and
+    names no commit id. Control: a fresh record posts the plain comment."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     fresh, _ = _posted(tmp_path, "verdict", knowledge_source("fresh"), label=f"od22-fresh-{how}")
     assert fresh == TODAYS_VERDICT_BODY, fresh
@@ -820,9 +781,8 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
 
 
 def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
-    """OD22' (2): a run with no host record and no `knowledge_source` in its stamp (pre-P4; old
-    runs are not rewritten) posts exactly today's comment. Control on the same channel: the same
-    shape of run whose stamp DOES name a source (case 3) gets the operator sentence."""
+    """Case (2): old runs are not rewritten, so a pre-P4 run posts exactly the plain comment.
+    Control: the same run with a stamp naming a source (case 3) gets the operator sentence."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     old = make_run(tmp_path, name="s-c-od22-pre-p4")
     plant_pre_p4_run(old)
@@ -840,9 +800,8 @@ def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
 
 
 def test_od22_an_investigation_with_no_run_serves_null_knowledge():
-    """OD22' (1): an investigation with no run yet serves `knowledge: null` — seeded without
-    knowledge, and through `add_run_knowledge(..., None)` (no record, no stamp). Control: a
-    fresh record's text on the same investigation is served `current`."""
+    """Case (1): seeded without knowledge, or through `add_run_knowledge(..., None)`, it serves
+    null. Control: a fresh record's text is served `current`."""
     inv = _investigation("inv-no-run", None)
     client = _client(inv)
     served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
@@ -861,7 +820,7 @@ def test_od22_an_investigation_with_no_run_serves_null_knowledge():
     assert served.get("knowledge") == _knowledge("current"), served
 
 
-#: The API seam's inputs for each OD22' run case: (host record text, the stamp's source).
+#: Each OD22 run case: (host record text, the stamp's source, what the API serves).
 API_RUN_CASES = {
     "pre-p4": (None, None, None),
     "missing-with-stamp": (None, stamp_view(knowledge_source("fresh")),
@@ -873,14 +832,9 @@ API_RUN_CASES = {
 
 @pytest.mark.parametrize("case", list(API_RUN_CASES))
 def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case):
-    """OD22' through the store: a pre-P4 run (no record, no stamp source) serves null; a missing
-    record whose stamp names a source, or a corrupt record, serves `{status: stale, stale_kind:
-    operator, commit: null}`. Control: a fresh record's text on the same path is `current`.
-
-    ASSUMED SEAM (reported): `InMemoryStore.add_run_knowledge(tenant_id, investigation_id,
-    record_text: str | None, *, stamp_knowledge_source: Mapping | None = None)` — the host
-    record's text (`None`: no file) and the run stamp's `knowledge_source` (`None`: the stamp has
-    none, or there is no run). Both `None` -> `knowledge: null`."""
+    """Through the store: a pre-P4 run serves null; a missing record whose stamp names a source,
+    or a corrupt record, serves stale/operator with no commit. Control: a fresh record's text is
+    `current`."""
     text, stamp_source, expected = API_RUN_CASES[case]
     inv = _investigation(f"inv-od22-{case}", None)
     client = _client(inv)

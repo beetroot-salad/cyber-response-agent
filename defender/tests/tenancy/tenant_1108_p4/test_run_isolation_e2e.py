@@ -1,19 +1,14 @@
-"""#1108 P4 slice S-B — O2 end to end: a run's model sees its own tenant's knowledge at one
-revision on every surface, all from the run copy.
+"""#1108 P4 O2 end to end: a run's model sees its own tenant's knowledge at one revision on every
+surface, all from the run copy.
 
-Entry: `run.main` over the REAL driver with replay models (`_replay_harness.Turn` scripts via
-`investigate_as_handed`), production's lifecycle and production's unsandboxed box (the replay
-harness's mode), the real `materialize`, and the `publish=` seam reporting `fresh`. The tenant
-is S0's fixture tenant published for real; a second tenant shares the data root.
-
-Each scenario advances `current` (a merge, published for real) at the model's FIRST request —
-after the run copied its export, before any read — so every surface below must answer from the
-seeded revision (`SEEDED_MARK`), never the merge (`MERGED_MARK`) nor the clone's working tree.
-
-Surfaces covered here: typed read, bash `cat`, bash `defender-lessons`, the opening message
-(orient's lessons section over the real shim, whose environment names the copy), the gather dispatch prompt's descriptor index, and the read
-gate (own copy admitted; the other tenant's export, our own clone and our own export refused).
-`list_verbs` messages are O-TEXT's (slice S-A); the tacit adapter is reported as uncovered.
+Entry: `run.main` over the real driver with replay models (`_replay_harness.Turn` scripts),
+production's lifecycle in the replay harness's unsandboxed mode, the real `materialize`, and a
+`publish=` seam reporting `fresh`; a second tenant shares the data root. Each scenario advances
+`current` (a merge, published for real) at the model's first request, after the run copied its
+export, so every surface must answer from the seeded revision (`SEEDED_MARK`), never the merge
+(`MERGED_MARK`) or the clone's working tree. Surfaces: typed read, bash `cat`, bash
+`defender-lessons`, the opening message's orientation, the gather dispatch's descriptor index, the
+tacit adapter, and the read gate.
 """
 from __future__ import annotations
 
@@ -74,9 +69,9 @@ def _read(surface: str, path: str) -> R.Turn:
 @pytest.mark.parametrize("surface", ["typed", "bash"])
 def test_o2_own_copy_reads_answer_at_the_copied_revision_and_every_other_root_is_refused(
         tenants, tmp_path, monkeypatch, surface):
-    """O2: the run's own lesson reads back the SEEDED revision after `current` moved to the
-    merge; the other tenant's export, this tenant's clone working tree and this tenant's export
-    folder are refused by the read gate (only the run copy is a read root)."""
+    """The run's own lesson reads back the seeded revision after `current` moved; the other
+    tenant's export, this tenant's clone and its export folder are refused (only the run copy is
+    a read root)."""
     t, other = tenants
     # The clone is left clean (P3 refuses to publish a dirty clone); the mid-run publish
     # fast-forwards its working tree to MERGED, so a clone read would show MERGED_MARK.
@@ -110,7 +105,7 @@ def test_o2_own_copy_reads_answer_at_the_copied_revision_and_every_other_root_is
 
 
 def test_o2_defender_lessons_in_bash_answers_from_the_run_copy(tenants, tmp_path, monkeypatch):
-    """O2: `defender-lessons` (box-side tool reading `DEFENDER_AGENT_DIR`) finds the fixture
+    """`defender-lessons` (box-side tool reading `DEFENDER_AGENT_DIR`) finds the fixture
     lesson by its signature — the product corpus has no such lesson — and shows the copied
     revision's description."""
     t, _other = tenants
@@ -142,10 +137,9 @@ class ShimRecorder:
 
 def test_o2_the_opening_messages_orientation_shows_the_copys_lessons(tenants, tmp_path,
                                                                    monkeypatch):
-    """O2: orient's lessons section in MAIN's opening message (over the REAL `defender-lessons`
-    shim) finds the copy's lesson by the run's signature at the copied revision; orient's shims
-    run with `DEFENDER_AGENT_DIR` naming the run copy (P2's orient case, re-rooted). The
-    workspace map renders over the copy."""
+    """Orient's lessons section in MAIN's opening message (over the real `defender-lessons`
+    shim) finds the copy's lesson by the run's signature at the copied revision, its shims
+    running with `DEFENDER_AGENT_DIR` naming the copy; the workspace map renders over the copy."""
     t, _other = tenants
     shim = ShimRecorder()
     main = AdvancingReplay([R.Turn(text="done")], t)
@@ -168,7 +162,7 @@ def test_o2_the_opening_messages_orientation_shows_the_copys_lessons(tenants, tm
 
 def test_o2_the_gather_dispatch_prompt_shows_the_copys_descriptor_index(tenants, tmp_path,
                                                                         monkeypatch):
-    """O2: a gather lead's dispatch prompt opens with the descriptor index from the copy."""
+    """A gather lead's dispatch prompt opens with the descriptor index from the copy."""
     t, _other = tenants
     main = AdvancingReplay([
         R.Turn(tool_calls=[("gather", {"lead_id": "l-sb1", "system": "cmdb",
@@ -195,8 +189,8 @@ TACIT_LEAD = "l-001"
 
 
 def _registry(entry_id: str, pattern: str, host_scope: str) -> str:
-    """One hand-written registry entry valid today (S0: the fixture registry is empty because a
-    dated entry expires; `find_entry` answers only while `added_at <= today <= review_by`)."""
+    """One registry entry valid today: `find_entry` answers only while `added_at <= today <=
+    review_by`, which is why the committed fixture's registry holds none."""
     import datetime as dt
 
     today = dt.datetime.now(dt.UTC).date()
@@ -223,9 +217,8 @@ def _lookup(pattern: str, host: str) -> R.Turn:
 
 def test_o2_the_tacit_adapter_answers_from_the_run_copys_registry_and_not_another_tenants(
         tmp_path, data_root, monkeypatch):
-    """O2 (tacit adapter): this tenant's registry entry (only in its export) answers a lookup
-    the run's gather lead makes through the real adapter; the second tenant's entry, whose
-    scope covers the second lookup, answers nothing. The product registry holds neither."""
+    """This tenant's registry entry (only in its export) answers a lookup made through the real
+    adapter; the second tenant's entry, whose scope covers the second lookup, answers nothing."""
     import json
 
     with B.run_tenant(tmp_path, data_root, files={REGISTRY: _registry(*OWN_ENTRY)}) as t, \
@@ -252,7 +245,7 @@ def test_o2_the_tacit_adapter_answers_from_the_run_copys_registry_and_not_anothe
         f"O2: another tenant's registry entry answered this run's lookup: {payloads[1]}")
 
 
-# --- R-I6: traversal at the copy's geometry ---------------------------------------------------
+# --- traversal at the copy's geometry ---------------------------------------------------------
 
 class StageClimbReplay(R.ReplayFn):
     """`ReplayFn` whose climb turns are built at its first request, once the live run copy
@@ -274,8 +267,8 @@ class StageClimbReplay(R.ReplayFn):
             (root,) = list(B.run_copies(self.tenant).iterdir())
             stage = root / "stage"
             others = sorted(p.name for p in stage.iterdir() if p.name != "agent")
-            # The token climb: the staged token's own name when one is staged (U9); a placeholder
-            # name otherwise (the read gate must refuse the climb either way).
+            # The token climb: the staged token's own name when one is staged, a placeholder
+            # otherwise (the read gate must refuse the climb either way).
             self.token = others[0] if others else "s-b-no-token-staged"
             if others and (stage / self.token).is_file():
                 self.token_bytes = (stage / self.token).read_bytes()
@@ -289,7 +282,7 @@ class StageClimbReplay(R.ReplayFn):
 @pytest.mark.parametrize("surface", ["typed", "bash"])
 def test_r_i6_reads_climbing_out_of_the_agent_half_are_refused(tenants, tmp_path, monkeypatch,
                                                                 surface):
-    """R-I6/U9: `/agent/..` is the copy's `stage/` (the staged token) and `/agent/../..` the copy
+    """`/agent/..` is the copy's `stage/` (the staged token) and `/agent/../..` the copy
     root (its `settings/`, its `owner` record). Reads of the copy's settings, the token and the
     owner record through those climbs are each refused and their bytes never reach the model; a
     listing of `/agent/..` shows the model neither the token nor any copy sibling. Positive

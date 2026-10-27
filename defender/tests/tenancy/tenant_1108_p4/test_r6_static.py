@@ -1,7 +1,6 @@
-"""#1108 P4 round 6 — static pins on files nothing hermetic executes (each was a wrong-but-green
-variant): what the dev Forgejo may mount from the issuer's state, what a Docker build context
-excludes, and the provisioning script's secret hygiene. Parsing the files as text is the oracle:
-the script needs docker and OpenBao to run (`test_live_dev_issuer.py` owns that)."""
+"""#1108 P4: static pins on files nothing hermetic executes (the dev compose file, `.dockerignore`,
+the issuer provisioning script), each a wrong-but-green variant. Parsing the files as text is the
+oracle: the script needs docker and OpenBao to run."""
 from __future__ import annotations
 
 import re

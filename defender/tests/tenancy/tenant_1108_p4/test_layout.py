@@ -1,7 +1,5 @@
-"""O1 / O-U5 / O-U6 (structural half) / O10 remnant — the product tree's layout (#1108 P4).
-
-After P4 the product tree holds no tenant knowledge: the tenant repo's `agent/` is the only
-home of lessons, system skills, queries, the tacit registry and the pitfalls add-on.
+"""#1108 P4, the product tree's layout: it holds no tenant knowledge. The tenant repo's `agent/`
+is the only home of lessons, system skills, queries, the tacit registry and the pitfalls add-on.
 """
 from __future__ import annotations
 
@@ -27,21 +25,20 @@ def _entries(folder: Path) -> set[str]:
 
 
 def test_product_skills_are_exactly_the_five_product_skills():
-    """O1: `defender/skills/` holds exactly gather, invlang, handbook, advisory and connect —
-    no system skill (`cmdb`, `elastic`, ...) and no `tacit-knowledge` folder."""
+    """No system skill (`cmdb`, `elastic`, ...) and no `tacit-knowledge` folder."""
     assert _entries(SKILLS) == PRODUCT_SKILLS, sorted(_entries(SKILLS) ^ PRODUCT_SKILLS)
 
 
 def test_no_lesson_corpus_in_the_product_tree():
-    """O1 / O-U5: no `defender/lessons*` entry — the runtime corpus, the questioner's, and the
-    retired `lessons-actor`/`lessons-environment` (deleted, not archived) are all gone."""
+    """The runtime corpus, the questioner's and the retired corpora (deleted, not archived) are
+    all gone."""
     left = sorted(p.name for p in DEFENDER.glob("lessons*"))
     assert left == [], left
 
 
 def test_the_query_catalog_is_gone_and_its_schema_moved_beside_gather():
-    """O1: `skills/gather/queries/` is absent; the catalog's format document, product
-    content, lives at `skills/gather/query-schema.md`, and no `SCHEMA.md` remains."""
+    """`skills/gather/queries/` is absent; the catalog's format document, product content,
+    lives at `skills/gather/query-schema.md`, and no `SCHEMA.md` remains."""
     assert not (SKILLS / "gather" / "queries").exists()
     schema = SKILLS / "gather" / "query-schema.md"
     assert schema.is_file(), schema
@@ -50,7 +47,7 @@ def test_the_query_catalog_is_gone_and_its_schema_moved_beside_gather():
 
 
 def test_no_tacit_registry_or_pitfalls_add_on_in_the_product_tree():
-    """O1: the tacit registry (`skills/tacit-knowledge/registry.yaml`) and the learned SQL
+    """The tacit registry (`skills/tacit-knowledge/registry.yaml`) and the learned SQL
     pitfalls add-on (`skills/gather/defender-sql.pitfalls.md`) are tenant content; neither, nor
     a learned `## Common pitfalls` section in the product's own `defender-sql.md`, is here."""
     registries = sorted(str(p.relative_to(DEFENDER)) for p in SKILLS.rglob("registry.yaml"))
@@ -61,21 +58,21 @@ def test_no_tacit_registry_or_pitfalls_add_on_in_the_product_tree():
 
 
 def test_no_verb_roster_file_anywhere_in_the_product_tree():
-    """O10 remnant (retired in P2, held here): no committed `verb-roster.md` survives the move."""
+    """No committed `verb-roster.md` survives (retired in P2, held here)."""
     found = sorted(str(p.relative_to(DEFENDER)) for p in DEFENDER.rglob("verb-roster.md")
                    if "tests" not in p.relative_to(DEFENDER).parts
                    and ".venv" not in p.relative_to(DEFENDER).parts)
     assert found == [], found
 
 
-# --- O-U5: the retired corpora are not named by the layout owner or the posture page ---------
+# --- the retired corpora are not named by the layout owner or the posture page ---------------
 
 def _source(rel: str) -> str:
     return (DEFENDER / rel).read_text(encoding="utf-8")
 
 
 def test_the_layout_owner_names_no_retired_corpus():
-    """O-U5: `KnowledgePaths`' module defines no retired-corpus name and none of its corpus
+    """`KnowledgePaths`' module defines no retired-corpus name and none of its corpus
     sets holds one; its source spells neither corpus."""
     knowledge = importlib.import_module("defender.knowledge._knowledge")
     assert not hasattr(knowledge, "LESSONS_ACTOR")
@@ -88,14 +85,14 @@ def test_the_layout_owner_names_no_retired_corpus():
 
 
 def test_the_posture_page_names_no_retired_corpus():
-    """O-U5: the lessons posture page (`learning/frontend/serialize.py`) no longer shows the
-    retired corpora — it neither imports their names nor spells them."""
+    """The lessons posture page (`learning/frontend/serialize.py`) neither imports the retired
+    corpora's names nor spells them."""
     text = _source("learning/frontend/serialize.py")
     named = [w for w in (*RETIRED_CORPORA, "LESSONS_ACTOR", "LESSONS_ENVIRONMENT") if w in text]
     assert named == [], named
 
 
-# --- O-U6 (structural): nothing in presentation/ runs git -------------------------------------
+# --- nothing in presentation/ runs git --------------------------------------------------------
 
 _GIT_FACADE = "defender._git"
 _SPAWNERS = re.compile(
@@ -142,8 +139,8 @@ def git_runs(rel: str, tree: ast.Module, module: str, package: str) -> list[str]
 
 
 def test_nothing_in_presentation_runs_git():
-    """O-U6: no module under `defender/presentation/` runs git — no use of the `_git` facade
-    and no spawn of a `git` program (the run page's lesson-history panel read `git log`)."""
+    """No use of the `_git` facade and no spawn of a `git` program (the run page's removed
+    lesson-history panel read `git log`)."""
     folder = DEFENDER / "presentation"
     found: list[str] = []
     for rel in _astlib.source_files(folder, (".venv", "__pycache__")):
@@ -155,7 +152,7 @@ def test_nothing_in_presentation_runs_git():
 
 
 def test_the_git_census_sees_aliases_and_spawns_but_not_a_python_child():
-    """O-U6 positive/negative control on the same channel: a call through an aliased facade
+    """Positive and negative control on the same channel: a call through an aliased facade
     module, through a function-local aliased import, and a `subprocess.run(["git", ...])` are
     each seen; spawning this interpreter, reading a `.git` pointer file, naming the facade's
     `REPO_ROOT` or catching its `GitError` are not running git."""

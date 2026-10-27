@@ -1,30 +1,10 @@
-"""#1108 P4, PR #1288 review: the fixes that dissolve a finding by construction, each pinned at the
-seam that now carries it.
+"""#1108 P4 fixes from PR #1288's review, each pinned at the seam that now carries it.
 
-- a run copy is owned from the instant its folder exists (its building name carries its owner),
-  so a publish's sweep, which takes no notice of the building process, never removes it;
-- the publish child holds ONE deadline over its network phase and reports, and records, running
-  out of it itself;
-- the launcher records the outcomes only it sees (a child that crashed or printed nothing).
-
-Second round:
-- every outcome the child reports is recorded from the report line itself (lock busy too);
-- a deadline that is not positive is already out, never "no deadline";
-- the run's agent folder and its stage are judged before the box-or-host choice, so the
-  unsandboxed opt-out never swallows a stage refusal;
-- the reducer pitfalls page the curator writes is the page a gather dispatch names, and the
-  tenant template ships it;
-- removing a batch's draft never raises; a missing alert is refused before any publish; two
-  launches into one held-out index cannot interleave their pin read and append.
-
-Third round:
-- the child's own report, whenever it printed one, is the outcome, even after the launcher
-  asked it to stop; the launcher never raises, and kills the child's whole group when it ends;
-- an `issuer_role` that is not a plain name is a refused binding, before any login;
-- a run box is always started over a run copy;
-- a run's knowledge commit comes from its host-held record; the family's, from the episode's
-  knowledge pin, which a sibling's start and the judge both read;
-- a batch reads its base's files once per head.
+A run copy is owned from the instant its folder exists (its building name carries its owner), so
+a publish's sweep never removes it mid-build. The publish child holds one deadline over its
+network phase, and every outcome is recorded from the report line (the launcher records what only
+it sees). The stage is judged before the box-or-host choice. A run's knowledge commit comes from
+its host-held record, and a family's from the episode's knowledge pin.
 """
 from __future__ import annotations
 
@@ -69,8 +49,8 @@ def test_a_folder_whose_name_carries_a_dead_owner_is_dead(tmp_path):
 
 
 def test_a_publish_sweep_keeps_a_run_copy_being_built_and_removes_a_dead_builders(p4_tenant):
-    """The finding's race, replayed in order: a run copy's building folder exists with no owner
-    file yet (the builder is between making it and writing its record) when a publish sweeps."""
+    """The race, replayed in order: a run copy's building folder exists with no owner file yet
+    (the builder is between making it and writing its record) when a publish sweeps."""
     from defender.learning.author.version_control.exports import sweep_dead_owners
     from defender.tenancy._owner import owned_temporary
 
@@ -160,7 +140,7 @@ def test_control_a_child_that_reports_validly_is_not_recorded_by_the_launcher(p4
     assert status is None or "publish child failed" not in status.get("refused", ""), status
 
 
-# --- second round: one recorder for every reported outcome -------------------------------------
+# --- one recorder for every reported outcome --------------------------------------------------
 
 def _lock(t):
     from defender.learning.author.version_control import tenant_lock
@@ -242,7 +222,7 @@ def test_the_launcher_and_run_start_build_one_failed_child_line():
     assert report.reason == run_knowledge.child_failed("it printed no report line").reason
 
 
-# --- second round: the stage is judged on both paths -------------------------------------------
+# --- the stage is judged on both paths ---------------------------------------------------------
 
 def _stage(tmp_path: Path) -> tuple[Path, Path]:
     stage = tmp_path / "copy" / "stage"
@@ -280,7 +260,7 @@ def test_a_stage_fault_is_refused_even_with_the_unsandboxed_opt_out(tmp_path, mo
     assert verdicts, "the refusal wrote no did-not-run marker"
 
 
-# --- second round: the reducer pitfalls page is one name, shipped and named ---------------------
+# --- the reducer pitfalls page is one name, shipped and named -----------------------------------
 
 def test_the_template_ships_the_reducer_pitfalls_page_the_curator_edits():
     from defender.knowledge._knowledge import AGENT_REL, REDUCER_PITFALLS
@@ -315,7 +295,7 @@ def test_a_gather_dispatch_names_the_run_copys_reducer_pitfalls_page():
     assert "reducer_pitfalls" in skill, "the gather skill never tells the agent to read it"
 
 
-# --- second round: cleanup, alert, held-out index ----------------------------------------------
+# --- cleanup, alert, held-out index ------------------------------------------------------------
 
 def test_a_draft_that_cannot_be_removed_is_logged_not_raised(tmp_path, caplog):
     from types import SimpleNamespace
@@ -354,7 +334,7 @@ def test_an_exclusively_held_index_folder_excludes_another_process(tmp_path):
     assert free.returncode == 0, "control: the folder is free once released"
 
 
-# --- third round: the child's word wins; one group per publish ----------------------------------
+# --- the child's word wins; one group per publish ----------------------------------------------
 
 def test_a_child_that_finishes_after_the_stop_is_reported_as_it_said(p4_tenant):
     """The launcher's wait runs out and it asks the child to stop; the child (on the lock, so
@@ -405,7 +385,7 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
         raise AssertionError("a process the child started outlived the publish")
 
 
-# --- third round: the binding is judged once, when read ----------------------------------------
+# --- the binding is judged once, when read -----------------------------------------------------
 
 def test_an_issuer_role_that_is_not_a_plain_name_is_a_refused_binding(p4_tenant):
     from defender.tenancy._tenant import read_forge_binding
@@ -416,7 +396,7 @@ def test_an_issuer_role_that_is_not_a_plain_name_is_a_refused_binding(p4_tenant)
         read_forge_binding(p4_tenant.tenant)
 
 
-# --- third round: a run box is always a run copy's ----------------------------------------------
+# --- a run box is always a run copy's ----------------------------------------------------------
 
 def test_a_run_box_over_a_bare_agent_folder_is_refused(tmp_path):
     from defender.box import BoxSpec
@@ -429,7 +409,7 @@ def test_a_run_box_over_a_bare_agent_folder_is_refused(tmp_path):
                                   None, None)
 
 
-# --- third round: knowledge commits from host-held records --------------------------------------
+# --- knowledge commits from host-held records --------------------------------------------------
 
 _A = "a" * 40
 _B = "b" * 40
@@ -539,7 +519,7 @@ def test_the_judge_reads_lesson_bodies_at_the_familys_pin_not_a_siblings_stamp(t
         "the judge read lesson bodies at the commit a sibling's box wrote")
 
 
-# --- third round: a batch reads its base once per head ------------------------------------------
+# --- a batch reads its base once per head ------------------------------------------------------
 
 def test_a_batch_reads_its_bases_files_once_per_head():
     from types import SimpleNamespace

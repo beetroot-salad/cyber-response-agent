@@ -1,21 +1,10 @@
-"""#1108 P4 flow 2 — materialise: an export for any commit in the clone, rebuilt from git objects.
+"""#1108 P4 flow 2: `version_control.materialise_export(tenant, commit)` writes `exports/<commit>/`
+for any commit in the clone from its git objects (exports are derived and rebuildable): no
+network, no issuer, the same validation as publish (`DeliveryRefused`), never touching `current`,
+under the tenant lock with a short bounded retry (`LockBusy` after it).
 
-Design (flow 2): "git-capable, no network, no issuer: write `exports/<commit>/` from clone
-objects if absent; same validation as publish; never touches `current`. Built on a local-only
-object reader split out of `GitRepository` (whose `open` needs the issuer and forge — P4-C22).
-Takes the tenant lock with a short bounded retry; every writer of `exports/`, and its temp
-sweep, runs under the lock." P-2: exports are derived and rebuildable from the clone.
-
-ASSUMED SYMBOL (reported; the design names the flow, not the function):
-`defender.learning.author.version_control.materialise_export(tenant, commit) -> TenantExport`
-— the tenant and a commit only: no identity, client or origin (no issuer, no network). Its
-refusals are the package's `DeliveryRefused` (publish's refusal type, "same validation as
-publish"); a lock still held after the bounded retry is `LockBusy`. Imported lazily so the
-module collects before it exists.
-
-"No network" is observed on the fakes' own call records (the origin's `GitHTTP.seen`, the
-forge's `ForgeHTTP.requests`, the issuer's `VaultHTTP.calls`), with a real publish on the same
-tenant as the positive control that those records do move.
+"No network" is observed on the fakes' own call records (`GitHTTP.seen`, `ForgeHTTP.requests`,
+`VaultHTTP.calls`); a real publish on the same tenant is the control that those records move.
 """
 from __future__ import annotations
 
@@ -68,10 +57,9 @@ def _temporaries(t) -> list[str]:
 
 def test_flow2_materialise_writes_a_clone_commits_export_without_network_or_moving_current(
         p4_tenant):
-    """Flow 2: a commit in the clone's objects (merged and fetched, never published) gets
-    `exports/<commit>/` holding exactly its `agent/` and `settings/` blobs; `current`, the
-    clone's HEAD and working tree are untouched; the origin, forge and issuer saw no call.
-    Positive control: a real publish on the same tenant does call all three."""
+    """A merged and fetched (never published) commit gets an export holding exactly its
+    `agent/` and `settings/` blobs, with `current` and the clone untouched and no call to the
+    origin, forge or issuer. Control: a real publish calls all three."""
     t = p4_tenant
     later = t.merge(dict([LATER]))
     _fetch(t)
@@ -101,8 +89,8 @@ def test_flow2_materialise_writes_a_clone_commits_export_without_network_or_movi
 
 
 def test_flow2_materialise_rebuilds_a_deleted_export_and_never_writes_current(p4_tenant):
-    """P-2: an export is derived; deleted, it is rebuilt byte-identical from the clone. With no
-    `current` at all, materialise still works and still writes none."""
+    """A deleted export is rebuilt byte-identical from the clone; with no `current` at all,
+    materialise still works and writes none."""
     t = p4_tenant
     first = files_under(export_dir(t.tenant, t.commit))
     exports = export_dir(t.tenant, t.commit).parent
@@ -150,10 +138,8 @@ def _foreign_marker(w: Path) -> None:
 
 @pytest.mark.parametrize("bad", ["link", "gitlink", "foreign-tenant-id"])
 def test_flow2_materialise_refuses_what_publish_refuses_and_leaves_nothing(p4_tenant, bad):
-    """Flow 2: "same validation as publish" — a commit holding a link, a gitlink, or an
-    `agent/.tenant-id` naming another tenant is refused (`DeliveryRefused`): no
-    `exports/<commit>/`, no staging folder, `current` unchanged. The positive control is the
-    first test (a clean commit materialises)."""
+    """A link, a gitlink or a foreign `agent/.tenant-id` is refused as publish refuses it,
+    leaving no export, no staging folder and `current` unchanged. Control: the first test."""
     t = p4_tenant
     edit = {"link": _link, "gitlink": _gitlink(t), "foreign-tenant-id": _foreign_marker}[bad]
     commit = push_to_remote(t.p3, t.scratch, edit, f"a merged {bad}", stage=False)
@@ -169,7 +155,7 @@ def test_flow2_materialise_refuses_what_publish_refuses_and_leaves_nothing(p4_te
 
 
 def test_flow2_a_commit_absent_from_the_clone_is_refused_naming_it(p4_tenant):
-    """P-2's limit: only a commit in the clone can be rebuilt. One it does not hold is refused
+    """Only a commit in the clone can be rebuilt: one it does not hold is refused
     naming the commit, and no folder is made for it; nothing is fetched to find it."""
     t = p4_tenant
     before = _calls(t)
@@ -214,9 +200,8 @@ def _plant_dead_temporary(t) -> Path:
 
 
 def test_flow2_materialise_waits_out_a_briefly_held_lock(p4_tenant):
-    """Flow 2: "takes the tenant lock with a short bounded retry" — a lock released 0.2 s after
-    materialise starts does not fail it. (The retry's length is undesigned; 0.2 s is taken as
-    well inside any "short" retry — reported.)"""
+    """A lock released 0.2 s after materialise starts does not fail it (the retry's length is
+    not designed; 0.2 s is well inside any short one)."""
     t = p4_tenant
     later = t.merge(dict([LATER]))
     _fetch(t)
@@ -230,11 +215,9 @@ def test_flow2_materialise_waits_out_a_briefly_held_lock(p4_tenant):
 
 
 def test_flow2_materialise_gives_up_on_a_held_lock_and_writes_nothing_outside_it(p4_tenant):
-    """Flow 2: the retry is BOUNDED — with the lock held throughout, materialise gives up with
-    `LockBusy` (within 60 s here) — and every write to `exports/`, its temp sweep included,
-    happens only under the lock: no export folder is made and a dead publisher's staging folder
-    is left alone. Positive control: once the lock is free, the same call sweeps it and writes
-    the export."""
+    """With the lock held throughout, materialise gives up with `LockBusy` (within 60 s here)
+    having written nothing to `exports/`, not even its temp sweep. Control: once the lock is
+    free, the same call sweeps the dead staging folder and writes the export."""
     t = p4_tenant
     later = t.merge(dict([LATER]))
     _fetch(t)

@@ -1,7 +1,4 @@
-"""#1108 P4 round 6 — malformed inputs the earlier rounds never fed (each case was a
-wrong-but-green production variant): a whitespace-led name below `agent/`, a half-present clone
-tree, a malformed forge binding, a malformed commit id handed to materialise, garbage and
-multi-line publish reports (launcher and run side), and a non-UTF-8 name in a published tree."""
+"""#1108 P4: malformed inputs, each case a wrong-but-green production variant."""
 from __future__ import annotations
 
 import json
@@ -30,7 +27,7 @@ def _vc():
     return version_control
 
 
-# --- inputs-02: a whitespace-led name below the first component -------------------------------
+# --- a whitespace-led name below the first component -----------------------------------------
 
 @pytest.mark.parametrize("path", ["agent/lessons/ x.md", "agent/lessons/\tx.md",
                                   "agent/ lessons/x.md", "agent/lessons/ "])
@@ -53,7 +50,7 @@ def test_r6_a_draft_file_with_a_whitespace_led_name_refuses_the_whole_change_set
         batch.change_set()
 
 
-# --- inputs-06: a clone with only one half of the working tree is still judged ----------------
+# --- a clone with only one half of the working tree is still judged --------------------------
 
 @pytest.mark.parametrize("half", ["settings", "agent"])
 def test_r6_a_clone_missing_one_half_of_its_tree_is_refused_at_run_start(
@@ -67,7 +64,7 @@ def test_r6_a_clone_missing_one_half_of_its_tree_is_refused_at_run_start(
         assert not out.reached, f"a run started over a clone with no {half}/: {out.text()}"
 
 
-# --- inputs-07: a forge binding with an empty or non-string field ------------------------------
+# --- a forge binding with an empty or non-string field ----------------------------------------
 
 @pytest.mark.parametrize("field", ["origin", "audience", "issuer_role", "issuer_config"])
 @pytest.mark.parametrize("bad", ["", None, 7, ["x"]])
@@ -100,7 +97,7 @@ def test_r6_a_forge_binding_naming_a_relative_issuer_config_is_refused(p4_tenant
         _tenant.read_forge_binding(p4_tenant.tenant)
 
 
-# --- inputs-08 / inputs-09: materialise takes only a full lowercase commit id -------------------
+# --- materialise takes only a full lowercase commit id -----------------------------------------
 
 @pytest.mark.parametrize("commit", ["../drafts", "..", "a/b", "abcd", "abcdef0123456789",
                                     "A" * 40, "0" * 41, "0" * 63, "0" * 65, ""])
@@ -113,7 +110,7 @@ def test_r6_materialise_refuses_anything_but_a_full_commit_id(p4_tenant, commit)
     assert current_commit(p4_tenant.tenant) == p4_tenant.commit
 
 
-# --- inputs-24 / 26 / 27, surfaces-30 / 31: garbage and multi-line reports are never fresh -----
+# --- garbage and multi-line reports are never fresh -------------------------------------------
 
 @pytest.mark.parametrize("line", ["fresh notanoid", "fresh abc123", f"fresh {OID.upper()}",
                                   f"fresh {OID}0", f"fresh {OID} extra", "fresh",
@@ -149,7 +146,7 @@ def tenant_id_only(tmp_path):
     return "r6-tenant", tmp_path
 
 
-# --- inputs-51: a non-UTF-8 name in a published tree is refused, not merged --------------------
+# --- a non-UTF-8 name in a published tree is refused, not merged ------------------------------
 
 def test_r6_a_commit_holding_a_non_utf8_name_is_refused_by_materialise(p4_tenant):
     t = p4_tenant

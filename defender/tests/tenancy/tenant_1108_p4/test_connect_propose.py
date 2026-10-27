@@ -1,19 +1,9 @@
-"""#1108 P4 slice S-D — flow 6 (connect's two-repo split) and O7 (connect's tenant half goes through
-`TenantDelivery`): the adapter is staged in the product repo; the system skill, seed queries and
-tacit entries are staged in a host directory; `tenant.py propose` turns that directory into a
-`ChangeSet` -> commit-maker -> PR touching `agent/` only; `validate_scaffold` checks the staged
-tenant half. Plus connect's model-facing instructions for that split (S-A owns the generic
-model-text lint; this file owns connect's specific two-repo instructions).
-
-ASSUMED SEAMS / SHAPES (reported; the implementer provides them):
-  - `defender.cli.tenant.propose(tenant_id, staged: Path, *, client=None, identity=None) -> int`
-    (the CLI verb `tenant.py propose <tenant> <dir>`), keywords as S-C's `update`. Refusals
-    print `[tenant.py] ...` (the file's `_say`) and return non-zero.
-  - The staged directory is shaped like the tenant's `agent/` root: `<dir>/skills/<system>/...`
-    lands as `agent/skills/<system>/...`. Files are added or replaced; nothing absent from the
-    staged directory is deleted (connect proposes one system's files, never the corpus).
-  - `validate_scaffold.py <system> --tenant <T> --staged <dir>`: the skill and template checks
-    read the staged directory (agent-root-shaped), the adapter checks the product repo.
+"""#1108 P4 flow 6, connect's two-repo split: the adapter is staged in the product repo; the system
+skill, seed queries and tacit entries in a host directory shaped like the tenant's `agent/`, which
+`tenant.py propose` turns into a commit-maker PR touching `agent/` only (files added or replaced,
+nothing deleted: connect proposes one system's files, never the corpus); `validate_scaffold.py
+--staged` checks that tenant half. Plus connect's model-facing instructions for the split (the
+generic model-text lint is `test_model_text.py`'s).
 """
 from __future__ import annotations
 
@@ -79,7 +69,7 @@ def _product_trace(repo: Path = REPO_ROOT) -> dict:
 
 
 def test_control_the_product_trace_sees_the_systems_files_and_a_connect_branch(tmp_path):
-    """R-L6 control for `_product_trace`: on a scratch product checkout (never the real one) it
+    """Control for `_product_trace`: on a scratch product checkout (never the real one) it
     sees the system's skill and its query folder written the product-tree way, and a `connect/`
     branch, each on its own; an unrelated product file moves neither."""
     repo = product_repo(tmp_path)
@@ -106,11 +96,9 @@ def test_control_the_product_trace_sees_the_systems_files_and_a_connect_branch(t
 
 def test_flow6_propose_turns_a_staged_directory_into_one_agent_only_pr_on_the_tenant_forge(
         p4_tenant, tmp_path, capsys):
-    """Flow 6 / O7: `propose` over the staged tenant half commits exactly the staged files, under
-    `agent/`, as commit-maker commits on a branch of the tenant clone off the origin's `main`,
-    pushes it to the tenant origin and opens one PR against `main` on the tenant forge. Nothing
-    else in `agent/` changes, the clone stays clean on `main`, and the product checkout gains
-    neither the system's files nor a `connect/` branch."""
+    """`propose` commits exactly the staged files under `agent/` on a branch off the origin's
+    `main` and opens one PR against `main`; the clone stays clean on `main`, and the product
+    checkout gains neither the system's files nor a `connect/` branch."""
     t = p4_tenant
     bind_forge(t)
     staged = _stage(tmp_path / "staged", STAGED_FILES)
@@ -136,9 +124,8 @@ def test_flow6_propose_turns_a_staged_directory_into_one_agent_only_pr_on_the_te
 @pytest.mark.parametrize("plant", ["tenant-id", "symlink"])
 def test_flow6_propose_refuses_a_staged_entry_a_change_set_cannot_carry(p4_tenant, tmp_path,
                                                                       capsys, plant):
-    """Flow 6 / amendment 2 O-C: a staged directory holding `.tenant-id` or a link is
-    refused whole — non-zero, the refusal naming the entry — and nothing is committed, pushed or
-    opened. (Control: the previous case proposes the same files without the planted entry.)"""
+    """A staged `.tenant-id` or link refuses the whole directory, naming the entry; nothing is
+    committed, pushed or opened. Control: the previous case, without the plant."""
     t = p4_tenant
     bind_forge(t)
     staged = _stage(tmp_path / "staged", STAGED_FILES)
@@ -196,7 +183,7 @@ def _staged_cmdb(root: Path, *, skill: str | None) -> Path:
 
 
 def test_flow6_validate_scaffold_judges_the_staged_skill_not_a_product_tree_copy(p4_tenant, tmp_path):
-    """Flow 6: the scaffold validator reads the per-system skill from the STAGED tenant half: a
+    """The scaffold validator reads the per-system skill from the staged tenant half: a
     staged `SKILL.md` naming the wrong skill FAILs, and one that is missing FAILs as missing,
     whatever the product checkout holds; a correct staged one PASSes (control: the same row read
     the same way)."""
@@ -232,7 +219,7 @@ def _connect_docs() -> dict[str, str]:
 
 
 def test_flow6_connect_never_tells_the_model_to_write_tenant_knowledge_into_the_product_repo():
-    """Flow 6 / O-TEXT: no connect page names a product-tree home for tenant knowledge (a
+    """No connect page names a product-tree home for tenant knowledge (a
     `defender/skills/<system>/` folder, `defender/skills/gather/queries/`, the tacit registry
     under `defender/skills/`). Positive control: the same matcher finds such a spelling in a line
     written the old way, and passes the product skills and the adapter's product path."""
@@ -249,7 +236,7 @@ def test_flow6_connect_never_tells_the_model_to_write_tenant_knowledge_into_the_
 
 
 def test_flow6_connect_routes_the_tenant_half_through_propose_and_keeps_the_adapter_in_product():
-    """Flow 6: connect's main page and its tacit route both hand the tenant half to `tenant.py
+    """Connect's main page and its tacit route both hand the tenant half to `tenant.py
     propose` (a staged directory, never a branch of the product repo), every scaffold-validator
     call passes the staged directory, and the adapter is still written into the product repo's
     `defender/integrations/`."""

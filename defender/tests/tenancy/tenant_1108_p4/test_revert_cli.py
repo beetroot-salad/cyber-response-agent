@@ -1,18 +1,11 @@
-"""#1108 P4 slice S-D — flow 5: `cli/learning/revert_lesson.py --tenant T <lesson>` reverts through
-`TenantDelivery.revert` (D-peel, amendment 3 R1) on the TENANT repo, never the product repo (O7).
+"""#1108 P4 flow 5: `cli/learning/revert_lesson.py --tenant T <lesson>` reverts through
+`TenantDelivery.revert` on the tenant repo, never the product repo.
 
-Entry: the CLI's own `main(argv)`, as `python3 defender/cli/learning/revert_lesson.py` runs it,
-over S0's fixture tenant published for real (`p4_tenant`). The lesson to revert is written the
-way a drain writes one — P3's commit-maker in a batch, finished as a PR — and merged on the fake
-origin as a human would (`merged_agent_lesson`).
-
-ASSUMED SEAM (reported; mirrors S-C's `tenant.py update` and the drain's):
-    revert_lesson.main(argv, *, client=None, identity=None, issuer_config=None,
-                       issuer_transport=None)
-  `client`: the forge's HTTP client; `identity` given -> no AppRole login (OD4's `issuer_login`
-  otherwise, from `issuer_config`).
-The drain lock (`AUTHOR_DRAIN_LOCK`) stays the revert's mutual exclusion with the author drain
-(exit 3 when held), as today.
+Entry: the CLI's own `main(argv)` over `p4_tenant`, injecting the forge `client` and an `identity`
+(so no AppRole login). The lesson to revert is written as a drain writes one (P3's commit-maker
+in a batch, finished as a PR) and merged on the fake origin as a human would
+(`merged_agent_lesson`). The author drain's lock is the revert's mutual exclusion with the drain
+(exit 3 when held).
 """
 from __future__ import annotations
 
@@ -49,15 +42,14 @@ def _revert(t: Any, name: str) -> int:
 
 
 def _product_refs(repo: Path = REPO_ROOT) -> str:
-    """The product checkout's lesson-branch refs (where the legacy revert pushed a branch)."""
+    """The product checkout's lesson-branch refs (where a product-repo revert would push)."""
     return git(repo, "for-each-ref", "--format=%(refname) %(objectname)",
                "refs/heads/lessons/", "refs/remotes/origin/lessons/")
 
 
 def test_control_the_product_refs_channel_sees_a_lesson_branch(tmp_path):
-    """R-L6 control for `_product_refs`: on a scratch product checkout (never the real one, whose
-    refs are shared) it reads nothing at first and sees a `lessons/` branch, and a remote-tracking
-    `origin/lessons/` ref, once one is made — the shape the legacy revert left."""
+    """Control for `_product_refs`, on a scratch checkout (the real one's refs are shared): it
+    reads nothing at first, then sees a `lessons/` branch and an `origin/lessons/` ref."""
     repo = product_repo(tmp_path)
     assert _product_refs(repo) == ""
     git(repo, "branch", "lessons/revert-p4")
@@ -83,10 +75,9 @@ def _lock_is_held(lock: Path) -> bool:
 
 def test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson(
         p4_tenant, capsys, caplog):
-    """Flow 5 / O7: reverting a lesson the commit-maker created (and a human merged) opens a PR on
-    the TENANT forge whose branch, off the origin's `main`, deletes `agent/lessons/<name>.md`
-    and touches nothing else; the CLI prints the PR and exits 0; the product checkout gains no
-    lesson branch."""
+    """Reverting a lesson the commit-maker created (and a human merged) opens a PR on the tenant
+    forge whose branch, off the origin's `main`, only deletes the lesson; the CLI prints the PR
+    and exits 0, and the product checkout gains no lesson branch."""
     t = p4_tenant
     bind_forge(t)
     merged_agent_lesson(t.p3, t.scratch, "seed-revert", LESSON_PATH, b"agent-written lesson\n")
@@ -94,9 +85,8 @@ def test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_age
     before = set(remote_branches(t.remote, prefix=""))
     product_before = _product_refs()
     capsys.readouterr()
-    # The drain lock is held while the revert asks the forge for its PR (moved here from
-    # `learning/stages/test_frames_680_lifecycle.py`'s driver case when P4 deleted `revert(branch=)`):
-    # observed from a second open of the lock file at the PR's create request.
+    # The drain lock is held while the revert asks the forge for its PR: observed from a second
+    # open of the lock file at the PR's create request.
     from defender.learning.core.state import AUTHOR_DRAIN_LOCK
 
     lock = location_path(t.tenant.learning) / AUTHOR_DRAIN_LOCK.file
@@ -126,9 +116,8 @@ def test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_age
 
 
 def test_flow5_revert_cli_refuses_a_human_written_lesson_naming_why(p4_tenant, capsys, caplog):
-    """Flow 5 / D-peel: a lesson no commit-maker change produced (the fixture's, human-written)
-    is refused — exit 2, the refusal logged naming the lesson — and no branch is pushed and no PR
-    opened. (Control: the previous case reverts on the same channels.)"""
+    """A lesson no commit-maker change produced (the fixture's, human-written) is refused: exit
+    2, naming the lesson, no branch pushed and no PR opened. Control: the previous case."""
     t = p4_tenant
     bind_forge(t)
     refs = git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)")
@@ -143,8 +132,8 @@ def test_flow5_revert_cli_refuses_a_human_written_lesson_naming_why(p4_tenant, c
 
 
 def test_flow5_revert_cli_waits_out_a_running_author_drain(p4_tenant):
-    """Flow 5: while the tenant's author drain holds its lock, the revert exits 3 and asks
-    nothing of the forge or the origin."""
+    """While the tenant's author drain holds its lock, the revert exits 3 and asks nothing of
+    the forge or the origin."""
     from defender.learning.core.state import AUTHOR_DRAIN_LOCK
 
     t = p4_tenant

@@ -1,18 +1,12 @@
-"""#1108 P4 S-F — O14, lab continuity across the cutover.
+"""#1108 P4 O14, lab continuity across the cutover: the lab repo's `agent/` equals the product
+content the P4 PR deletes, minus the retired corpora, by digest per category (recorded on the PR);
+lab `main` is protected before merge; no legacy pending delivery, queued `defender/...` path or
+open product-repo learning PR remains at merge; `tenant.py update` runs before the first
+post-merge run.
 
-O14: the lab repo's `agent/` equals the product content the P4 PR deletes, minus the retired
-corpora (U5), by digest — `lessons`, `lessons-questioner`, system skills, queries, registry —
-recorded on the PR; lab `main` is protected before merge (P4-C13); no legacy pending delivery,
-queued item with a `defender/...` path, or open product-repo learning PR remains at merge;
-`tenant.py update` runs before the first post-merge run.
-
-Two kinds of test live here:
-
-* CI-safe self-checks of the comparator and scanners this file uses, over tmp git repos and
-  tmp state folders (they pass now: they prove the checks can fail, nothing about the lab).
-* `live`/manual checks run BY HAND at cutover, against the real lab clone and the product
-  repo. The digest check prints the record to paste on the PR (run with `-s`). They are a
-  procedure's gate, not CI.
+The CI-safe tests prove the comparator and scanners can fail (over tmp repos and state folders;
+nothing about the lab). The `live` tests are a procedure's gate, run by hand at cutover against
+the real lab clone; the digest check prints the record to paste on the PR (run with `-s`):
 
     DEFENDER_LIVE_DATA_ROOT=/workspace/.defender-data DEFENDER_LIVE_TENANT=<lab id> \\
     DEFENDER_O14_PRODUCT_COMMIT=<the P4 PR's parent> PYTHONPATH="$PWD" \\
@@ -23,15 +17,15 @@ Optional: DEFENDER_O14_LAB_REF (default `refs/remotes/origin/main` of the lab cl
 first, e.g. with `tenant.py update`), DEFENDER_O14_LEGACY_STATE (default
 `<main checkout>/defender/learning`), DEFENDER_O14_POST_MERGE=1 for the post-merge check.
 
-Interpretations (reported to the orchestrator, not settled by the design):
+Interpretations the checks encode:
 * `skills/gather/queries/SCHEMA.md` is not lab content: O1 moves it to the product's
-  `skills/gather/query-schema.md`, so it is not "deleted product content".
-* The lab's `agent/.tenant-id` and an EMPTY `agent/.gitkeep` are not product content and are
-  outside the comparison; anything else under the lab's `agent/` must be product content.
+  `skills/gather/query-schema.md`.
+* The lab's `agent/.tenant-id` and an empty `agent/.gitkeep` are outside the comparison; anything
+  else under the lab's `agent/` must be product content.
 * A "`defender/...` path" in a queued item is a string naming a product corpus
   (`defender/lessons*`, `defender/skills/...`), repo-relative or absolute.
 * "Product-repo learning PRs" are open GitHub PRs whose head starts `lessons/` or
-  `lead-author/` (the legacy `AuthorBranch` prefixes at base 0f62791e).
+  `lead-author/` (the legacy delivery's prefixes).
 """
 from __future__ import annotations
 
@@ -353,9 +347,8 @@ def _main_checkout() -> Path:
 
 @pytest.mark.live
 def test_o14_lab_agent_equals_the_deleted_product_content_by_digest():
-    """O14: the lab repo's `agent/` (at its `main`) equals the product content at the P4 PR's
-    parent minus the retired corpora — lessons, lessons-questioner, system skills, queries,
-    registry — by sha256 of every file, both directions. Prints the record for the PR."""
+    """The lab's `agent/` at its `main` equals the product content at the P4 PR's parent minus
+    the retired corpora, by sha256 of every file, both directions. Prints the record for the PR."""
     _root, _tenant_id, tenant_dir = _lab_inputs()
     commit = os.environ.get("DEFENDER_O14_PRODUCT_COMMIT")
     if not commit:
@@ -375,12 +368,10 @@ def test_o14_lab_agent_equals_the_deleted_product_content_by_digest():
 
 @pytest.mark.live
 def test_o14_lab_main_is_publishable_for_the_lab_tenant_before_merge():
-    """O14 ('`tenant.py update` runs before the first post-merge run') needs that publish to
-    succeed: P3's publish refuses an `agent/.tenant-id` not naming the tenant and a clone whose
-    `main` cannot fast-forward to `origin/main`. So before merge, the lab's `main` names the lab
-    tenant and the clone holds no commit on `main` that the forge lacks. (Observed 2026-10-22:
-    lab `origin/main` is 75b5e6a with `.tenant-id` = `playground`; the clone's `main` is 2
-    commits ahead — the UUID migration c6cdf9f and 1784b0f were never delivered. Red.)"""
+    """The first post-merge `tenant.py update` must publish, and P3's publish refuses an
+    `agent/.tenant-id` not naming the tenant and a clone whose `main` cannot fast-forward to
+    `origin/main`: so before merge the lab's `main` names the lab tenant and the clone holds no
+    commit the forge lacks."""
     _root, tenant_id, tenant_dir = _lab_inputs()
     clone = tenant_dir / "knowledge"
     marker = committed_blobs(clone, "refs/remotes/origin/main", "agent/.tenant-id")
@@ -391,8 +382,8 @@ def test_o14_lab_main_is_publishable_for_the_lab_tenant_before_merge():
 
 @pytest.mark.live
 def test_o14_lab_main_is_protected_before_merge_C13():
-    """O14/P4-C13: lab `main` is protected against the bot before the P4 PR merges (the same
-    check delivery makes; through the dev issuer). Red until the operator protects it."""
+    """Lab `main` is protected against the bot before the P4 PR merges (the check delivery
+    makes, through the dev issuer)."""
     from .test_live_dev_issuer import _forge, _lab, _login
 
     lab = _lab()
@@ -401,12 +392,9 @@ def test_o14_lab_main_is_protected_before_merge_C13():
 
 @pytest.mark.live
 def test_o14_no_legacy_pending_delivery_or_queued_corpus_path_remains():
-    """O14: at merge, neither the tenant's learning root nor the legacy product-tree learning
-    state holds a pending delivery (failed ones included: they too are legacy deliveries no P4
-    drain will pick up) or a queued item naming a `defender/...` corpus path. (Observed
-    2026-10-22: no `<lab>/learning/`; the main checkout's `defender/learning/` holds 5
-    author-queue items, 1 learn-queue item and `_pending` rows, none naming a corpus path, and
-    no `_pending_delivery/`.)"""
+    """At merge, neither the tenant's learning root nor the legacy product-tree learning state
+    holds a pending delivery (failed ones too: no P4 drain picks them up) or a queued item
+    naming a `defender/...` corpus path."""
     _root, _tenant_id, tenant_dir = _lab_inputs()
     legacy = Path(os.environ.get("DEFENDER_O14_LEGACY_STATE", _main_checkout() / "defender" / "learning"))
     roots = [tenant_dir / "learning", legacy]
@@ -416,7 +404,7 @@ def test_o14_no_legacy_pending_delivery_or_queued_corpus_path_remains():
 
 @pytest.mark.live
 def test_o14_no_open_product_repo_learning_pr_remains():
-    """O14: no open product-repo (GitHub) learning PR remains at merge."""
+    """No open product-repo (GitHub) learning PR remains at merge."""
     if shutil.which("gh") is None:
         pytest.skip("needs the GitHub CLI")
     out = subprocess.run(["gh", "pr", "list", "--state", "open", "--limit", "1000",
@@ -429,7 +417,7 @@ def test_o14_no_open_product_repo_learning_pr_remains():
 
 @pytest.mark.live
 def test_o14_after_merge_update_published_the_imported_main_before_any_run():
-    """O14: after the P4 PR merges, `tenant.py update` (or the first launch) has published:
+    """After the P4 PR merges, `tenant.py update` (or the first launch) has published:
     the lab's `current` export is its `main` tip, and that commit's `agent/` still equals the
     moved content. Opt-in: DEFENDER_O14_POST_MERGE=1 (and DEFENDER_O14_PRODUCT_COMMIT)."""
     if os.environ.get("DEFENDER_O14_POST_MERGE") != "1":

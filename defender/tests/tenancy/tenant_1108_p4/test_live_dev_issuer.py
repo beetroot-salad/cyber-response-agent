@@ -1,19 +1,15 @@
-"""#1108 P4 S-F — the dev issuer and Forgejo, against the running dev stack (`live`).
+"""#1108 P4: the dev issuer and Forgejo, against the running dev stack (`live`).
 
-O12 (U1): after `docker compose up` (and any restart) OpenBao is unsealed without a human and a
-delivery process logs in; one lesson PR is delivered end to end; the bot cannot push protected
-`main`. O13 (U2): Forgejo's data is the `<repo>/playground-knowledge/` bind mount, and the lab
-repo, its bot and its history carried over from the named volume. P-4/U4: deployment facts are
-file-only and never in the tenant repo.
+After `docker compose up` (and any restart) OpenBao is unsealed without a human and a delivery
+process logs in; one lesson PR is delivered end to end; the bot cannot push protected `main`
+(O12). Forgejo's data is the `<repo>/playground-knowledge/` bind mount, and the lab repo, its bot
+and its history carried over from the named volume (O13). Deployment facts are file-only and
+never in the tenant repo. These also probe the design's unverified claims (C13-C15: OpenBao's
+static seal, identity tokens and AppRole; Forgejo trusting an issuer on a non-443 port with a
+private CA), so a failure is the probe answering. Skips are for absent infrastructure only: a
+Forgejo older than 17 or a sealed issuer fails.
 
-These are where the unprobed claims get verified: P4-C13 (lab `main` protected against the bot),
-P4-C14 (OpenBao >= 2.4 static seal auto-unseals; identity tokens and AppRole behave as in Vault),
-P4-C15 (Forgejo accepts an issuer on a non-443 port with a private CA). Nothing here presumes
-their outcome beyond the design: a failure here is the probe answering.
-
-Skips are for absent infrastructure only. A Forgejo older than 17 or a sealed issuer FAILS.
-
-Inputs (test-only environment; P-4 forbids environment for the product, not for a test):
+Inputs (test-only environment; P-4 bars environment for the product, not for a test):
 
     DEFENDER_LIVE_DATA_ROOT        the host's real data root holding the lab tenant (the suite's
                                    conftest replaces DEFENDER_DATA_ROOT with a tmp root per test)
@@ -29,15 +25,9 @@ Inputs (test-only environment; P-4 forbids environment for the product, not for 
     PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock defender/.venv/bin/python -m pytest \\
         -m live defender/tests/tenancy/tenant_1108_p4/test_live_dev_issuer.py
 
-Assumed seam (A-ID, shared with S-D): `defender.learning.author.version_control.issuer_login(
-tenant) -> ForgejoIdentity` — reads the tenant row's forge binding and the issuer client config
-file it names (issuer URL, CA, AppRole role_id/secret_id), logs in to
-OpenBao with AppRole, and returns the identity whose `client` is the authenticated, CA-trusting
-OpenBao client. Every live delivery process (drains, `tenant.py`, the publish child) goes through
-it, so this file logs in exactly as a drain does.
-
-`survives docker compose down -v` (O13) cannot run from inside the dev container that `down`
-stops. It is a manual step: `docker compose down -v && docker compose up -d`, then run this file;
+Logins go through `version_control.issuer_login(tenant)`, as every delivery process's do.
+`survives docker compose down -v` (O13) cannot run from inside the dev container `down` stops:
+run `docker compose down -v && docker compose up -d` by hand, then this file;
 `test_forgejo_data_is_the_playground_knowledge_bind_mount_O13` and the O13 history test are the
 post-conditions.
 """
@@ -107,7 +97,7 @@ def _lab() -> Lab:
 
 
 def _login(lab: Lab):
-    """AppRole login exactly as a delivery process does it (assumed seam, see module doc)."""
+    """AppRole login exactly as a delivery process does it."""
     vc = importlib.import_module("defender.learning.author.version_control")
     return vc.issuer_login(lab.tenant)
 
@@ -182,10 +172,8 @@ def _forgejo_version(lab: Lab, identity) -> tuple[int, ...]:
 # ---------------------------------------------------------------------------------------------
 
 def test_forgejo_data_is_the_playground_knowledge_bind_mount_O13():
-    """O13/U2: the running Forgejo's `/data` is a bind of `<host repo>/playground-knowledge`,
-    not a docker volume — what makes `down -v` and rebuilds survivable. (Observed 2026-10-22:
-    `response-forgejo` runs 15.0.9 with `/data` on volume
-    `cyber-response-agent_devcontainer_forgejo-data`: red until the stack is re-created.)"""
+    """Not a docker volume: the bind is what makes `down -v` and rebuilds survivable. A stack
+    created before the migration keeps the volume and fails here until it is re-created."""
     mounts = _container("forgejo")["Mounts"]
     data = [m for m in mounts if m.get("Destination") == "/data"]
     assert len(data) == 1, f"forgejo /data mounts: {data}"
@@ -194,9 +182,8 @@ def test_forgejo_data_is_the_playground_knowledge_bind_mount_O13():
 
 
 def test_running_forgejo_is_17_or_later_O12():
-    """O12: the running Forgejo supports Authorized Integrations (17+). Fails, not skips, on an
-    older one. (Observed 2026-10-22: `response-forgejo` runs `codeberg.org/forgejo/forgejo:15.0.9`
-    while the compose default is 17.0.0 — red until the stack is re-created and upgraded.)"""
+    """Authorized Integrations need 17+: an older running Forgejo fails, not skips, until the
+    stack is re-created from the current compose file."""
     image = _container("forgejo")["Config"]["Image"]
     match = re.search(r":v?(\d+)\.(\d+)\.(\d+)$", image)
     assert match, f"the running Forgejo image {image!r} names no version"
@@ -204,7 +191,7 @@ def test_running_forgejo_is_17_or_later_O12():
 
 
 def test_issuer_state_is_on_disk_under_playground_issuer_and_no_host_port_U4():
-    """U4/design: the running openbao keeps its state in binds under
+    """The running openbao keeps its state in binds under
     `<host repo>/playground-issuer/`, uses no docker volume, and publishes no host port."""
     bao = _container("openbao")
     host_issuer = _host_repo() / "playground-issuer"
@@ -221,9 +208,9 @@ def test_issuer_state_is_on_disk_under_playground_issuer_and_no_host_port_U4():
 # ---------------------------------------------------------------------------------------------
 
 def test_issuer_is_unsealed_and_a_delivery_process_logs_in_O12_C14_C15():
-    """O12: with the stack up, OpenBao is initialised and unsealed (no human ran `unseal`), an
-    AppRole login yields a short-lived identity token bound to the lab tenant over the dev CA's
-    TLS, and Forgejo (17+) accepts that token for the lab repository (P4-C14, P4-C15)."""
+    """With the stack up, OpenBao is initialised and unsealed (no human ran `unseal`), an AppRole
+    login yields a short-lived identity token bound to the lab tenant over the dev CA's TLS, and
+    Forgejo (17+) accepts that token for the lab repository."""
     lab = _lab()
     identity = _login(lab)
     assert identity.issuer.startswith("https://"), identity.issuer
@@ -239,12 +226,10 @@ def test_issuer_is_unsealed_and_a_delivery_process_logs_in_O12_C14_C15():
 
 
 def test_after_an_issuer_restart_it_unseals_itself_and_publish_works_O12_C14():
-    """O12 ('and any restart'): `docker restart` the openbao container; within the budget the
-    issuer reports unsealed with nobody calling `sys/unseal`, a fresh AppRole login succeeds
-    (identity state persisted in file storage), and a publish of the lab tenant — fetch through
-    the issuer's token — succeeds. Mutates the dev stack: opt-in via
-    DEFENDER_LIVE_ALLOW_RESTART=1. Publishing touches local derived state only (exports,
-    `current`), never the lab repo."""
+    """After `docker restart` of openbao, within the budget it reports unsealed with nobody
+    calling `sys/unseal`, a fresh AppRole login succeeds (identity state persists in file
+    storage), and a publish of the lab tenant succeeds. Opt-in (DEFENDER_LIVE_ALLOW_RESTART=1):
+    it restarts the dev issuer; the publish touches only local derived state, never the lab repo."""
     lab = _lab()
     if os.environ.get("DEFENDER_LIVE_ALLOW_RESTART") != "1":
         pytest.skip("restarts the dev issuer: set DEFENDER_LIVE_ALLOW_RESTART=1")
@@ -281,11 +266,9 @@ def test_after_an_issuer_restart_it_unseals_itself_and_publish_works_O12_C14():
 # ---------------------------------------------------------------------------------------------
 
 def test_lab_main_is_protected_against_the_bot_O12_C13():
-    """O12/P4-C13: Forgejo reports lab `main` protected and not pushable by the bot (read-only;
-    the same check `TenantDelivery.open` makes). Then, opted in, a real push of a commit to
-    `main` with the bot's token is refused by Forgejo — attempted only after protection is
-    reported, so an unprotected `main` fails here without being written. (Observed 2026-10-22:
-    unprotected per the 2026-10-16 comment — red until the operator protects it.)"""
+    """Forgejo reports lab `main` protected against the bot (the check `TenantDelivery.open`
+    makes); then, opted in, a real push to `main` with the bot's token is refused. The push comes
+    only after protection is reported, so an unprotected `main` fails without being written."""
     lab = _lab()
     identity = _login(lab)
     _forge(lab, identity).verify_main_protection()
@@ -331,12 +314,10 @@ def _delete_branch(lab: Lab, identity, branch: str) -> None:
 # ---------------------------------------------------------------------------------------------
 
 def test_one_lesson_pr_is_delivered_end_to_end_through_the_dev_issuer_O12():
-    """O12: through AppRole login -> `TenantDelivery.open` -> publish -> batch draft -> one
-    lesson written in the `lessons` lane -> ChangeSet -> commit-maker -> push -> PR, the lab
-    Forgejo shows an open PR against `main` whose only file is that lesson. The batch uses its
-    own branch prefix so no drain's writer lease sees it, and the PR is closed and its branch
-    deleted afterwards. Opt-in: DEFENDER_LIVE_ALLOW_LAB_PR=1 (it opens a PR on the lab repo and
-    leaves a commit-maker record entry for the batch)."""
+    """Login, open, publish, one lesson in a batch draft, commit-maker, push, PR: the lab Forgejo
+    shows an open PR against `main` whose only file is that lesson. The batch's own branch
+    prefix keeps it out of every drain's writer lease; the PR is closed and its branch deleted
+    afterwards. Opt-in (DEFENDER_LIVE_ALLOW_LAB_PR=1): it also leaves a commit-maker record."""
     lab = _lab()
     if os.environ.get("DEFENDER_LIVE_ALLOW_LAB_PR") != "1":
         pytest.skip("opens a PR on the lab repo: set DEFENDER_LIVE_ALLOW_LAB_PR=1")
@@ -385,12 +366,11 @@ def test_one_lesson_pr_is_delivered_end_to_end_through_the_dev_issuer_O12():
 # ---------------------------------------------------------------------------------------------
 
 def test_deployment_facts_are_file_only_and_never_in_the_tenant_repo_P4_U4():
-    """P-4: the issuer client config lies under `<repo>/playground-issuer/client/` (dev, U4);
-    the tenant row's forge binding is exactly `{origin, audience, issuer_role, issuer_config}`
-    (no secret: the config's path, never its content); no
-    issuer/forge fact is in this process's environment (the dev container's); and no blob of the
-    lab repo's `main` carries the issuer URL, the audience, a certificate or a private key.
-    Positive control for the blob scan: it finds the tenant id in `agent/.tenant-id`."""
+    """The issuer client config lies under `<repo>/playground-issuer/client/`; the forge binding
+    is exactly `{origin, audience, issuer_role, issuer_config}` (the config's path, never its
+    content); no issuer/forge fact is in this process's environment; and no blob of the lab
+    repo's `main` carries the issuer URL, the audience, a certificate or a private key. Control:
+    the blob scan finds the tenant id in `agent/.tenant-id`."""
     lab = _lab()
     client_dir = _main_checkout() / "playground-issuer" / "client"
     assert client_dir in lab.issuer_config.resolve().parents, (
@@ -414,10 +394,9 @@ def test_deployment_facts_are_file_only_and_never_in_the_tenant_repo_P4_U4():
 # ---------------------------------------------------------------------------------------------
 
 def test_migration_kept_the_lab_repo_bot_history_and_the_old_volume_O13():
-    """O13: after the one-time migration from the named volume, the old volume still exists
-    (kept until the operator deletes it), the bot authenticates as the same Forgejo user it was,
-    and a lab commit made before the migration is an ancestor of the lab's `main`. Run right
-    after migrating (the old volume is the operator's to delete later)."""
+    """Run right after the one-time migration: the old volume still exists (the operator's to
+    delete), the bot authenticates as the same Forgejo user, and a lab commit made before the
+    migration is an ancestor of the lab's `main`."""
     lab = _lab()
     old = os.environ.get("DEFENDER_LIVE_O13_OLD_VOLUME")
     commit = os.environ.get("DEFENDER_LIVE_O13_COMMIT")

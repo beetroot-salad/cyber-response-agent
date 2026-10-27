@@ -1,6 +1,6 @@
-"""#1108 P4 round 6 — what the readers of a run's knowledge source accept (each case was a
-wrong-but-green production variant): a host record of the wrong shape is unreadable, never fresh;
-a run with no stamp and no record is a pre-P4 run (shows nothing)."""
+"""#1108 P4: what the readers of a run's knowledge source accept: a host record of the wrong
+shape is unreadable, never fresh; a run with no stamp and no record is a pre-P4 run (shows
+nothing)."""
 from __future__ import annotations
 
 import json
@@ -81,8 +81,7 @@ def test_r6_a_run_with_no_record_and_no_stamp_is_a_pre_p4_run_that_shows_nothing
 
 
 def test_r6_a_host_record_whose_kind_is_not_a_scalar_is_unreadable_not_a_crash():
-    """EXPECTED RED on honest code (production defect, reported): `kind not in KINDS` raises
-    `TypeError: unhashable type: 'list'` for `"kind": ["fresh"]` (or a dict), so a reader of the
-    run (page, ticket, API) crashes on a corrupt record instead of reading it as unreadable."""
+    """An unhashable `kind` (a list or dict) must not crash every reader of the run (page,
+    ticket, API) with a `TypeError` on the `kind not in KINDS` check."""
     for kind in (["fresh"], {"a": 1}):
         assert knowledge_status(_record(kind=kind), stamp_names_source=False) == UNREADABLE

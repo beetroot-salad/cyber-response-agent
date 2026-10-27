@@ -1,17 +1,11 @@
-"""#1108 P4 slice S-C — the run page.
+"""#1108 P4 run page: a stale run's page carries a banner naming the kind, the reason and the
+commit used, read from the host record beside the run dir (fresh and pinned runs carry none; a
+stamp the box rewrites changes nothing); the lesson-history section is gone (O-U6).
 
-- O-WARN (U8, U12): a stale run's page carries a banner naming the kind, the reason and the
-  commit used, read from the HOST record beside the run dir; fresh and pinned runs carry none;
-  a stamp the box rewrites (suppress or forge) changes nothing on the page.
-- O-U6: the run page has no lesson-history section and no table-of-contents entry for one.
-  (The structural half, "nothing in `presentation/` runs git", is slice S-A's.)
-
-Entry: a real hermetic run driven through the replay harness (`test_922_renderer.driven_run`), its
-page saved by the real post-run step (`run_common.visualize` over the tenant-bound handle), read
-back from the run dir. The run's knowledge source is planted as the host record
-(`test_stale_visibility.write_host_record`, assumed seam `RunPaths.knowledge_source()`), and the
-box-readable provenance stamp carries its informational view (OD17: no reason) unless a test
-plays the box rewriting it.
+Entry: a real hermetic run driven through the replay harness (`test_922_renderer.driven_run`),
+its page saved by the real post-run step (`run_common.visualize`) and read back. The host record
+is planted with `test_stale_visibility.write_host_record`, and the stamp carries its
+informational view (no reason) unless a test plays the box rewriting it.
 """
 from __future__ import annotations
 
@@ -95,9 +89,8 @@ def _normalized(page: str) -> str:
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
 def test_o_warn_a_stale_runs_page_carries_a_banner_naming_kind_reason_and_commit(
         run_dir, stale_kind):
-    """O-WARN: the page of a run whose host record is stale names its kind, its raw reason
-    (operator-facing; the host record is the only place it is kept) and the commit the run used;
-    the same run recorded fresh shows none of them."""
+    """The page shows the raw reason (operator-facing; the host record is its only keeper); the
+    same run recorded fresh shows none of the banner."""
     reason = RAW_REASON[stale_kind]
     _record(run_dir, knowledge_source("fresh"))
     fresh = _visible(_page(run_dir))
@@ -125,11 +118,9 @@ TAMPERED_REASON = "box says: open https://evil.invalid/ to fix"
 
 @pytest.mark.parametrize("tamper", ["suppress", "forge"])
 def test_o_warn_a_box_rewritten_stamp_changes_nothing_on_the_page(run_dir, tamper):
-    """O-WARN, danger lens (U12, OD17): the stamp sits in the box's rw bind, so the page reads the
-    host record only. The box rewriting the stamp changes nothing on the page, both ways:
-    - suppress: host record stale, stamp rewritten to fresh -> the banner is still there;
-    - forge: host record fresh, stamp rewritten to stale with the box's own commit and reason ->
-      still no banner, and neither the planted commit nor reason appears."""
+    """The stamp sits in the box's rw bind, so the page reads the host record only: rewriting
+    the stamp to fresh keeps the banner (suppress), and to stale with the box's own commit and
+    reason adds nothing (forge)."""
     if tamper == "suppress":
         host = knowledge_source("stale", stale_kind="transient")
         planted = knowledge_source("fresh", commit=STALE_COMMIT)
@@ -157,8 +148,8 @@ def test_o_warn_a_box_rewritten_stamp_changes_nothing_on_the_page(run_dir, tampe
 
 
 def test_o_warn_the_banner_shows_a_hostile_reason_escaped(run_dir):
-    """O-WARN, danger lens: a reason quoting attacker-influenced text (a merged path, a forge's
-    error body) is shown as text — escaped, never as markup."""
+    """A reason quoting attacker-influenced text (a merged path, a forge's error body) is shown
+    escaped, never as markup."""
     _record(run_dir, knowledge_source("stale", stale_kind="operator", reason=HOSTILE_REASON))
     page = _page(run_dir)
     assert html.escape(HOSTILE_REASON, quote=False) in page or html.escape(HOSTILE_REASON) in page, (
@@ -170,8 +161,8 @@ def test_o_warn_the_banner_shows_a_hostile_reason_escaped(run_dir):
 @pytest.mark.parametrize(("kind", "commit"), [("fresh", FRESH_COMMIT), ("pinned", PINNED_COMMIT)],
                          ids=["fresh", "pinned"])
 def test_o_warn_fresh_and_pinned_runs_pages_carry_no_stale_banner(run_dir, kind, commit):
-    """O-WARN: a fresh or pinned run's page says nothing about stale knowledge; the same run
-    recorded stale does (positive control on the same page)."""
+    """A fresh or pinned run's page says nothing about stale knowledge; the same run recorded
+    stale does (positive control)."""
     _record(run_dir, knowledge_source(kind, commit=commit))
     page = _visible(_page(run_dir))
     assert "stale" not in page.lower(), f"O-WARN: a {kind} run's page carries a stale banner"
@@ -185,10 +176,9 @@ def test_o_warn_fresh_and_pinned_runs_pages_carry_no_stale_banner(run_dir, kind,
 
 @pytest.mark.parametrize("how", ["missing-with-stamp", "corrupt"])
 def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, how):
-    """OD22' (3): where a host record should exist (the stamp names a source) but is missing, or
-    the record is corrupt, the page claims no freshness: a stale banner of kind operator saying
-    the knowledge record is unreadable. Control: the same run with a fresh host record shows no
-    banner."""
+    """Where a host record should exist (the stamp names a source) but is missing or corrupt,
+    the page claims no freshness: an operator-kind banner says the record is unreadable.
+    Control: a fresh host record shows none."""
     from defender.tests.tenancy.tenant_1108_p4.test_stale_visibility import (
         plant_unreadable_host_record,
     )
@@ -205,9 +195,8 @@ def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, h
 
 
 def test_od22_a_pre_p4_run_page_shows_no_banner(run_dir):
-    """OD22' (2): a run with no host record and no `knowledge_source` in its stamp (pre-P4; old
-    runs are not rewritten) shows no banner. Control on the same page: the same run whose stamp
-    names a source with the record missing (case 3) shows the unreadable banner."""
+    """Old runs are not rewritten, so a run with no host record and no stamp source shows no
+    banner. Control: the same run whose stamp names a source shows the unreadable banner."""
     from defender.tests.tenancy.tenant_1108_p4.test_stale_visibility import (
         plant_pre_p4_run,
         plant_unreadable_host_record,
@@ -224,9 +213,8 @@ def test_od22_a_pre_p4_run_page_shows_no_banner(run_dir):
 
 
 def test_o_u6_the_run_page_has_no_lesson_history_section_or_toc_entry(run_dir):
-    """O-U6 (U6): the run page drops the lesson-history panel (today's footer of "concurrent
-    lesson commits", read with `git log` over the product tree) and its table-of-contents link.
-    The rest of the table of contents stays (positive control)."""
+    """The lesson-history panel (a footer read with `git log` over the product tree) and its
+    table-of-contents link are gone; the rest of the table of contents stays (control)."""
     page = _page(run_dir)
     visible = _visible(page)
 

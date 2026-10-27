@@ -5,7 +5,7 @@ from defender.systems import verb_roster
 
 
 def test_model_surface_enumeration_and_withheld_verb_audit_survive(tmp_path):
-    """D6: deleting generator/loader cannot delete the functioning audit of instruction text."""
+    """The audit of instruction text works without the retired roster generator and loader."""
     tree = tmp_path / 'defender'
     adapters = tree / "integrations"
     adapters.mkdir(parents=True)

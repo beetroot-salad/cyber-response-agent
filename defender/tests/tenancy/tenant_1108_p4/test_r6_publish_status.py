@@ -1,7 +1,5 @@
-"""#1108 P4 round 6 — O-SEE / O-STALE through the real publish child entry (each case was a
-wrong-but-green production variant): a launch-time publish records its outcome (a
-misconfiguration is visible to `tenant.py check`, a success clears the refusal), a git fetch that
-cannot connect is an outage (`stale:transient`), and a busy lock is never recorded as a refusal."""
+"""#1108 P4: what the real publish child entry records for `tenant.py check`, each case a
+wrong-but-green production variant."""
 from __future__ import annotations
 
 import pytest

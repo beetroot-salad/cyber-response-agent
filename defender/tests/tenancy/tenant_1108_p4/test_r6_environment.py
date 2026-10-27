@@ -1,7 +1,7 @@
-"""#1108 P4 round 6 — the environment scrub, over EVERY issuer-named variable the design lists
-(each narrowing of the scrub was a wrong-but-green production variant), for the publish child and
-for every other host child (`provider_scrubbed_environ`, `run_env`), plus the publish child's
-lack of model-provider keys."""
+"""#1108 P4: the environment scrub over every issuer-named variable the design lists (each
+narrowing was a wrong-but-green production variant), for the publish child and every other host
+child (`provider_scrubbed_environ`, `run_env`), plus the publish child's lack of model-provider
+keys."""
 from __future__ import annotations
 
 import pytest
@@ -53,8 +53,6 @@ def test_r6_every_other_host_child_gets_none_of_the_issuer_named_variables(plant
 
 @pytest.mark.parametrize("name", ["ANTHROPIC_API_KEY", "FIREWORKS_API_KEY"])
 def test_r6_the_publish_child_gets_no_model_provider_key(monkeypatch, tmp_path, name):
-    """EXPECTED RED until production drops model-provider keys from the publish child's
-    environment (`publish_launch.child_environment` passes them today)."""
     from defender.investigation import publish_launch
 
     monkeypatch.setenv(name, "r6-model-provider-key")

@@ -1,35 +1,13 @@
-"""#1108 P4 slice S-D — flow 4 (the drain), O7 (its writes go through `TenantDelivery`), O9 (its
-refusals), D-closed on the retained-batch path, and O-SWEEP's draft half.
+"""#1108 P4 flow 4: the drains deliver through `TenantDelivery` (O7) and refuse what cannot be
+delivered (O9); a retained batch whose PR was closed; the writer lease; O-SWEEP's draft half.
 
-Flow 4: `--tenant T` → forge binding + issuer config → login → `TenantDelivery.open` → publish →
-batches (draft, box windows, ChangeSet per claim, commit-maker) → finish/deliver status
-(D-closed) → `discard()`.
-
-Every case drives the REAL drain entry (`defender.learning.core.drains.author_drain`) through the
-stage runner the CLI uses (`learning.core.cli._run_stage`), over S0's fixture tenant published
-for real (`p4_tenant`: a real clone, a loopback smart-HTTP origin, P3's forge and issuer fakes).
-The lessons curator that runs inside the tick is the REAL one (`learning.author.lessons.run`):
-only its model spawn (`cfg.invoke_agent`) is replaced, by `_spec773.FakeCurator`, which writes a
-lesson where the curator's config says its corpus is. Everything between the spawn and the forge
-(draft, ChangeSet, commit-maker, push, PR) is the code under test's.
-
-The drain's `paths.repo_root` is a scratch product checkout (a real git repo), so "nothing lands
-in the product repo" is observed on a repo the legacy drain WOULD commit to (positive control:
-a hand commit there shows on the same observation).
-
-ASSUMED SEAMS (reported; the implementer provides them; mirror S-C's `tenant.py update` and
-TenantDelivery.open's own keywords):
-  author_drain(paths, *, trigger_author=, client=, identity=, issuer_config=, issuer_transport=,
-               start_box=, stop_box=)
-    - `client`: the forge's HTTP client (production builds one); `identity`: a ForgejoIdentity,
-      given -> the AppRole login is skipped; absent -> `issuer_login(tenant,
-      issuer_config=...)` (orchestrator decision OD4; `issuer_transport` reaches its HTTP client,
-      see test_drain_credentials.py).
-    - `start_box(request) -> executor` / `stop_box(executor)`: the batch's box (default:
-      `TenantDelivery.start_box` / `box.stop_box`). The `branch=` and `scrub=` seams are gone.
-    - `trigger_author` keeps its call shape `(paths, state, channel, threshold_env,
-      module_name, pending_label, *, box)`; whatever else the drain hands it arrives as keywords
-      and is forwarded to the curator's config builder.
+Every case drives the real drain entry through the CLI's stage runner over `p4_tenant` (a real
+clone, a loopback origin, P3's forge and issuer fakes), injecting the forge `client`, an
+`identity` (so the AppRole login is skipped) and `start_box`/`stop_box`. The curator inside the
+tick is the real one with only its model spawn replaced by `_spec773.FakeCurator`; everything
+from the draft to the PR is the code under test's. `paths.repo_root` is a scratch product
+checkout, so "nothing lands in the product repo" is observed on a real repo (positive control: a
+hand commit there shows).
 """
 from __future__ import annotations
 
@@ -106,14 +84,9 @@ def thresholds(monkeypatch):
 
 def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_forge_O7(
         p4_tenant, tmp_path, thresholds, caplog):
-    """Flow 4, O7: a drain tick publishes first (a human merge already on the origin's `main`
-    becomes `current` and the batch's base), the curator's lesson is one commit-maker commit on a
-    `lessons/` branch of the TENANT clone touching only `agent/lessons/<lesson>` (never
-    `agent/.tenant-id`), pushed to the tenant origin with a PR against `main` on the tenant
-    forge; no checkout moved (the clone sits clean on `main`, one worktree); the draft is
-    discarded; the box mounted the draft, never the clone; the row stays queued until the lesson
-    reaches `main` (#922/#952: consumption follows durability, `hold_committed`); and the product
-    checkout's git state is byte-for-byte what it was."""
+    """A tick publishes first (a pending human merge becomes `current` and the batch's base), then
+    delivers the lesson as one commit on a tenant `lessons/` branch with its PR, moving no
+    checkout of the clone and nothing in the product repo."""
     t = p4_tenant
     bind_forge(t)
     merged = t.merge({"agent/lessons/human-merged.md": "a human-reviewed lesson\n"})
@@ -155,7 +128,7 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     staged = [m for m in mounts if m.kind == "staged"]
     assert len(staged) == 1, mounts
     assert under(staged[0].source, drafts_dir(t)), mounts
-    # Amendment A / U9: the box mounts the draft's `stage/`, never the folder holding `owner`.
+    # The box mounts the draft's `stage/`, never the folder holding `owner`.
     assert Path(staged[0].source).name == "stage", mounts
     assert Path(staged[0].source).parent.parent == drafts_dir(t), mounts
     assert not [m for m in mounts if under(m.source, t.clone) or under(t.clone, m.source)], mounts
@@ -179,10 +152,9 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
 
 def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_call(
         p4_tenant, tmp_path, thresholds, caplog):
-    """O9: no `forge` binding in the tenant row is a misconfiguration, decidable locally: the
-    drain refuses (exit 2, the refusal logged naming the forge binding) before the issuer, the
-    forge, a draft, a box or the curator is touched. Positive control on the same channels: once
-    bound, the same tick calls the curator and reaches the forge."""
+    """No forge binding is decidable locally: the drain refuses (exit 2, naming the binding)
+    before touching the issuer, the forge, a draft, a box or the curator. Positive control: once
+    bound, the same tick reaches them."""
     t = p4_tenant
     paths = drain_paths(t, product_repo(tmp_path))
     queue(paths, [S.finding_row("f1", run_id="f1")])
@@ -212,9 +184,8 @@ def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_ca
 
 def test_o9_an_unprotected_tenant_main_surfaces_as_a_drain_refusal_naming_it(
         p4_tenant, tmp_path, thresholds, caplog):
-    """O9: a delivery refusal at open (the forge says `main` is unprotected) is the drain's
-    refusal: exit 2, logged naming the protection, and no curator, box, draft or branch. (Control:
-    the flow-4 case, protected `main`, delivers.)"""
+    """A refusal at open (the forge says `main` is unprotected) is the drain's refusal: exit 2,
+    naming the protection, and no curator, box, draft or branch."""
     t = p4_tenant
     bind_forge(t)
     t.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
@@ -240,10 +211,9 @@ def test_o9_an_unprotected_tenant_main_surfaces_as_a_drain_refusal_naming_it(
 
 def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_never_reopened(
         p4_tenant, tmp_path, thresholds, caplog):
-    """Flow 4 + D-closed: a tick whose PR request reached the forge but lost its answer keeps the
-    batch for delivery (the failure is logged, never silent). A human then closes that PR. The
-    next tick delivers the retained batch first: the forge's answer is `closed`, so nothing is
-    pushed and no PR is opened, and the closed status is logged."""
+    """A tick whose PR answer was lost retains its batch (and logs the failure). After a human
+    closes that PR, the next tick delivers the retained batch first, sees `closed`, pushes
+    nothing, opens no PR and logs the status."""
     t = p4_tenant
     bind_forge(t)
     paths = drain_paths(t, product_repo(tmp_path))
@@ -275,18 +245,16 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
 
 
 # ---------------------------------------------------------------------------------------------
-# OD8: the writer lease (amendment 3 keeps the `state=open` listing; D-fork)
+# OD8: the writer lease
 # ---------------------------------------------------------------------------------------------
 
 #: An open PR row on the tenant forge, by who holds it, for a drain whose lane prefix is `own` and
-#: whose other lane's prefix is `other`: our own repository on this lane, a fork on this lane's
-#: prefix, a row whose head repository is gone (D-fork), our own repository on the OTHER lane.
+#: whose other lane's prefix is `other`.
 _LEASE_ROWS = {
     "ours-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=OURS),
     "fork-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=FORK),
     # A fork under our own owner, and another repository that took our full name: repository
-    # identity is the id (moved here from `tenant_1108_delivery/test_forgejo.py`'s
-    # `AuthorBranch` lease case when P4 deleted `AuthorBranch`).
+    # identity is the id.
     "sibling-fork-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch",
                                                             repo=SIBLING_FORK),
     "namesake-on-this-lane": lambda own, _other: pr_row(3, f"{own}earlier-batch", repo=NAMESAKE),
@@ -298,8 +266,8 @@ _LEAD_TEMPLATE = "gather/queries/cmdb/host-owner.md"
 
 
 def _lead_tick(t: Any, tmp_path: Path, monkeypatch: Any, label: str) -> tuple[Any, Any, LeadStep]:
-    """The lead lane awake on one queued run, the REAL lead author editing one template (as the
-    writers' F-LEAD case): `(paths, run name, step)`. The pitfalls and lift knobs stay shut."""
+    """The lead lane awake on one queued run, the real lead author editing one template:
+    `(paths, run name, step)`. The pitfalls and lift knobs stay shut."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
     paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
@@ -317,12 +285,9 @@ def _queue_file(paths: Any, case: str) -> Path:
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does(
         p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain, holder):
-    """OD8 (amendment 3 C1, D-fork), on both drains (R-L3): an open PR of OUR tenant repository
-    on this lane's branch prefix (`lessons/` for the author drain, `lead-author/` for the lead
-    drain) holds the lane's writer lease: the tick starts no batch — no curator or lead step,
-    box, draft, branch or PR — and leaves its row queued. A fork's PR on the same prefix, a PR
-    row with no head repository, and our own open PR on the other lane's prefix hold nothing:
-    the tick serves and opens its PR (positive controls on the same channels)."""
+    """Only an open PR of our own tenant repository on this lane's prefix holds the writer lease:
+    the tick then starts no batch and leaves its row queued. A fork's, a namesake's or a headless
+    PR on the prefix, or our own PR on the other lane's, holds nothing: the tick opens its PR."""
     t = p4_tenant
     bind_forge(t)
     own, other = (LESSONS_PREFIX, LEAD_PREFIX) if drain == "author" else (LEAD_PREFIX, LESSONS_PREFIX)
@@ -447,10 +412,8 @@ def _dead_process() -> tuple[int, str]:
 
 def test_o_sweep_publish_sweeps_a_draft_whose_owner_died_and_keeps_a_live_owners(
         p4_tenant, tmp_path):
-    """O-SWEEP: a draft records its owner; the next publish sweeps, UNDER THE TENANT LOCK, a
-    draft whose owner process is dead. A draft this live process built survives the same
-    publish (positive control on the same observation), and its owner record names this
-    process: its pid and its start time. (Red today: P3 sweeps only dot-named temporaries.)"""
+    """The next publish sweeps, under the tenant lock, a draft whose owner process died; this
+    live process's draft survives (control), its owner record naming this pid and start time."""
     t = p4_tenant
     _owner_process(t, tmp_path, "orphan", hold=False)
     mine = t.open_delivery().start_batch("mine", lanes=("lessons",))
@@ -470,9 +433,8 @@ def test_o_sweep_publish_sweeps_a_draft_whose_owner_died_and_keeps_a_live_owners
 
 
 def test_o_sweep_a_live_owners_draft_survives_publish_until_its_owner_exits(p4_tenant, tmp_path):
-    """O-SWEEP: liveness is the owner's, not the draft's age: while ANOTHER live process owns a
-    draft (its owner record names that process's pid and start time), a publish keeps it; once
-    it has exited, the next publish sweeps it."""
+    """Liveness is the owner's, not the draft's age: another live process's draft survives a
+    publish and is swept once that process exits."""
     t = p4_tenant
     owner = _owner_process(t, tmp_path, "held", hold=True)
     try:
@@ -492,10 +454,8 @@ def test_o_sweep_a_live_owners_draft_survives_publish_until_its_owner_exits(p4_t
 
 
 def test_o_sweep_an_owner_record_naming_a_live_pid_with_another_start_time_is_dead(p4_tenant):
-    """O-SWEEP: an owner is its pid AND its start time: a record naming a running pid (this
-    one) with a different start time names a process that is gone (the pid was reused), so the
-    next publish sweeps that draft. Positive control: an untouched draft of this process, its
-    record naming the true start time, survives the same publish."""
+    """An owner is pid and start time: a record naming this running pid with another start time
+    (a reused pid) is dead, so its draft is swept; this process's true record survives."""
     t = p4_tenant
     d = t.open_delivery()
     reused = d.start_batch("reused", lanes=("lessons",))
@@ -511,9 +471,9 @@ def test_o_sweep_an_owner_record_naming_a_live_pid_with_another_start_time_is_de
 
 
 def test_o_sweep_a_dead_owners_half_built_temporary_is_swept_under_the_lock(p4_tenant):
-    """O-SWEEP: a build cut off before its rename leaves a dot-named temporary holding its
-    owner record and part of its stage; its owner is dead, so the next publish sweeps it under
-    the tenant lock. A live draft survives the same publish (positive control)."""
+    """A build cut off before its rename leaves a dot-named temporary holding its owner record;
+    that owner being dead, the next publish sweeps it under the tenant lock. A live draft
+    survives (control)."""
     t = p4_tenant
     kept = t.open_delivery().start_batch("kept", lanes=("lessons",))
     temp = drafts_dir(t) / ".halfbuilt-0a1b2c"
@@ -533,10 +493,8 @@ def test_o_sweep_a_dead_owners_half_built_temporary_is_swept_under_the_lock(p4_t
 
 
 def test_control_o_sweep_a_publish_right_after_start_batch_keeps_the_fresh_draft(p4_tenant):
-    """CONTROL (passes today; relabelled from `test_o_sweep_a_draft_never_shows_an_unowned_
-    moment_to_a_publisher`, which pinned nothing a sweep could break): a publish right after
-    `start_batch` in this live process keeps the fresh draft, and no dot-named entry is left
-    beside it. The sweep's own promises are the cases above."""
+    """Control: a publish right after `start_batch` in this live process keeps the fresh draft
+    and leaves no dot-named entry beside it."""
     t = p4_tenant
     batch = t.open_delivery().start_batch("fresh", lanes=("lessons",))
 
@@ -547,7 +505,7 @@ def test_control_o_sweep_a_publish_right_after_start_batch_keeps_the_fresh_draft
 
 
 # ---------------------------------------------------------------------------------------------
-# OD16 (R-L1): what the drain hands its lane entries
+# OD16: what the drain hands its lane entries
 # ---------------------------------------------------------------------------------------------
 
 
@@ -560,10 +518,9 @@ def _one_batch(batches: list[Any]) -> Any:
 
 def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_rooted_paths(
         p4_tenant, tmp_path, thresholds, caplog):
-    """OD16 (R-L1): every `trigger_author` call of one author tick receives `batch=` — the batch
-    of THIS tick: its draft is a folder of `<T>/drafts/`, the draft the box mounted as `staged`,
-    and its branch is the one the tick pushed — and the `paths` the drain was given, still rooted
-    at the product checkout (the corpus is the draft's, never a draft-rooted `LoopPaths`)."""
+    """Every `trigger_author` call of one tick gets this tick's `batch=` (its draft under
+    `<T>/drafts/`, mounted as `staged`; the branch pushed) and the drain's own product-rooted
+    `paths`, never a draft-rooted `LoopPaths`."""
     t = p4_tenant
     bind_forge(t)
     product = product_repo(tmp_path)
@@ -578,7 +535,7 @@ def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_ro
     assert trigger.calls == ["author", "questioner_curator"], trigger.calls
     batch = _one_batch(trigger.batches)
     draft = Path(batch.draft_root)
-    # Amendment A / U9: draft_root is `<T>/drafts/<id>/stage`, the folder beside `owner`.
+    # `draft_root` is `<T>/drafts/<id>/stage`, the folder beside `owner`.
     assert draft.name == "stage", draft
     assert draft_folder(batch).parent == drafts_dir(t), draft
     [staged] = [Path(m.source) for m in box.requests[0].mounts if m.kind == "staged"]
@@ -591,10 +548,9 @@ def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_ro
 
 def test_od16_the_lead_drain_hands_both_steps_the_ticks_batch_and_product_rooted_paths(
         p4_tenant, tmp_path, monkeypatch, caplog):
-    """OD16 (R-L1): one lead tick serving a queued run AND curating a pitfall hands both steps
-    (`run_lead_author`, `run_pitfalls`) the same `batch=` — the tick's: a draft under
-    `<T>/drafts/`, the box's `staged` mount, the `lead-author/` branch it pushed — and the
-    product-rooted `paths`; the pitfalls curator hands its spawn that batch's draft root."""
+    """A lead tick serving a run and curating a pitfall hands both steps the same tick's
+    `batch=` and the product-rooted `paths`; the pitfalls curator hands its spawn that batch's
+    draft root."""
     from defender.learning.core.state import PITFALLS
     from defender.tests.support.learning.core._declared870 import shim_row
 
@@ -613,7 +569,7 @@ def test_od16_the_lead_drain_hands_both_steps_the_ticks_batch_and_product_rooted
     batch = _one_batch(step.batches + pitfalls.batches)
     assert pitfalls.batches, "the pitfalls step was never called"
     draft = Path(batch.draft_root)
-    # Amendment A / U9: draft_root is `<T>/drafts/<id>/stage`, the folder beside `owner`.
+    # `draft_root` is `<T>/drafts/<id>/stage`, the folder beside `owner`.
     assert draft.name == "stage", draft
     assert draft_folder(batch).parent == drafts_dir(t), draft
     [staged] = [Path(m.source) for m in box.requests[0].mounts if m.kind == "staged"]
@@ -658,10 +614,8 @@ def _fault(kind: str) -> BaseException:
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_r_l4_a_faulted_tick_leaves_no_draft_behind(
         p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain, fault):
-    """R-L4 (flow 4 `discard()`): a tick whose box fails to start, whose box faults mid-batch,
-    or whose curator / lead step fails leaves nothing under `<T>/drafts/`, on both drains.
-    Positive controls on the same channel: the draft was there while the tick ran (at the box's
-    start, or inside the failing step)."""
+    """Whatever faults (the box start, the box mid-batch, the curator or lead step), the tick
+    leaves nothing under `<T>/drafts/`; the draft was there while the tick ran (control)."""
     t = p4_tenant
     bind_forge(t)
     seen: list[list[str]] = []
@@ -699,8 +653,8 @@ def test_r_l4_a_faulted_tick_leaves_no_draft_behind(
 
 
 def _default_box_tick(t: Any, tmp_path: Path, monkeypatch: Any, drain: str) -> tuple[int, list]:
-    """One tick through the REAL drain entry with NO `start_box`/`stop_box` seam (production's
-    default box start), the issuer and forge seams as every case: `(rc, the lane calls made)`."""
+    """One tick through the real drain entry with no `start_box`/`stop_box` seam (production's
+    default box start): `(rc, the lane calls made)`."""
     ran: list[str] = []
     seams = {"client": t.forge.client, "identity": t.vault.identity()}
     if drain == "author":
@@ -727,11 +681,9 @@ def _default_box_tick(t: Any, tmp_path: Path, monkeypatch: Any, drain: str) -> t
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_r_i3_a_drain_with_no_daemon_refuses_even_under_the_unsandboxed_opt_out(
         p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain):
-    """R-I3 (C3 at the drain): with production's default box start, the operator opt-out
-    (`DEFENDER_ALLOW_UNSANDBOXED=1`) and no reachable daemon (`DOCKER_HOST` at an absent socket),
-    the drain refuses — exit 2, no curator or lead step ran, no draft left — never a host
-    executor. Positive control: the same tick over a fake daemon (`_box1195.FakeDaemon` as the
-    `docker` on `PATH`) gets past the box start and runs its lane."""
+    """With the default box start, the operator opt-out set and no reachable daemon, the drain
+    refuses (exit 2, no lane step, no draft) rather than run on a host executor. Control: over a
+    fake daemon (`_box1195.FakeDaemon` on `PATH`) the same tick runs its lane."""
     from defender.tests.support.sandbox._box1195 import FakeDaemon
 
     t = p4_tenant

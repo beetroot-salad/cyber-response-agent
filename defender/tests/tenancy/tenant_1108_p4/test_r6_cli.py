@@ -1,8 +1,6 @@
-"""#1108 P4 round 6 — operator CLIs (each case was a wrong-but-green production variant): every
-CLI that logs in reads the issuer client config its tenant row's forge binding names (no flag,
-no dev default), `tenant.py setup` publishes a
-forge-bound tenant, and the CLIs that show a tenant's knowledge read an export (the one the run
-read, or `current`), never the clone's working tree."""
+"""#1108 P4 operator CLIs, each case a wrong-but-green production variant: every CLI that logs in
+reads the issuer client config its forge binding names (no flag, no dev default), and the CLIs
+that show a tenant's knowledge read an export (the run's, or `current`), never the clone."""
 from __future__ import annotations
 
 import logging
@@ -31,7 +29,7 @@ def test_r6_the_workspace_map_of_a_run_reads_the_export_that_run_read(tmp_path, 
         t.merge(B.MERGE_FILES)
         second = t.publish().commit
         assert second != first
-        # A clone-only file the map must not show either.
+        # The map must show neither the later export nor the clone.
         capsys.readouterr()
         rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name])
         text = capsys.readouterr().out

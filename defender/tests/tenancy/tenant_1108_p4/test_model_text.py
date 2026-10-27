@@ -1,15 +1,11 @@
-"""O-TEXT — every path the model is shown is rendered from `KnowledgePaths` or the model view
-(#1108 P4).
+"""O-TEXT (#1108 P4): every path the model is shown is rendered from `KnowledgePaths` or the model
+view.
 
-After P4 the tenant's knowledge lives under an agent root (`$DEFENDER_AGENT_DIR`, a run copy or
-a draft), still in its relative shape (`lessons/`, `skills/<system>/`, `skills/gather/queries/`).
-So a bare relative spelling is not old; what is old is the PRODUCT TREE's spelling of tenant
-knowledge — `defender/lessons`, `defender/skills/<system>`, `defender/skills/gather/queries` —
-and the names of things P4 deletes or moves (`SCHEMA.md`, the retired corpora, the roster
-file, P2's `/tenant/agent` mount).
-
-This census has no suppression marker: a line that must name an old spelling does not exist in
-model-facing text or production code after P4. Its only allowlist entry is the layout owner.
+Tenant knowledge keeps its relative shape under an agent root (`$DEFENDER_AGENT_DIR`: a run copy
+or a draft), so a bare relative spelling is not old; what is old is the product tree's spelling of
+tenant knowledge (`defender/lessons`, `defender/skills/<system>`, `defender/skills/gather/queries`)
+and the names of things P4 deleted or moved. The census has no suppression marker; its only
+allowlist entry is the layout owner.
 """
 from __future__ import annotations
 
@@ -58,7 +54,7 @@ def old_spellings(text: str) -> list[str]:
 
 
 def test_the_old_spellings_are_recognised_and_the_new_ones_are_not():
-    """O-TEXT (oracle self-check): each old spelling is refused; the agent-root spellings that
+    """Oracle self-check: each old spelling is refused; the agent-root spellings that
     replace them, the product's own skills, and a code package that happens to be called
     `lessons` are not."""
     old = [
@@ -81,7 +77,7 @@ def test_the_old_spellings_are_recognised_and_the_new_ones_are_not():
 
 
 def box_surfaces() -> list[Path]:
-    """What the model's box runs or is policed by, beyond prose (review R-I7): the
+    """What the model's box runs or is policed by, beyond prose: the
     extension-less command shims it calls (`bin/defender-*`, `defender-lessons` among them),
     the bash policy, and the box image's Dockerfile."""
     surfaces = [*sorted((DEFENDER / "bin").glob("defender-*")),
@@ -93,9 +89,9 @@ def box_surfaces() -> list[Path]:
 
 
 def test_model_facing_text_names_no_product_tree_knowledge_path():
-    """O-TEXT: no text a model may be handed or run — `SKILL.md`s, gather/handbook/connect
+    """No text a model may be handed or run (`SKILL.md`s, gather/handbook/connect
     pages, learning prompts, the template and fixture tenants' `agent/`, the box's command
-    shims, bash policy and image — spells an old path."""
+    shims, bash policy and image) spells an old path."""
     found: list[str] = []
     for path in [*_agent_facing_text(), *box_surfaces()]:
         rel = path.relative_to(WORKTREE).as_posix()
@@ -107,10 +103,9 @@ def test_model_facing_text_names_no_product_tree_knowledge_path():
 
 
 def test_production_code_spells_no_product_tree_knowledge_path():
-    """O-TEXT: no string a production module builds — a `list_verbs` or query error, a deny
-    text, a prompt, a pathspec — spells an old path. Folded constants (`+`, f-strings of
-    literals, `"/".join([...])`) count; docstrings and comments are not strings the model is
-    shown."""
+    """No string a production module builds (an error, a deny text, a prompt, a pathspec)
+    spells an old path. Folded constants (`+`, f-strings of literals, `"/".join([...])`) count;
+    docstrings and comments are not strings the model is shown."""
     found: set[str] = set()
     for rel, tree in production_trees():
         path = f"defender/{rel}"
@@ -127,7 +122,7 @@ def test_production_code_spells_no_product_tree_knowledge_path():
 
 
 def test_the_code_census_reads_folded_constants(tmp_path):
-    """O-TEXT positive control on the code channel: a spelling assembled by `+`, by an
+    """Positive control on the code channel: a spelling assembled by `+`, by an
     f-string of literals, or by a literal `"/".join`, is folded and caught; a docstring is
     not a model-facing string."""
     tree = ast.parse(
@@ -153,9 +148,8 @@ UPDATED_LINTS = ("lint_stale_refs", "lint_shippable_surface", "lint_ci_hygiene")
 
 
 def test_the_scope_lints_carve_out_no_product_tree_knowledge():
-    """O-TEXT: the stale-ref, shippable-surface and ci-hygiene lints (sources and baselines)
-    name no product-tree knowledge directory — their carve-outs are updated to the new layout
-    rather than left to exempt paths that no longer exist."""
+    """The stale-ref, shippable-surface and ci-hygiene lints (sources and baselines) name no
+    product-tree knowledge directory."""
     found: list[str] = []
     for stem in UPDATED_LINTS:
         for path in (LINT / f"{stem}.py", LINT / f"{stem}_baseline.json"):
@@ -172,7 +166,7 @@ def test_the_scope_lints_carve_out_no_product_tree_knowledge():
 # --- rendered paths come from the run's knowledge root and model view -------------------------
 
 def test_the_workspace_map_names_knowledge_through_the_run_copy(tmp_path):
-    """O-TEXT / O2 (orient's view mapping): with a run view whose agent tree is the run copy,
+    """With a run view whose agent tree is the run copy,
     the workspace map's system-skill and query-template sections name the agent tree's model
     paths and list the run copy's content — never the product tree's, which holds none."""
     from defender.investigation.workspace_map import workspace_map
