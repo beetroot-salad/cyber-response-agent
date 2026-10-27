@@ -27,9 +27,9 @@ BAD_OPEN_STATUS = "{summary}"
 
 def _world(tmp_path: Path, *, marker: str = MARKER, open_status: str = "open",
            name: str = "tenants") -> tuple[Path, Path, Path]:
-    """The data-root row (#1078), a complete #1107 tenant set up under this test's data root
-    (#1120: `run.py` reads its tenants from `DEFENDER_DATA_ROOT` alone; a second call replaces the
-    first's knowledge whole), and an alert. Returns (data root, tenant knowledge folder, alert)."""
+    """The data-root row, a complete tenant under this test's data root (the one `run.py` reads;
+    a second call replaces the first's knowledge whole), and an alert. Returns (data root,
+    knowledge folder, alert)."""
     ensure_d9_tenant()
     root = current_data_root()
     folder = S.plant(root, marker=marker, open_status=open_status)
@@ -39,7 +39,7 @@ def _world(tmp_path: Path, *, marker: str = MARKER, open_status: str = "open",
 
 def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any], name: str = "docker"
           ) -> S.DockerShim:
-    """The docker shim, first on THIS process's PATH — which run.py's run env is built from."""
+    """The docker shim, first on this process's PATH — which run.py's run env is built from."""
     shim = S.DockerShim(tmp_path / name, list(answers) or None)
     monkeypatch.setenv("PATH", shim.path_value())
     return shim
@@ -48,7 +48,7 @@ def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any], name: str = "do
 def _run(tmp_path: Path, root: Path, alert: Path, *, run_id: str = "r1107",
          summary: dict[str, Any] | None = None, page: bool = False, before: Any = None,
          update_ticket: bool = True) -> tuple[int | None, Any, Path, S.RunRecorder]:
-    """`run.main` over one alert with the REAL ticket writer. `page=True` leaves the REAL renderer
+    """`run.main` over one alert with the real ticket writer. `page=True` leaves the real renderer
     in place; otherwise the recorder's `visualize` stands in. Returns (rc, refusal, run dir,
     recorder)."""
     rec = S.RunRecorder(tmp_path / "runs" / run_id, summary=summary, before_lifecycle=before)
@@ -133,7 +133,7 @@ def test_d_writer_context_from_run(tmp_path, monkeypatch):
     for call in calls:
         env = call["env"]
         # box_mod.run_env(defender_dir, run_dir) exports both — run.py's values, whatever the
-        # process's own DEFENDER_DIR and cwd say (G29).
+        # process's own DEFENDER_DIR and cwd say.
         assert env.get("DEFENDER_DIR") == str(S.DEFENDER), (
             f"the writer's child names DEFENDER_DIR={env.get('DEFENDER_DIR')!r}, not run.py's "
             f"{S.DEFENDER}")
@@ -226,8 +226,8 @@ def test_o6_mapping_fault_receipt(tmp_path, monkeypatch, caplog):
 
 def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    # G23/RG3 (executed): docker answers an unknown context with rc 1 and 'context not found' on
-    # stderr, before any request — the request returns no status.
+    # Docker answers an unknown context with rc 1 and 'context not found' on stderr, before any
+    # request — the request returns no status.
     _shim(tmp_path, monkeypatch, S.context_not_found(S.context_name(MARKER, "case-history")))
     root, _folder, alert = _world(tmp_path)
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-transport")
@@ -239,8 +239,8 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     assert got.get("status") == "error", got
     reason = got.get("reason") or ""
     assert reason.strip(), f"no reason on the transport-fault receipt: {got}"
-    # NF-23: the reason is the failing check's own text — docker's 'context not found' (G23), or
-    # the transport's naming of the endpoint it could not reach (the context).
+    # The reason is the failing check's own text: docker's 'context not found', or the
+    # transport's naming of the context it could not reach.
     assert ("context not found" in reason or "transport" in reason.lower()
             or S.context_name(MARKER, "case-history") in reason), (
         f"the reason does not name the transport failure: {reason!r}")
@@ -302,7 +302,7 @@ def test_o6_open_step_no_receipt(tmp_path, monkeypatch, caplog):
             S.config_path(folder, "case-history").unlink()
         elif arm == "bad-config":
             S.set_key(folder, "case-history", "CASE_HISTORY_TIMEOUT_SEC", "ten")
-        # run.main's own seam, with the REAL open step and a record step that does nothing — so
+        # run.main's own seam, with the real open step and a record step that does nothing — so
         # whatever lands at the receipt's name came from the open step.
         writer = SimpleNamespace(open_case_ticket=ticket_writer.open_case_ticket,
                                  record_case_ticket=lambda *a, **k: None)
@@ -375,7 +375,7 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
             assert host not in w, f"a warning line carries the host path {host}: {w!r}"
 
     # A person has already closed the case: the store holds it `closed`, and every answer it
-    # gives says so. The writer never asks, so the record lands as on any case (#1221, amended).
+    # gives says so. The writer never asks, so the record lands as on any case (#1221).
     root2, _folder2, alert2 = _world(tmp_path, name="tenants-closed")
     run_id = "r-closed"
     shim2 = _shim(tmp_path, monkeypatch,
@@ -396,9 +396,9 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
 
 def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    root, folder, alert = _world(tmp_path)
+    root, _folder, alert = _world(tmp_path)
 
-    # (a) A directory squatting the receipt's name: a real input the guarded replace cannot write
+    # A directory squatting the receipt's name: a real input the guarded replace cannot write
     # over. The record step itself succeeds against the store.
     _shim(tmp_path, monkeypatch, *S.store_answers_ok("r-squat"), name="docker-squat")
 
@@ -413,23 +413,6 @@ def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog
     warned = [w for w in _warnings(caplog)
               if "receipt" in w.lower() or RunPaths(run_dir).ticket_write.name in w]
     assert warned, f"the failed receipt write was not logged as a warning: {_warnings(caplog)}"
-
-    # (b) The last attempt wins: a successful record, then a second record step in the SAME run
-    # dir after the case-history config went missing, whose error receipt (MF-9) replaces it.
-    # #1187 (declared change 1): the run folder is rebuilt below from this id, so the id is
-    # the canonical UUID `run_argv` and the recorder use.
-    run_id = fixture_uuid("r-twice")
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id), name="docker-twice")
-    _run(tmp_path, root, alert, run_id=run_id)
-    first = S.receipt(tmp_path / "runs" / run_id)
-    assert first is not None, f"the first attempt failed: {first}"
-    assert first.get("ok") is True, f"the first attempt failed: {first}"
-    S.config_path(folder, "case-history").unlink()
-    _run(tmp_path, root, alert, run_id=run_id)
-    last = S.receipt(tmp_path / "runs" / run_id)
-    assert last is not None, f"the later record step did not replace the earlier receipt: {last}"
-    assert last.get("status") == "error", f"the later record step did not replace the earlier receipt: {last}"
-    assert last.get("ok") is False, f"the later record step did not replace the earlier receipt: {last}"
 
 
 def test_s7_mf12_no_receipt_branch_clears_stale_receipt(tmp_path, monkeypatch):
@@ -471,7 +454,7 @@ def test_s7_mf12_no_receipt_branch_clears_stale_receipt(tmp_path, monkeypatch):
 
 def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
     """With CASE_HISTORY_URL_BASE exported, the record step's request URL and the receipt's url are
-    the tenant file's. At base the exported value wins (C3, CX3)."""
+    the tenant file's."""
     exported = "http://exported-case-history-1107:1"
     monkeypatch.setenv("CASE_HISTORY_URL_BASE", exported)
     run_id = "r-o1"
@@ -482,7 +465,7 @@ def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
     assert rc == 0, f"rc={rc} refused={refused}"
     calls = shim.calls()
     assert calls, "the record step reached the store through no docker child"
-    # The variable WAS exported and did reach the run env (N4: it is passed through untouched).
+    # The variable was exported and reached the run env (it is passed through untouched).
     assert calls[0]["env"].get("CASE_HISTORY_URL_BASE") == exported, (
         "the exported variable never reached the run env — the fixture does not discriminate")
     file_base = f"http://case-history-{MARKER}:8080"
@@ -498,8 +481,7 @@ def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
 
 def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     root, folder, alert = _world(tmp_path)
-    # #1187 (declared change 1): the run folder is rebuilt below from this id, so the id is
-    # the canonical UUID `run_argv` and the recorder use.
+    # The run folder is rebuilt below from this id, so it is the canonical UUID the recorder uses.
     run_id = fixture_uuid("r-atomic")
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
     _run(tmp_path, root, alert, run_id=run_id)
@@ -507,6 +489,7 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     path = S.receipt_path(run_dir)
     assert path.is_file(), "the first record step wrote no receipt"
     old_bytes = path.read_bytes()
+    assert json.loads(old_bytes).get("ok") is True, f"the first record step failed: {old_bytes!r}"
     old_inode = path.stat().st_ino
     # A reader holding the file open across the next write.
     with path.open("rb") as reader:
@@ -516,8 +499,9 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     assert held == old_bytes, "the second write changed the bytes under an open reader (in place)"
     json.loads(held.decode("utf-8"))
     after = json.loads(path.read_bytes().decode("utf-8"))
-    # The second record step (MF-9: the missing config's error receipt) did write.
+    # The second record step (the missing config's error receipt) did write: the last attempt wins.
     assert after.get("status") == "error", f"the second (error) receipt did not land: {after}"
+    assert after.get("ok") is False, f"the second (error) receipt did not land: {after}"
     assert path.stat().st_ino != old_inode, (
         "the second receipt was not written by a replace — the same inode was rewritten")
     leftovers = sorted(p.name for p in run_dir.iterdir()
@@ -553,7 +537,7 @@ def test_s7_f6_run_env_handed_to_the_ticket_writer(tmp_path, monkeypatch):
     assert rc == 0, f"rc={rc} refused={refused}"
     calls = shim.calls()
     assert calls, "the writer reached no docker child"
-    # box_mod.run_env's copy, as run.py builds it for THIS run (G29): the marker and the two
+    # box_mod.run_env's copy, as run.py builds it for this run: the marker and the two
     # run-scoped variables are what the writer's child must be handed.
     run_envs = box_mod.run_env(S.DEFENDER, run_dir)
     wanted = {k: run_envs.get(k) for k in (marker_var, "DEFENDER_DIR", "DEFENDER_RUN_DIR")}

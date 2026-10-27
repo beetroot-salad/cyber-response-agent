@@ -1,4 +1,4 @@
-"""D7 `tenant.py setup <id>`: ADOPT the operator-placed knowledge folder."""
+"""`tenant.py setup <id>`: adopt the operator-placed knowledge folder and provision learning."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
@@ -17,11 +17,11 @@ from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.records._tenant_id import TenantId, TenantRefused
 
-#: The remedy every "no knowledge folder" refusal carries (DC2, N12 re-read): clone the tenant
+#: Words of the remedy every "no knowledge folder" refusal carries: clone, then run setup.
 REMEDY_WORDS = ("clone", "tenant.py setup")
 
-# #1186 O5: setup has an explicitly named migration source, never a checkout/env fallback.
-# The eight live state entries plus the retired forward-check bundles are preserved.
+# Setup migrates learning state only from an explicitly named source, never a checkout/env
+# fallback; the eight live state entries plus the retired forward-check bundles are preserved.
 LEARNING_ENTRIES = (
     ".author-drain.lock", ".lead-author-drain.lock", "_author.lock", "_pending",
     "_pending_delivery", "_pending_leads", "_pending_pitfalls", "author-queue", "runs",
@@ -56,7 +56,7 @@ def _adopt_learning(root: Path, source: Path, **env: str) -> subprocess.Complete
 @pytest.mark.parametrize("target_shape", ["existing", "dangling"])
 def test_1186_setup_refuses_a_linked_learning_destination(
         tmp_path: Path, migrate: bool, target_shape: str) -> None:
-    """O5/O6: refuse existing/dangling root links, accept an empty real destination."""
+    """Refuse a linked learning/ (existing or dangling target); accept an empty real one."""
     root, source, outside = tmp_path / "data", tmp_path / "legacy", tmp_path / "outside"
     H.adopted(root)
     source_before = _legacy_learning(source) if migrate else {}
@@ -89,7 +89,7 @@ def test_1186_setup_refuses_a_linked_learning_destination(
 @pytest.mark.parametrize("legacy_location", ["env", "checkout"])
 def test_1186_setup_without_source_ignores_legacy_locations(
         tmp_path: Path, legacy_location: str) -> None:
-    """O5: fresh setup provisions this tenant, without discovering a migration source."""
+    """Fresh setup provisions this tenant without discovering a migration source."""
     root, source = tmp_path / "data", tmp_path / "legacy"
     H.place_knowledge(root)
     checkout = H.tmp_checkout(tmp_path / "checkout")
@@ -105,7 +105,7 @@ def test_1186_setup_without_source_ignores_legacy_locations(
 
 
 def test_1186_setup_moves_only_named_state_and_preserves_metadata(tmp_path: Path) -> None:
-    """O5: migrate queues/locks/deliveries and legacy bundles, preserving package source."""
+    """Migrate queues/locks/deliveries and legacy bundles, preserving package source."""
     root, source, decoy = tmp_path / "data", tmp_path / "legacy", tmp_path / "env-decoy"
     H.place_knowledge(root)
     _legacy_learning(source)
@@ -157,7 +157,7 @@ def test_1186_setup_moves_only_named_state_and_preserves_metadata(tmp_path: Path
     "unowned-stage-child",
 ])
 def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path, fault: str) -> None:
-    """O5: an explicit bad source or unexplained migration state cannot be guessed away."""
+    """An explicit bad source or unexplained migration state cannot be guessed away."""
     root, source = tmp_path / "data", tmp_path / "legacy"
     H.adopted(root)
     destination = H.tenant_folder(root) / "learning"
@@ -191,7 +191,7 @@ def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path,
 
 @pytest.mark.parametrize("lock_name", LEARNING_LOCKS)
 def test_1186_setup_refuses_held_source_lock_before_moving(tmp_path: Path, lock_name: str) -> None:
-    """O5: neither a queue appender nor an author/drain may be migrated mid-operation."""
+    """Neither a queue appender nor an author/drain may be migrated mid-operation."""
     import fcntl
 
     root, source = tmp_path / "data", tmp_path / "legacy"
@@ -211,7 +211,7 @@ def test_1186_setup_refuses_held_source_lock_before_moving(tmp_path: Path, lock_
 
 @pytest.mark.parametrize("location", ["data-root", "ancestor", "tenant-child", "checkout"])
 def test_1186_setup_refuses_overlapping_migration_source(tmp_path: Path, location: str) -> None:
-    """O5: adoption cannot recursively move a tenant, its data root, or the running checkout."""
+    """Adoption cannot recursively move a tenant, its data root, or the running checkout."""
     root = tmp_path / "data"
     H.adopted(root)
     child = H.tenant_folder(root) / "runs"
@@ -231,7 +231,7 @@ def test_1186_setup_refuses_overlapping_migration_source(tmp_path: Path, locatio
 
 
 def test_1186_setup_never_merges_state_and_accepts_already_in_place(tmp_path: Path) -> None:
-    """O5: occupied destination refuses without loss; selecting the destination is a no-op."""
+    """An occupied destination refuses without loss; selecting the destination is a no-op."""
     root, source = tmp_path / "data", tmp_path / "legacy"
     H.adopted(root)
     _legacy_learning(source)
@@ -251,7 +251,7 @@ def test_1186_setup_never_merges_state_and_accepts_already_in_place(tmp_path: Pa
     "moving", "copying", "published", "deleting", "racing-write",
 ])
 def test_1186_setup_completes_interrupted_adoption(tmp_path: Path, phase: str) -> None:
-    """O5/D10: recover token staging, split moves and cleanup; preserve/report recreated writes."""
+    """Recover token staging, split moves and cleanup; preserve and report recreated writes."""
     root, source = tmp_path / "data", tmp_path / "legacy"
     H.adopted(root)
     before = _legacy_learning(source)
@@ -333,7 +333,8 @@ def test_1120_setup_over_an_absent_knowledge_folder_exits_one_naming_it_and_the_
         "the refused setup wrote into the data root")
 
 
-#: A verb the change-mgmt adapter declares (`change_mgmt_adapter.VERBS`) and the fixture's
+#: A verb the change-mgmt adapter declares (`change_mgmt_adapter.VERBS`); dropping its row from
+#: the fixture's table leaves a grant gap.
 GAP_LINE = "    get-change:"
 GAP_PAIR = "change-mgmt.get-change"
 
@@ -365,7 +366,7 @@ def _plain_folder(tmp: Path, root: Path) -> Path:
 
 def _local_clone(tmp: Path, root: Path) -> Path:
     knowledge = H.cloned_tenant(tmp, root)
-    # The cell IS a hard-linked clone (C3/C4, P-DC2-1 leg D) — assert it, never assume it.
+    # The cell is a hard-linked clone: assert it, never assume it.
     assert H.hardlinked_git_objects(knowledge), (
         "precondition: the plain local clone left no hard-linked file under .git/objects — "
         "this cell would not be the local-clone-hardlinked-git member")
@@ -381,10 +382,8 @@ PLACEMENTS = [
 @pytest.mark.parametrize("place", PLACEMENTS)
 def test_1120_setup_adopts_knowledge_and_provisions_tenant_learning(
         tmp_path: Path, place) -> None:
-    """Over a data root whose only entry is acme/knowledge, placed by the operator, `tenant.py setup
-    acme` exits 0 and prints nothing."""
-    # rejected: detecting an in-progress or interrupted clone (NF3) — setup judges the tree
-    # as found; the docs say run setup after the clone exits 0.
+    """Over a data root holding only the placed `<T>/knowledge`, setup exits 0 silently, adding
+    only the row and an empty learning/."""
     root = tmp_path / "data"
     knowledge = place(tmp_path, root)
     before = H.tree_census(root)
@@ -419,8 +418,8 @@ def _knowledge_file(root: Path, tmp: Path) -> None:
 
 
 def _row_alias_beside_knowledge(root: Path, tmp: Path) -> None:
-    # J60: an alias planted at the row's own name is the guarded write's to refuse, never the
-    # guard's — the row's name stays exempt from the inner scan.
+    # An alias planted at the row's own name is the guarded write's to refuse, never the
+    # guard's: the row's name stays exempt from the inner scan.
     H.knowledge_dir(root).mkdir(parents=True)
     location_path(H.row_path)(root).symlink_to(tmp / "nowhere.json")
 
@@ -494,11 +493,9 @@ def test_1120_setup_refuses_a_placed_knowledge_folder_whose_tenant_id_is_absent_
 
 
 def test_1120_setup_over_a_finished_tenant_succeeds_and_writes_nothing(tmp_path: Path) -> None:
-    # rejected: re-cloning, re-copying or overwriting an existing knowledge/ (and, per N6,
-    # pulling).
     root = tmp_path / "data"
     H.adopted(root)
-    # O5: a finished tenant already has the learning root that fresh setup provisions.
+    # A finished tenant already has the learning root that fresh setup provisions.
     (H.tenant_folder(root) / "learning").mkdir()
     before = H.tree_census(root)
     text = H.assert_clean(H.setup(tenant_py, root))
@@ -594,7 +591,7 @@ def _outside_file(tmp: Path) -> Path:
 
 
 def _first_knowledge_symlink(root: Path, tmp: Path) -> Path:
-    """The operator cloned elsewhere and symlinked the clone in (47 P3): the target is a
+    """The operator cloned elsewhere and symlinked the clone in: the target is a
     complete, valid knowledge folder, so only the link itself can be the refusal."""
     real = H.place_knowledge(tmp / "clone-elsewhere")
     link = H.knowledge_dir(root)
@@ -670,8 +667,8 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
         proc = H.setup(tenant_py, root)
     except subprocess.TimeoutExpired:
         pytest.fail(f"setup blocked on {named} instead of refusing it (a FIFO opened for reading)")
-    # The case-history mapping is refused by the one tenant check (#1222 A5): a fixed reason
-    # naming the file relative to settings/, never the host path.
+    # The case-history mapping's refusal names the file relative to settings/, never the host
+    # path.
     needle = "systems/case-history/mapping.yaml" if named.name == "mapping.yaml" else str(named)
     text = H.assert_refused(proc, needle)
     assert "the data root is not empty" not in text, (
@@ -688,9 +685,8 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
 
 def test_1120_two_concurrent_first_setups_leave_one_row_and_one_refusal_naming_it(
         tmp_path: Path) -> None:
-    """Two concurrent first `setup acme` runs over one operator-placed knowledge/ leave exactly one
-    tenant.json, valid and naming acme, and knowledge/ byte-identical."""
-    # rejected: a foreign tenant created mid-setup (N1).
+    """Two racing first setups leave one valid row; the loser's refusal names it, and knowledge/
+    stays byte-identical."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     knowledge_before = _knowledge_census(root)
@@ -722,7 +718,7 @@ def test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused(
     H.place_knowledge(root)
     before = H.tree_census(root)
     text = H.assert_refused(H.run_script(script, "setup", H.TID, root=root),
-                            "[tenant.py]", str(checkout / "defender"))
+                            "[tenant.py]", str(checkout / "defender"), str(root))
     assert "not empty" not in text, (
         f"the refusal is the one-tenant guard's, not O11a's — the guard must admit the placed "
         f"knowledge (MF1 (a)):\n{text}")

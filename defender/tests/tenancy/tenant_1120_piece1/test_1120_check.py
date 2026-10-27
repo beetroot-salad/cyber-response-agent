@@ -1,4 +1,4 @@
-"""D7/O8 `tenant.py check <id> | --folder <path>`: the tenant's own checks."""
+"""`tenant.py check <id> | --folder <path>`: the tenant's own checks."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -20,7 +20,7 @@ from defender.systems import verb_dispositions
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
-#: A system only a tmp checkout declares, and the one verb its adapter declares (A3).
+#: A system only a tmp checkout declares, and the one verb its adapter declares.
 EXTRA_SYSTEM = "extra"
 EXTRA_PAIR = "extra.verb"
 EXTRA_ADAPTER = 'VERBS = {"verb": None}\n'
@@ -31,24 +31,24 @@ BROKEN_ADAPTER = H.BROKEN_ADAPTER
 #: The retired learning-state knob; #1186 commands must ignore it even when overlapping.
 OVERLAP_ENV = H.LEARNING_STATE_ENV
 
-#: #1159: what `check` says when the census cannot be taken — the folder's table went unjudged
+#: What `check` says when the census cannot be taken and the folder's table goes unjudged (#1159).
 CENSUS_NOT_TAKEN = "was not checked against the running checkout's adapters"
 
-#: The census's own causes (#1159 O1), each naming the side that failed: this machine's git,
+#: The census's own causes, each naming the side that failed: this machine's git or an adapter.
 GIT_ABSENT_CAUSE = "git is not available on PATH on this machine"
 GIT_UNRUNNABLE_CAUSE = "git cannot be run on this machine"
 ADAPTER_CAUSE = "have an adapter the cold verb reader saw no verb in"
 
 
 def _copy_script(checkout: Path) -> Path:
-    """The tmp checkout's OWN `tenant.py` — the copy of the file `tenant_py` runs from."""
+    """The tmp checkout's own `tenant.py` — the copy of the file `tenant_py` runs from."""
     return checkout / H.script_of(tenant_py).resolve().relative_to(H.REPO_ROOT)
 
 
 def _folder(tmp_path: Path, name: str, *, source: Path = H.FIXTURE,
             tenant_id_file: str | bytes | None = None) -> Path:
     """A tenant repo's working folder (`settings/` + `agent/`), copied from `source` — what
-    `check --folder` is pointed at in tenant CI. No `.tenant-id` unless asked (M8)."""
+    `check --folder` is pointed at in tenant CI. No `.tenant-id` unless asked."""
     folder = tmp_path / name
     shutil.copytree(source, folder, symlinks=True)
     H.write_tenant_id_file(folder, H.TID, tenant_id_file)
@@ -87,7 +87,8 @@ def _unparseable_mapping(folder: Path) -> Path:
 
 def _census_blind_line(proc: subprocess.CompletedProcess, *, folder: Path, cause: str,
                        names: tuple[str, ...] = (), also: tuple[str, ...] = ()) -> tuple[str, str]:
-    """#1159: `proc` is a `check` over `folder` whose census could not be taken."""
+    """Assert `proc`, a `check` over `folder`, printed the census-not-taken line once, naming
+    the table, then `cause` and `names`."""
     text = H.assert_refused(proc, CENSUS_NOT_TAKEN, *also)
     lines = [ln for ln in text.splitlines() if CENSUS_NOT_TAKEN in ln]
     assert len(lines) == 1, f"the census line is not printed exactly once:\n{text}"
@@ -112,7 +113,6 @@ def extra_checkout(tmp_path_factory) -> Path:
 
 
 def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: Path) -> None:
-    """`tenant.py check acme` over a finished tenant built from the fixture under a tmp data root exits 0."""
     root = tmp_path / "data"
     H.adopted(root)
     before = H.tree_census(root)
@@ -192,8 +192,7 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
              "names": (BROKEN_SYSTEM, str(checkout.resolve()))}
     _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
     _unparseable_mapping(folder)
-    # A mapping that does not parse is refused by the one tenant check (#1222 A5) in acceptance,
-    # before any census: a fixed reason naming the file, no host path.
+    # Acceptance refuses a mapping that does not parse before any census, naming the file.
     H.assert_refused(H.run_script(script, "check", "--folder", str(folder), root=None),
                      "systems/case-history/mapping.yaml")
 
@@ -250,7 +249,7 @@ def _write_lead_zero(settings: Path, template: str) -> None:
                                              encoding="utf-8")
 
 
-#: A lead-zero template the running checkout's catalog lacks (92 #1 executed it through
+#: A lead-zero template the running checkout's catalog lacks.
 ABSENT_TEMPLATE = "elastic.no-such-template"
 
 
@@ -411,12 +410,10 @@ def test_1120_check_with_both_or_neither_selector_is_a_usage_error(tmp_path: Pat
 
 
 def _withhold_all(settings: Path) -> None:
-    """The table as the TEMPLATE ships it: every declared pair decided, each `roles: []`
-    with its reason — all withheld (the committed template's own verb-grants.yaml)."""
+    """The template's own table: every declared pair decided and withheld (`roles: []`)."""
     shutil.copyfile(H.TEMPLATE / "settings" / "verb-grants.yaml", settings / "verb-grants.yaml")
 
 
-# rejected: an all-withheld table as a finding (M6, human).
 def test_1120_check_does_not_report_an_all_withheld_table_as_a_finding(tmp_path: Path) -> None:
     root = tmp_path / "data"
     H.adopted(root)
@@ -432,35 +429,10 @@ def test_1120_check_does_not_report_an_all_withheld_table_as_a_finding(tmp_path:
     H.assert_refused(_check_folder(folder), "threat-intel.list-indicators")
 
 
-def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(tmp_path: Path) -> None:
-    """A verb-grants.yaml that decides every declared pair and withholds every one (the table the
-    template ships) grants gather nothing, so require_gather_query refuses every run of the tenant."""
-    first = tmp_path / "first"
-    knowledge = H.place_knowledge(first)
-    _withhold_all(knowledge / "settings")
-    table = knowledge / "settings" / "verb-grants.yaml"
-    before = H.tree_census(first)
-    text = H.assert_refused(H.setup(tenant_py, first), str(table))
-    assert "the data root is not empty" not in text, (
-        f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
-        f"setup must refuse the table no run can start with:\n{text}")
-    assert H.census_diff(before, H.tree_census(first)) == [], "the refused setup wrote something"
-    assert not location_path(H.row_path)(first).exists(), "a refused first setup left a row (MF1 Q2)"
-
-    rerun = tmp_path / "rerun"
-    H.place_knowledge(rerun)
-    H.assert_clean(H.setup(tenant_py, rerun))
-    _withhold_all(H.settings_dir(rerun))
-    before = H.tree_census(rerun)
-    H.assert_refused(H.setup(tenant_py, rerun), str(H.settings_dir(rerun) / "verb-grants.yaml"))
-    assert H.census_diff(before, H.tree_census(rerun)) == [], "the refused re-run wrote something"
-    H.assert_clean(_check_id(rerun))
-
-
 def _gather_health_checks_only(settings: Path) -> None:
     """The template's table with every `health-check` row granted to gather and every other row still
     withheld: total (no gap), lead-zero clean and not all-withheld, yet gather holds no query verb,
-    so require_gather_query refuses every run (92r2 #1, executed)."""
+    so require_gather_query refuses every run."""
     doc = yaml.safe_load(
         (H.TEMPLATE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8"))
     granted = 0
@@ -475,11 +447,18 @@ def _gather_health_checks_only(settings: Path) -> None:
     _write_table(settings, doc)
 
 
-def test_1120_setup_refuses_a_health_check_only_gather_grant_that_check_accepts(
-        tmp_path: Path) -> None:
+@pytest.mark.parametrize("plant", [
+    pytest.param(_withhold_all, id="all-withheld"),
+    pytest.param(_gather_health_checks_only, id="health-checks-only"),
+])
+def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(
+        tmp_path: Path, plant: Callable[[Path], None]) -> None:
+    """A table granting gather no query verb (the template's all-withheld one, or one granting
+    only `health-check`) fails `require_gather_query` for every run: setup refuses it, check
+    does not."""
     first = tmp_path / "first"
     knowledge = H.place_knowledge(first)
-    _gather_health_checks_only(knowledge / "settings")
+    plant(knowledge / "settings")
     table = knowledge / "settings" / "verb-grants.yaml"
     before = H.tree_census(first)
     text = H.assert_refused(H.setup(tenant_py, first), str(table))
@@ -492,7 +471,7 @@ def test_1120_setup_refuses_a_health_check_only_gather_grant_that_check_accepts(
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
     H.assert_clean(H.setup(tenant_py, rerun))
-    _gather_health_checks_only(H.settings_dir(rerun))
+    plant(H.settings_dir(rerun))
     before = H.tree_census(rerun)
     H.assert_refused(H.setup(tenant_py, rerun), str(H.settings_dir(rerun) / "verb-grants.yaml"))
     assert H.census_diff(before, H.tree_census(rerun)) == [], "the refused re-run wrote something"
@@ -501,9 +480,8 @@ def test_1120_setup_refuses_a_health_check_only_gather_grant_that_check_accepts(
 
 
 def _decoy_repo(tmp_path: Path) -> Path:
-    """A repo whose HEAD DOES commit agent/.tenant-id = acme — what an exported GIT_DIR would point
-    check's git read at (J-PO1, executed: an exported GIT_DIR decides the repository whatever `cwd=`
-    says)."""
+    """A repo whose HEAD does commit the right agent/.tenant-id, for an exported GIT_DIR to point
+    check's git read at (an exported GIT_DIR overrides `cwd=`)."""
     src = tmp_path / "decoy-src"
     shutil.copytree(H.FIXTURE, src, symlinks=True)
     H.write_tenant_id_file(src, H.TID, "id")
@@ -546,7 +524,7 @@ def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
 #: A uid other than this process's, for a clone git refuses as "dubious ownership".
 OTHER_UID = 1000
 
-#: A fault is `(tmp_path, knowledge) -> (env for the faulted run, a pattern for git's reason,
+#: A fault is `(tmp_path, knowledge) -> (env for the faulted run, git's reason pattern, a repair)`.
 GitFault = Callable[[Path, Path], tuple[dict[str, str], str, Callable[[], None]]]
 
 
@@ -571,7 +549,7 @@ def _git_absent(tmp_path: Path, _knowledge: Path):
 
 def _git_unrunnable(tmp_path: Path, _knowledge: Path):
     """The only `git` on PATH is a file nobody may execute: starting it raises PermissionError, not
-    FileNotFoundError (#1159 review: it crashed `check` with a traceback)."""
+    FileNotFoundError (#1159)."""
     bin_dir = tmp_path / "bin-with-unrunnable-git"
     bin_dir.mkdir()
     (bin_dir / "git").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -594,8 +572,8 @@ def _chown_tree(top: Path, uid: int) -> None:
 
 
 def _owned_by_another_uid(_tmp_path: Path, knowledge: Path):
-    """The clone owned by another uid (an operator's host clone read by a root process — C14's
-    daemon-mapped data root): git refuses it as dubious ownership, rc 128 (92r2 #3, executed)."""
+    """The clone owned by another uid (a host clone read by a root process): git refuses it as
+    dubious ownership, rc 128."""
     _chown_tree(knowledge, OTHER_UID)
     probe = _git_probe(knowledge)
     said = (f"precondition: git answers over a clone owned by uid {OTHER_UID} (a "
@@ -639,7 +617,7 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
     H.plant_row(root)
-    # O5: this setup re-run starts from a fully provisioned tenant.
+    # Fully provisioned, so setup's re-run below has nothing to write.
     (H.tenant_folder(root) / "learning").mkdir()
     env, reason, repair = fault(tmp_path, knowledge)
     try:
@@ -656,7 +634,7 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
     H.assert_clean(_check_folder(knowledge))
 
 
-#: The two ways this machine's git fails the census, each with the census's cause and V16's
+#: The two ways this machine's git fails, each with the census's cause and the unverified-id reason.
 GIT_FAILS: list[Any] = [
     pytest.param(_git_absent, GIT_ABSENT_CAUSE, "git is not available on PATH", id="git:absent"),
     pytest.param(_git_unrunnable, GIT_UNRUNNABLE_CAUSE, "git cannot be run",
@@ -667,19 +645,10 @@ GIT_FAILS: list[Any] = [
 @pytest.mark.parametrize(("fault", "cause", "unverified_reason"), GIT_FAILS)
 def test_1159_check_says_this_machines_git_failed_and_exits_1(
         tmp_path: Path, fault: GitFault, cause: str, unverified_reason: str) -> None:
-    """#1159 O2 (V16): when this machine's git fails, `check` over a tenant whose knowledge is
-    a git work tree says, on its own line, that the committed `.tenant-id` cannot be verified
-    and gives git's reason, and exits 1; a plain folder is exempt from that rule.
-
-    #1108 P4 (design gap I, respelled): this case also pinned that the GRANT CENSUS goes blind
-    with git (#1159 O1's census line naming `cause`). The census read git only for the
-    checkout's committed system markers — the product tree's system skills, which P4 deletes
-    (O-U5): the census is the adapters, read cold, and no longer starts git. That half pinned a
-    mechanism P4 removes and is dropped (`cause` is kept in the parameters for the record); the
-    census's own blind line stays pinned by the adapter cases above (`ADAPTER_CAUSE`). V16's
-    half still reads git and is kept whole. What stays of the census half is its converse: the
-    census is git-free, so neither command's output carries the census-not-taken line or either
-    of the census's git causes."""
+    """When this machine's git fails, `check` over a git work tree says on its own line that
+    the committed `.tenant-id` cannot be verified, with git's reason, and exits 1; a plain folder
+    is exempt. The census reads adapters cold, so no output carries the census-not-taken line or
+    a census git cause."""
     folder = _folder(tmp_path, "tenant")
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
@@ -689,8 +658,8 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
     def assert_census_taken(text: str) -> None:
         assert CENSUS_NOT_TAKEN not in text, (
             f"#1108 P4: the census is git-free, yet it went blind with git ({cause!r}):\n{text}")
-        # The census causes end "... on this machine"; V16's own reason (`unverified_reason`)
-        # is their prefix without it, so V16's line does not match these needles.
+        # The census causes end "... on this machine"; `unverified_reason` is their prefix
+        # without it, so the unverified-id line does not match these needles.
         for git_cause in (GIT_ABSENT_CAUSE, GIT_UNRUNNABLE_CAUSE):
             assert git_cause not in text, (
                 f"#1108 P4: the census is git-free, yet the output gives a git cause "

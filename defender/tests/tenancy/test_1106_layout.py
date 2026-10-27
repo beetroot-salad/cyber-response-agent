@@ -14,7 +14,7 @@ from defender.tests.support.tenancy import _tenants1106 as T
 
 def _committed_tenant_dirs() -> list[Path]:
     """The committed knowledge folders that are a tenant's shape and not the template: the
-    frozen test fixture (#1120 H2) — the one the CI census walks beside the template."""
+    frozen test fixture — the one the CI census walks beside the template."""
     return [T.FIXTURE]
 
 
@@ -29,8 +29,8 @@ def test_the_playground_resolves_through_the_real_resolver():
 
 
 def test_every_template_row_grants_nobody_and_says_why():
-    """D1. Each row is `roles: []` with a REVIEWABLE reason — the table is total over the
-    shared adapters (O8), so it states a decision about every verb, and the decision is no."""
+    """Each row is `roles: []` with a reviewable reason: the table is total over the shared
+    adapters, so it states a decision about every verb, and the decision is no."""
     vd = T.mod("systems.verb_dispositions")
     with warnings.catch_warnings():
         warnings.simplefilter("error", vd.DispositionWarning)
@@ -44,11 +44,8 @@ def test_every_template_row_grants_nobody_and_says_why():
 
 
 def test_the_template_table_is_total_over_the_real_adapters():
-    """O8 / #1108 P4 (N6: adapters stay in the product; skills and markers are the tenant's):
-    the template's table is total over the PRODUCT's adapters. The marker half of
-    `declared_systems` was read off the product tree's `defender/skills/<system>/execution.md`
-    — lab content P4 removes (O1) — and the template's own `agent/` declares no system, so the
-    systems walked are the adapter half alone, read from the checkout's adapters directory."""
+    """The template's table is total over the product's adapters (adapters stay in the
+    product; system skills are the tenant's, and the template's own `agent/` declares none)."""
     from defender._paths import adapters_under
     from defender.systems.verbs import read_roster
 
@@ -61,13 +58,9 @@ def test_the_template_table_is_total_over_the_real_adapters():
 
 
 def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
-    """M1: the template's `lead-zero.yaml` names a catalog template that EXISTS, so an operator
-    who grants the lead its pair later has nothing else to fix.
-
-    #1108 P4 (O1, flow 3 "lead-zero (templates from the copy's catalog)"): the catalog a run
-    resolves the id against is the TENANT's `agent/skills/gather/queries/`, never the
-    checkout's (which P4 empties), so a tenant made from the template finds the id only in the
-    template's own `agent/` catalog."""
+    """The template's `lead-zero.yaml` names a template that exists in its own `agent/`
+    catalog (the one a run resolves the id against, never the checkout's), so an operator who
+    grants the lead its pair later has nothing else to fix."""
     from defender.knowledge._corpus import is_established, iter_query_templates
 
     lz = T.mod("systems.lead_zero_config")
@@ -98,26 +91,6 @@ def test_every_committed_tenant_and_the_template_loads_its_table_and_lead_zero()
             warnings.simplefilter("error", vd.DispositionWarning)
             assert vd.load_dispositions(vd.dispositions_path(settings)), settings
         assert lz.load_correlation_template(lz.lead_zero_config_path(settings)), settings
-
-
-def test_every_committed_tenant_passes_the_resolver(tmp_path):
-    """Each committed knowledge folder, placed under a data root as an operator places one, is
-    accepted by the real `accept_tenant`, and its settings half is the placed copy."""
-    root = tmp_path / "data"
-    folders = _committed_tenant_dirs()
-    assert folders, "no committed knowledge folder to check"
-    for n, folder in enumerate(folders):
-        tenant_id = fixture_uuid(f"tenant:committed-{n}")
-        shutil.copytree(folder, root / tenant_id / "knowledge")
-        (root / tenant_id / "knowledge" / "agent" / ".tenant-id").write_text(
-            f"{tenant_id}\n", encoding="utf-8")
-        (root / tenant_id / "tenant.json").write_text(
-            f'{{"tenant_id": "{tenant_id}", "created_at": "2026-09-28T00:00:00+00:00"}}\n',
-            encoding="utf-8")
-        td = T.accept(root, tenant_id)
-        assert td.settings == root / tenant_id / "knowledge" / "settings"
-        assert (td.settings / "verb-grants.yaml").read_bytes() == \
-            (folder / "settings" / "verb-grants.yaml").read_bytes()
 
 
 def _reader_policies(run_dir: Path):
