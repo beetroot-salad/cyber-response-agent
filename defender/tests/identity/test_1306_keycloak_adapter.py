@@ -111,6 +111,8 @@ class Keycloak:
         #: When set, the HTTP status every admin API call / the admin token request answers with.
         self.admin_status: int | None = None
         self.admin_token_status: int | None = None
+        #: The admin token's stated `expires_in`, in seconds; unset, the answer carries none.
+        self.admin_token_lifetime: int | None = None
 
     # --- the transport ---------------------------------------------------------------------
     def transport(self) -> httpx.MockTransport:
@@ -136,7 +138,10 @@ class Keycloak:
                     raise self.token_error
                 if self.admin_token_status is not None:
                     return httpx.Response(self.admin_token_status, json={"error": "unauthorized_client"})
-                return httpx.Response(200, json={"access_token": ADMIN_TOKEN, "token_type": "Bearer"})
+                granted = {"access_token": ADMIN_TOKEN, "token_type": "Bearer"}
+                if self.admin_token_lifetime is not None:
+                    granted["expires_in"] = self.admin_token_lifetime
+                return httpx.Response(200, json=granted)
             if self.token_status != 200:
                 return httpx.Response(self.token_status, json={"error": "invalid_grant"})
             return httpx.Response(200, json={"access_token": "kc-access-secret", "token_type": "Bearer",
@@ -189,7 +194,7 @@ def kc() -> Keycloak:
 def adapter(kc: Keycloak, *, now: dt.datetime = NOW) -> KeycloakSignIn:
     return KeycloakSignIn(
         issuer=ISSUER, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
-        admin_realm=REALM, admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
+        admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
         transport=kc.transport(), clock=lambda: now)
 
 
@@ -273,6 +278,11 @@ def test_keycloaks_tokens_never_leave_the_adapter(kc):
 def test_a_token_without_amr_reports_no_methods_and_so_no_otp(kc):
     """A missing amr is the empty tuple, not an error and not otp (C13)."""
     assert sign_in(kc, kc.signer.sign(claims(amr=None))).amr == ()
+
+
+def test_a_token_without_a_name_reports_no_name_not_the_username(kc):
+    """`preferred_username` is the id our own code gave the account, never a display name."""
+    assert sign_in(kc, kc.signer.sign(claims(name=None, preferred_username=USER_ID))).name == ""
 
 
 def test_an_audience_list_that_contains_the_client_is_accepted(kc):
@@ -484,3 +494,35 @@ def test_reads_change_nothing_at_keycloak(kc):
     # Positive control: both calls did reach Keycloak, the credential read on the admin API.
     assert any(s.method == "GET" and s.path.endswith(f"/users/{USER_ID}/credentials") for s in kc.seen)
     assert kc.admin_writes() == []
+
+
+def _admin_token_requests(kc: Keycloak) -> int:
+    return sum(1 for s in kc.calls("POST", "/openid-connect/token")
+               if s.form().get("grant_type") == "client_credentials")
+
+
+def test_the_admin_token_is_reused_until_shortly_before_it_expires(kc):
+    """One client-credentials grant serves admin calls while it has more than 30 s left."""
+    kc.admin_token_lifetime = 300
+    clock = {"now": NOW}
+    port = KeycloakSignIn(
+        issuer=ISSUER, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
+        admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
+        transport=kc.transport(), clock=lambda: clock["now"])
+    port.require_otp_setup(USER_ID)  # a read and a write
+    port.has_otp(USER_ID)
+    assert _admin_token_requests(kc) == 1
+    clock["now"] = NOW + dt.timedelta(seconds=269)
+    port.has_otp(USER_ID)
+    assert _admin_token_requests(kc) == 1
+    clock["now"] = NOW + dt.timedelta(seconds=270)
+    port.has_otp(USER_ID)
+    assert _admin_token_requests(kc) == 2
+
+
+def test_an_admin_token_with_no_stated_lifetime_is_not_reused(kc):
+    """Without `expires_in` there is nothing to bound reuse by, so each admin call asks afresh."""
+    port = adapter(kc)
+    port.has_otp(USER_ID)
+    port.has_otp(USER_ID)
+    assert _admin_token_requests(kc) == 2

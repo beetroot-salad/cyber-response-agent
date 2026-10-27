@@ -26,6 +26,8 @@ _log = logging.getLogger(__name__)
 _REQUIRED_ACTIONS = {"set_password": "UPDATE_PASSWORD", "set_up_otp": "CONFIGURE_TOTP"}
 _TIMEOUT_SECONDS = 10.0
 _ALGORITHM = "RS256"
+#: An admin token is dropped this long before its stated expiry, so a call never carries a dead one.
+_ADMIN_TOKEN_MARGIN = _dt.timedelta(seconds=30)
 
 
 def _utc_now() -> _dt.datetime:
@@ -42,7 +44,6 @@ class KeycloakSignIn:
         client_id: str,
         client_secret: str,
         redirect_uri: str,
-        admin_realm: str,
         admin_client_id: str,
         admin_client_secret: str,
         transport: httpx.BaseTransport | None = None,
@@ -55,12 +56,13 @@ class KeycloakSignIn:
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
         self._http = httpx.Client(transport=transport, timeout=_TIMEOUT_SECONDS)
-        # Keycloak serves every realm under <base>/realms/<name>; the admin API sits beside it.
-        base = self._issuer.rsplit("/realms/", 1)[0]
-        self._admin_token_url = f"{base}/realms/{admin_realm}/protocol/openid-connect/token"
-        self._admin_users_url = f"{base}/admin/realms/{admin_realm}/users"
+        # Keycloak serves every realm under <base>/realms/<name>; the admin API sits beside it. The
+        # admin client's `manage-users` role reaches only its own realm, which is the sign-in realm.
+        base, realm = self._issuer.rsplit("/realms/", 1)
         self._oidc = f"{self._issuer}/protocol/openid-connect"
+        self._admin_users_url = f"{base}/admin/realms/{realm}/users"
         self._keys: dict[str, Any] = {}
+        self._admin_token_held: tuple[str, _dt.datetime] | None = None
 
     def close(self) -> None:
         self._http.close()
@@ -86,7 +88,8 @@ class KeycloakSignIn:
         """Exchange the code, verify the ID token, and return who signed in and how."""
         id_token = self._exchange_code(code, code_verifier)
         claims = self._verify(id_token, nonce)
-        name = claims.get("name") or claims.get("preferred_username") or ""
+        # Only the name the person gave: `preferred_username` is the id our own code chose.
+        name = claims.get("name") or ""
         amr = claims.get("amr")
         methods = tuple(m for m in amr if isinstance(m, str)) if isinstance(amr, list) else ()
         return VerifiedSignIn(account_id=claims["sub"], name=str(name), amr=methods)
@@ -239,12 +242,16 @@ class KeycloakSignIn:
         return f"{self._admin_users_url}/{urllib.parse.quote(account_id, safe='')}"
 
     def _admin_token(self) -> str:
-        """A fresh client-credentials token; held only for the call that asked for it."""
+        """A client-credentials token, reused until shortly before Keycloak says it expires."""
+        held = self._admin_token_held
+        if held is not None and self._clock() < held[1]:
+            return held[0]
         try:
-            response = self._http.post(self._admin_token_url, auth=self._admin_client,
+            response = self._http.post(f"{self._oidc}/token", auth=self._admin_client,
                                        data={"grant_type": "client_credentials"})
             response.raise_for_status()
-            token = response.json()["access_token"]
+            body = response.json()
+            token, lifetime = body["access_token"], body.get("expires_in")
         except httpx.HTTPError as error:
             _log.warning("keycloak admin token request failed: %s", type(error).__name__)
             raise SignInUnavailable("keycloak refused the admin token request") from error
@@ -252,6 +259,8 @@ class KeycloakSignIn:
             raise SignInUnavailable("keycloak's admin token response is unreadable") from error
         if not isinstance(token, str) or not token:
             raise SignInUnavailable("keycloak's admin token response is unreadable")
+        if isinstance(lifetime, (int, float)) and lifetime > _ADMIN_TOKEN_MARGIN.total_seconds():
+            self._admin_token_held = (token, self._clock() + _dt.timedelta(seconds=lifetime) - _ADMIN_TOKEN_MARGIN)
         return token
 
     def _admin(self, method: str, url: str, *, accept: tuple[int, ...] = (), **kwargs: Any) -> httpx.Response:
