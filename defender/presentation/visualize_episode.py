@@ -1,7 +1,7 @@
 """The episode page: `render_episode(runs, episode_id) -> Path` renders `learning.html` beside
 `judge.yaml`, the episode opened by id through the request's tenant's repository
 (`runs.episode(episode_id)`, #1105 PR 2); `main(argv)` is the standalone CLI
-(`--tenant T <episode_id>`). The launcher (`branch/cli.py::_render_page`) calls `render_episode`
+(`--tenant T <episode_id>`). The episode launcher (`learning/branch/cli.py::_render_page`, handed this renderer by `cli/learning/branch.py`) calls `render_episode`
 after the judge frame closes, under its own non-fatal boundary."""
 from __future__ import annotations
 

@@ -35,7 +35,7 @@ that loses its producer can be badged rather than hidden.
 ## Build
 
 ```bash
-DEFENDER_DEPLOYMENT=dev DEFENDER_RUN_VISUALIZATIONS_DIR=<folder> python3 defender/learning/frontend/build.py --tenant <tenant-uuid>
+DEFENDER_DEPLOYMENT=dev DEFENDER_RUN_VISUALIZATIONS_DIR=<folder> python3 defender/cli/learning/lessons_page.py --tenant <tenant-uuid>
 ```
 
 Publishes four artifacts into the tenant's area under the publish root

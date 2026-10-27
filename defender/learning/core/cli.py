@@ -27,7 +27,7 @@ and open a PR.
 WHERE THE FINDINGS COME FROM (#922). Until the cutover this file also carried the LEARN stage
 — `loop.py <run_dir>` and `--learn-drain` — which ran a four-role pipeline over one finished
 run and appended its verdicts to the findings queue. That pipeline is deleted. Findings now
-come from a BRANCHED EPISODE: `defender/learning/branch/cli.py` forks a finished run at a
+come from a BRANCHED EPISODE: `defender/cli/learning/branch.py` forks a finished run at a
 chosen message, runs a family of worlds from it, and its judge appends the graded rows to the
 same `_pending/findings.jsonl` this drain reads. The queue and both stages below are unchanged;
 only the producer moved.

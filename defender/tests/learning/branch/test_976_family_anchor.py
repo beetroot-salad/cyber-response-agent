@@ -30,6 +30,11 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
+def _entry():
+    """The command entry, whose `main` supplies the real preflight and page renderer."""
+    return T.mod("cli.learning.branch")
+
+
 def _tenant_paths():
     """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
     return T.current_tenant()
@@ -86,7 +91,7 @@ class Launch:
 
     def run(self, *argv_extra: str) -> int:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id.
-        self.rc = _cli().main(
+        self.rc = _entry().main(
             ["--tenant", self.src.parent.parent.name, self.src.name, str(T.BRANCH_MESSAGE_ID),
              *T.retired_continuation_argv(), *argv_extra],
             spawn=self.spawn, questioner=self.questioner, judge=self.judge,

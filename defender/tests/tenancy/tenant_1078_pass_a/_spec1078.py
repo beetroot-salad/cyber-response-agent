@@ -121,6 +121,10 @@ def branch_cli() -> Any:
     return mod("learning.branch.cli")
 
 
+def branch_entry() -> Any:
+    return mod("cli.learning.branch")
+
+
 # ======================================================================================
 # The data root and the tenant layout, hand-spelled.
 #
@@ -504,6 +508,6 @@ def drive_launch(source: Path, *, spawn: Any = None, tenant_id: str | None = Non
     Returns the exit status, or the refusal it raised."""
     seams.setdefault("preflight", no_preflight)
     try:
-        return branch_cli().main(launch_argv(source, tenant_id=tenant_id), spawn=spawn, **seams)
+        return branch_entry().main(launch_argv(source, tenant_id=tenant_id), spawn=spawn, **seams)
     except SystemExit as refused:
         return refused

@@ -297,7 +297,7 @@ def close_vocabulary() -> _CloseVocabulary:
     """`close_tool`'s outcome members and its not-reviewed cause.
 
     Imported lazily: `close_tool` pulls in the whole runtime (pydantic-ai included), and
-    `learning/frontend/build.py` imports this package just for the page CSS."""
+    `cli/learning/lessons_page.py` imports this package just for the page CSS."""
     from defender.investigation.close_tool import CAUSE_NOT_REVIEWED, CHALLENGED, FORCED_INCONCLUSIVE, STANDS
 
     return _CloseVocabulary(STANDS, CHALLENGED, FORCED_INCONCLUSIVE, CAUSE_NOT_REVIEWED)

@@ -117,8 +117,8 @@ def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
 
 
 def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
-    """The documented ``python3 defender/learning/branch/cli.py`` shape reaches argparse."""
-    cli_path = Path(__file__).resolve().parents[3] / "learning" / "branch" / "cli.py"
+    """The documented ``python3 defender/cli/learning/branch.py`` shape reaches argparse."""
+    cli_path = Path(__file__).resolve().parents[3] / "cli" / "learning" / "branch.py"
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
 

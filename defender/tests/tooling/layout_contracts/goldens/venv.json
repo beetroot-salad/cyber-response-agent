@@ -77,7 +77,7 @@
   },
   "frontend build": {
    "rc": 0,
-   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/learning/frontend/build.py\t--alpha\ttwo words\n",
+   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/cli/learning/lessons_page.py\t--alpha\ttwo words\n",
    "err": ""
   },
   "frontend serializer": {
@@ -222,7 +222,7 @@
    "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/api/serve.py\t--alpha\ttwo words"
   ],
   "frontend build, unset": [
-   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/learning/frontend/build.py\t--alpha\ttwo words"
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/cli/learning/lessons_page.py\t--alpha\ttwo words"
   ],
   "frontend serializer, unset": [
    "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/learning/frontend/serialize.py\t--alpha\ttwo words"
@@ -242,7 +242,7 @@
    "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/api/serve.py\t--alpha\ttwo words"
   ],
   "frontend build, empty": [
-   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/learning/frontend/build.py\t--alpha\ttwo words"
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/cli/learning/lessons_page.py\t--alpha\ttwo words"
   ],
   "frontend serializer, empty": [
    "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/learning/frontend/serialize.py\t--alpha\ttwo words"

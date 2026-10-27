@@ -218,7 +218,7 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
     _base, src = S.source_run(tmp_path, est, calls=list(calls))
     before()
     spawn = S.FakeSpawn()
-    cli = S.mod(S.CLI)
+    cli = S.mod("cli.learning.branch")
     message = ""
     root = S.tenant_episodes(src.parent.parent.name)
     already = {p.name for p in root.iterdir()} if root.is_dir() else set()

@@ -51,9 +51,12 @@ def load_password() -> str:
 
 def docker_curl(password: str, method: str, path: str, body: str | None = None) -> tuple[int, str]:
     """Run curl inside the kibana container, return (http_code, body)."""
+    # The credential reaches curl as config on stdin (`-K -`), never as an argument or an
+    # exec env var: an argument inside the container is read by Falco and by host process
+    # monitoring, both of which ship it into Elasticsearch.
     args = [
         "docker", "--context", DOCKER_CONTEXT,
-        "exec", "-e", f"EP={password}",
+        "exec", "-i",
     ]
     if body is not None:
         args += ["-e", f"BODY={body}"]
@@ -61,7 +64,8 @@ def docker_curl(password: str, method: str, path: str, body: str | None = None) 
         KIBANA_CONTAINER, "sh", "-c",
         _curl_command(method, path, body is not None),
     ]
-    proc = subprocess.run(args, capture_output=True, text=True)
+    proc = subprocess.run(args, input=f'user = "elastic:{password}"\n',
+                          capture_output=True, text=True)
     if proc.returncode != 0:
         sys.exit(
             f"docker exec failed (rc={proc.returncode}): {proc.stderr.strip()}"
@@ -81,8 +85,7 @@ def docker_curl(password: str, method: str, path: str, body: str | None = None) 
 
 def _curl_command(method: str, path: str, has_body: bool) -> str:
     parts = [
-        "curl -ks",
-        '-u "elastic:$EP"',
+        "curl -ks -K -",
         '-H "kbn-xsrf: true"',
         '-H "Content-Type: application/json"',
         f"-X {method}",

@@ -332,7 +332,7 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
     previous = ep.page.read_bytes()
     listing = sorted(p.name for p in ep.dir.iterdir())
     with pytest.raises(KeyboardInterrupt), \
-            E.when_inside(E.raise_now(KeyboardInterrupt("mid-render"))) as seen:
+            E.when_inside(E.raise_now(KeyboardInterrupt("mid-render")), at="_write_page") as seen:
         E.render_episode(ep.dir, module=visualize_episode())
     assert seen["hit"], "the interrupt never landed inside the render"
     assert ep.page.read_bytes() == previous, "a partial page replaced the previous one"
@@ -340,7 +340,7 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
 
     nxt = ST._NextEpisode()
     with pytest.raises(KeyboardInterrupt), \
-            E.when_inside(E.raise_now(KeyboardInterrupt("mid-render"))) as seen:
+            E.when_inside(E.raise_now(KeyboardInterrupt("mid-render")), at="_write_page") as seen:
         ST._launch(tmp_path)
     assert seen["hit"], "the interrupt never landed inside the launcher's render"
     launched = nxt.dir
@@ -366,7 +366,7 @@ def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
     ep = E.sample_episode(tmp_path)
     listing = sorted(p.name for p in ep.dir.iterdir())
     with pytest.raises(RuntimeError, match="mid-build"), \
-            E.when_inside(E.raise_now(RuntimeError("mid-build"))) as seen:
+            E.when_inside(E.raise_now(RuntimeError("mid-build")), at="_render_document") as seen:
         E.render_episode(ep.dir, module=visualize_episode())
     assert seen["hit"]
     assert not ep.page.exists(), "a partial page was written"
@@ -375,7 +375,7 @@ def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
     render(ep)
     previous = ep.page.read_bytes()
     with pytest.raises(RuntimeError, match="mid-build"), \
-            E.when_inside(E.raise_now(RuntimeError("mid-build"))) as seen:
+            E.when_inside(E.raise_now(RuntimeError("mid-build")), at="_render_document") as seen:
         E.render_episode(ep.dir, module=visualize_episode())
     assert seen["hit"]
     assert ep.page.read_bytes() == previous

@@ -1,0 +1,17 @@
+# Kibana configuration, mounted over the image's default (compose.yml `kibana`).
+#
+# The first four lines are the image's own defaults. The rest carry secrets through ${VAR}
+# substitution: the image entrypoint turns recognised env names (ELASTICSEARCH_PASSWORD,
+# XPACK_*_ENCRYPTIONKEY, ...) into --flags on Kibana's command line, where host process
+# monitoring reads them and ships them into Elasticsearch. The KBN_* names are not recognised,
+# so these values stay off every command line.
+server.host: "0.0.0.0"
+server.shutdownTimeout: "5s"
+elasticsearch.hosts: [ "http://elasticsearch:9200" ]
+monitoring.ui.container.elasticsearch.enabled: true
+
+elasticsearch.password: "${KBN_ES_PASSWORD}"
+xpack.security.encryptionKey: "${KBN_ENCRYPTION_KEY}"
+xpack.reporting.encryptionKey: "${KBN_ENCRYPTION_KEY}"
+xpack.encryptedSavedObjects.encryptionKey: "${KBN_ENCRYPTION_KEY}"
+# keyRotation.decryptionOnlyKeys is appended at start by with-previous-key.sh, only after a rotation.

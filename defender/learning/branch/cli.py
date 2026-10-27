@@ -45,15 +45,10 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-# Run by path, so Python puts only `learning/branch/` on `sys.path`: re-exec into the project
-# venv when it exists, then add the workspace root before any `defender` import.
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
-_VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
-if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VENV_PY:
-    os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *sys.argv[1:]])
 
-if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
-    sys.path.insert(0, _root)
+#: Renders an episode's page from its runs repository and id; the entry supplies it.
+PageRenderer = Callable[["RunsRepository[Tenant]", str], Path]
 
 from defender.records import _alert_input, _provenance
 from defender.records._locations import DataRoot
@@ -516,7 +511,8 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     *,
     spawn: Callable[..., int] | None = None,
     questioner: Any = None,
-    preflight: Callable[..., int] | None = None,
+    preflight: Callable[..., int],
+    render_page: PageRenderer,
     judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], _provenance.RunProvenance] | None = None,
@@ -524,10 +520,12 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     verifier: Any = None,
     roster: Any = None,
 ) -> int:
-    """Launch one episode, reporting a refusal as an operator exit rather than a traceback."""
+    """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
+    `preflight` (the role-model check) and `render_page` (the episode page) are handed in by the
+    entry, which sits above both."""
     try:
         return _launch(argv, spawn=spawn, questioner=questioner, preflight=preflight,
-                       judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
+                       render_page=render_page, judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
                        oracle=oracle, verifier=verifier, roster=roster)
     except (branch.BranchError, LedgerError, EstateError, FamilyError, GrantError,
             session_store.StoreError, sqlite3.Error) as refusal:
@@ -536,17 +534,14 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
 
 def _launch(  # noqa: PLR0913 — see `main`
     argv: list[str], *, spawn: Any, questioner: Any,
-    preflight: Callable[..., int] | None, judge: Any = None,
+    preflight: Callable[..., int], render_page: PageRenderer, judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], _provenance.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None,
 ) -> int:
-    from defender.run import preflight_role_models
-
     ns = parse_branch_args(argv)
-    # Injected seams are resolved once here and threaded inward non-`None`, so no two frames can
+    # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
     # disagree about which preflight, roster or model an episode used.
-    role_preflight = preflight_role_models if preflight is None else preflight
     # The episode's tenant first, from the request: pre-flight's reader, the served systems,
     # the source run and the siblings all resolve through it.
     try:
@@ -586,7 +581,7 @@ def _launch(  # noqa: PLR0913 — see `main`
                     if live_tree is None else live_tree)
     source_stamp = preflight_episode(
         source=source, branch_message_id=ns.branch_message_id,
-        preflight=role_preflight, model=ns.model,
+        preflight=preflight, model=ns.model,
         allow_dirty=ns.allow_dirty,
         live_tree=live_capture, oracle=oracle, verifier=verifier)
     if roster is None:
@@ -610,7 +605,7 @@ def _launch(  # noqa: PLR0913 — see `main`
                 questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
                 tenant=tenant, runs=runs, served=served, oracle=oracle,
                 verifier=verifier, roster=roster, started=started,
-                knowledge_commit=pinned.commit)
+                knowledge_commit=pinned.commit, render_page=render_page)
         except SystemExit:
             raise
         except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -625,7 +620,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     ns: argparse.Namespace, *, source: Run, source_stamp: dict, episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
-    verifier: Any, roster: Any, started: threading.Event, knowledge_commit: str | None = None,
+    verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer,
+    knowledge_commit: str | None = None,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -692,7 +688,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         _grade(runs, episode_id=episode_id, judge=judge)
     # Rendered after the JUDGE frame closes so the page sees the judge's timing row;
     # non-fatal.
-    _render_page(runs, episode_id=episode_id)
+    _render_page(runs, render_page, episode_id=episode_id)
     return 1 if failed else 0
 
 
@@ -716,13 +712,11 @@ def _finished_arms(view: EpisodeRuns, world_ids: Sequence[str]) -> dict[str, Run
         return {world_id: handout[ids[world_id]] for world_id in world_ids}
 
 
-def _render_page(runs: RunsRepository[Tenant], *, episode_id: str) -> None:
+def _render_page(runs: RunsRepository[Tenant], render_page: PageRenderer, *, episode_id: str) -> None:
     """Render the episode page, by id in the request's tenant's repository. Never fatal to the
     launch: a failure is logged, not raised."""
     try:
-        from defender.presentation import visualize_episode
-
-        page = visualize_episode.render_episode(runs, episode_id)
+        page = render_page(runs, episode_id)
         _logger.info(f"episode {episode_id}: page {page}")
     except Exception as render_failed:  # noqa: BLE001 — a render fault is non-fatal to the launch
         _logger.warning(f"episode {episode_id}: the page could not be rendered "
@@ -771,8 +765,3 @@ __all__ = [
     "verify_family",
 ]
 
-
-if __name__ == "__main__":
-    from defender._log import configure_from_env
-    configure_from_env()
-    raise SystemExit(main(sys.argv[1:]))

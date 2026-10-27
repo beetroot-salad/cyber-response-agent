@@ -50,12 +50,12 @@ def build_stage_agent(
     verbs: Any = None,
     workspace: ModelView | None = None,
 ) -> Agent[Any, str]:
-    from defender.agents import AGENTS
+    from defender.learning.roles import LEARNING_AGENTS
 
     overrides: dict[str, Any] = {"model": lambda: wiring.model, "effort": wiring.effort}
     if tools is not None:
         overrides["tools"] = tools
-    defn = replace(AGENTS[deps_type.role], **overrides)
+    defn = replace(LEARNING_AGENTS[deps_type.role], **overrides)
     instructions = read_text_utf8(wiring.prompt_path)
     if workspace is not None:
         instructions += (

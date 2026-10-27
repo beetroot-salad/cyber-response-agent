@@ -188,7 +188,11 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
         # Static flags live in the in-container shell so ${VAR} expands there;
         # everything dynamic is forwarded as argv after `--` (so a JSON body with
         # spaces/quotes survives intact — no shell re-parsing). `--` lands in $0.
-        inner = f'exec curl {" ".join(flags)} -u "{auth}" "$@"'
+        # The credential reaches curl as config on stdin (`-K -`), written by the shell's
+        # builtin printf: never as an argument, which every process monitor on the host
+        # can read (Falco, process metrics) and ship into the telemetry this agent queries.
+        inner = (f'printf \'user = "%s"\\n\' "{auth}" | '
+                 f'exec curl {" ".join(flags)} -K - "$@"')
         cmd = ["docker", "--context", context, "exec", "-i", container,
                "sh", "-c", inner, "--", *args]
     else:

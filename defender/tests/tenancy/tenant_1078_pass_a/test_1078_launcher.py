@@ -62,7 +62,7 @@ def _launch_id(source_run_id: str, *, tenant_id: str = TID, **over):
     argv = ["--tenant", tenant_id, source_run_id, str(T.BRANCH_MESSAGE_ID),
             *T.retired_continuation_argv()]
     try:
-        result = H.branch_cli().main(argv, spawn=spawn, **seams)
+        result = H.branch_entry().main(argv, spawn=spawn, **seams)
     except SystemExit as refused:
         result = refused
     return result, spawn, seams["questioner"]

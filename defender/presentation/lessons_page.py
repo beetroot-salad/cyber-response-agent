@@ -1,34 +1,16 @@
-#!/usr/bin/env python3
+"""The lessons and queue pages' HTML: the templates, the stylesheets and the functions that fill
+them from a view. Learning builds the views; the entry at `cli/learning/lessons_page.py` composes
+the two and publishes the result."""
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from string import Template
-from typing import TYPE_CHECKING
 
-HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[3]
-
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from defender.execution._venv import reexec_into_venv  # noqa: E402
-
-if __name__ == "__main__":
-    reexec_into_venv(__file__)
-
-from defender.learning.core.config import LoopPaths  # noqa: E402
-from defender.presentation.publisher import NoPublishRoot, Publisher  # noqa: E402
-from defender.learning.frontend import serialize, serialize_queues  # noqa: E402
-from defender.presentation.visualize_primitives import (  # noqa: E402
+from defender.presentation.visualize_primitives import (
     esc_untrusted,
     pretty_json_html,
 )
-from defender.presentation.visualize_run import CSS as RUN_CSS  # noqa: E402
-
-if TYPE_CHECKING:
-    from defender.tenancy._tenant import Tenant
+from defender.presentation.visualize_run import CSS as RUN_CSS
 
 GROUP_STAGE = {"defender": "stage-defender"}
 
@@ -520,50 +502,3 @@ def render(view: dict) -> str:
         .replace("__STAGE_JSON__", json.dumps(GROUP_STAGE))
         .replace("__LESSONS_JSON__", payload)
     )
-
-
-def main(tenant: Tenant) -> int:
-    """Both pages and their contracts, published into the accepted tenant's learning area (#1279
-    O1). Refuses before building when there is nowhere to publish: outside `dev` (O4), or a
-    `dev` deployment with no publish folder set (A11). The lessons page shows the tenant's
-    published knowledge; with nothing published it shows no lesson (and says why), and the queue
-    page is built all the same."""
-    from defender.tenancy._exports import DeliveryRefused
-
-    publisher = Publisher.for_tenant(tenant)
-    agent_root = None
-    try:
-        agent_root = serialize.published_agent_root(tenant)
-    except DeliveryRefused as refused:
-        print(f"note: no published knowledge to show lessons from: {refused}", file=sys.stderr)
-    queues = serialize_queues.stamped_view(LoopPaths.for_tenant(tenant))
-    view = serialize.stamped_view(agent_root)
-
-    pages = {
-        "lessons.json": serialize.dump_contract(view),
-        "lessons.html": render(view),
-        "queues.json": serialize_queues.dump_contract(queues),
-        "queues.html": render_queues(queues),
-    }
-    for name, text in pages.items():
-        publisher.learning_page(name).write(text)
-
-    counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
-    dead = {ch["name"]: len(ch["deadletter"]) for ch in queues["channels"]}
-    print(f"published {publisher.learning_page('lessons.html').path.parent} — {counts}, dead letters {dead}")
-    return 0
-
-
-if __name__ == "__main__":
-    from defender._log import configure_from_env
-    configure_from_env()
-    import argparse
-    from defender.learning.core.cli import command_line_tenant
-
-    parser = argparse.ArgumentParser(description="Build this tenant's learning queue pages")
-    parser.add_argument("--tenant", required=True)
-    args = parser.parse_args()
-    try:
-        sys.exit(main(command_line_tenant(parser, args.tenant)))
-    except NoPublishRoot as refused:
-        parser.exit(2, f"{parser.prog}: {refused}\n")
