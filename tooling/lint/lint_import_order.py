@@ -7,13 +7,13 @@ top-level module: every flat `_*.py` counts as one node (`_flat`), and `run.py`,
 and `agents.py` each count as their own. Every import statement counts — at module load, inside
 a function, and under `if TYPE_CHECKING:` — since an indented import is still a dependency and the
 usual way a loop is hidden. Relative imports are resolved. An import's fingerprint is the importing
-file plus the fully resolved module it names (`from defender.runtime import session_store` keys
-as `defender.runtime.session_store`), so a listed entry never covers a second import.
+file plus the fully resolved module it names (`from defender.records import session_store` keys
+as `defender.records.session_store`), so a listed entry never covers a second import.
 
 Besides the order, two adapter rules (#1080 O4): `integrations/` imports only `kit`, the flat
 tier, `knowledge` and itself; and nothing outside `integrations/` imports it. The named reach-ins
 that remain are baseline entries owned by #1172, so they fail like any other once gone. That the
-API loads no `runtime` or `learning` module is a question of what Python executes, not of
+API loads no `investigation` or `learning` module is a question of what Python executes, not of
 spelling, so it is answered by importing (`defender/tests/api/test_1080_api_loads.py`), not here.
 
 It fails (exit 1) on an unlisted finding, on a baseline entry no finding matches (the list only
@@ -47,8 +47,8 @@ LABEL = "lint_import_order"
 #: first needs the other direction.
 ORDER = (
     "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records",
-    "tenancy", "knowledge", "box", "integrations", "hooks", "skills",
-    "runtime", "learning", "presentation", "run_common", "agents", "run", "cli", "api",
+    "tenancy", "knowledge", "box", "integrations", "systems", "hooks", "skills",
+    "investigation", "learning", "presentation", "run_common", "agents", "run", "cli", "api",
 )
 _RANK = {node: rank for rank, node in enumerate(ORDER)}
 

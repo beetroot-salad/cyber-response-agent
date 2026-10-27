@@ -5,9 +5,9 @@ import os
 
 import pytest
 
-from defender.runtime.run_state import RunState
+from defender.investigation.run_state import RunState
 from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
-from defender.runtime.branch._spec import BranchError
+from defender.investigation.branch._spec import BranchError
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 

@@ -9,12 +9,12 @@ pytest.importorskip("pydantic_ai")
 
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.learning.core import config  # noqa: E402
-from defender.runtime import permission  # noqa: E402
-from defender.runtime.agent_definition import (  # noqa: E402
+from defender.investigation import permission  # noqa: E402
+from defender.investigation.agent_definition import (  # noqa: E402
     compile_policy_for,
     read_allow_of,
 )
-from defender.runtime.permission import AgentPolicy  # noqa: E402
+from defender.investigation.permission import AgentPolicy  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 _DEFENDER = config.REPO_ROOT / "defender"

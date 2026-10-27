@@ -11,7 +11,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender import run_common
 from defender.records import PROVENANCE, RunPaths
-from defender.runtime.workspace_map import _unlisted
+from defender.investigation.workspace_map import _unlisted
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     GOLDEN_AB3,
@@ -155,7 +155,7 @@ def test_the_gather_subagent_is_bound_with_no_salt_at_all(tmp_path, monkeypatch)
         f"frame its own summary returns inside (#875 F-1): {sorted(gather_tokens & main_tokens)}"
     )
 
-    src = (DEFENDER / "runtime" / "tools_gather.py").read_text(encoding="utf-8")
+    src = (DEFENDER / "investigation" / "tools_gather.py").read_text(encoding="utf-8")
     assert not re.search(r"bind\(\s*GATHER_DEF[^)]*salt\s*=", src), \
         "the gather dispatch passes a salt into bind(GATHER_DEF, …)"
 

@@ -64,8 +64,8 @@ KNOWLEDGE_JOINS = ("settings", "knowledge", "agent")
 
 #: The settings-half loaders that survive piece 1 unchanged (profile resource
 SETTINGS_LOADER_MODULES = (
-    "runtime/verb_dispositions.py", "runtime/lead_zero_config.py", "runtime/run_tenant.py",
-    "runtime/case_ticket.py", "integrations/elastic_adapter.py",
+    "systems/verb_dispositions.py", "systems/lead_zero_config.py", "systems/run_tenant.py",
+    "tenancy/case_ticket.py", "integrations/elastic_adapter.py",
     "integrations/_stub_transport.py", "learning/branch/estate/stagers/elastic.py",
     "learning/branch/staging.py", "skills/connect/validate_scaffold.py",
 )
@@ -88,7 +88,7 @@ def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_se
         f"def row_only(tenant: Tenant) -> Path:\n    return tenant.{H.ROW_PATH_PROPERTY}\n\n"
         "def control(ep: Path, run_id: str) -> Path:\n"
         "    return EpisodePaths(ep).runs / run_id\n")
-    displays = _scan_planted(tmp_path, "runtime/tenant_joins.py", source)
+    displays = _scan_planted(tmp_path, "investigation/tenant_joins.py", source)
     assert _in(displays, "control"), f"the join arm is not live:\n{displays}"
     unflagged = [p for p in RECORD_LOCATIONS
                  if not any("owner-only record location" in d for d in _in(displays, f"join_{p}"))]
@@ -116,7 +116,7 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
 
         from defender.records._episode_paths import EpisodePaths
         from defender.tenancy._tenant import accept_tenant
-        from defender.runtime.run_tenant import RunTenant
+        from defender.systems.run_tenant import RunTenant
 
 
         def local_runs(root: Path, run_id: str) -> Path:
@@ -166,7 +166,7 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
         def control(ep: Path, run_id: str) -> Path:
             return EpisodePaths(ep).runs / run_id
         """)
-    displays = _scan_planted(tmp_path, "runtime/factory_joins.py", source)
+    displays = _scan_planted(tmp_path, "investigation/factory_joins.py", source)
     assert _in(displays, "control"), f"the join arm is not live:\n{displays}"
     untagged = [fn for fn in ("local_runs", "call_runs", "chain_learning")
                 if not any("owner-only record location" in d for d in _in(displays, fn))]

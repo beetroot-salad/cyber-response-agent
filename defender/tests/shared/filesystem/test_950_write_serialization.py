@@ -11,17 +11,17 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import Agent  # noqa: E402
 
-from defender.runtime import challenge_gate  # noqa: E402
-from defender.runtime.close_tool import register_close_tool  # noqa: E402
-from defender.runtime.review.projector import parse_investigation  # noqa: E402
-from defender.runtime.review.reply import (  # noqa: E402
+from defender.investigation import challenge_gate  # noqa: E402
+from defender.investigation.close_tool import register_close_tool  # noqa: E402
+from defender.investigation.review.projector import parse_investigation  # noqa: E402
+from defender.investigation.review.reply import (  # noqa: E402
     HOLDS,
     Unreadable,
     citable_refs,
     read_composer_reply,
 )
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.runtime.tools import AgentDeps, register_tools  # noqa: E402
+from defender.investigation.tools import AgentDeps, register_tools  # noqa: E402
 from defender.tests.support.runtime.permissions._review_bundle import bundle, composer_reply  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[3]

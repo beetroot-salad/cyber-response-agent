@@ -21,21 +21,21 @@ from defender.learning.branch.ledger import (
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
-from defender.runtime.branch._family import (
+from defender.records._family import (
     BASE_ROLE,
     FamilyError,
     ManifestPredatesOracle,
     load_manifest_document,
     parse_family,
 )
-from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
-from defender.runtime.run_end import (
+from defender.systems.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
+from defender.records.run_end import (
     TRUNCATED_BY_EXECUTED_QUERIES,
     TRUNCATED_BY_SERVED_LEDGER,
     RunEnd,
     parse_record,
 )
-from defender.runtime.verbs import is_system_name
+from defender.kit.verbs import is_system_name
 from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,

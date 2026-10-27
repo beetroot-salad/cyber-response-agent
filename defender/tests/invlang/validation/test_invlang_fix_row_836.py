@@ -29,7 +29,7 @@ _DUPLICATE_WARN_DOC = PROLOGUE + attr_block(WARN_ROW, WARN_ROW)
 
 
 def _fix(deps, old_row, new_row):
-    from defender.runtime.tools import _tool_fix_row
+    from defender.investigation.tools import _tool_fix_row
 
     return _tool_fix_row(deps, old_row, new_row)
 
@@ -57,9 +57,9 @@ def _registered_tools():
 
     from defender.agents import MAIN_DEF
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.runtime import driver, observe
+    from defender.investigation import driver, observe
     from defender.providers import BuiltModel
-    from defender.runtime.tools import AgentDeps
+    from defender.investigation.tools import AgentDeps
     from defender.tests.e2e._replay_harness import ReplayFn
 
     logger = observe.RequestLogger(Path(os.devnull))
@@ -303,8 +303,8 @@ def test_fix_row_with_empty_new_row_deletes_the_line(tmp_path):
 
 def test_the_repair_window_is_closable_while_the_run_is_still_taking_turns(tmp_path):
     """O5, RE-SCOPED by H1: the window can always be closed **while the run is still taking turns**."""
-    from defender.runtime import challenge_gate
-    from defender.runtime.close_tool import close_investigation
+    from defender.investigation import challenge_gate
+    from defender.investigation.close_tool import close_investigation
     from defender.tests.support.runtime.permissions import _review_bundle
 
     deps, run = main_deps(tmp_path)
@@ -398,8 +398,8 @@ def test_fix_row_refused_once_the_close_committed(tmp_path):
     """SEC2 / RS15: no write on `investigation.md` after the close commits a recorded disposition — `fix_row` joins the three verbs that already refuse there (claim p10)."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender.runtime import challenge_gate
-    from defender.runtime.close_tool import close_investigation
+    from defender.investigation import challenge_gate
+    from defender.investigation.close_tool import close_investigation
     from defender.tests.support.runtime.permissions import _review_bundle
 
     deps, run = main_deps(tmp_path)

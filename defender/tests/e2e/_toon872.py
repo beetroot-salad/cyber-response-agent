@@ -32,8 +32,8 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.toolsets import FunctionToolset  # noqa: E402
 
-from defender.runtime import driver  # noqa: E402
-from defender.runtime.agent_definition import AgentDefinition  # noqa: E402
+from defender.investigation import driver  # noqa: E402
+from defender.investigation.agent_definition import AgentDefinition  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, ReplayFn  # noqa: E402
 
 REPO_ROOT = DEFENDER.parent
@@ -287,12 +287,12 @@ def _returner(value: Any):
 def gate_metadata_key() -> str:
     """The reserved key §7 r1 spelled, imported PER CALL rather than at a module head.
 
-    `defender.runtime.toon_gate` does not exist at the base this spec forks from, and a
+    `defender.investigation.toon_gate` does not exist at the base this spec forks from, and a
     module-head import turns that into one collection error per file instead of one failure per
     test — which is exactly what the null-stub check cannot read: an import error proves the
     file is broken, never that the test discriminates. The #705 spec suite established this
     shape for the same reason."""
-    from defender.runtime.toon_gate import GATE_METADATA_KEY
+    from defender.investigation.toon_gate import GATE_METADATA_KEY
     return GATE_METADATA_KEY
 
 
@@ -302,7 +302,7 @@ def owned_toolset(returns: Any, *, name: str = "fetch_rows") -> Any:
     The label is applied through the production marker, never by spelling a metadata key in
     the test: `d59` pins what the label IS, and a test that hand-wrote the key would go green
     over an implementation that read a different one."""
-    from defender.runtime.toon_gate import mark_owned
+    from defender.investigation.toon_gate import mark_owned
     return mark_owned(foreign_toolset(returns, name=name))
 
 
@@ -468,7 +468,7 @@ def _deps(defn: Any = None, run_dir: Path | None = None):
     """A real `AgentDeps`, bound the way the composition root binds one."""
     import tempfile
 
-    from defender.runtime.agent_definition import RunScope, bind
+    from defender.investigation.agent_definition import RunScope, bind
     resolved = _defn(defn)
     if run_dir is None:
         run_dir = Path(tempfile.mkdtemp(prefix="toon872-"))
@@ -522,8 +522,8 @@ def _defn(defn: Any = None) -> AgentDefinition:
     `AGENTS` picks the subjects, it is not what is asserted about them."""
     from dataclasses import replace
 
-    from defender.runtime.agent_definition import DENY_ALL, ToolSet
-    from defender.runtime.driver import MAIN_DEF
+    from defender.investigation.agent_definition import DENY_ALL, ToolSet
+    from defender.investigation.driver import MAIN_DEF
     base = defn if defn is not None else MAIN_DEF
     # `write_shapes`/`bash_shapes`/`verb_grant`/`corpus_dirs` go with the grants they scope:
     # `agent_definition` refuses a definition that declares shapes no ToolSet grants a writer

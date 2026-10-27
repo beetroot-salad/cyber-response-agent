@@ -17,7 +17,7 @@ from typing import Any
 from defender import run_common
 from defender.records import RunPaths
 from defender.learning.branch.estate.registry import EstateError
-from defender.runtime import run_tenant
+from defender.systems import run_tenant
 from defender.tests.support.runtime.engine import _spec767 as M
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.storage._alert_plant import plant_alert as plant_with_record
@@ -385,7 +385,7 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
     for shown in ("SOC-OPEN-1107", "SOC-CLOSED-1107", "MARK-OPEN-1107", "MARK-CLOSED-1107"):
         assert _shown(gather, shown), f"{shown} was withheld from gather under a bad mapping"
     warned = [r for r in caplog.records
-              if r.name == "defender.runtime.query_tool" and r.levelno >= logging.WARNING
+              if r.name == "defender.investigation.query_tool" and r.levelno >= logging.WARNING
               and said in r.getMessage()]
     assert warned == [], "the query tool still reads the case-history mapping"
 

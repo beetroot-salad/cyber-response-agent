@@ -1,6 +1,6 @@
 # The verb-disposition table — who may call what, in this deployment.
 #
-# READ defender/runtime/verb_dispositions.py before editing. The short version:
+# READ defender/systems/verb_dispositions.py before editing. The short version:
 #
 #   * This file is AUTHORED. It is never generated from what is on disk, because deriving it
 #     would mean dropping an adapter file into the tree grants that adapter access.
@@ -63,7 +63,7 @@ dispositions:
     # the lead to another backend is that config line plus this holder's rows — not one
     # without the other. The loader's one-query-verb rule is what keeps a one-word edit here from
     # widening it; withholding the pair (`roles: [gather]`) skips the lead instead. It used
-    # to be a `VerbGrant` literal in `runtime/lead_zero/_spec.py` that no row here could
+    # to be a `VerbGrant` literal in `investigation/lead_zero/_spec.py` that no row here could
     # withdraw.
     alerts: {roles: [gather, lead-zero-correlation]}
     esql: {roles: [gather]}

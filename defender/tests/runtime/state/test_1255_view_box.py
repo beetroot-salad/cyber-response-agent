@@ -234,8 +234,8 @@ def test_b2_c9_mains_write_lane_lands_a_model_path_and_refuses_a_host_path(tmp_p
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.agents import MAIN_DEF
-    from defender.runtime import tools as runtime_tools
-    from defender.runtime.agent_definition import bind
+    from defender.investigation import tools as runtime_tools
+    from defender.investigation.agent_definition import bind
 
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()

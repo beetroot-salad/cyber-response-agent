@@ -2,7 +2,7 @@
 """Defender entrypoint — investigate one alert end-to-end.
 
 The investigation is driven by the in-process PydanticAI driver
-(`runtime/driver.py`): materialize the run dir → run → cross-check the two live
+(`investigation/driver.py`): materialize the run dir → run → cross-check the two live
 tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
 via `run_common.py`.
 
@@ -60,23 +60,23 @@ from defender.records import RunPaths  # noqa: E402
 from defender.tenancy import _tenant  # noqa: E402
 from defender.records._episode_handle import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
-from defender.runtime import driver  # noqa: E402
+from defender.investigation import driver  # noqa: E402
 from defender import providers  # noqa: E402
-from defender.runtime import run_end  # noqa: E402
-from defender.runtime import run_knowledge  # noqa: E402
-from defender.runtime import system_status  # noqa: E402
+from defender.records import run_end  # noqa: E402
+from defender.tenancy import run_knowledge  # noqa: E402
+from defender.systems import system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.run_tenant import RunTenant  # noqa: E402
-from defender.runtime.system_status import RunSystems  # noqa: E402
-from defender.runtime.verb_grant import GrantError  # noqa: E402
-from defender.runtime.verbs import (  # noqa: E402
+from defender.systems.run_tenant import RunTenant  # noqa: E402
+from defender.systems.system_status import RunSystems  # noqa: E402
+from defender.systems.verb_grant import GrantError  # noqa: E402
+from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     RegistryError,
     RosterRead,
     ServingAbort,
     read_roster,
 )
-from defender.runtime import ticket_writer as _default_ticket_writer  # noqa: E402
+from defender.investigation import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -337,7 +337,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             prebranch_calls,
         )
         from defender.learning.branch.ledger import Ledger
-        from defender.runtime import branch as branch_mod
+        from defender.investigation import branch as branch_mod
 
         family = world.family
         # Declared up front: a world that serves nothing must still leave a ledger.
@@ -474,7 +474,7 @@ def _resolve_run_tenant(
     `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
     lead. Without `copy` (a direct caller), the record is resolved over the tenant's own
     folder. `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
-    from defender.runtime import run_tenant as run_tenant_mod
+    from defender.systems import run_tenant as run_tenant_mod
 
     del defender_dir
     roots = ({} if copy is None else
@@ -541,7 +541,7 @@ def _publish_report(
 
 def _default_publish() -> Callable[..., object]:
     """The real launch-time publish: a separate child process (O-BUDGET, P-3)."""
-    from defender.runtime.publish_launch import launch_publish as real
+    from defender.investigation.publish_launch import launch_publish as real
 
     return real
 
@@ -668,7 +668,7 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
     primed recording and depends on nothing the manifest does not say. The manifest records
     its served systems, so no tenant is resolved to read it: `tenant` is never called here.
     """
-    from defender.runtime.branch import _family
+    from defender.records import _family
 
     del tenant  # the manifest is the whole record; see the docstring
     family = _family.load_family(episode.view(), expected_episode_id=episode.dir.name)
@@ -719,7 +719,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
         # run on as an ordinary investigation.
         sys.exit(f"[run.py] --episode {ns.episode}: no episode is held for it")
     from defender.records import RunRefused
-    from defender.runtime.branch._family import FamilyError
+    from defender.records._family import FamilyError
 
     if ns.update_ticket:
         sys.exit(
@@ -923,7 +923,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
             # adapters' own settings checks over those settings — a start at which no granted
             # system is usable refused here (O-8, a sibling's own start too) — and handed to the
             # lifecycle whole, so the investigation reads that roster and does not judge again.
-            from defender.runtime.branch._family import family_identities
+            from defender.records._family import family_identities
 
             known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
             systems = _judge_start(

@@ -11,7 +11,7 @@ from defender.tenancy._exports import remove_entry as _remove_entry
 from defender.tenancy._tenant import Tenant
 from defender import box
 from defender._model_view import ModelView
-from defender.runtime.permission.grant import path_operands
+from defender.investigation.permission.grant import path_operands
 
 from .commits import CommitMaker, _Line
 from .exports import TenantExport, agent_blobs

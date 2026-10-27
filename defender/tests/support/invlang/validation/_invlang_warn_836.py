@@ -21,9 +21,9 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.runtime import challenge_gate, driver, observe  # noqa: E402
-from defender.runtime.run_state import RunState  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.investigation import challenge_gate, driver, observe  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
@@ -269,7 +269,7 @@ class RecordingStages:
         return call
 
     def bundle(self) -> Any:
-        from defender.runtime.review_roles import ReviewStages
+        from defender.investigation.review_roles import ReviewStages
 
         return ReviewStages(
             support=self._stage("support", _review_bundle.LENS_READING),

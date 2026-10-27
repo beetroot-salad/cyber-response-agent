@@ -83,7 +83,7 @@ def _main_deps_over_run_copy(tmp_path: Path) -> tuple[Any, Path]:
 
     from defender.agents import MAIN_DEF
     from defender.records import Run
-    from defender.runtime.agent_definition import RunScope, bind
+    from defender.investigation.agent_definition import RunScope, bind
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
@@ -113,7 +113,7 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
     corpus.mkdir()
     lesson = _write_lesson(corpus, F.CLASS_LESSON, nodes=F.CLASS_SELECTOR)
 
-    lessons_push = importlib.import_module("defender.runtime.lessons_push")
+    lessons_push = importlib.import_module("defender.investigation.lessons_push")
     text, on_minted = lessons_push.compose_fold(deps, "the record", F.FOLDING_DOC)
     assert on_minted is not None, "the fold push produced no block (it failed open)"
     block = text[len("the record"):]
@@ -122,7 +122,7 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
     assert model_lesson in block, block
     assert F.FOLD_HEADER in block.strip().splitlines()[0], block
 
-    document = importlib.import_module("defender.runtime.tools._document")
+    document = importlib.import_module("defender.investigation.tools._document")
     recall = document._frontier_recall(deps, "", F.FOLDING_DOC)
     assert model_lesson in recall, f"the document tool produced no block: {recall!r}"
     assert F.WRITE_RETURN_HEADER in recall, recall
@@ -146,12 +146,12 @@ def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
 
 def test_1080_observe_costs_usage_through_pricing_in_providers_as_today():
     moved = S.moved("usage_cost", home=S.PRICING)
-    observe = importlib.import_module("defender.runtime.observe")
+    observe = importlib.import_module("defender.investigation.observe")
     assert observe.usage_cost is moved
     assert _pricing_rows(observe.usage_cost) == _g("pricing")["rows"]
 
     seen = _cold_import(S.dotted(S.home_of("usage_cost", home=S.PRICING)),
-                        "defender.runtime.observe")
+                        "defender.investigation.observe")
     pricing_mod, observer = list(seen)
     assert seen[pricing_mod] == [], f"importing pricing loaded {seen[pricing_mod]}"
     assert "pydantic_ai" in seen[observer], "positive control: the observer loads pydantic_ai"

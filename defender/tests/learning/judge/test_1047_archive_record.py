@@ -257,7 +257,7 @@ def test_run_end_write_happens_even_for_a_run_that_ended_cleanly(tmp_path):
 
 def test_the_driver_records_whether_the_model_had_already_closed_when_the_exit_was_stamped(
         tmp_path):
-    from defender.runtime import challenge_gate
+    from defender.investigation import challenge_gate
     from defender.tests.support.runtime.engine import _spec923
 
     closed_deps, closed_run = _deps(tmp_path / "closed")

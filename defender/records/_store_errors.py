@@ -1,6 +1,6 @@
 """The session store's error root and its bad-case-id error — stdlib only.
 
-Kept out of `runtime/session_store.py` (which pulls in pydantic-ai) because
+Kept out of `records/session_store.py` (which pulls in pydantic-ai) because
 `_layout.SessionPaths` raises `InvalidCaseId` and must import with no third-party package
 installed. `session_store` re-exports both names.
 """

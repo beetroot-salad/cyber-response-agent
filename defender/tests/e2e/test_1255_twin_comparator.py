@@ -627,9 +627,9 @@ def test_1255_twin_read_scope_parity(tmp_path, rel, main, gather):
 
 
 def test_1255_twin_review_roles_read_no_file():
-    from defender.runtime.agent_definition import ToolSet
-    from defender.runtime.challenge_gate import REVIEW_ROLES
-    from defender.runtime.review_roles import COMPOSER_DEF, SUPPORT_DEF
+    from defender.investigation.agent_definition import ToolSet
+    from defender.investigation.challenge_gate import REVIEW_ROLES
+    from defender.investigation.review_roles import COMPOSER_DEF, SUPPORT_DEF
 
     assert set(REVIEW_ROLES) == {"support", "ablation", "composer"}, REVIEW_ROLES
     for defn in (SUPPORT_DEF, COMPOSER_DEF):

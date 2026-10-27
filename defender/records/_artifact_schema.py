@@ -5,7 +5,7 @@
 well-formed one is: the report's frontmatter grammar and `disposition` enum, UTF-8 byte
 bounds, and the investigation's invlang structure.
 
-It owns no authorization (`runtime/permission/files.py` does) and never sees a policy, run
+It owns no authorization (`investigation/permission/files.py` does) and never sees a policy, run
 dir, or path. Entry points return a deny reason or `None`, not a `permission.Decision`, so
 this stays a neutral leaf both the gate and read-side validators can import.
 """
@@ -209,7 +209,7 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
 
 def _rendered_errors(found: list[Diagnostic]) -> str | None:
     """The error-severity findings rendered for the model, or `None`. Shared by the write and
-    close gates, which differ only in framing. Warnings are `runtime.tools`' repair window."""
+    close gates, which differ only in framing. Warnings are `investigation.tools`' repair window."""
     errors = [d for d in found if d.severity != "warning"]
     if not errors:
         return None

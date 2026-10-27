@@ -34,7 +34,7 @@ from defender.records import (
     Run,
 )
 
-from defender.runtime.run_tenant import RunTenant
+from defender.systems.run_tenant import RunTenant
 
 from defender.learning.branch import outcome as outcome_mod
 
@@ -47,11 +47,11 @@ from defender.learning.branch.ledger import Ledger
 
 
 
-from defender.runtime import branch
+from defender.investigation import branch
 
-from defender.runtime.branch import _family
+from defender.records import _family
 
-from defender.runtime.branch._family import (
+from defender.records._family import (
     runnable_worlds,
 )
 
@@ -239,7 +239,7 @@ def _originals(source_run_dir: Path) -> list[_Original]:
 def _not_admitted(reader: Any, call: _Original) -> str | None:
     """Why the live gather grant does not admit `call` for replay, or `None` when it does
     (M22=A: every replayed call goes through `decide`; only read verbs are replayed)."""
-    from defender.runtime.verbs import GRANTED
+    from defender.systems.verbs import GRANTED
     from defender.kit.verbs import verb_class_of
 
     try:
@@ -266,7 +266,7 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) 
     row). `DEFENDER_RUNS_BASE` is the source run's container — the tenant's natural runs folder
     — from the source `Run`'s own hand-out, not `run_env`'s `run_dir.parent`."""
     from defender.box import run_env
-    from defender.runtime.verbs import VerbContext
+    from defender.systems.verbs import VerbContext
 
     env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
@@ -298,7 +298,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     from defender.learning.branch.estate.checks import canonical_json
     from defender.learning.branch.ledger import payload_text, request_key
     from defender.learning.core.config import oracle_settings_with
-    from defender.runtime.verbs import ModuleVerbRegistry
+    from defender.systems.verbs import ModuleVerbRegistry
 
     # The reader first, unguarded: a tenant with no gather grant refuses here (`GrantError`),
     # before anything is read or sent (O-16).

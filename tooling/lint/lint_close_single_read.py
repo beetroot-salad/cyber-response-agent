@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Close single-read fence (#991): the close reads and parses the investigation companion once.
 
-* `runtime/close_tool.py` makes exactly one `parse_dense_companion(` call and one
+* `investigation/close_tool.py` makes exactly one `parse_dense_companion(` call and one
   `read_companion(` call, and `_close_investigation_async` takes no `read_text` / `read_bytes` of
   its own beside the one read it hands to every gate.
-* `runtime/challenge_gate.py` reads and parses nothing: no `read_text`, `read_bytes`,
+* `investigation/challenge_gate.py` reads and parses nothing: no `read_text`, `read_bytes`,
   `parse_dense_companion` or `parse_investigation` call (it is handed the parsed document).
 * The one parse sits inside `_refuse_if_entry_price_is_owed`, which catches and raises
   `ModelRetry`, so a parse fault is a refusal and never a traceback.
@@ -28,8 +28,8 @@ import _astlib
 #: The checkout's own `defender/`, so a run from any directory or worktree sweeps itself.
 DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
-_CLOSE = "runtime/close_tool.py"
-_GATE = "runtime/challenge_gate.py"
+_CLOSE = "investigation/close_tool.py"
+_GATE = "investigation/challenge_gate.py"
 _CLOSE_FN = "_close_investigation_async"
 _GUARD_FN = "_refuse_if_entry_price_is_owed"
 _OWN_READS = ("read_text", "read_bytes")

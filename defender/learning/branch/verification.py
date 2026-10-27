@@ -35,7 +35,7 @@ from defender.records import (
 
 
 from defender.learning.branch import outcome as outcome_mod
-from defender.runtime.branch._family import load_family
+from defender.records._family import load_family
 
 
 

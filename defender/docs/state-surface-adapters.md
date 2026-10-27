@@ -128,15 +128,15 @@ adapter. Each verb takes keyword-only params (shown in parentheses), not
 ## Permissions
 
 Since #611 a data-source adapter is not on any bash lane. The gather subagent
-calls the in-process typed `query` tool (`runtime/query_tool.py`), which
+calls the in-process typed `query` tool (`investigation/query_tool.py`), which
 dispatches `(system, verb, params)` against the verb registry
-(`runtime/verbs.py`'s `ModuleVerbRegistry`, discovered by glob over
+(`systems/verbs.py`'s `ModuleVerbRegistry`, discovered by glob over
 `integrations/*_adapter.py`). That registry IS the allowlist — a system or verb
 not in it is rejected — so a new adapter auto-gates by dropping its
 `{system}_adapter.py` (with a `VERBS` mapping) into `integrations/`, no per-CLI
 permission entry needed. The main loop is denied data-source access entirely
 (the gather subagent is the data-access layer); the per-agent grant model
-(`runtime/permission/`, #575) gates what remains on the read-only bash lanes.
+(`investigation/permission/`, #575) gates what remains on the read-only bash lanes.
 
 The adapter may shell out to `docker --context soc-playground exec *` internally,
 but that runs inside the in-process verb — it is never a model-authored command

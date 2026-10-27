@@ -25,7 +25,7 @@ import pytest
 
 from defender.learning.branch.estate import oracle as oracle_mod
 from defender.learning.branch.estate.checks import CheckStore, RealData, check_submission
-from defender.runtime.verbs import CALL_DELIVERY, CallDelivery
+from defender.systems.verbs import CALL_DELIVERY, CallDelivery
 from defender.box._oracle import OracleBox, stop_oracle_box
 from defender.box._spec import BoxSpec, _DockerTransport
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S

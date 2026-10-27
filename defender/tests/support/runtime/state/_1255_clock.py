@@ -25,7 +25,7 @@ from defender import _clock  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender import box as box_mod  # noqa: E402
-from defender.runtime import driver  # noqa: E402
+from defender.investigation import driver  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
@@ -337,7 +337,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
 
 def quiet_registry() -> type:
     """Use real verb signatures with empty elastic answers instead of network calls."""
-    from defender.runtime.verbs import ModuleVerbRegistry
+    from defender.systems.verbs import ModuleVerbRegistry
     from defender.integrations.elastic_adapter import search_envelope
 
     def canned(fn: Any) -> Any:
@@ -372,8 +372,8 @@ def opened_source(run_dir: Path) -> Any:
 @contextlib.contextmanager
 def _source_main_session(source_run_dir: Path) -> Iterator[list[tuple[int, Any]]]:
     """Read source MAIN rows in path order and close the store on exit."""
-    from defender.runtime import branch as branch_mod
-    from defender.runtime import session_store as ss
+    from defender.investigation import branch as branch_mod
+    from defender.records import session_store as ss
 
     source = opened_source(source_run_dir)
     store = branch_mod.source_store_if_any(source.run_dir, source_run=source)

@@ -10,7 +10,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 
 def _family():
-    return T.mod("runtime.branch._family")
+    return T.mod("records._family")
 
 
 def _load(doc):

@@ -18,11 +18,11 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
-from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import (  # noqa: E402
+from defender.investigation import tools as runtime_tools  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.investigation.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import (  # noqa: E402
     GRANTED,
     ModuleVerbRegistry,
     VerbContext,
@@ -41,7 +41,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
-from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import Sequence as _WindowSpec
@@ -577,7 +577,7 @@ def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_pa
         "nothing, or is not registered on the real gather agent"
     )
 
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    from defender.investigation.lead_zero import RESERVED_LEAD_IDS
     own_rows = [
         row for row in read_jsonl_rows(run_dir / "executed_queries.jsonl")
         if row.get("lead_id") not in RESERVED_LEAD_IDS

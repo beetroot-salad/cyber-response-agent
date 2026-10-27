@@ -89,7 +89,7 @@ def build_curator_agent(tmp_path: Path, prompt_path: Path, make_model):
     """
     from defender.learning.core.config import StageWiring
     from defender.learning._pydantic_stage import build_stage_agent
-    from defender.runtime import observe
+    from defender.investigation import observe
 
     logger = observe.RequestLogger(tmp_path / "t.jsonl")
     try:

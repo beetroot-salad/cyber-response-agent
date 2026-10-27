@@ -83,7 +83,7 @@ def assert_stage_tools(deps_cls, *, label: str, effort: str, expected: list[str]
 
     from defender.learning.core.config import StageWiring
     from defender.learning import _pydantic_stage
-    from defender.runtime import observe
+    from defender.investigation import observe
 
     logger = observe.RequestLogger(Path(f"/tmp/does-not-need-to-exist-{label}-tools.jsonl"))
     try:

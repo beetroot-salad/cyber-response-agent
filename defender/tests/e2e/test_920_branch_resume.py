@@ -8,7 +8,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.runtime.lead_zero import CORRELATION_HEADING  # noqa: E402
+from defender.investigation.lead_zero import CORRELATION_HEADING  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.learning.branch._branch_947 import spec_at  # noqa: E402
 from defender.tests.support.storage._session_head_754 import message_ids  # noqa: E402
@@ -46,9 +46,9 @@ FENCES = 7
 
 
 def branch_mod():
-    """`defender.runtime.branch` — PR 1's new module, imported per test so a missing target is
+    """`defender.investigation.branch` — PR 1's new module, imported per test so a missing target is
     one failure per test rather than a collection error for the file."""
-    return importlib.import_module("defender.runtime.branch")
+    return importlib.import_module("defender.investigation.branch")
 
 
 def _source_run(tmp_path, sink, *, docs):

@@ -13,7 +13,7 @@ from defender.hooks.budget_enforcer import (
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,
 )
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+from defender.investigation.lead_zero import RESERVED_LEAD_IDS
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     FakeVerbs,

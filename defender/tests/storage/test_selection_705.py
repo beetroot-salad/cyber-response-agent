@@ -1,4 +1,4 @@
-"""runtime/selection.py and the one role-scoped reader over the session store."""
+"""records/selection.py and the one role-scoped reader over the session store."""
 from __future__ import annotations
 
 import pytest

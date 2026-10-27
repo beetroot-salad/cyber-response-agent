@@ -19,7 +19,7 @@ def _questioner():
 
 
 def _family_mod():
-    return T.mod("runtime.branch._family")
+    return T.mod("records._family")
 
 
 # registration, and everything that moves with it
@@ -29,7 +29,7 @@ def test_947_questioner_definition_grants_no_tool_and_no_verb(tmp_path):
     QUESTIONER_DEF = _questioner().QUESTIONER_DEF
     assert tuple(QUESTIONER_DEF.tools) == ()
     assert QUESTIONER_DEF.verb_grant.entries == ()
-    compile_policy_for = T.sym("runtime.permission", "compile_policy_for")
+    compile_policy_for = T.sym("investigation.permission", "compile_policy_for")
     run_dir, defender_dir = tmp_path / "run", tmp_path / "defender"
     run_dir.mkdir()
     defender_dir.mkdir()

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from defender._vocab import DISPOSITION_ENUM, HOST_ONLY_DISPOSITION
-from defender.runtime.close_tool import (
+from defender.investigation.close_tool import (
     CAUSE_NOT_REVIEWED,
     CHALLENGED,
     FORCED_INCONCLUSIVE,
@@ -302,7 +302,7 @@ def test_driver_forced_unresolved_survives_after_a_challenged_inconclusive(tmp_p
 
 def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
     """A run whose `inconclusive` close was challenged and which then hits the request ceiling is force-closed..."""
-    from defender.runtime import driver
+    from defender.investigation import driver
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
 
     deps, run_dir = _challenged_inconclusive(tmp_path)
@@ -326,9 +326,9 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
 def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
     """The other two exits that stop the model — the tool budget's kill and the circuit breaker's abort — do NOT..."""
     from defender.hooks.budget_enforcer import BudgetKill
-    from defender.runtime import driver
-    from defender.runtime import session_store
-    from defender.runtime.circuit_breaker import RunAborted
+    from defender.investigation import driver
+    from defender.records import session_store
+    from defender.systems.circuit_breaker import RunAborted
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
 
     class _Killed:
@@ -365,8 +365,8 @@ def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
 
 def test_disposition_threaded_seams(tmp_path):
     """`composer_projection` accepts the reviewed disposition and renders a different host sentence for..."""
-    from defender.runtime import challenge_gate
-    from defender.runtime.review.projector import composer_projection, parse_investigation
+    from defender.investigation import challenge_gate
+    from defender.investigation.review.projector import composer_projection, parse_investigation
 
     companion = parse_investigation(ceiling_companion())
     readings = {"support": "l-001 moves h-002"}

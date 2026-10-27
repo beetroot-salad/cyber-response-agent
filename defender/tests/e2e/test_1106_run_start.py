@@ -270,7 +270,7 @@ class _RegistryRecorder:
 
 
 def _grant_of(call: tuple[tuple, dict]) -> Any:
-    from defender.runtime.verb_grant import VerbGrant
+    from defender.systems.verb_grant import VerbGrant
 
     args, kwargs = call
     grants = [v for v in (*args, *kwargs.values()) if isinstance(v, VerbGrant)]

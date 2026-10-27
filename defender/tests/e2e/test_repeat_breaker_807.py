@@ -15,14 +15,14 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E4
 from defender.records import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
-from defender.runtime import circuit_breaker  # noqa: E402
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
+from defender.investigation.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from defender.knowledge._query_rules import _json_safe_params  # noqa: E402
-from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry  # noqa: E402
 from defender.kit.faults import TransportFault, UpstreamFault  # noqa: E402
 from defender.knowledge import _query_rules  # noqa: E402
-from defender.runtime import record_query  # noqa: E402
+from defender.investigation import record_query  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,
@@ -43,7 +43,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
 )
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.runtime.record_query import (
+from defender.investigation.record_query import (
     REJECTION_BUDGET,
     REPEAT_ESCAPE,
     REPEAT_THRESHOLD,
@@ -53,7 +53,7 @@ from defender.runtime.record_query import (
     rejection_trip,
     repeat_trip,
 )
-from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
 from defender.tests.support.shared.contracts._after_start_1256 import AfterStart, Relink  # noqa: E402
 
 pytestmark = pytest.mark.e2e

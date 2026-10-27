@@ -53,7 +53,7 @@ def test_an_episode_is_read_under_one_namespace(tmp_path):
     """An episode's worlds are written and read back under one namespace, and it cannot be built any
     other way."""
     cli = W.mod("learning.branch.cli")
-    fam = W.mod("runtime.branch._family")
+    fam = W.mod("records._family")
     judge_family = W.mod("learning.judge.family")
 
     rc, spawn, ep = launch(tmp_path)
@@ -124,7 +124,7 @@ def test_arm_roster_capacity_matches_the_readable_wire_budget(count, expected_by
 @pytest.mark.parametrize("count", [799, 800])
 def test_host_publication_checks_roster_capacity_before_writing(tmp_path, count):
     from defender.records._episode_handle import Episode
-    from defender.runtime.branch import _family
+    from defender.records import _family
 
     doc = _capacity_family(count)
     with Episode.create(tmp_path / T.EPISODE_ID) as episode:
@@ -143,7 +143,7 @@ def test_host_publication_checks_roster_capacity_before_writing(tmp_path, count)
 def test_preflight_checks_the_same_roster_capacity_before_oracle_or_writes(tmp_path, count):
     from defender.records._episode_handle import Episode
     from defender.learning.branch import cli
-    from defender.runtime.branch import _family
+    from defender.records import _family
     from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
     est, src = P.launch_source(tmp_path)

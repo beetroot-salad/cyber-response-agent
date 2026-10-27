@@ -8,11 +8,11 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.agent_definition import compile_policy_for  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
+from defender.investigation.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
+from defender.systems.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     ADAPTERS_DIR,
@@ -33,7 +33,7 @@ from defender.tests.support.learning.curation._verb_authorization_632 import (  
     recording_table,
     run_gather,
 )
-from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

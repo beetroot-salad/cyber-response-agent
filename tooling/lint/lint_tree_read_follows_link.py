@@ -87,7 +87,7 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/branch/timing.py",
     "learning/branch/questioner/__init__.py",
     # The branch package: the sibling launcher reads the source run dir throughout.
-    "runtime/branch/",
+    "investigation/branch/",
     # The family judge, whose input is the episode tree: archived world dirs, the episode's
     # `judge.yaml`/`review.yaml`/`family.yaml`, per-draw records, and the runs base.
     "learning/judge/__init__.py",

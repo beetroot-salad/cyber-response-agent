@@ -395,7 +395,7 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
     _restamp(launch.src, dirty=True)
     stamp = _accepted(launch, "--allow-dirty")
     assert stamp["source"]["dirty"] is True
-    assert stamp["source"]["dirty_paths"] == ["defender/runtime/driver/__init__.py"]
+    assert stamp["source"]["dirty_paths"] == ["defender/investigation/driver/__init__.py"]
     assert stamp["source"]["dirty_path_count"] == 1
     assert stamp["allow_dirty"] is True
     assert stamp["agreed"]["commit"] == stamp["source"]["commit"] == "deadbee"

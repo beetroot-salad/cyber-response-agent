@@ -7,7 +7,7 @@ pytest.importorskip("pydantic_ai")
 
 
 from defender._paths import PATHS  # noqa: E402
-from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
+from defender.investigation.agent_definition import RunScope, bind  # noqa: E402
 from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF  # noqa: E402
 
 from defender.tests.support.learning.curation._curator_691_harness import (  # noqa: E402

@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from defender.runtime import run_knowledge
+from defender.tenancy import run_knowledge
 from defender.tests.e2e._box665 import RecordingDocker
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
@@ -112,7 +112,7 @@ def test_r6_a_copy_build_cut_off_mid_write_leaves_a_temporary_that_already_names
         run_id = str(uuid.uuid4())
         script = textwrap.dedent(f"""
             import resource, signal, sys
-            from defender.runtime import run_knowledge
+            from defender.tenancy import run_knowledge
             from defender.tenancy import _tenant
             tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), {t.tenant_id!r})
             source = run_knowledge.KnowledgeSource(kind="fresh", commit={t.commit!r})

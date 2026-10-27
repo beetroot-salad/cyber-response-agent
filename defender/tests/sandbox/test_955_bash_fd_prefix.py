@@ -222,8 +222,8 @@ def test_an_unquoted_operator_is_still_an_operator():
 # The same invariant, at the layer that actually decides.
 def test_the_gate_does_not_rewrite_the_command_before_it_parses_it(tmp_path):
     """`decide_bash` is the entry point"""
-    from defender.runtime.agent_definition import compile_policy_for
-    from defender.runtime.permission import decide_bash
+    from defender.investigation.agent_definition import compile_policy_for
+    from defender.investigation.permission import decide_bash
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()

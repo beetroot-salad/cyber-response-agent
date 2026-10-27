@@ -585,7 +585,7 @@ class EpisodeRuns:
         must then exactly match this episode's validated manifest: no partial or foreign arm
         mapping can be used. Descriptive labels never participate in roster identity.
         """
-        from defender.runtime.branch._family import manifest_world_ids
+        from defender.records._family import manifest_world_ids
 
         arms = self._roster_document()
         if arms is None:
@@ -619,7 +619,7 @@ class EpisodeRuns:
         Then make `runs/` no-follow and publish the roster complete-or-absent; a crash between
         those steps leaves no roster. Labels are resolved at operator-facing boundaries.
         """
-        from defender.runtime.branch._family import manifest_world_ids
+        from defender.records._family import manifest_world_ids
 
         world_ids = builtins.list(world_ids)
         check_arm_roster_capacity(len(world_ids))

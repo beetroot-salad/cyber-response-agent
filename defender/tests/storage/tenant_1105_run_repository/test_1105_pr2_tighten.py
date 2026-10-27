@@ -220,7 +220,7 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     import uuid
 
     from defender._paths import adapters_under
-    from defender.runtime.verbs import read_roster
+    from defender.systems.verbs import read_roster
     from defender.cli import workspace_map as wm
 
     runs = location_path(P.data_root)() / d9_tenant / "runs"
@@ -304,7 +304,7 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     import uuid
 
     from defender._paths import adapters_under
-    from defender.runtime.verbs import read_roster
+    from defender.systems.verbs import read_roster
     from defender.cli import workspace_map as wm
 
     runs = location_path(P.data_root)() / d9_tenant / "runs"

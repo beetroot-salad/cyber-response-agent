@@ -272,7 +272,7 @@ def _plant_folding_document(run_dir) -> None:
 
 def test_d4_a_source_folded_before_its_branch_point_is_refused_at_launch(
         tmp_path, monkeypatch, caplog):
-    from defender.runtime import session_store
+    from defender.records import session_store
 
     monkeypatch.setenv("DEFENDER_COMPACTION", "1")
     folded = S.drive_source(tmp_path / "folded", FOLD_SCRIPT, before=_plant_folding_document)

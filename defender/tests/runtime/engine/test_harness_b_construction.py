@@ -19,15 +19,15 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from defender.runtime import challenge_gate, driver, observe  # noqa: E402
+from defender.investigation import challenge_gate, driver, observe  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
-from defender.runtime.agent_definition import (  # noqa: E402
+from defender.investigation.agent_definition import (  # noqa: E402
     AgentDefinition,
     ToolSet,
 )
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
-from defender.runtime.tools import AgentDeps  # noqa: E402
+from defender.investigation.tools import AgentDeps  # noqa: E402
 from defender.records import SessionPaths
 
 _DEFENDER = Path(__file__).resolve().parents[3]
@@ -112,9 +112,9 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     """The two names are now distinct, and each is load-bearing for something different:"""
     import asyncio
 
-    from defender.runtime import tools_gather
-    from defender.runtime.agent_definition import bind
-    from defender.runtime.driver import MAIN_DEF
+    from defender.investigation import tools_gather
+    from defender.investigation.agent_definition import bind
+    from defender.investigation.driver import MAIN_DEF
     from defender.tests.support.tenancy import _tenants1106
 
     seen: list[tuple[str, str]] = []
@@ -129,7 +129,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     from dataclasses import replace
 
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
@@ -231,7 +231,7 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
 
 def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
     """SEAM CONTRACT, overturned by #705 (O20, R2/M8 — not preserved):"""
-    from defender.runtime import session_store
+    from defender.records import session_store
 
     store = session_store.open_store(case_id="case-harness", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs")))
     session_id = store.new_session(agent_id="main")

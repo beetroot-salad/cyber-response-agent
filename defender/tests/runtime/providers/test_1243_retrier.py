@@ -608,7 +608,7 @@ def test_p1_the_openai_compatible_builder_makes_one_wire_attempt(monkeypatch: py
 @pytest.mark.parametrize("which", ["DEFAULT_MODEL", "DEFAULT_GATHER_MODEL"])
 def test_p1_the_shared_builder_retries_the_default_openai_compatible_models(
         which: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    name = P.sym("runtime.driver", which)
+    name = P.sym("investigation.driver", which)
     provider = P.providers().provider_for(name)
     assert isinstance(provider, P.sym("providers.openai_compat", "OpenAICompatProvider")), (
         f"{which}={name!r} is no longer an OpenAI-compatible model; this test is about that path")

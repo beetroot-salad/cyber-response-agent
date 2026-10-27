@@ -80,7 +80,7 @@ def test_id_census_syntax_partitions(tmp_path, name, source, expected):
     import textwrap
 
     prefix = ("from defender._run_id import mint_run_id as m\n"
-              "from defender.runtime.branch import _family as family_model\n"
+              "from defender.records import _family as family_model\n"
               "from defender import _run_id\nfrom defender.records import RunId\n"
               "def episode_id_for(src):\n    return src\n"
               "def compose(eid, label):\n    joined = eid\n    return f'{joined}-{label}'\n")

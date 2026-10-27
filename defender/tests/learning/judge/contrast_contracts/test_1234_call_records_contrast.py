@@ -653,20 +653,20 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "record", "via": ("WorldRegistry.authorize_call", "WorldRegistry._base"),
         "failed_write": "ends the run", "call_id": "this run's",
         "driven_by": "test_1234_failed_served_ledger_write_ends_the_run"},
-    "runtime/query_tool.py::QueryCapture._record": {
+    "investigation/query_tool.py::QueryCapture._record": {
         "writes_by": "append_query_row", "via": ("QueryCapture._record_denied",),
         "failed_write": "ordinary OSError propagates; denied view is best-effort",
         "call_id": "none on the row (#1255 G4: the host-only join record holds it)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "runtime/tools/_bash.py::_record_shim_failure": {
+    "investigation/tools/_bash.py::_record_shim_failure": {
         "writes_by": "append_query_row", "via": (), "failed_write": "best-effort view",
         "call_id": "none on the row (#1255 G4)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "runtime/record_query.py::append_query_row": {
+    "investigation/record_query.py::append_query_row": {
         "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
         "call_id": "none on the row (#1255 G4)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "runtime/branch/_snapshot.py::ForkSnapshot.restore_files": {
+    "investigation/branch/_snapshot.py::ForkSnapshot.restore_files": {
         "writes_by": "seed", "via": (), "failed_write": "refuses the restore",
         "call_id": "none of this run's (restored from the source's snapshot)",
         "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},

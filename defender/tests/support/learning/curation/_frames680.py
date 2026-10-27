@@ -18,9 +18,9 @@ from defender.learning.author import shared as author_shared
 from defender.learning.author.curator_engine import CuratorDeps
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
-from defender.runtime.agent_definition import RunScope, bind
+from defender.investigation.agent_definition import RunScope, bind
 from defender.box import BoxResult
-from defender.runtime.tools import _tool_bash, _tool_read_file
+from defender.investigation.tools import _tool_bash, _tool_read_file
 from defender.tests.support.runtime.state._1255_view import model_path
 from defender.tests.support.learning.curation._curator1134 import corpus_view, open_state
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs

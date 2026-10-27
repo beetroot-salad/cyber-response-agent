@@ -12,8 +12,8 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.investigation import tools as runtime_tools  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.tests.e2e._replay_harness import GOLDEN_AB3  # noqa: E402
 
 pytestmark = pytest.mark.e2e

@@ -10,7 +10,7 @@ import pytest
 from defender.learning.core import persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import pitfalls_curator
-from defender.runtime.verbs import is_system_name
+from defender.systems.verbs import is_system_name
 from defender.tests.support.learning.core._declared870 import (
     PITFALLS_SECTION,
     Spawn,

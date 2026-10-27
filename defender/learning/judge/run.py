@@ -233,7 +233,7 @@ def _systems(value: Any, where: str, *, empty_ok: bool) -> list[str]:
     """A systems list exactly as written: names passing the roster's own name rule (N03; `IDP`
     is refused, never normalised), none twice (X12: never silently de-duplicated), non-empty
     unless `empty_ok`."""
-    from defender.runtime.verbs import is_system_name
+    from defender.kit.verbs import is_system_name
 
     if not isinstance(value, list) or not all(isinstance(s, str) for s in value):
         raise JudgeRefused(f"{where}'s systems={value!r} must be a list of system names")

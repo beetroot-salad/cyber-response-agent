@@ -15,9 +15,9 @@ from defender.tests.support.learning.curation._frames680 import frame_salt_of
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender._io import read_jsonl_rows
-from defender.runtime import challenge_gate
+from defender.investigation import challenge_gate
 from defender.records import RunPaths
-from defender.runtime.close_tool import (
+from defender.investigation.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_NOTHING_LEFT_TO_ASK,
     CAUSE_STORY_SETTLED,
@@ -27,7 +27,7 @@ from defender.runtime.close_tool import (
     STANDS,
     UNREADABLE,
 )
-from defender.runtime.review_roles import ReviewStages
+from defender.investigation.review_roles import ReviewStages
 from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
 from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
 from defender.tests.support.runtime.permissions._review_bundle import stage as _stage
@@ -41,7 +41,7 @@ GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
 
 def _deps(tmp_path: Path):
     from defender.agents import MAIN_DEF
-    from defender.runtime.agent_definition import bind
+    from defender.investigation.agent_definition import bind
 
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = tmp_path / fixture_uuid("run")
@@ -64,7 +64,7 @@ def _companion(deps):
     """The close's one read and parse of the run's document, done here because these tests
     drive the gate directly rather than through the close that would hand the body in — the
     same reader, so a missing file reaches the gate as the empty body the close would give it."""
-    from defender.runtime.tools import read_companion
+    from defender.investigation.tools import read_companion
     from defender.skills.invlang.parser import parse_dense_companion
 
     return parse_dense_companion(read_companion(deps).text or "")[0]
@@ -73,8 +73,8 @@ def _companion(deps):
 def _real_targets(deps) -> list[str]:
     """Ids the investigation actually recorded — an ask naming anything else is refused by the
     invented-identifier guard, so a routing test has to use real ones."""
-    from defender.runtime.review.projector import parse_investigation
-    from defender.runtime.review.reply import citable_refs
+    from defender.investigation.review.projector import parse_investigation
+    from defender.investigation.review.reply import citable_refs
 
     inv = (deps.run_dir / "investigation.md").read_text(encoding="utf-8")
     return sorted(citable_refs(parse_investigation(inv)))
@@ -255,7 +255,7 @@ def test_a_lens_that_was_never_dispatched_is_not_recorded_as_one_that_answered(t
 
 
 def test_an_unknown_stage_name_is_refused_as_a_name(tmp_path):
-    from defender.runtime.review_roles import UnboundReviewStage
+    from defender.investigation.review_roles import UnboundReviewStage
 
     bundle = _bundle(composer=_composer("holds"))
     with pytest.raises(UnboundReviewStage, match="not a review stage"):

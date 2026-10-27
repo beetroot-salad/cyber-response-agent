@@ -28,15 +28,16 @@ from pydantic_ai.messages import (  # noqa: E402
 
 # `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
 # partially initialized module.
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
-from defender.runtime import circuit_breaker, request_ceiling, tools_gather  # noqa: E402
-from defender.runtime import session_store  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.request_ceiling import FINAL_REQUEST, RequestCeiling  # noqa: E402
-from defender.runtime.tools import DeadEnd, LeadStop  # noqa: E402
-from defender.runtime.tools_gather import (  # noqa: E402
+from defender.systems import circuit_breaker  # noqa: E402
+from defender.investigation import request_ceiling, tools_gather  # noqa: E402
+from defender.records import session_store  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.investigation.request_ceiling import FINAL_REQUEST, RequestCeiling  # noqa: E402
+from defender.investigation.tools import DeadEnd, LeadStop  # noqa: E402
+from defender.investigation.tools_gather import (  # noqa: E402
     NO_SUMMARY_FAILED,
     GatherRequest,
 )
@@ -111,7 +112,7 @@ def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None
              handed: list | None = None) -> str:
     from dataclasses import replace
 
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     run_dir = materialize(root, GOLDEN_AB3)
     # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:

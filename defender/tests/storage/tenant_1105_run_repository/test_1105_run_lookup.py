@@ -169,7 +169,7 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     otherwise refuse, and a recording io= seam passed to each refused call records no call at
     all. Positive control: the same calls with an accepted Tenant and a RunId answer."""
     from defender.records import RunId, RunsRepository
-    from defender.runtime.run_tenant import RunTenant
+    from defender.systems.run_tenant import RunTenant
 
     rid = str(uuid.uuid4())
     root = tmp_path / "data"

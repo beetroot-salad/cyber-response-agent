@@ -298,7 +298,7 @@ def close_vocabulary() -> _CloseVocabulary:
 
     Imported lazily: `close_tool` pulls in the whole runtime (pydantic-ai included), and
     `learning/frontend/build.py` imports this package just for the page CSS."""
-    from defender.runtime.close_tool import CAUSE_NOT_REVIEWED, CHALLENGED, FORCED_INCONCLUSIVE, STANDS
+    from defender.investigation.close_tool import CAUSE_NOT_REVIEWED, CHALLENGED, FORCED_INCONCLUSIVE, STANDS
 
     return _CloseVocabulary(STANDS, CHALLENGED, FORCED_INCONCLUSIVE, CAUSE_NOT_REVIEWED)
 
@@ -426,7 +426,7 @@ def _review_row_status(row: dict) -> tuple[str, str]:
 def _read_role_traces(run_dir: Path) -> list[tuple[str, list[dict]]]:
     """Every review role's trace (roster from `REVIEW_ROLES`), read once per run."""
     from defender.records import RunPaths
-    from defender.runtime.challenge_gate import REVIEW_ROLES
+    from defender.investigation.challenge_gate import REVIEW_ROLES
 
     owner = RunPaths(run_dir)
     return [(role, _review_trace(owner.review_trace(role))) for role in REVIEW_ROLES]

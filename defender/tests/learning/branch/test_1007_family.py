@@ -72,7 +72,7 @@ def test_the_family_reply_admits_a_family_level_finding(tmp_path, monkeypatch):
 def test_the_family_agent_id_cannot_collide_with_a_world_label(tmp_path, monkeypatch):
     """`family` becomes a RESERVED world label, so the family call's agent id and trace name cannot
     collide with a world's."""
-    family_mod = W.mod("runtime.branch._family")
+    family_mod = W.mod("records._family")
 
     assert "family" in family_mod.RESERVED_WORLD_LABELS, (
         f"RESERVED_WORLD_LABELS is {family_mod.RESERVED_WORLD_LABELS} — a world may still be "
@@ -193,8 +193,8 @@ def test_a_faulted_family_draw_isolates_and_leaves_the_per_world_rows_intact(
 def test_the_family_trace_filename_cannot_collide_with_a_worlds_own(tmp_path):
     """The family call's trace filename cannot collide with a world's, even though the colon fold
     that makes the filename is not injective."""
-    family_mod = W.mod("runtime.branch._family")
-    observe = W.mod("runtime.observe")
+    family_mod = W.mod("records._family")
+    observe = W.mod("investigation.observe")
 
     def trace_name(agent_id: str) -> str:
         return observe.stage_trace_path(

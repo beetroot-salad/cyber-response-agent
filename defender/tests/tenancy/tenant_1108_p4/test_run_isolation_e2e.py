@@ -134,7 +134,7 @@ class ShimRecorder:
         self.envs: list[dict[str, str]] = []
 
     def __call__(self, argv: list[str], env: dict[str, str]) -> Any:
-        from defender.runtime import orient
+        from defender.investigation import orient
 
         self.envs.append(dict(env))
         return orient._shim(argv, env)

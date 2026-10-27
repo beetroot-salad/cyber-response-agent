@@ -22,7 +22,7 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 
 | Work | Start here |
 |---|---|
-| Runtime, permissions, close-time review | `runtime/`; its scoped instructions and `docs/runtime-development.md` |
+| Runtime, permissions, close-time review | `investigation/`; its scoped instructions and `docs/runtime-development.md`. What a run may call and whether it is up is `systems/`; model clients are `providers/`; the session store is `records/session_store/` |
 | Branch replay, questioner, judge, curators | `learning/`; its scoped instructions and `docs/learning-development.md` |
 | Platform API and tenant registration | `api/`; its scoped instructions |
 | Tests and fixtures | `tests/`; its scoped instructions |

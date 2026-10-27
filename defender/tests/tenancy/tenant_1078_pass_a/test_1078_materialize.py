@@ -113,7 +113,7 @@ def test_o4_materialize_layout(tmp_path, tenant_root):
 def test_o4_run_store_location(tmp_path, tenant_root):
     run_dir = Path(_materialize(_golden_alert(tmp_path), T_ID))
     _replay(run_dir)
-    store = H.mod("runtime.session_store").resolve_store_path(_run_handle_1165(run_dir))
+    store = H.mod("records.session_store").resolve_store_path(_run_handle_1165(run_dir))
     assert store.parent == tenant_root / T_ID / "sessions", f"the store is at {store}"
     assert store.suffix == ".db"
     assert store.is_file()

@@ -50,7 +50,7 @@ def test_run_py_tail_takes_both_record_fields_off_the_summary(tmp_path, monkeypa
 
 
 def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
-    from defender.runtime import challenge_gate
+    from defender.investigation import challenge_gate
     from defender.tests.support.runtime.engine import _spec923
 
     deps, run_dir = _spec923.main_deps(tmp_path / "owed")
@@ -88,7 +88,7 @@ def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp
 
 
 def test_parse_record_is_strict_as_a_whole():
-    run_end = S.mod("runtime.run_end")
+    run_end = S.mod("records.run_end")
     ok = run_end.parse_record({"truncated_by": "aborted", "closed_before_cut": False})
     assert ok == run_end.RunEnd("aborted", False)
     clean = run_end.parse_record({"truncated_by": None, "closed_before_cut": False})

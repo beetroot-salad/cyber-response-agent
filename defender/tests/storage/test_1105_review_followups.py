@@ -45,7 +45,7 @@ def test_the_repository_reads_and_writes_episode_records_without_the_model_stack
                                   defender_dir={str(H.DEFENDER)!r})
         assert str(R.RunId.parse({run_id!r})) == {run_id!r}
         assert [str(i) for i in t.runs_repository().list()] == [{run_id!r}]
-        assert "pydantic_ai" not in sys.modules and "defender.runtime.branch" not in sys.modules
+        assert "pydantic_ai" not in sys.modules and "defender.records._family" not in sys.modules
         print("ok")
     ''')
     env = {**os.environ, "PYTHONPATH": str(H.WORKTREE)}
@@ -177,7 +177,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
 
 
 def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
-    from defender.runtime.branch import _family
+    from defender.records import _family
     with pytest.raises(_family.FamilyError, match="world-label alphabet"):
         _family.check_identities(_family.parse_family(
             _family_doc("ep", "x.accounting_failures.json")))  # lint-stale-ref: ok — the reserved sidecar suffix, not the removed `RunPaths.accounting_failures()`

@@ -312,7 +312,7 @@ def drive_roundtrip(state: Any, *, request_key: Any, append: Any,
 
 def _query_id_verdicts() -> dict[str, dict[str, Any]]:
     pytest.importorskip("pydantic_ai")
-    from defender.runtime import query_tool
+    from defender.investigation import query_tool
 
     resolve = S.moved("resolve_query_id")
     is_reserved = _flat("is_reserved_query_id")
@@ -370,9 +370,9 @@ def test_params_values_of_every_awkward_kind():
 def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
     g = _g()["roundtrip"]
     request_key = _flat(_RK)
-    rq = S.module_at("defender/runtime/record_query.py")
+    rq = S.module_at("defender/investigation/record_query.py")
     # Never driven: the writer takes the run's state, started as a run's start starts it (#1235).
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
     (tmp_path / fixture_uuid("run")).mkdir()
     got = drive_roundtrip(RunState(tmp_path / fixture_uuid("run"), "r1080-roundtrip"),
                           request_key=request_key, append=rq.append_query_row,

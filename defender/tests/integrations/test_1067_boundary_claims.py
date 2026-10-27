@@ -11,7 +11,7 @@ from defender.knowledge._corpus import iter_lessons
 from defender.records._report import parse_report_text
 from defender._text import as_int
 from evaluations.oracle_golden import judge
-from defender.runtime import record_query as rq
+from defender.investigation import record_query as rq
 from defender.tests.runtime.engine.test_826_deferred_defects import LEAD, _row
 
 #: The keys YAML 1.1 builds as something other than `str`, each paired with what it builds.

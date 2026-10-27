@@ -81,7 +81,7 @@ def test_the_image_holds_no_checkout_no_env_file_and_no_ssh_material():
     assert [d for d in dirs if d.endswith("/.ssh")] == []
     assert [f for f in files if re.search(r"/id_(rsa|ed25519|ecdsa|dsa)$", f)] == []
     assert [f for f in files if f.endswith("/box.Dockerfile") or f.endswith("/defender/run.py")] == []
-    assert [d for d in dirs if d.endswith("/defender/runtime")] == []
+    assert [d for d in dirs if d.endswith("/defender/investigation")] == []
     locks = [f for f in files if f.endswith("/uv.lock")]
     assert len(locks) == 1, locks
     assert str(Path(locks[0]).with_name("pyproject.toml")) in files, locks

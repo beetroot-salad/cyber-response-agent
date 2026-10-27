@@ -23,7 +23,7 @@ def is_valid_run_id(run_id: str) -> bool:
 
 
 #: The shape a session store's case (lineage) id must have to name its `.db` file. Lives here
-#: so `refuse_bad_case_id` needs no store import; `runtime.session_store` re-exports it.
+#: so `refuse_bad_case_id` needs no store import; `records.session_store` re-exports it.
 CASE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 

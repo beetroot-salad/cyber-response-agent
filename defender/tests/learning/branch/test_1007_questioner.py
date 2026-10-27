@@ -143,7 +143,7 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     production env seam with that root, so the shim really runs."""
     from types import SimpleNamespace
 
-    orient = W.mod("runtime.orient")
+    orient = W.mod("investigation.orient")
     box_mod = W.mod("box")
     signature = "rule-v2-cross-tier-ssh-pivot"
     agent = tmp_path / "agent"

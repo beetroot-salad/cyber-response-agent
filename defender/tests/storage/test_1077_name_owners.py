@@ -85,9 +85,9 @@ def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
 def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admits_it(run_dir):
     """The absolute payload path gather puts in its note is the owner's, and gather's own read
     gate admits it under the raw-payload shape."""
-    from defender.runtime import permission
-    from defender.runtime.agent_definition import compile_policy_for
-    from defender.runtime import record_query
+    from defender.investigation import permission
+    from defender.investigation.agent_definition import compile_policy_for
+    from defender.investigation import record_query
 
     rel = record_query.persist_payload(_writer_run_1165(run_dir), S.LEAD_ID, S.SEQ, '{"rows": []}')
     absolute = S.RunPaths(run_dir).payload(S.LEAD_ID, S.SEQ)
@@ -193,7 +193,7 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
 # The session database — RG-4: pin the pattern BY REFERENCE, never re-spell it
 
 def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
-    from defender.runtime.session_store._write import InvalidCaseId
+    from defender.records.session_store._write import InvalidCaseId
     with pytest.raises(InvalidCaseId) as excinfo:
         S.RunPaths(run_dir).session_db(fixture_runs_base(base), lineage)
     return excinfo.value
@@ -202,7 +202,7 @@ def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
 def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_dir):
     """`session_db` refuses a lineage id the case-id pattern rejects, exactly as `store_path_for`
     does today."""
-    from defender.runtime.session_store._write import CASE_ID_RE, InvalidCaseId, store_path_for
+    from defender.records.session_store._write import CASE_ID_RE, InvalidCaseId, store_path_for
     for lineage in ("-leading-dash", "has space", "a/b", "héllo", "..", "_under"):
         assert not CASE_ID_RE.match(lineage), (
             "the pattern is pinned BY REFERENCE at defender/records/_run_id.py (`CASE_ID_RE`) (RG-4); "
@@ -250,7 +250,7 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
     with pytest.raises(Exception):  # noqa: B017,PT011
         owner.served_world(f"{S.EPISODE_ID}.Overlay")
     # The session-database path gains the check BESIDE its existing CASE_ID_RE format check.
-    from defender.runtime.session_store._write import CASE_ID_RE, InvalidCaseId
+    from defender.records.session_store._write import CASE_ID_RE, InvalidCaseId
     mixed = "Case-0011223344556677"
     assert CASE_ID_RE.match(mixed), (
         "the format check admits a mixed-case id today (`_run_id.CASE_ID_RE`) — the case-"

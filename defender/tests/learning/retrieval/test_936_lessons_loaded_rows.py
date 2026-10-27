@@ -56,9 +56,9 @@ def _tenant_runs() -> Path:
 
 def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
     """O5: a lesson opened through the real `_gated_read` (MAIN's `read_file`) leaves a row with `kind == "read"` and the reader's role"""
-    from defender.runtime.agent_definition import RunScope, bind
+    from defender.investigation.agent_definition import RunScope, bind
     from defender.tests.support.tenancy import _tenants1106
-    from defender.runtime.tools import _tool_read_file
+    from defender.investigation.tools import _tool_read_file
 
     # #1108 P4 (O2, O5): the corpus is the run copy's `agent/lessons`, the root both roles serve.
     main, run, agent, dfn = _run_copy_main_deps(tmp_path)
@@ -83,7 +83,7 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
 
 def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
     """O5: the row's `role` is the deps' `AgentRole` value for EVERY role, not "gather or else main"."""
-    from defender.runtime.tools.lesson_read import _tool_lesson_read
+    from defender.investigation.tools.lesson_read import _tool_lesson_read
     from defender._agent_role import AgentRole
     from defender.tests.support.learning.curation._curator_scene import curator_deps, curator_scene
 
@@ -107,7 +107,7 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
 
 
 def test_a_push_row_names_the_push_and_the_main_role(tmp_path):
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation.tools import _tool_append_block
 
     deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = agent / "lessons"
@@ -126,8 +126,8 @@ def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compacti
     tmp_path, monkeypatch,
 ):
     """Under compaction the render that prepares MAIN's next request folds through the loop a write just closed, and that write's return is off the send..."""
-    from defender.runtime import compaction
-    from defender.runtime.tools import _tool_append_block
+    from defender.investigation import compaction
+    from defender.investigation.tools import _tool_append_block
 
     writes = (CLOSED_LOOP, OPEN_CLASS_BLOCK, SECOND_LOOP)
     doc = ""
@@ -167,7 +167,7 @@ def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compacti
 
 def test_render_takes_a_lead_and_the_default_is_the_write_return_header(tmp_path):
     """M4: `render(hits)` still leads with the write-return sentence (the CLI and #919's pins are untouched)"""
-    from defender.runtime.lessons_engine.lessons_frontier import match_lessons, render
+    from defender.investigation.lessons_engine.lessons_frontier import match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
     corpus = tmp_path / "defender" / "lessons"

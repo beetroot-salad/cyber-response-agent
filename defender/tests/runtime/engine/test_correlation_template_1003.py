@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from defender.knowledge._corpus import iter_query_templates, read_query_template
-from defender.runtime.verb_grant import VerbGrant
+from defender.systems.verb_grant import VerbGrant
 from defender.tests.support.invlang.validation._dispositions995 import grant_for, load_dispositions, write_table
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
@@ -115,7 +115,7 @@ def _pair(system: str, verb: str) -> str:
 def test_a_missing_config_is_refused_naming_the_path(tmp_path):
     """No file is not "the shipped default": a deployment tree without the config gets a
     typed refusal naming where the file was looked for, the way an absent table does."""
-    from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
+    from defender.systems.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
     missing = tmp_path / "settings" / "lead-zero.yaml"
     with pytest.raises(LeadZeroConfigError) as caught:
@@ -132,7 +132,7 @@ def test_a_missing_config_is_refused_naming_the_path(tmp_path):
 def test_an_unread_key_is_refused_naming_it(tmp_path, text, refused_key):
     """Unknown top-level keys are refused the way `verb-grants.yaml`'s are (`_reject_unread_keys`):
     a key nothing reads is the two-statements-one-honoured defect one level up."""
-    from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
+    from defender.systems.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
     assert load_correlation_template(
         _config(tmp_path / "ok", f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
@@ -155,7 +155,7 @@ def test_an_unread_key_is_refused_naming_it(tmp_path, text, refused_key):
     "correlation_template: [\n",           # does not parse
 ], ids=["int", "empty", "null", "absent", "list", "unparseable"])
 def test_a_config_with_no_usable_id_is_refused_naming_the_path(tmp_path, text):
-    from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
+    from defender.systems.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
     path = _config(tmp_path, text)
     with pytest.raises(LeadZeroConfigError) as caught:
@@ -165,7 +165,7 @@ def test_a_config_with_no_usable_id_is_refused_naming_the_path(tmp_path, text):
 
 def test_an_undecodable_config_is_refused_naming_the_path_not_raised_raw(tmp_path):
     """The #677 shape: bytes that are not UTF-8."""
-    from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
+    from defender.systems.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
     path = _config(tmp_path, f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
     assert load_correlation_template(path) == SHIPPED_TEMPLATE_ID
@@ -176,7 +176,7 @@ def test_an_undecodable_config_is_refused_naming_the_path_not_raised_raw(tmp_pat
 
 
 def test_a_repeated_key_is_refused_rather_than_last_wins(tmp_path):
-    from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
+    from defender.systems.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
     assert load_correlation_template(
         _config(tmp_path / "ok", f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
@@ -190,10 +190,10 @@ def test_a_repeated_key_is_refused_rather_than_last_wins(tmp_path):
 
 
 def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_handed(tmp_path):
-    from defender.runtime.driver import _correlation_dispatch_at_run_start
-    from defender.runtime.lead_zero import CorrelationDispatch
-    from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
-    from defender.runtime.run_tenant import TenantRefused, run_tenant_for
+    from defender.investigation.driver import _correlation_dispatch_at_run_start
+    from defender.investigation.lead_zero import CorrelationDispatch
+    from defender.systems.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
+    from defender.systems.run_tenant import TenantRefused, run_tenant_for
 
     tree = tmp_path / "repo" / "defender"
     tree.mkdir(parents=True)
@@ -240,7 +240,7 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
 
 def test_a_planted_backend_dispatches_on_its_own_system(tmp_path):
     """O1, by mechanism (N4: no second template ships)."""
-    from defender.runtime.lead_zero import CorrelationDispatch, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatch, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "splunk", "correlate-things", verb="search")
@@ -261,7 +261,7 @@ def test_a_planted_backend_dispatches_on_its_own_system(tmp_path):
 
 
 def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
-    from defender.runtime.lead_zero import (
+    from defender.investigation.lead_zero import (
         CorrelationDispatch,
         resolve_correlation_dispatch,
     )
@@ -284,7 +284,7 @@ def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
 
 
 def test_a_same_vendor_verb_mismatch_is_refused_naming_both_pairs(tmp_path):
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
@@ -303,7 +303,7 @@ def test_a_same_vendor_verb_mismatch_is_refused_naming_both_pairs(tmp_path):
 
 
 def test_a_table_granting_a_different_verb_is_refused_naming_both_pairs(tmp_path):
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
@@ -328,7 +328,7 @@ def test_a_table_granting_a_different_verb_is_refused_naming_both_pairs(tmp_path
 def test_the_reports_table_moving_the_holder_to_another_vendor_is_refused(tmp_path):
     """The report's own rows — `splunk.search` granted to the holder — with the shipped id still
     configured."""
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
@@ -349,7 +349,7 @@ def test_the_reports_table_moving_the_holder_to_another_vendor_is_refused(tmp_pa
 
 
 def test_a_template_binding_the_health_check_verb_is_not_a_dispatch_target(tmp_path):
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
@@ -375,8 +375,8 @@ def test_a_template_binding_the_health_check_verb_is_not_a_dispatch_target(tmp_p
     "splunk.carrier",
 ])
 def test_an_id_the_lead_could_not_bind_as_its_own_is_refused_even_when_a_file_carries_it(tmp_path, bad_id):
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
-    from defender.runtime.query_tool import resolve_query_id
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.query_tool import resolve_query_id
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "elastic", "carrier", tid=bad_id, verb="alerts")
@@ -400,7 +400,7 @@ def test_an_id_the_lead_could_not_bind_as_its_own_is_refused_even_when_a_file_ca
 def test_two_established_files_carrying_the_id_are_refused_naming_both_paths(tmp_path):
     """An ambiguous catalog is refused AS ambiguous, whichever file sorts first — never settled by
     `matches[0]`."""
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     grant = _shipped_shaped_grant(tmp_path)
     for granted_first in (True, False):
@@ -422,8 +422,8 @@ def test_two_established_files_carrying_the_id_are_refused_naming_both_paths(tmp
 
 
 def test_a_grant_holding_two_query_pairs_is_refused_as_the_functions_own_contract(tmp_path):
-    from defender.runtime.lead_zero import resolve_correlation_dispatch
-    from defender.runtime.verb_grant import GrantError
+    from defender.investigation.lead_zero import resolve_correlation_dispatch
+    from defender.systems.verb_grant import GrantError
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
@@ -435,7 +435,7 @@ def test_a_grant_holding_two_query_pairs_is_refused_as_the_functions_own_contrac
 
 
 def test_a_typo_resolving_to_nothing_is_refused_naming_the_id(tmp_path):
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
     _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
@@ -453,7 +453,7 @@ def test_a_typo_resolving_to_nothing_is_refused_naming_the_id(tmp_path):
 
 
 def test_a_draft_or_misfiled_copy_does_not_resolve(tmp_path):
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     grant = _shipped_shaped_grant(tmp_path)
 
@@ -482,7 +482,7 @@ def test_a_draft_or_misfiled_copy_does_not_resolve(tmp_path):
 def test_a_template_declaring_no_verb_is_refused_as_malformed_not_as_a_mismatch(tmp_path):
     """Built through the REAL reader: a `.md` with no `verb:` line parses to `verb == ""`
     (`knowledge/_corpus.py`'s fallback, asserted as the precondition)."""
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
+    from defender.investigation.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     grant = _shipped_shaped_grant(tmp_path)
 

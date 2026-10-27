@@ -28,9 +28,9 @@ _BASH = "def _tool_bash():\n    return runner.run_parsed(cmd)\n"
 
 def _tree(tmp_path: Path, run: str = _MAIN, bash: str = _BASH) -> Path:
     root = tmp_path / "defender"
-    (root / "runtime/tools").mkdir(parents=True)
+    (root / "investigation/tools").mkdir(parents=True)
     (root / "run.py").write_text(run, encoding="utf-8")
-    (root / "runtime/tools/_bash.py").write_text(bash, encoding="utf-8")
+    (root / "investigation/tools/_bash.py").write_text(bash, encoding="utf-8")
     return root
 
 

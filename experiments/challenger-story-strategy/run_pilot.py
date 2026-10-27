@@ -22,7 +22,7 @@ import prompts  # noqa: E402
 import yaml  # noqa: E402
 from pydantic_ai import Agent  # noqa: E402
 
-from defender.runtime import providers  # noqa: E402
+from defender import providers  # noqa: E402
 
 HERE = Path(__file__).parent
 MODEL = "glm-5.2"

@@ -27,11 +27,11 @@ from pydantic_ai.exceptions import (  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.tests.support.shared.contracts import _system_index_1256 as SI
 from defender.learning import lead_repository  # noqa: E402
-from defender.runtime import permission, tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
-from defender.runtime.circuit_breaker import RunAborted, error_class_for_exit  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.permission.grant import Route  # noqa: E402
+from defender.investigation import permission, tools as runtime_tools  # noqa: E402
+from defender.investigation.agent_definition import bind, compile_policy_for  # noqa: E402
+from defender.systems.circuit_breaker import RunAborted, error_class_for_exit  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.permission.grant import Route  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -45,15 +45,15 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 
-from defender.runtime import query_tool  # noqa: E402
-from defender.runtime.verb_grant import DENY_ALL, VerbGrant  # noqa: E402
-from defender.runtime.verbs import (  # noqa: E402
+from defender.investigation import query_tool  # noqa: E402
+from defender.systems.verb_grant import DENY_ALL, VerbGrant  # noqa: E402
+from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
 )
 from defender.integrations import _stub_transport  # noqa: E402
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault  # noqa: E402
-from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -97,7 +97,7 @@ class _Run:
         """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
         the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
         pre-ORIENT resolution against `GOLDEN_AB3`'s alert."""
-        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     def row(self) -> dict:
@@ -499,7 +499,7 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
           verbs=elastic_ok(rec))
 
     assert gather.calls == 4, "one of the three non-query tools was intercepted and derailed"
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    from defender.investigation.lead_zero import RESERVED_LEAD_IDS
     own_rows = [
         row for row in read_jsonl_rows(run_dir / "executed_queries.jsonl")
         if row.get("lead_id") not in RESERVED_LEAD_IDS
@@ -548,7 +548,7 @@ def test_seq_collision_would_misdirect_the_judge(tmp_path):
     keys = [(row["lead_id"], row["seq"]) for row in rows]
     assert len(set(keys)) == len(keys), f"duplicate (lead_id, seq) key: {keys}"
 
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    from defender.investigation.lead_zero import RESERVED_LEAD_IDS
     leads = lead_repository.joined(r.run_dir)
     queries = [
         qr for lead in leads for qr in lead.queries
@@ -744,7 +744,7 @@ def test_stage_tables_still_round_trips(tmp_path):
     assert read_jsonl_rows(dst / "executed_queries.jsonl") == r.rows
     for row in r.rows:
         assert (dst / row["payload_path"]).read_text() == (r.run_dir / row["payload_path"]).read_text()
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    from defender.investigation.lead_zero import RESERVED_LEAD_IDS
     staged = lead_repository.joined(dst)
     own_staged = [lead for lead in staged if lead.lead_id not in RESERVED_LEAD_IDS]
     assert [lead.lead_id for lead in own_staged] == [LEAD]

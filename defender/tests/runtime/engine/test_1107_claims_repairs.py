@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime import case_ticket
-from defender.runtime import tenant_settings as ts
+from defender.tenancy import case_ticket
+from defender.tenancy import tenant_settings as ts
 from defender.integrations import _stub_transport as transport
-from defender.runtime import ticket_writer
+from defender.investigation import ticket_writer
 from defender.presentation import visualize_run
 from defender.tests.support.shared.filesystem import _spec1047
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S

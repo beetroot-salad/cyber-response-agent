@@ -82,7 +82,7 @@ import itertools  # noqa: E402
 
 from defender._io import json_safe  # noqa: E402
 from defender.learning.judge.family import mapping_key  # noqa: E402
-from defender.runtime import observe  # noqa: E402
+from defender.investigation import observe  # noqa: E402
 from defender.knowledge._query_rules import _request_key
 from defender.tests.support.integrations._defender_sql import EXIT_OK, run_sql_py  # noqa: E402
 

@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from defender.runtime.permission.grant import cat_input_files
+from defender.investigation.permission.grant import cat_input_files
 
 _CAT = shutil.which("cat")
 requires_cat = pytest.mark.skipif(_CAT is None, reason="cat binary not available")

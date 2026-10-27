@@ -94,10 +94,10 @@ from defender import _git
 from defender.tenancy import _tenant  # noqa: E402
 from defender._io import guarded_mkdir, read_plain_bytes, write_guarded  # noqa: E402
 from defender.tenancy._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
-from defender.runtime import run_tenant  # noqa: E402
+from defender.systems import run_tenant  # noqa: E402
 from defender.learning.core import state as learning_state  # noqa: E402
-from defender.runtime.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
-from defender.runtime import case_ticket  # noqa: E402
+from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
+from defender.tenancy import case_ticket  # noqa: E402
 from defender.records._tenant_id import TenantId, TenantRefused
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one

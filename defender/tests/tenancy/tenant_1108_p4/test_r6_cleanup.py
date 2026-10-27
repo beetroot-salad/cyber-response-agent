@@ -39,7 +39,7 @@ BIG = {"agent/lessons/r6-big.md": "x" * 200_000}
 def test_r6_a_run_copy_build_that_fails_leaves_no_half_built_folder(tmp_path, data_root):
     with B.run_tenant(tmp_path, data_root, files=BIG) as t:
         done = _run_limited(textwrap.dedent(f"""
-            from defender.runtime import run_knowledge
+            from defender.tenancy import run_knowledge
             from defender.tenancy import _tenant
             tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), {t.tenant_id!r})
             source = run_knowledge.KnowledgeSource(kind="fresh", commit={t.commit!r})
@@ -124,7 +124,7 @@ def test_r6_a_zombie_is_not_a_live_owner(tmp_path):
 
 
 def test_r6_a_pinned_commit_with_no_export_is_refused_when_it_is_resolved(tmp_path, data_root):
-    from defender.runtime import run_knowledge
+    from defender.tenancy import run_knowledge
 
     with B.run_tenant(tmp_path, data_root) as t:
         absent = "fedcba9876543210" * 2 + "fedcba98"

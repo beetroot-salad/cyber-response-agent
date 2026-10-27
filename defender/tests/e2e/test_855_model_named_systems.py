@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.learning.leads.pitfalls_curator import _build_pitfalls_handoffs  # noqa: E402
-from defender.runtime import record_query  # noqa: E402
+from defender.investigation import record_query  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _dispatch, _run  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402

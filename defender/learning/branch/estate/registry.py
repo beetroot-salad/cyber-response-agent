@@ -17,16 +17,16 @@ from typing import Any
 from defender import _yaml
 from defender.records._episode_paths import LAYOUT
 from defender.records._run_id import uuid_id_fault
-from defender.runtime.branch import source_alert
-from defender.runtime.branch._family import family_identities
+from defender.investigation.branch import source_alert
+from defender.records._family import family_identities
 from defender.records import Run
 from defender._io import read_jsonl_rows, read_text_utf8
 from defender.knowledge._query_rules import ParamsTooDeep, _json_safe_params
 from defender.learning.core.config import OracleSettings
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
-from defender.runtime.payload_view import payload_text_of
-from defender.runtime.case_ticket import read_posted_comments
-from defender.runtime.verbs import (
+from defender.investigation.payload_view import payload_text_of
+from defender.tenancy.case_ticket import read_posted_comments
+from defender.systems.verbs import (
     CALL_DELIVERY,
     CALL_ID,
     DENIED,
@@ -35,7 +35,7 @@ from defender.runtime.verbs import (
     VerbDecision,
 )
 
-from defender.runtime.run_end import TRUNCATED_BY_SERVED_LEDGER, CallRecordWriteFailed
+from defender.records.run_end import TRUNCATED_BY_SERVED_LEDGER, CallRecordWriteFailed
 
 from ..outcome import BUDGET, ORACLE_UNSERVABLE
 from ..ledger import (
@@ -145,7 +145,7 @@ def prebranch_calls(source: Run, branch_message_id: int) -> frozenset[str]:
     A source with no session store cannot say which leads those were, so nothing is fixed."""
     from defender.learning.branch.ledger import request_key as ledger_key
     from defender.learning.lead_repository import load_queries_report
-    from defender.runtime import branch
+    from defender.investigation import branch
 
     run_dir = source.run_dir
     store = branch.source_store_if_any(run_dir, source_run=source)

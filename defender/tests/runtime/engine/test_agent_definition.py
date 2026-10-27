@@ -18,14 +18,14 @@ from defender._paths import PATHS  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.agents import QUESTIONER_DEF  # noqa: E402
 from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
+from defender.investigation import driver, observe, permission  # noqa: E402
 from defender import providers  # noqa: E402
-from defender.runtime import driver, observe, permission  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
-from defender.runtime.tools import AgentDeps  # noqa: E402
+from defender.investigation.tools import AgentDeps  # noqa: E402
 
-from defender.runtime.agent_definition import (  # noqa: E402
+from defender.investigation.agent_definition import (  # noqa: E402
     AgentDefinition,
     RunScope,
     ToolSet,
@@ -36,7 +36,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     read_allow_of,
     resolve_roots,
 )
-from defender.runtime.permission import Grant, Route  # noqa: E402
+from defender.investigation.permission import Grant, Route  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from typing import ClassVar  # noqa: E402
 

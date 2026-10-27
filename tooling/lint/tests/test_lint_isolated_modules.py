@@ -16,8 +16,9 @@ _CLEAN = {
     "integrations/tacit_knowledge_adapter.py":
         "import yaml\nfrom pathlib import Path\n"
         "def load(p):\n    return yaml.safe_load(Path(p).read_text())\n",
-    "runtime/ticket_writer.py": "def write(env):\n    return env['X']\n",
-    "runtime/lead_zero/run.py": "def go(env):\n    return env\n",
+    "investigation/ticket_writer.py": "def write(env):\n    return env['X']\n",
+    "investigation/lead_zero/run.py": "def go(env):\n    return env\n",
+    "systems/correlation.py": "def resolve(env):\n    return env\n",
     "hooks/budget_enforcer.py": "DEFAULT = 5\ndef cap(limits):\n    return limits.get('x', DEFAULT)\n",
 }
 
@@ -85,12 +86,14 @@ def test_a_budget_enforcer_read_of_the_environment_or_a_file_is_found(tmp_path, 
 
 
 @pytest.mark.parametrize("rel, body", [
-    ("runtime__ticket_writer.py", "process_defender_dir()"),
-    ("runtime__ticket_writer.py", "Path.cwd()"),
-    ("runtime__ticket_writer.py", "run_env(x)"),
-    ("runtime__ticket_writer.py", "os.environ['X']"),
-    ("runtime__lead_zero__run.py", "os.getenv('X')"),
-    ("runtime__lead_zero__run.py", "run_env(x)"),
+    ("investigation__ticket_writer.py", "process_defender_dir()"),
+    ("investigation__ticket_writer.py", "Path.cwd()"),
+    ("investigation__ticket_writer.py", "run_env(x)"),
+    ("investigation__ticket_writer.py", "os.environ['X']"),
+    ("investigation__lead_zero__run.py", "os.getenv('X')"),
+    ("investigation__lead_zero__run.py", "run_env(x)"),
+    ("systems__correlation.py", "os.getenv('X')"),
+    ("systems__correlation.py", "run_env(x)"),
 ])
 def test_a_module_that_finds_its_own_environment_is_found(tmp_path, rel, body):
     src = f"import os\ndef f(x):\n    return {body}\n"
@@ -100,13 +103,19 @@ def test_a_module_that_finds_its_own_environment_is_found(tmp_path, rel, body):
 
 def test_cwd_is_allowed_in_lead_zero(tmp_path):
     src = "from pathlib import Path\ndef f():\n    return Path.cwd()\n"
-    assert _GATE.scan(_tree(tmp_path, **{"runtime__lead_zero__run.py": src})) == []
+    assert _GATE.scan(_tree(tmp_path, **{"investigation__lead_zero__run.py": src})) == []
 
 
 def test_a_missing_file_is_a_finding(tmp_path):
     root = _tree(tmp_path)
     (root / "box/_image.py").unlink()
     assert any("_image.py" in f and "missing" in f for f in _GATE.scan(root))
+
+
+def test_a_missing_correlation_module_is_a_finding(tmp_path):
+    root = _tree(tmp_path)
+    (root / "systems/correlation.py").unlink()
+    assert any("correlation.py" in f and "missing" in f for f in _GATE.scan(root))
 
 
 def test_a_file_that_does_not_parse_is_exit_2(tmp_path):

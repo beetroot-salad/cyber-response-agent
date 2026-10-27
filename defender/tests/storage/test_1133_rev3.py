@@ -405,7 +405,7 @@ def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, hos
 @pytest.mark.parametrize("state", ["absent", "symlink", "undecodable"])
 def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, host, via,
                                                                       state):
-    fam = mod("runtime.branch._family")
+    fam = mod("records._family")
     ep = _delta_episode(tmp_path)
     manifest = ep / LAYOUT.family
     good = manifest.read_bytes()

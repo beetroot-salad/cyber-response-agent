@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from defender.records import RunPaths, SessionPaths
-from defender.runtime.session_store._write import CASE_ID_RE, InvalidCaseId, StoreError, open_store, store_path_for
+from defender.records.session_store._write import CASE_ID_RE, InvalidCaseId, StoreError, open_store, store_path_for
 from defender.tests.e2e import _replay_harness as replay
 
 #: Ids the case-id pattern ADMITS but that are not case-stable — so a refusal of them is the
@@ -161,8 +161,8 @@ def source_run(_finished_run) -> Iterator[tuple[Path, Path]]:
 
 
 def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error(source_run):
-    from defender.runtime import branch
-    from defender.runtime import session_store
+    from defender.investigation import branch
+    from defender.records import session_store
 
     root, run_dir = source_run
     pointer_file = RunPaths(run_dir).session_pointer()
@@ -211,7 +211,7 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
 def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(source_run):
     """A source run whose pointer's `case_id` is `null` fails `open_source_store` as `BranchError`
     caused by `InvalidCaseId` — the driver's store-setup class — and creates nothing."""
-    from defender.runtime import branch
+    from defender.investigation import branch
 
     root, run_dir = source_run
     pointer_file = RunPaths(run_dir).session_pointer()

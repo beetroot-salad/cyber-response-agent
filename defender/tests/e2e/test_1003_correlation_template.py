@@ -93,7 +93,7 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
                      Turn(text="Investigation complete.")])
     gather = ReplayFn([Turn(text=CORRELATION_SUMMARY)])
 
-    from defender.runtime.lead_zero import CorrelationDispatchError
+    from defender.investigation.lead_zero import CorrelationDispatchError
 
     with pytest.raises(CorrelationDispatchError) as caught:
         drive(run_dir, run_id="lz1003-bad", main=main, gather=gather,
@@ -165,7 +165,7 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
 
 def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     """The id comes from the RUN's `lead-zero.yaml` (its tenant's, #1106), not from a process-cached read of this..."""
-    from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
+    from defender.systems.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
     from defender.tests.support.tenancy import _tenants1106 as T1106
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 

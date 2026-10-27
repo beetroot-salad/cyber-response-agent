@@ -14,9 +14,9 @@ from pydantic_ai.models.function import FunctionModel
 from defender import _io
 from defender.records import Run
 from defender import box
-from defender.runtime import driver
+from defender.investigation import driver
 from defender.providers import BuiltModel
-from defender.runtime.run_state import RunState
+from defender.investigation.run_state import RunState
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.e2e import _replay_harness as replay

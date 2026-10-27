@@ -548,7 +548,7 @@ def test_r7_run_start_never_carries_a_faulted_case_mapping_into_a_started_run(
     ok = verdicts(w, sites)
     for v in ok.values():
         assert_passed(v)
-    kept_fault = S.sym("runtime.case_ticket", "CaseTicketError")
+    kept_fault = S.sym("tenancy.case_ticket", "CaseTicketError")
     carried = ok["run-start"].detail.lifecycle_calls[0]["tenant"].ticket_mapping
     assert not isinstance(carried, kept_fault), f"the run carried a kept fault: {carried!r}"
     try:

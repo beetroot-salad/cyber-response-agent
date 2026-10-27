@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.execution import bash_exec  # noqa: E402
-from defender.runtime import permission  # noqa: E402
+from defender.investigation import permission  # noqa: E402
 from defender.tests.support.sandbox import _baseline_959 as base
 
 CR = base.CR

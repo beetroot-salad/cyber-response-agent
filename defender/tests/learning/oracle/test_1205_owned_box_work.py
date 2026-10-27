@@ -11,7 +11,7 @@ import pytest
 from defender import box
 from defender.learning.branch.estate._oracle_attempt import _AttemptBox, _AttemptFailed, _Run
 from defender.learning.branch.estate.oracle import _within_deadline
-from defender.runtime.exception_groups import carried
+from defender._exception_groups import carried
 
 
 class _Worker:

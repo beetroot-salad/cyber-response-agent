@@ -24,7 +24,7 @@ from defender.learning.core.config import FatalConfigError, LoopPaths, StageAbor
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender import box as box_mod
 from defender.box import BoxFault
-from defender.runtime.verbs import RegistryError
+from defender.systems.verbs import RegistryError
 from defender.tests.support.sandbox import _box1195 as X
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation import _spec773 as S

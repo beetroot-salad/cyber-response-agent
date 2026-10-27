@@ -29,8 +29,8 @@ from defender.records._tenant_id import TenantId, TenantRefused
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from defender.runtime.branch._family import ResumeWorld
-    from defender.runtime.run_knowledge import KnowledgeSource
+    from defender.records._family import ResumeWorld
+    from defender.tenancy.run_knowledge import KnowledgeSource
 
 _GENERIC_ALERT_STEMS = {"alert"}
 

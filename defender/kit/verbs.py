@@ -1,13 +1,14 @@
 """The verb contract an adapter is written against (#1080): the `@verb` decorator, the marks it
 sets and their readers, and the call context as an adapter sees it. The registry that loads and
-serves adapters stays in `runtime.verbs`; so does the engine table (`engine_for`).
+serves adapters stays in `systems.verbs`; so does the engine table (`engine_for`).
 
 `VerbContext` here is a protocol naming only what an adapter reads. The runtime's concrete
-`runtime.verbs.VerbContext` satisfies it, so adapters annotate their leading parameter with this
+`systems.verbs.VerbContext` satisfies it, so adapters annotate their leading parameter with this
 one and never import the runtime."""
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,28 @@ from typing import Any, Protocol
 
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import SystemConfig
+
+
+#: The alphabet of a system name, unanchored, for scanners that find a name inside text. A
+#: fragment rather than a compiled pattern so nobody matches with it and skips the length bound
+#: `is_system_name` applies. Verb names share this alphabet.
+SYSTEM_PATTERN = r"[a-z0-9][a-z0-9-]*"
+#: Private so callers use `is_system_name`, which also applies the bound. Anchored at both ends
+#: so `.search` cannot match a well-formed suffix of a bad name.
+_SYSTEM_RE = re.compile(rf"\A{SYSTEM_PATTERN}\Z")
+#: Ceiling on a system name, which arrives as unbounded model text at several readers (the
+#: prompt-cache key, the `query` tool's echo, the gather tool's retry message).
+SYSTEM_MAX_LEN = 64
+
+
+def is_system_name(name: str) -> bool:
+    """Is `name` a well-formed system name (lowercase letters, digits and hyphens, bounded)?
+
+    The single check for every channel a system name arrives on; a looser second spelling
+    would admit names the dispatch seam later rejects. Shape only, never membership.
+    """
+    # Length first so an arbitrarily long model-supplied blob is refused without a regex scan.
+    return len(name) <= SYSTEM_MAX_LEN and bool(_SYSTEM_RE.match(name))
 
 
 class TenantRecord(Protocol):
@@ -162,12 +185,15 @@ def model_facing_params(fn: Verb) -> dict[str, inspect.Parameter]:
 __all__ = [
     "Capture",
     "RunClock",
+    "SYSTEM_MAX_LEN",
+    "SYSTEM_PATTERN",
     "TenantRecord",
     "Verb",
     "VerbContext",
     "body_param_of",
     "declared_params",
     "engine_of",
+    "is_system_name",
     "model_facing_params",
     "verb",
     "verb_class_of",

@@ -33,14 +33,14 @@ from defender.tests.support.storage._session_store_705 import (  # noqa: E402
 
 
 def branch_mod():
-    """`defender.runtime.branch` — PR 1's new module, imported per test."""
-    return importlib.import_module("defender.runtime.branch")
+    """`defender.investigation.branch` — PR 1's new module, imported per test."""
+    return importlib.import_module("defender.investigation.branch")
 
 
 def _sibling_state(sibling_dir: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
     """A fresh run state for the sibling at `sibling_dir`: what the driver hands seeding as
     its third argument (#1235 round 2, where it was the sibling's run dir)."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(sibling_dir, sibling_dir.name)
 

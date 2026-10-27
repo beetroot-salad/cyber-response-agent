@@ -238,8 +238,8 @@ def scan_guard(rel: str) -> Iterator[None]:
 def module_and_package(rel: str, *, root: str = "defender") -> tuple[str, str]:
     """`(dotted module, dotted package)` of a file at `rel` under the `root` package's folder:
     `learning/branch/cli.py` -> (`defender.learning.branch.cli`, `defender.learning.branch`); a
-    package's `__init__.py` is its package (`runtime/driver/__init__.py` ->
-    `defender.runtime.driver` twice). What `module_env` takes, so a relative import resolves."""
+    package's `__init__.py` is its package (`investigation/driver/__init__.py` ->
+    `defender.investigation.driver` twice). What `module_env` takes, so a relative import resolves."""
     parts = Path(rel).with_suffix("").parts
     if parts and parts[-1] == "__init__":
         module = ".".join((root, *parts[:-1]))
@@ -250,7 +250,7 @@ def module_and_package(rel: str, *, root: str = "defender") -> tuple[str, str]:
 
 def import_source(node: ast.ImportFrom, package: str | None) -> str:
     """The module a from-import names: absolute when `package` (the importing module's) is
-    given — `from .. import x` in `defender.runtime.driver` is `defender.runtime` — else with
+    given — `from .. import x` in `defender.investigation.driver` is `defender.investigation` — else with
     its leading dots kept, so a relative `.re` is never mistaken for the stdlib `re`. The one
     relative-import resolver: the scope tree's bindings use it too."""
     if node.level and package is not None:
@@ -379,8 +379,8 @@ def _scope_bindings(
     """``(imports, other bindings)`` made directly in one scope.
 
     With ``package`` (the dotted package the module sits in), a relative import resolves to
-    its absolute origin: ``from ..run_tenant import RunTenant`` in ``defender.runtime.driver``
-    -> ``defender.runtime.run_tenant.RunTenant``. Without it, the leading dots are kept.
+    its absolute origin: ``from ..run_tenant import RunTenant`` in ``defender.investigation.driver``
+    -> ``defender.systems.run_tenant.RunTenant``. Without it, the leading dots are kept.
 
     Stops at every nested function/lambda/class, whose bindings belong to that scope; the
     nested def's name is bound here.

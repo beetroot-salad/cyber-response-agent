@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 
 from defender._git import REPO_ROOT
-from defender.runtime import permission
-from defender.runtime.agent_definition import compile_policy_for
-from defender.runtime.driver import MAIN_DEF
+from defender.investigation import permission
+from defender.investigation.agent_definition import compile_policy_for
+from defender.investigation.driver import MAIN_DEF
 from defender.tests.support.tenancy import _tenants1106
-from defender.runtime.verb_grant import VerbGrant
-from defender.runtime.verbs import (
+from defender.systems.verb_grant import VerbGrant
+from defender.systems.verbs import (
     GRANTED,
     ModuleVerbRegistry,
     VerbContext,

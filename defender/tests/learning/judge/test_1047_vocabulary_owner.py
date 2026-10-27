@@ -13,7 +13,7 @@ from defender.tests.support.shared.filesystem import _spec1047 as S
 
 def _owner():
     """The owner function, imported at CALL time — `AttributeError` here is a real red."""
-    return S.sym("runtime.session_store", "normalized_truncated_by")
+    return S.sym("records.session_store", "normalized_truncated_by")
 
 
 # the seam itself

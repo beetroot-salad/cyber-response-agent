@@ -11,7 +11,7 @@ import pytest
 
 from defender.hooks.budget_enforcer import BUDGET_REFUSAL_MESSAGE, DEFAULT_LIMITS
 from defender.records import RunPaths
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+from defender.investigation.lead_zero import RESERVED_LEAD_IDS
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 

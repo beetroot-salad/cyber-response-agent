@@ -47,7 +47,7 @@ system, stop and point them at the right surface.
 
 You run as a maintainer skill in a normal session, not inside the
 `run.py` hook regime — so you test integrations directly, and the runtime
-gates (`runtime/permission/`, the `query` tool's capture capability)
+gates (`investigation/permission/`, the `query` tool's capture capability)
 are properties you verify the *shape* of, not constraints on you.
 
 ## Source of truth

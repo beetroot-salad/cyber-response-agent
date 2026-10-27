@@ -11,7 +11,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, User
 from pydantic_ai.usage import RequestUsage  # noqa: E402
 
 from defender._io import JSON_NESTING_LIMIT, json_nesting_depth, parse_jsonl_row  # noqa: E402
-from defender.runtime import observe  # noqa: E402
+from defender.investigation import observe  # noqa: E402
 
 
 def _chain(depth: int) -> dict:

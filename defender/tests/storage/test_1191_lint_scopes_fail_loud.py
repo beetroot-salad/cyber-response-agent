@@ -130,7 +130,7 @@ def _rebind(lint_file: Path, name: str, expr: str) -> None:
 def _named(text: str, entries: Iterable[str]) -> list[str]:
     """The entries `text` names as WHOLE paths: as listed, with or without a `defender/` prefix
     and with or without a directory entry's trailing `/`, bounded on both sides by something that
-    cannot continue a path. So `runtime/tools/` is not named by `runtime/tools_gather.py`, nor
+    cannot continue a path. So `investigation/tools/` is not named by `investigation/tools_gather.py`, nor
     `_io.py` by `x/_io.py`."""
     named: list[str] = []
     for entry in entries:
@@ -264,13 +264,13 @@ def test_source_files_outside_a_git_repo_drops_nothing(tmp_path):
 
 
 @pytest.mark.parametrize(("entry", "rel", "selected"), [
-    ("runtime/observe.py", "runtime/observe.py", True),
-    ("runtime/tools/", "runtime/tools/x.py", True),
-    ("runtime/tools/", "runtime/tools/sub/y.py", True),
-    ("runtime/tools/", "runtime/tools_gather.py", False),
-    ("runtime/driver", "runtime/driver/x.py", False),
+    ("investigation/observe.py", "investigation/observe.py", True),
+    ("investigation/tools/", "investigation/tools/x.py", True),
+    ("investigation/tools/", "investigation/tools/sub/y.py", True),
+    ("investigation/tools/", "investigation/tools_gather.py", False),
+    ("investigation/driver", "investigation/driver/x.py", False),
     ("x.py", "a/x.py", False),
-    ("runtime/observe.py", "runtime/observe.pyi.py", False),
+    ("investigation/observe.py", "investigation/observe.pyi.py", False),
 ])
 def test_selects(entry, rel, selected):
     astlib = import_lint_lib("_astlib")
@@ -440,9 +440,9 @@ def _plantable(root: Path, stem: str) -> tuple[Path, Path, str]:
 #: Per list-scoped lint, two entries that EXIST in the real checkout and select nothing: a
 #: package dir named without its `/` (it holds `.py`), and a dir holding no `.py` at all.
 REAL_IDLE: dict[str, tuple[str, str]] = {
-    TREE_READ: ("runtime/branch", "docs/"),
-    TREE_WRITE: ("runtime/driver", "docs/"),
-    ENV_READS: ("defender/runtime/lead_zero", "defender/docs/"),
+    TREE_READ: ("investigation/branch", "docs/"),
+    TREE_WRITE: ("investigation/driver", "docs/"),
+    ENV_READS: ("defender/investigation/lead_zero", "defender/docs/"),
 }
 
 

@@ -17,9 +17,9 @@ from defender.learning.leads import draft_synthesis, lead_extraction, lead_neigh
 from defender.learning.leads.lead_author import build_handoff
 from defender.learning.leads.lead_extraction import collect_general_failures
 from defender.execution.box_codec import BoxResult
-from defender.runtime.query_tool import resolve_query_id
+from defender.investigation.query_tool import resolve_query_id
 from defender.knowledge import _query_rules
-from defender.runtime import record_query
+from defender.investigation import record_query
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
     ReplayFn,
@@ -38,7 +38,7 @@ from defender.tests.e2e.test_query_tool_611 import (
 )
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.runtime.record_query import SHIM_COMMAND_MAX_CHARS
+from defender.investigation.record_query import SHIM_COMMAND_MAX_CHARS
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view  # noqa: E402
 
@@ -103,7 +103,7 @@ class _Res:
         """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
         the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
         pre-ORIENT resolution against `GOLDEN_AB3`'s alert."""
-        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     @property
@@ -123,7 +123,7 @@ class _Res:
     def own_leads(self) -> list:
         """`.leads()` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
         mirrors `own_rows` for the offline-extraction view."""
-        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [lead for lead in self.leads() if lead.lead_id not in RESERVED_LEAD_IDS]
 
     def routed(self, query_id: str | None = None) -> tuple[int, int, int]:

@@ -17,7 +17,7 @@ def as_utc(moment: _dt.datetime) -> _dt.datetime:
     """`moment` as an aware UTC datetime, reading a naive value as UTC.
 
     The single normalisation: the turn-N branch derives a moment in one module, formats it in
-    another, and cross-checks them for exact equality (`runtime.branch._refuse_bad_as_of`).
+    another, and cross-checks them for exact equality (`investigation.branch._refuse_bad_as_of`).
     `astimezone` on a naive value would read it as local time and shift it by the host offset.
     """
     at = moment if moment.tzinfo is not None else moment.replace(tzinfo=_dt.UTC)

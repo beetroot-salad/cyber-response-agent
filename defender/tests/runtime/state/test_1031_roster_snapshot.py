@@ -13,15 +13,15 @@ pytest.importorskip("pydantic_ai")
 
 from defender.knowledge import _scaffold_rules  # noqa: E402
 from defender.tests.learning.oracle.live_contracts._spec1224 import build_registry  # noqa: E402
-from defender.runtime import verbs  # noqa: E402
-from defender.runtime.query_tool import QueryCapture  # noqa: E402
-from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
-from defender.runtime.record_query import system_fingerprint  # noqa: E402
+from defender.systems import verbs  # noqa: E402
+from defender.investigation.query_tool import QueryCapture  # noqa: E402
+from defender.systems.verb_grant import DENY_ALL  # noqa: E402
+from defender.systems.verbs import ModuleVerbRegistry  # noqa: E402
+from defender.investigation.record_query import system_fingerprint  # noqa: E402
 from defender.tests.support.runtime.engine._declared869 import ADAPTER_BODY, write  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import grant_of  # noqa: E402
 from defender.tests.learning.branch.test_920_estate_seam import AS_OF, SERVED_FILE, World, fresh_ledger  # noqa: E402
-from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
 
 #: A grant that reaches the one system the fixtures declare, with the one verb they declare —
 GRANT = grant_of("gather", (("elastic", "query"),))

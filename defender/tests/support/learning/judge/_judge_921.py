@@ -919,7 +919,7 @@ def refusals() -> tuple[type[BaseException], ...]:
     from defender.learning.branch.episode import EpisodeError
     from defender.learning.branch.ledger import LedgerError
     from defender.learning.core.config import RunUnprocessable
-    from defender.runtime.branch import BranchError
+    from defender.investigation.branch import BranchError
 
     out: list[type[BaseException]] = [
         SystemExit, BranchError, EpisodeError, LedgerError, RunUnprocessable,

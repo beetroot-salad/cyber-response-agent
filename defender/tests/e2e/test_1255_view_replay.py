@@ -99,7 +99,7 @@ HITS_HEADER = "### Hits for that signature"
 
 
 def test_b6_o3_message_zero_lessons_section_shows_no_host_layout(tmp_path, monkeypatch):
-    from defender.runtime import orient
+    from defender.investigation import orient
 
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     # #1108 P4 (O1, O4): the corpus the signature lookup reads is the run TENANT's

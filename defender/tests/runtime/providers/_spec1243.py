@@ -450,7 +450,7 @@ def sidecar(run_dir: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     doc = json.loads(path.read_text(encoding="utf-8"))
-    rec = sym("runtime.run_end", "parse_record")(doc)
+    rec = sym("records.run_end", "parse_record")(doc)
     return None if rec is None else {"truncated_by": rec.truncated_by,
                                      "closed_before_cut": rec.closed_before_cut, "raw": doc}
 

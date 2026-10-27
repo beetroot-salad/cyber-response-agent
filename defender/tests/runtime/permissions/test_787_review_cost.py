@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 
 from defender._io import read_jsonl_rows
-from defender.runtime import observe
-from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX, live_review_stages
+from defender.investigation import observe
+from defender.investigation.review_roles import REVIEW_AGENT_ID_PREFIX, live_review_stages
 from defender.configuration._pricing import usage_cost
 
 from defender.presentation.visualize_data import (
@@ -71,7 +71,7 @@ def _recording_build(seen: dict):
 
 
 def _stage_request(prompt: str = "the projection"):
-    from defender.runtime.challenge_gate import StageRequest
+    from defender.investigation.challenge_gate import StageRequest
 
     return StageRequest(prompt=prompt, salt="00", timeout=30.0)
 

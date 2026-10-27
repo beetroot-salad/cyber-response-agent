@@ -34,7 +34,7 @@ ROSTER_PROBE = f"ledger {T.fixture_world_id('a')}.jsonl missing; run {ROSTER['a'
 
 def _family(episode_id: str):
     doc = T.family_doc(episode_id=episode_id, source_run_id=PINNED_SOURCE)
-    return T.sym("runtime.branch._family", "parse_family")(doc)
+    return T.sym("records._family", "parse_family")(doc)
 
 
 def _arm_ids() -> dict:
@@ -47,7 +47,7 @@ def _arm_ids() -> dict:
 def _known(episode_id: str) -> frozenset[str]:
     """The family's set over the roster (#1187 declared change 15: `family_identities(family,
     arm_ids)`)."""
-    return T.sym("runtime.branch._family", "family_identities")(_family(episode_id), _arm_ids())
+    return T.sym("records._family", "family_identities")(_family(episode_id), _arm_ids())
 
 
 def _redact(detail, known):
@@ -66,7 +66,7 @@ def test_family_identities_are_every_arms_run_id_and_token_plus_the_episodes_own
     composed (#1187 deletes `arm_run_id_for`).
     #1187 declared change 15
     """
-    fam = T.mod("runtime.branch._family")
+    fam = T.mod("records._family")
     family = _family(PINNED_EPISODE)
     expected = {PINNED_EPISODE, *ROSTER.values()}
     for world in family.worlds:
@@ -157,14 +157,14 @@ def test_the_known_set_is_a_required_argument():
 
 
 def test_the_query_capture_requires_the_known_set():
-    params = inspect.signature(T.sym("runtime.query_tool", "QueryCapture")).parameters
+    params = inspect.signature(T.sym("investigation.query_tool", "QueryCapture")).parameters
     assert params["known_ids"].default is inspect.Parameter.empty
 
 
 def test_a_natural_registry_knows_no_branch_identity():
     """`ModuleVerbRegistry` serves real systems on a run with no siblings."""
-    from defender.runtime.verb_grant import DENY_ALL
-    from defender.runtime.verbs import ModuleVerbRegistry, read_roster
+    from defender.systems.verb_grant import DENY_ALL
+    from defender.systems.verbs import ModuleVerbRegistry, read_roster
 
     registry = ModuleVerbRegistry(read_roster(T.DEFENDER / "integrations"), DENY_ALL)
     assert registry.branch_identities() == frozenset()
@@ -172,8 +172,8 @@ def test_a_natural_registry_knows_no_branch_identity():
 
 def test_lead_zeros_narrowed_registry_answers_with_the_registry_it_narrows():
     """The correlation lead narrows the run's registry's grant, not its identity."""
-    from defender.runtime.lead_zero._items import _NarrowedRegistry
-    from defender.runtime.verb_grant import DENY_ALL
+    from defender.investigation.lead_zero._items import _NarrowedRegistry
+    from defender.systems.verb_grant import DENY_ALL
     from defender.tests.e2e._replay_harness import FakeVerbs
 
     known = _known(PINNED_EPISODE)

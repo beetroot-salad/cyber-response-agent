@@ -15,14 +15,14 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-import defender.runtime.tools as _rt_tools  # noqa: E402  (the shared read core / char cap)
-from defender.runtime import permission  # noqa: E402
+import defender.investigation.tools as _rt_tools  # noqa: E402  (the shared read core / char cap)
+from defender.investigation import permission  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.agents import AGENTS  # noqa: E402
-from defender.runtime.agent_definition import ToolSet  # noqa: E402
+from defender.investigation.agent_definition import ToolSet  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
-from defender.runtime.tools import AgentDeps, register_tools  # noqa: E402
+from defender.investigation.tools import AgentDeps, register_tools  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     CORPUS_AUTHOR_DEF,
     CuratorDeps,

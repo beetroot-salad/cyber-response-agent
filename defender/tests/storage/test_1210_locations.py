@@ -48,9 +48,9 @@ def findings(rel: str, source: str) -> list[str]:
 def test_every_record_location_is_rejected_without_receiver_tracking():
     gate = load_lint_gate("lint_run_records", name="locations_1210_names")
     for attr in gate.RECORD_LOCATION_NAMES:
-        found = findings("runtime/probe.py", f"def f(anything):\n    return anything.{attr}\n")
+        found = findings("investigation/probe.py", f"def f(anything):\n    return anything.{attr}\n")
         assert any(f"owner-only record location (.{attr})" in line and ":2 " in line for line in found)
-    assert findings("runtime/probe.py", "def f(t):\n    return t.knowledge / 'child'\n") == []
+    assert findings("investigation/probe.py", "def f(t):\n    return t.knowledge / 'child'\n") == []
 
 
 @pytest.mark.parametrize("source", [
@@ -68,11 +68,11 @@ def test_every_record_location_is_rejected_without_receiver_tracking():
     "def f(value):\n    return value.run_end_sidecar(value.parent)\n",
 ])
 def test_unsafe_references_are_rejected_even_without_types(source):
-    assert findings("runtime/probe.py", source)
+    assert findings("investigation/probe.py", source)
 
 
 def test_type_annotations_and_safe_forwarding_remain_legal():
-    assert findings("runtime/probe.py", "from defender.records._locations import LearningRoot as R\ndef f(value: R) -> R:\n    return value\n") == []
+    assert findings("investigation/probe.py", "from defender.records._locations import LearningRoot as R\ndef f(value: R) -> R:\n    return value\n") == []
 
 
 def test_conversion_permissions_are_function_and_role_specific():
@@ -103,7 +103,7 @@ def test_all_declared_storage_boundaries_have_narrow_permissions():
             else:
                 source = prefix + f"def {qualified}(value):\n    return raw(value)\n"
             assert findings(rel, source) == [], (role, rel, qualified)
-            assert findings("runtime/unrelated.py", source), (role, qualified)
+            assert findings("investigation/unrelated.py", source), (role, qualified)
 
 
 def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):

@@ -32,14 +32,14 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
     BudgetKill,
     tier,
 )
-from defender.runtime import driver, observe  # noqa: E402
-from defender.runtime.agent_definition import bind, effective_tools_for  # noqa: E402
+from defender.investigation import driver, observe  # noqa: E402
+from defender.investigation.agent_definition import bind, effective_tools_for  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
-from defender.runtime.query_tool import CONTROL_FLOW_EXCEPTIONS  # noqa: E402
-from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import VerbRegistry  # noqa: E402
+from defender.investigation.query_tool import CONTROL_FLOW_EXCEPTIONS  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import VerbRegistry  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -78,7 +78,7 @@ def _run_dir(tmp_path: Path, name: str = "run") -> Path:
 
 def _state(run_dir: Path, run_id: str = "r"):
     """The run's state, as `run_investigation` starts it (#1235 round 2): the budget a driven agent counts..."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     return RunState(run_dir, run_id)
 
@@ -133,8 +133,8 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     assert BudgetKill not in CONTROL_FLOW_EXCEPTIONS
     assert not any(issubclass(BudgetKill, t) for t in CONTROL_FLOW_EXCEPTIONS)
 
-    from defender.runtime import tools as runtime_tools
-    from defender.runtime.tools_gather import GatherRequest
+    from defender.investigation import tools as runtime_tools
+    from defender.investigation.tools_gather import GatherRequest
 
     run_dir = _run_dir(tmp_path)
     state = _state(run_dir, "run-1")
@@ -390,7 +390,7 @@ def _registered_names(defn) -> set[str]:
             ScriptedModel([])), None), limits=DEFAULT_LIMITS,
     )
     if defn is MAIN_DEF:
-        from defender.runtime.tools import register_gather_tool
+        from defender.investigation.tools import register_gather_tool
         register_gather_tool(
             agent, lambda agent_id, system, request_limit: agent, driver.GATHER_REQUEST_LIMIT,
             T1106.fixture_grants().gather, catalog=None,

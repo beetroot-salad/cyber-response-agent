@@ -11,7 +11,7 @@ DEFENDER = Path(__file__).resolve().parents[3]
 if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(DEFENDER.parent))
 
-from defender.runtime.lessons_engine import lessons_frontier as LF  # noqa: E402
+from defender.investigation.lessons_engine import lessons_frontier as LF  # noqa: E402
 from defender.skills.invlang.frontier import frontier_from_text  # noqa: E402
 from defender.skills.invlang.parser import scan_fences  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402

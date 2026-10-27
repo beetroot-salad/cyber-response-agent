@@ -24,8 +24,8 @@ _SAME = {"native_query": "FROM logs"}
 
 # X5 — a planted row cannot re-attribute a reducer failure to another system.
 def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
-    from defender.runtime.run_state import RunState
-    from defender.runtime import record_query as rq
+    from defender.investigation.run_state import RunState
+    from defender.investigation import record_query as rq
 
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = tmp_path / fixture_uuid("run")
@@ -43,7 +43,7 @@ def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
 
 def test_1235_a_gather_at_the_cap_changes_nothing(tmp_path):
     from defender.hooks import budget_enforcer as be
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
     state = RunState(tmp_path, "r")
     be.account_call(state, "bash", limits=limits, tier="core")
@@ -56,7 +56,7 @@ def test_1235_increments_survive_fine_grained_preemption(tmp_path):
     import sys
     import threading
     from defender.hooks import budget_enforcer as be
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
     state = RunState(tmp_path, "r")
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 10**9}
     old = sys.getswitchinterval()

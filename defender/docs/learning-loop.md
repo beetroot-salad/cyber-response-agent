@@ -115,13 +115,13 @@ et al. (feedback-loop debt, which starts accruing once lessons feed back).
 5. **Git history as the audit trail.** The loop is the sole committer; spawned
    agents run no git.
 6. **No index, no service.** Flat markdown, grep over frontmatter. Three pushes
-   read it: the PLAN-time signature block (`runtime/orient.py`), the #919
+   read it: the PLAN-time signature block (`investigation/orient.py`), the #919
    frontier block on a write that moved the open set
-   (`runtime/lessons_engine/lessons_frontier.py`), and the #936 frontier block the
+   (`investigation/lessons_engine/lessons_frontier.py`), and the #936 frontier block the
    compaction fold's row carries — the same derivation as #919, over the whole
    document (not the cut record) at the moment the fold displaces the turns
    that showed earlier blocks; derived fresh, not a re-show
-   (`runtime/lessons_push.py`).
+   (`investigation/lessons_push.py`).
 
 ## Loop Shape
 
@@ -351,7 +351,7 @@ Canonical enumeration: `core/config.py` and `core/drains.py`.
 
 Manual. **Which runs get branched** is an operator choice — the disposition
 routes nothing now, the direction table having gone with the pipeline. **Which
-turn to branch at** is the measurement's main lever (`runtime/branch.py` decides
+turn to branch at** is the measurement's main lever (`investigation/branch.py` decides
 which messages may be branched from). **Curator promotion** proceeds only for
 findings whose source case has a ground truth.
 

@@ -5,10 +5,10 @@ import os
 
 import pytest
 
-from defender.runtime.verb_grant import DENY_ALL, VerbGrant
-from defender.runtime.verbs import ModuleVerbRegistry
+from defender.systems.verb_grant import DENY_ALL, VerbGrant
+from defender.systems.verbs import ModuleVerbRegistry
 from defender.tests.e2e._replay_harness import DEFENDER
-from defender.runtime.verbs import read_roster
+from defender.systems.verbs import read_roster
 
 ADAPTERS = DEFENDER / "integrations"
 

@@ -5,7 +5,7 @@ from defender.learning.leads.draft_synthesis import (
     _draft_basename,
     _draft_candidate_segments,
 )
-from defender.runtime.query_tool import resolve_query_id
+from defender.investigation.query_tool import resolve_query_id
 
 
 def test_resolve_query_id_refuses_a_foreign_prefix():

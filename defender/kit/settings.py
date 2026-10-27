@@ -1,6 +1,6 @@
 """The settings value types an adapter reads (#1080): one system's parsed `config.env`, the
 config-key prefix rule, the blank rule, and how a fault names a settings file. The parser that
-reads `config.env` from disk stays in `runtime.tenant_settings`."""
+reads `config.env` from disk stays in `tenancy.tenant_settings`."""
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping

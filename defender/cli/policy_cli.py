@@ -30,16 +30,16 @@ from typing import Any
 from defender._paths import PATHS
 from defender.tenancy._tenants import add_tenant_arguments
 from defender.agents import AGENTS
-from defender.runtime import permission
-from defender.runtime.agent_definition import (
+from defender.investigation import permission
+from defender.investigation.agent_definition import (
     AgentDefinition,
     RunScope,
     compile_policy_for,
     effective_tools_for,
 )
 from defender._agent_role import AgentRole
-from defender.runtime.permission import AgentPolicy
-from defender.runtime.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
+from defender.investigation.permission import AgentPolicy
+from defender.investigation.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
 
 _ROLES = {r.name.lower(): r for r in AgentRole}
 
@@ -82,8 +82,8 @@ def _definition(role: AgentRole, defender_dir: Path, tenant: str | None) -> Agen
     if role is not AgentRole.GATHER:
         return defn
     from defender.tenancy import _tenant
-    from defender.runtime import run_tenant as run_tenant_mod
-    from defender.runtime.driver import gather_def_for
+    from defender.systems import run_tenant as run_tenant_mod
+    from defender.investigation.driver import gather_def_for
 
     try:
         requested = _tenant.requested_tenant_id(tenant)
@@ -100,7 +100,7 @@ def _read_roots(policy: AgentPolicy, run_dir: Path, defender_dir: Path) -> list[
 
     The resolver may raise on a hostile operand (symlink cycle, embedded NUL); where the gate
     fails closed, this reports the fault rather than a traceback."""
-    from defender.runtime.permission.files import _resolved_read_roots
+    from defender.investigation.permission.files import _resolved_read_roots
 
     try:
         return [str(p) for p in _resolved_read_roots(policy, run_dir, defender_dir)]

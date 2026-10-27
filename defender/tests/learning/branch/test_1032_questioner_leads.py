@@ -14,8 +14,8 @@ from defender.learning import lead_repository
 from defender.learning._prompt import titled_section
 from defender.learning.branch.cli import _joined_leads
 from defender.learning.branch.questioner import UNTRUSTED_TAG
-from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
-from defender.runtime.record_query import append_query_row
+from defender.systems.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
+from defender.investigation.record_query import append_query_row
 from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
@@ -96,7 +96,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     ])
     shell = "cat gather_raw/l-001/0.json | SHIM_SHELL_MARKER --unnest"
     from defender._io import read_jsonl_rows
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     state = RunState(run_dir, "r1032-questioner")
     state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))

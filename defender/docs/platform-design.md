@@ -720,7 +720,7 @@ needs live storage virtualization or multi-host mid-run mutation (§6).
   from the commit. Dev runs may grant the agent `rm` within the corpus for iteration ergonomics; prod relies
   on the mount/Landlock boundary, not on the agent's cooperation.
 - **The investigation agent needs the same OS boundary — its in-process `bash` gate is
-  defense-in-depth, not containment.** `runtime/permission.py` validates a `shlex`
+  defense-in-depth, not containment.** `investigation/permission.py` validates a `shlex`
   decomposition of the model's command against a read-only-tool allowlist; the runtime
   then executes that *validated token structure* directly (`shell=False`, via
   `runtime/bash_exec.py`) with the parent environment at the repo root — it no longer

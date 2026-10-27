@@ -10,10 +10,10 @@ from pydantic import ValidationError
 pytest.importorskip("pydantic_ai")
 
 from defender._paths import PATHS  # noqa: E402
-from defender.runtime import tools  # noqa: E402
-from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
+from defender.investigation import tools  # noqa: E402
+from defender.investigation.agent_definition import compile_policy_for  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 _MAIN_POLICY = compile_policy_for(MAIN_DEF, run_dir=Path("/run"), defender_dir=Path("/dfn"))

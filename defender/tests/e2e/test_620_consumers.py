@@ -140,7 +140,7 @@ class _Run:
     @property
     def own_rows(self) -> list[dict]:
         """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`)."""
-        from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+        from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
     def row(self) -> dict:
@@ -184,7 +184,7 @@ def _executed_leads(run_dir: Path) -> list:
 def _own_executed_leads(run_dir: Path) -> list:
     """`_executed_leads` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`), for
     call sites that index into the list and need the lead dispatched under test, not lead-0's."""
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    from defender.investigation.lead_zero import RESERVED_LEAD_IDS
     return [lead for lead in _executed_leads(run_dir) if lead.lead_id not in RESERVED_LEAD_IDS]
 
 
@@ -310,7 +310,7 @@ def test_produced_row_threads_to_the_canonical_record(tmp_path):
     r = run_gather(tmp_path, verbs=_seven_registry(rec), system="cmdb", turns=[
         q("cmdb", "get-host", {"host": "web-7"}, query_id="cmdb.host-lookup"), DONE,
     ])
-    from defender.runtime.lead_zero import RESERVED_LEAD_IDS
+    from defender.investigation.lead_zero import RESERVED_LEAD_IDS
     rows = lead_repository.load_queries(r.run_dir)
     own_rows = [row for row in rows if row.lead_id not in RESERVED_LEAD_IDS]
     assert [row.query_id for row in own_rows] == ["cmdb.host-lookup"]

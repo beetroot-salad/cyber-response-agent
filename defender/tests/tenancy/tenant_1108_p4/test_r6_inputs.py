@@ -120,7 +120,7 @@ def test_r6_materialise_refuses_anything_but_a_full_commit_id(p4_tenant, commit)
                                   f"fresh {OID}\nfresh {OID}", f"fresh {OID}\rmore",
                                   "stale:transient a\nstale:operator b", "misconfigured a\nb"])
 def test_r6_read_publish_report_never_reads_garbage_or_multiple_lines_as_fresh(line):
-    from defender.runtime.run_knowledge import FRESH, read_publish_report
+    from defender.tenancy.run_knowledge import FRESH, read_publish_report
 
     report = read_publish_report(line)
     assert report.kind != FRESH, report
@@ -136,7 +136,7 @@ def test_r6_read_publish_report_never_reads_garbage_or_multiple_lines_as_fresh(l
 def test_r6_the_launcher_never_passes_on_a_garbage_fresh_line(tenant_id_only, said):
     """A child that exits 0 printing `said` is a failed child, `stale:operator`, from the launcher
     itself (the run side re-validates, so only the launcher's own line shows this)."""
-    from defender.runtime.publish_launch import launch_publish
+    from defender.investigation.publish_launch import launch_publish
 
     tenant_id, root = tenant_id_only
     line = launch_publish(tenant_id, data_root=root, budget=30.0,

@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.runtime import observe  # noqa: E402
+from defender.investigation import observe  # noqa: E402
 from defender.presentation.visualize_run import render_runtime_page  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     DONE,

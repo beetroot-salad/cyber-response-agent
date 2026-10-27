@@ -31,7 +31,7 @@ LESSONS = "defender-lessons"
 
 
 def _sql_engine() -> str:
-    """The moved sql engine, repo-relative: the one module under `defender/runtime/` defining the
+    """The moved sql engine, repo-relative: the one module under `defender/investigation/` defining the
     engine's exit-code vocabulary."""
     return S.home_of("EXIT_NO_RUNTIME", home=S.RUNTIME)
 
@@ -56,7 +56,7 @@ def _wrapper_rel(shim: str) -> str:
 
 def _packages(relpath: str) -> list[str]:
     """Every package directory on a module's dotted path, outermost first:
-    `defender/runtime/x/y.py` gives `defender`, `defender/runtime`, `defender/runtime/x`."""
+    `defender/investigation/x/y.py` gives `defender`, `defender/investigation`, `defender/investigation/x`."""
     parts = relpath.split("/")[:-1]
     return ["/".join(parts[: i + 1]) for i in range(len(parts))]
 

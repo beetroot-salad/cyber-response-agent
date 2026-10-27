@@ -8,7 +8,7 @@ from defender.tests.runtime.providers import _spec1243 as P
 
 
 def _run_end():
-    return P.mod("runtime.run_end")
+    return P.mod("records.run_end")
 
 
 def test_o5_provider_down_is_a_member_of_the_run_end_vocabulary() -> None:

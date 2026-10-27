@@ -16,13 +16,13 @@ pytest.importorskip("pydantic_ai")
 
 from defender.records._episode_handle import Episode  # noqa: E402
 from defender.learning.lead_repository import joined  # noqa: E402
-from defender.runtime.circuit_breaker import (  # noqa: E402
+from defender.systems.circuit_breaker import (  # noqa: E402
     AGENT_FIXABLE_ERROR_CLASS,
     DENIED_ERROR_CLASS,
     DENIED_EXIT_CODE,
     INFRA_ERROR_CLASS,
 )
-from defender.runtime.record_query import REJECTION_BUDGET
+from defender.investigation.record_query import REJECTION_BUDGET
 from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
@@ -455,7 +455,7 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     from defender._io import read_jsonl_rows
     from defender.records import RunPaths
     from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     rec = VerbRecorder()
     r = run_gather(tmp_path / "source", verbs=_registry(rec), turns=[

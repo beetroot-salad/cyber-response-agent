@@ -16,7 +16,7 @@ import yaml
 from defender._io import parse_jsonl_row, read_jsonl_rows
 from defender.records import RunPaths
 from defender.knowledge import _query_rules
-from defender.runtime.record_query import append_query_row
+from defender.investigation.record_query import append_query_row
 from defender.knowledge._query_rules import params_too_deep
 
 LEAD = "l-001"
@@ -102,7 +102,7 @@ def _started(parent: Path):  # noqa: ANN202 — a `RunState` (#1235: not importe
     """A run the writer can be driven on: a run folder under `parent` and the run's state,
     started as a run start starts it (#1235), since the writer takes each row's seq from the
     state."""
-    from defender.runtime.run_state import RunState
+    from defender.investigation.run_state import RunState
 
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     root = parent / fixture_uuid("r1127-nesting")

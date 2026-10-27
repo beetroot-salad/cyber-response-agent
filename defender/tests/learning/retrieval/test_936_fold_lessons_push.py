@@ -92,7 +92,7 @@ def _frontier_rows(store) -> list[tuple[int, int, str]]:
 def _append_returns(store) -> list[str]:
     """What MAIN's `append_block` calls returned, in order, off the store's analysis render
     (the `send` render has displaced them — that is the whole issue)."""
-    from defender.runtime import session_store as ss
+    from defender.records import session_store as ss
 
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
     out = []
@@ -122,7 +122,7 @@ def _fold_run(tmp_path: Path, monkeypatch, *, tree: tuple[Path, Path],
 def _expected_hits(doc: str, corpus: Path) -> list[str]:
     """The lesson names the shared derivation must produce for `doc` — the same two calls
     `_frontier_recall` makes, over the same corpus."""
-    from defender.runtime.lessons_engine.lessons_frontier import match_lessons
+    from defender.investigation.lessons_engine.lessons_frontier import match_lessons
     from defender.skills.invlang.frontier import frontier_from_text
 
     return [h.name for h in match_lessons(frontier_from_text(doc), corpus)]
@@ -143,7 +143,7 @@ def _model_path(lesson: Path) -> str:
 
 def test_the_fold_row_carries_the_block_the_whole_document_matched(tmp_path, monkeypatch):
     """O1 / O3 / M1 / M2: the synthesized frontier row is `record + "\\n\\n" + block`, where the block names the lesson the FULL document matched at mint —..."""
-    from defender.runtime import compaction
+    from defender.investigation import compaction
 
     tree = _planted_defender(tmp_path)
     corpus = tree[1] / "lessons"
@@ -179,7 +179,7 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
     tmp_path, monkeypatch,
 ):
     """M1 / M4: with TWO slots open at mint against a corpus of three lessons (two match), the frontier row's block is byte-for-byte..."""
-    from defender.runtime.lessons_engine.lessons_frontier import FOLD_LEAD, match_lessons, render
+    from defender.investigation.lessons_engine.lessons_frontier import FOLD_LEAD, match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
     tree = _planted_defender(tmp_path)
@@ -210,7 +210,7 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
 
 def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, monkeypatch):
     """N3 / key flow 4 / O1 for every fold after the first"""
-    from defender.runtime import compaction
+    from defender.investigation import compaction
 
     tree = _planted_defender(tmp_path)
     corpus = tree[1] / "lessons"

@@ -24,6 +24,6 @@ it authors the next family. Both curators run inside one drain tick.
 Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
 the sole committer, and spawned agents run no git. Lessons feed back into the runtime three times: at
 PLAN time via `defender-lessons`, on every write that moves the investigation's open set via
-`runtime/lessons_engine/lessons_frontier.py`, and on the compaction fold's frontier row, which carries
+`investigation/lessons_engine/lessons_frontier.py`, and on the compaction fold's frontier row, which carries
 the block the whole document matches at the fold — derived fresh, not a re-show of what the
-folded-away turns carried (`runtime/lessons_push.py`).
+folded-away turns carried (`investigation/lessons_push.py`).
