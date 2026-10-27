@@ -256,8 +256,8 @@ services:
       - KBN_ES_PASSWORD=${V2_KIBANA_PASSWORD}
       - KBN_ENCRYPTION_KEY=${V2_KIBANA_ENCRYPTION_KEY}
       # The key saved objects were encrypted with before the last rotation (decrypt-only).
-      # Defaults to the current key, so a stack that never rotated needs no extra variable.
-      - KBN_ENCRYPTION_KEY_PREVIOUS=${V2_KIBANA_ENCRYPTION_KEY_PREVIOUS:-${V2_KIBANA_ENCRYPTION_KEY}}
+      # Unset on a stack that never rotated; kibana/with-previous-key.sh declares it only when set.
+      - KBN_ENCRYPTION_KEY_PREVIOUS=${V2_KIBANA_ENCRYPTION_KEY_PREVIOUS:-}
     volumes:
       - certs:/usr/share/kibana/config/certs:ro
       - kibana_data:/usr/share/kibana/data

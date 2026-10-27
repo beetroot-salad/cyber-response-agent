@@ -14,4 +14,4 @@ elasticsearch.password: "${KBN_ES_PASSWORD}"
 xpack.security.encryptionKey: "${KBN_ENCRYPTION_KEY}"
 xpack.reporting.encryptionKey: "${KBN_ENCRYPTION_KEY}"
 xpack.encryptedSavedObjects.encryptionKey: "${KBN_ENCRYPTION_KEY}"
-xpack.encryptedSavedObjects.keyRotation.decryptionOnlyKeys: [ "${KBN_ENCRYPTION_KEY_PREVIOUS}" ]
+# keyRotation.decryptionOnlyKeys is appended at start by with-previous-key.sh, only after a rotation.
