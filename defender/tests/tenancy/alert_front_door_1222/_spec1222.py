@@ -41,6 +41,7 @@ from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
+from collections.abc import Iterator
 
 _TENANT_ACME = fixture_uuid('tenant:acme')
 
@@ -1323,12 +1324,14 @@ def store_factory(tmp_path: Path, *, fault: SS.StoreFault | None = None,
     default = SS.StoreFault(on="new_session", after=0, mode="locked" if once else "corrupt")
     base = SS.runs_base(tmp_path)
 
-    def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("records", "SessionPaths")(fixture_runs_base(base)))  # lint-store-ownership: ok — a factory: the run that calls it closes the wrapper
-        handle = LeadSessionFault(real, fault or default, once=once)
-        if sink is not None:
-            sink.append(handle)
-        return handle
+    @contextlib.contextmanager
+    def factory(case_id: str, run_dir: Path) -> Iterator[Any]:
+        with SS.store_mod().open_store(case_id=case_id, sessions=sym("records", "SessionPaths")(
+                fixture_runs_base(base))) as real:
+            handle = LeadSessionFault(real, fault or default, once=once)
+            if sink is not None:
+                sink.append(handle)
+            yield handle
 
     return factory
 

@@ -18,6 +18,8 @@ from defender.records import RunPaths
 from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+import contextlib
+from collections.abc import Iterator
 
 L3 = S.L3
 #: The correlation deadline every timed scenario configures (seconds).
@@ -233,11 +235,13 @@ def _main_append_fault_store(tmp: Path, sink: list) -> Callable[..., Any]:
     base = location_path(SS.runs_base)(tmp)
     fault = SS.StoreFault(on="append", after=0, mode="disk-full")
 
-    def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("records", "SessionPaths")(fixture_runs_base(base)))  # lint-store-ownership: ok — a factory: the run that calls it closes the wrapper
-        handle = _AgentAppendFault(real, fault, agent_id="main")
-        sink.append(handle)
-        return handle
+    @contextlib.contextmanager
+    def factory(case_id: str, run_dir: Path) -> Iterator[Any]:
+        with SS.store_mod().open_store(case_id=case_id, sessions=S.sym("records", "SessionPaths")(
+                fixture_runs_base(base))) as real:
+            handle = _AgentAppendFault(real, fault, agent_id="main")
+            sink.append(handle)
+            yield handle
 
     return factory
 

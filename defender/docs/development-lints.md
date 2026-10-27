@@ -49,7 +49,6 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | An AST check over shipped source resolving a name through `tooling/lint/_astlib.py`, not by matching the spelling — an alias, the attribute form or a local shadow each read right and mean something else | `# lint-ast-resolve: ok` |
 | A mixed collection classified exhaustively, with the residue reported (see below) | `# lint-selection: ok` |
 | Every writer of `investigation.md` / `report.md` to meet their schema (see below) | `# lint-artifact-gate: ok` |
-| Every session-store open (`open_store`, `open_store_for_read`, `open_source_store`, `source_store_if_any`) owned by a `with`, an `enter_context`, a `return` to the caller, or a `with` on the name it is assigned to — a handle closed by hand was closed on three of the run's six exits (#1324). The runtime half: `UnclosedStoreWarning`, an error in the test suite | `# lint-store-ownership: ok` |
 
 ### Hygiene
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from contextlib import AbstractContextManager
 from defender._model import model, unwrap_before
 from datetime import datetime
 from pathlib import Path
@@ -91,7 +92,8 @@ _FIELD_TYPES = _field_types()
 
 
 def open_source_store(run_dir: Path, *, source_run: Run) -> Any:
-    """The finished run's own store, opened for writing.
+    """The finished run's own store, for writing: its pointer is checked now, and the store
+    opens when the returned context manager's `with` block starts (`session_store.open_store`).
 
     A sibling forks into the source database, where the prefix rows live. The store's path is
     derived as the writer did (the run folder's own `RunPaths.session_paths()`) and checked
@@ -125,9 +127,9 @@ def open_source_store(run_dir: Path, *, source_run: Run) -> Any:
     return session_store.open_store(case_id=case_id, sessions=sessions)
 
 
-def source_store_if_any(run_dir: Path, *, source_run: Run) -> Any:
-    """The finished run's own store (`open_source_store`), or `None` when it carries no
-    session pointer.
+def source_store_if_any(run_dir: Path, *, source_run: Run) -> AbstractContextManager[Any] | None:
+    """The finished run's own store to open in a `with` (`open_source_store`), or `None` when
+    it carries no session pointer.
 
     Only an absent pointer means "no session". `open_source_store` raises one class for both a
     missing pointer and one that does not reconcile, so the presence check is made here and a
@@ -151,9 +153,9 @@ def _refuse_legacy(run_dir: Path) -> None:
 
 
 def store_factory_for(spec: BranchSpec, *, source_run: Run):
-    """A `driver.StoreFactory` that hands back the source run's store; both arguments are
-    ignored because a resume joins the source case rather than minting one."""
-    def factory(case_id: str, run_dir: Path) -> Any:  # noqa: ARG001 — the factory's shape
+    """A `driver.StoreFactory` that hands back the source run's store to open; both arguments
+    are ignored because a resume joins the source case rather than minting one."""
+    def factory(case_id: str, run_dir: Path) -> AbstractContextManager[Any]:  # noqa: ARG001 — the factory's shape
         return open_source_store(spec.source_run_dir, source_run=source_run)
 
     return factory

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from pathlib import Path
 
+from contextlib import AbstractContextManager
 from typing import Any, NamedTuple
 
 from defender.records import _provenance
@@ -160,32 +161,32 @@ def _check_branch_point(source: Run, branch_message_id: int) -> None:
             f"[branch] branch message id {branch_message_id} is beyond {MAX_BRANCH_MESSAGE_ID}, "
             "the most any one investigation's session could hold — no run produced a message "
             "there, so this is a typo rather than a branch point")
-    store = _source_store(source)
-    if store is None:
+    opened = _source_store(source)
+    if opened is None:
         raise LauncherRefused(
             f"[branch] {source.id} carries no session store, so it recorded no fork snapshot "
             f"for message {branch_message_id} — nothing says what it held when that response "
             "arrived, and no arm can be restored from it")
     try:
-        as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
-        # An empty capture is not refused here: pre-flight records it as a `refused` episode
-        # (M05=A), so the operator finds the reason in the outcome record.
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=Path(source_run_dir),
-            branch_message_id=branch_message_id,
-            as_of=as_of,
-        ), source_run=source, require_capture=False)
+        with opened as store:
+            as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
+            # An empty capture is not refused here: pre-flight records it as a `refused` episode
+            # (M05=A), so the operator finds the reason in the outcome record.
+            branch.validate(store, branch.BranchSpec(
+                source_run_dir=Path(source_run_dir),
+                branch_message_id=branch_message_id,
+                as_of=as_of,
+            ), source_run=source, require_capture=False)
     except branch.BranchError as bad:
         raise LauncherRefused(f"[branch] {bad}") from bad
-    finally:
-        store.close()
 
 
 
 
-def _source_store(source: Run) -> Any:
-    """The source run's own session store, or `None` when it does not carry one
-    (`branch.source_store_if_any`: a pointer that does not reconcile still refuses)."""
+def _source_store(source: Run) -> AbstractContextManager[Any] | None:
+    """The source run's own session store to open in a `with`, or `None` when it does not
+    carry one (`branch.source_store_if_any`: a pointer that does not reconcile still
+    refuses)."""
     return branch.source_store_if_any(source.run_dir, source_run=source)
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from contextlib import AbstractContextManager
 import json
 import logging
 import os
@@ -152,10 +153,12 @@ def _log_node(node: Any) -> None:
         _logger.info("· end")
 
 
-StoreFactory = Callable[[str, Path], Any]
+#: `factory(case_id, run_dir)` hands back the run's store as a context manager: the store opens
+#: when the run's `with` block starts and closes when the run ends, however it ends (#1324).
+StoreFactory = Callable[[str, Path], AbstractContextManager[Any]]
 
 
-def _default_store_factory(case_id: str, run_dir: Path) -> Any:
+def _default_store_factory(case_id: str, run_dir: Path) -> AbstractContextManager[Any]:
     return session_store.open_store(case_id=case_id, sessions=RunPaths(run_dir).session_paths())
 
 
@@ -640,24 +643,6 @@ def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: f
                           f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
 
 
-#: Store setup failures, ended through the `truncated_by="store"` exit without driving a turn. A
-#: refused branch point (`BranchError`) is one of them, like a store fault.
-_STORE_SETUP_FAULTS = (sqlite3.Error, session_store.StoreError, branch.BranchError, OSError)
-
-
-def _store_setup_failed(e: BaseException, *, logger: Any, model_name: str | None,
-                        case_id: str) -> dict:
-    """End a run whose store could not be set up: setup is outside `_drive_agent`'s handler, so
-    it is logged here and the wire log released. The store, if one opened, is its opener's."""
-    _logger.error(f"store setup failed ({e!r}); ending the run")
-    logger.close()
-    return _run_summary(
-        output=None, model_name=model_name, requests=logger.n_requests,
-        end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
-        exit_reason=type(e).__name__, case_id=case_id, store_path=None,
-    )
-
-
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
     *,
     alert_path: Path,
@@ -752,15 +737,12 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     case_id = uuid.uuid4().hex
     # Default and resume precedence live in `_resolve_store_factory`.
-    try:
-        factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
-        store = factory(case_id, run_dir)
-    except _STORE_SETUP_FAULTS as e:
-        return _store_setup_failed(e, logger=logger, model_name=model_name, case_id=case_id)
-    # The run opened the store, so the run closes it, on every exit below however the run ends
-    # (#1324). A caller that wants the rows afterwards reopens the summary's `store_path`.
-    with contextlib.closing(store):
+    # The store is open for this block only, so it closes on every exit below however the run
+    # ends (#1324). A caller that wants the rows afterwards reopens the summary's `store_path`.
+    with contextlib.ExitStack() as owns_the_store:
         try:
+            factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
+            store = owns_the_store.enter_context(factory(case_id, run_dir))
             # A resume joins the source run's case, so the case pointer comes from the store,
             # not the uuid minted above (they match on a fresh run). `run_dir` is passed because
             # a resumed MAIN inherits the investigation document as well as the message history.
@@ -770,8 +752,17 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             # source run's store. Rebound so `_run_summary` names the case this run joined.
             case_id = branch.attach_case_pointer(
                 store, resume, run, case_id=case_id, session_id=session_id)
-        except _STORE_SETUP_FAULTS as e:
-            return _store_setup_failed(e, logger=logger, model_name=model_name, case_id=case_id)
+        # A refused branch point (`BranchError`) is a setup failure like a store fault.
+        except (sqlite3.Error, session_store.StoreError, branch.BranchError, OSError) as e:
+            # Setup is outside `_drive_agent`'s handler; end the run through the
+            # `truncated_by="store"` exit without driving a turn.
+            _logger.error(f"store setup failed ({e!r}); ending the run")
+            logger.close()
+            return _run_summary(
+                output=None, model_name=model_name, requests=logger.n_requests,
+                end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
+                exit_reason=type(e).__name__, case_id=case_id, store_path=None,
+            )
 
         # One execution clock covers correlation and MAIN, including a stop before MAIN.
         run_started = time.monotonic()

@@ -238,20 +238,20 @@ _READBACK = """
 import json, sys
 from defender.records import session_store as ss
 
-store = ss.open_store_for_read(sys.argv[1])
 out = {}
-for session_id in sys.argv[2:]:
-    head = store.connection.execute(
-        "SELECT head_message_id FROM session WHERE session_id = ?", (session_id,)).fetchone()
-    log = store.connection.execute(
-        "SELECT id, session_id, from_message_id, to_message_id, attached_to_message_id, "
-        "reason FROM session_head_log WHERE session_id = ? ORDER BY id", (session_id,)
-    ).fetchall()
-    out[session_id] = {
-        "head": head[0] if head is not None else None,
-        "path": ss.path_row_ids(store, session_id),
-        "log": [list(r) for r in log],
-    }
+with ss.open_store_for_read(sys.argv[1]) as store:
+    for session_id in sys.argv[2:]:
+        head = store.connection.execute(
+            "SELECT head_message_id FROM session WHERE session_id = ?", (session_id,)).fetchone()
+        log = store.connection.execute(
+            "SELECT id, session_id, from_message_id, to_message_id, attached_to_message_id, "
+            "reason FROM session_head_log WHERE session_id = ? ORDER BY id", (session_id,)
+        ).fetchall()
+        out[session_id] = {
+            "head": head[0] if head is not None else None,
+            "path": ss.path_row_ids(store, session_id),
+            "log": [list(r) for r in log],
+        }
 print(json.dumps(out))
 """
 

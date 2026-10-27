@@ -82,7 +82,8 @@ def render_page(run: Run, *, update_ticket: bool = False) -> str:
     """
     from defender.records import session_store as ss
 
-    ss.open_store_for_read(ss.resolve_store_path(run)).close()
+    with ss.open_store_for_read(ss.resolve_store_path(run)):
+        pass
     return render_runtime_page(run.run_dir, update_ticket=update_ticket)
 
 

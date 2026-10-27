@@ -36,9 +36,17 @@ from defender.tests.support.storage._session_store_705 import (  # noqa: E402
 )
 from defender.records import SessionPaths  # noqa: E402
 from defender.tests.support.storage._store_owner import owned_store, reread
+from typing import Any
+
+
+def _opening(opener: Any, *args: Any, **kwargs: Any) -> None:
+    """Open the store `opener` hands back, and close it: a refusal happens on opening."""
+    with opener(*args, **kwargs):
+        pass
 
 
 # the two tables' declared shape
+
 
 def test_session_head_log_has_the_declared_shape(tmp_path):
     """`session_head_log` is one STRICT table with SIX columns — an integer primary key, the"""
@@ -223,7 +231,7 @@ def test_open_store_refuses_a_user_version_1_file(tmp_path):
     stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(fixture_runs_base(base))))
     assert file_shape(stale)["user_version"] == 1
 
-    refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(fixture_runs_base(base)))
+    refusal = raised_by(_opening, ss.open_store, case_id="case-stale", sessions=SessionPaths(fixture_runs_base(base)))
 
     assert isinstance(refusal, ss.UnknownSchemaVersion), (
         f"a version-1 file must be refused at open; got {refusal!r}")
@@ -242,8 +250,8 @@ def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
     base = runs_base(tmp_path)
     stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(fixture_runs_base(base))))
 
-    reader_refusal = raised_by(ss.open_store_for_read, stale)
-    writer_refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(fixture_runs_base(base)))
+    reader_refusal = raised_by(_opening, ss.open_store_for_read, stale)
+    writer_refusal = raised_by(_opening, ss.open_store, case_id="case-stale", sessions=SessionPaths(fixture_runs_base(base)))
     assert isinstance(reader_refusal, ss.UnknownSchemaVersion), (
         f"the reader is the opener that MEETS a stale file; got {reader_refusal!r}")
     assert isinstance(writer_refusal, ss.UnknownSchemaVersion), writer_refusal
@@ -252,7 +260,7 @@ def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
     current = owned_store(case_id="case-current", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = current.new_session(agent_id="main")
     linear_turns(current, session_id, 1)
-    current.close()
+    current.connection.close()
     reader = reread(ss.store_path_for("case-current", sessions=SessionPaths(fixture_runs_base(base))))
     assert ss.path_row_ids(reader, session_id), (
         "control: the same reader opens and serves a file at the current version")
@@ -288,7 +296,7 @@ def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):
     assert ordered[0] == fork, (
         "the counterfactual must make rowid order favour the fork, or the assertion is "
         "about ordering and not about the predicate")
-    store.close()
+    store.connection.close()
 
     picked = session_analysis(run_dir)
 
@@ -309,7 +317,7 @@ def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
     empty_dir, empty_store = _rendered_run(tmp_path, case_id="case-nomain")
     leg = empty_store.new_session(agent_id="gather-l1")
     linear_turns(empty_store, leg, 1, agent_id="gather-l1", label="leg")
-    empty_store.close()
+    empty_store.connection.close()
 
     missing = raised_by(session_analysis, empty_dir)
     assert missing is not None, (
@@ -325,7 +333,7 @@ def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
     linear_turns(two_store, second, 1, label="second main")
     assert sql(two_store, "SELECT COUNT(*) FROM session WHERE parent_session_id IS NULL "
                           "AND agent_id = 'main'") == [(2,)]
-    two_store.close()
+    two_store.connection.close()
 
     ambiguous = raised_by(session_analysis, two_dir)
     assert ambiguous is not None, "two roots of lineage must be a caught error"
@@ -334,6 +342,6 @@ def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
     one_dir, one_store = _rendered_run(tmp_path, case_id="case-onemain")
     only = one_store.new_session(agent_id="main")
     linear_turns(one_store, only, 1, label="the only main")
-    one_store.close()
+    one_store.connection.close()
     assert session_analysis(one_dir), (
         "control: exactly one root of lineage renders its transcript")

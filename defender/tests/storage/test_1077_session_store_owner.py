@@ -212,7 +212,8 @@ def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(
     root, run_dir = source_run
     pointer_file = RunPaths(run_dir).session_pointer()
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
-    branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir)).close()
+    with branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir)):
+        pass
 
     pointer_file.write_text(json.dumps({**pointer, "case_id": None}), encoding="utf-8")
     before = _tree(root)

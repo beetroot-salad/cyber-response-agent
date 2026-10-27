@@ -133,8 +133,8 @@ def runs_base(tmp_path: Path) -> Path:
 def make_store(tmp_path: Path, *, case_id: str = "case-alpha"):
     """Open a real per-case store under a real runs base, closed when the test ends."""
     ss = store_mod()
-    return owning_stack().enter_context(contextlib.closing(
-        ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))))
+    return owning_stack().enter_context(
+        ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path)))))
 
 
 def sql(store, query: str, params: tuple = ()) -> list[tuple]:
@@ -255,13 +255,13 @@ class FaultStore:
             return
         path = Path(self._real.path)
         if f.mode == "absent":
-            self._real.close()
+            self._real.connection.close()
             path.unlink(missing_ok=True)
             for suffix in ("-wal", "-shm"):
                 Path(str(path) + suffix).unlink(missing_ok=True)
             path.parent.chmod(0o500)
         elif f.mode == "corrupt":
-            self._real.close()
+            self._real.connection.close()
             path.write_bytes(b"this is not a database, it is attacker text\n" * 64)
         elif f.mode == "locked":
             # Re-issued on the REAL connection the store is about to append through, so the
@@ -323,19 +323,21 @@ def store_factory(tmp_path: Path, *, fault: StoreFault | None = None,
                   case_id: str | None = None, sink: list | None = None):
     """Build the callable R12 threads through `run_investigation(store_factory=…)`.
 
-    The factory signature IS part of the contract: `factory(case_id, run_dir)` returns
-    an open per-case store handle. `sink` collects the handles the run opened so a
-    scenario can assert on the rows after the run ends.
+    The factory signature IS part of the contract: `factory(case_id, run_dir)` returns the
+    per-case store to open in the run's `with`. `sink` collects the handles the run opened so a
+    scenario can observe them; the run closes them, so rows are read back with `reread`.
     """
     base = runs_base(tmp_path)
 
+    @contextlib.contextmanager
     def factory(run_case_id: str, run_dir: Path):
         ss = store_mod()
-        real = ss.open_store(case_id=case_id or run_case_id, sessions=SessionPaths(fixture_runs_base(base)))  # lint-store-ownership: ok — a factory: the run that calls it closes the handle
-        handle = FaultStore(real, fault) if fault is not None else real
-        if sink is not None:
-            sink.append(handle)
-        return handle
+        with ss.open_store(case_id=case_id or run_case_id,
+                           sessions=SessionPaths(fixture_runs_base(base))) as real:
+            handle = FaultStore(real, fault) if fault is not None else real
+            if sink is not None:
+                sink.append(handle)
+            yield handle
 
     return factory
 

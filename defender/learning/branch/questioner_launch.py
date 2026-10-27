@@ -93,12 +93,10 @@ def branch_point_clock(source: Run, branch_message_id: int) -> Any:
     import datetime as _dt
 
     source_run_dir = source.run_dir
-    store = _source_store(source)
-    if store is not None:
-        try:
+    opened = _source_store(source)
+    if opened is not None:
+        with opened as store:
             return branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
-        finally:
-            store.close()
     newest = max(
         (p.stat().st_mtime for p in Path(source_run_dir).rglob("*") if artifact_file(p)),
         default=Path(source_run_dir).stat().st_mtime)
@@ -259,15 +257,13 @@ def _fence_count(source: Run, branch_message_id: int, *, as_of: Any) -> int:
         return 0
     document = read_text_utf8(path)
     total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a count of fences, not a read of their content; `fence_count_at` below answers whenever a session exists  # noqa: E501
-    store = _source_store(source)
-    if store is None:
+    opened = _source_store(source)
+    if opened is None:
         return total
-    try:
+    with opened as store:
         spec = BranchSpec(source_run_dir=source.run_dir, branch_message_id=branch_message_id,
                           as_of=as_of)
         return fence_count_at(store, source_session(store, spec, source_run=source), branch_message_id, document)
-    finally:
-        store.close()
 
 
 

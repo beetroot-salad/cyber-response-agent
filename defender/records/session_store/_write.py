@@ -8,7 +8,7 @@ import json
 import math
 import sqlite3
 import uuid
-import warnings
+from collections.abc import Iterator
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -62,11 +62,6 @@ def _finish_connect(conn: sqlite3.Connection) -> None:
 
 
 # the handle
-
-class UnclosedStoreWarning(ResourceWarning):
-    """A store handle was garbage-collected while still open: whoever opened it never closed
-    it (#1324). The test suite turns this into an error."""
-
 
 @model
 class StoreHandle:
@@ -247,22 +242,6 @@ class StoreHandle:
             "SELECT body FROM fork_snapshot_blob WHERE sha256 = ?", (sha256,)).fetchone()
         return row[0] if row is not None else None
 
-    def close(self) -> None:
-        self.connection.close()
-
-    def __del__(self) -> None:
-        try:
-            self.connection.total_changes  # noqa: B018 — raises once the connection is closed
-        except sqlite3.ProgrammingError:
-            return
-        warnings.warn(f"session store {self.path} was dropped while still open",
-                      UnclosedStoreWarning, stacklevel=2, source=self)
-
-    def __enter__(self) -> StoreHandle:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
 
 
 
@@ -434,10 +413,13 @@ def store_path_for(case_id: str, *, sessions: SessionPaths) -> Path:
 
 
 
-def open_store(*, case_id: str, sessions: SessionPaths) -> StoreHandle:
-    """The store for `case_id`, created if missing. The layout owner (`sessions`, a run's
-    `RunPaths.session_paths()`) hands over both the store's path and the root its directory
-    is made under (#1105 fork S(b)): this module reads neither a runs base nor a trust root."""
+@contextlib.contextmanager
+def open_store(*, case_id: str, sessions: SessionPaths) -> Iterator[StoreHandle]:
+    """The store for `case_id`, created if missing, open for the `with` block only (#1324): it
+    opens when the block starts and closes when the block ends, however it ends. The layout
+    owner (`sessions`, a run's `RunPaths.session_paths()`) hands over both the store's path and
+    the root its directory is made under (#1105 fork S(b)): this module reads neither a runs
+    base nor a trust root."""
     # The store's path and the root its directory is made under, from the owner's one
     # hand-out (the one `store_path_for`, which the resume door asks, reads too), asked once.
     path, root = sessions.store(case_id)
@@ -454,14 +436,17 @@ def open_store(*, case_id: str, sessions: SessionPaths) -> StoreHandle:
     except BaseException:
         conn.close()
         raise
-    return StoreHandle(path=path, connection=conn, case_id=case_id)
+    with contextlib.closing(conn):
+        yield StoreHandle(path=path, connection=conn, case_id=case_id)
 
 
 
 
-def open_store_for_read(store_path: Path) -> StoreHandle:
-    """Open an existing store file for reading; never creates one, so a reader fails closed
-    instead of conjuring an empty database. Refuses a stale version before DDL/WAL.
+@contextlib.contextmanager
+def open_store_for_read(store_path: Path) -> Iterator[StoreHandle]:
+    """An existing store file, open for reading for the `with` block only, like `open_store`;
+    never creates one, so a reader fails closed instead of conjuring an empty database. Refuses
+    a stale version before DDL/WAL.
 
     Issues no DDL, so an older file may still carry an unscoped `gather_boundary` view with
     the same `SCHEMA_VERSION`; a reader of that view must rebuild it first."""
@@ -475,4 +460,5 @@ def open_store_for_read(store_path: Path) -> StoreHandle:
     except BaseException:
         conn.close()
         raise
-    return StoreHandle(path=store_path, connection=conn, case_id="")
+    with contextlib.closing(conn):
+        yield StoreHandle(path=store_path, connection=conn, case_id="")

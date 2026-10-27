@@ -338,12 +338,9 @@ def test_o4_fork_store_location(tmp_path, data_root):
     sib = (data_root / TID / "episodes" / T.EPISODE_ID / "runs"
            / fixture_uuid("o4-fork-sibling-b"))
     sib.mkdir(parents=True)
-    store = br.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))("minted-case", sib)
-    try:
+    with br.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))("minted-case", sib) as store:
         session_id, _history = br.open_main_session(store, spec, _sibling_state(sib), run=fixture_run(sib), source_run=fixture_run(spec.source_run_dir))
         br.attach_case_pointer(store, spec, _run_handle_1165(sib), case_id="minted-case", session_id=session_id)
-    finally:
-        store.close()
 
     pointer = json.loads(RunPaths(sib).session_pointer().read_text(encoding="utf-8"))
     assert not (sib / "session_store_pointer.json").exists(), (

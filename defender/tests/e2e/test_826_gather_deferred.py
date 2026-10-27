@@ -41,6 +41,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     raising,
 )
 from defender.tests.support.storage._store_owner import reread
+import contextlib
 
 pytestmark = pytest.mark.e2e
 
@@ -254,12 +255,14 @@ def test_a_broken_store_cannot_turn_a_lost_terminator_into_a_lost_lead(tmp_path)
     real_factory = store_factory(tmp_path)
     wrapped: list[_UnstampableStore] = []
 
+    @contextlib.contextmanager
     def factory(case_id: str, run_dir_: Path):
         # The sink collects the WRAPPER, not the handle underneath it: `attempts` is the
         # observation this test turns on, and the inner handle never sees the call.
-        handle = _UnstampableStore(real_factory(case_id, run_dir_))
-        wrapped.append(handle)
-        return handle
+        with real_factory(case_id, run_dir_) as real:
+            handle = _UnstampableStore(real)
+            wrapped.append(handle)
+            yield handle
 
     drive(run_dir, run_id="d826-nostamp", main=main, gather=gather,
           verbs=elastic_ok(rec), store_factory=factory)

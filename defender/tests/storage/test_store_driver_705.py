@@ -43,6 +43,7 @@ from defender.tests.e2e._replay_harness import (
     materialize,
 )
 from defender.tests.support.storage._store_owner import reread
+import contextlib
 
 pytestmark = pytest.mark.e2e
 
@@ -82,10 +83,12 @@ def test_run_investigation_takes_a_store_factory_seam(tmp_path):
     factory = store_factory(tmp_path, sink=opened)
     handles: list = []
 
+    @contextlib.contextmanager
     def recording(case_id: str, rd: Path):
-        handle = FaultStore(factory(case_id, rd))
-        handles.append((case_id, rd, handle))
-        return handle
+        with factory(case_id, rd) as real:
+            handle = FaultStore(real)
+            handles.append((case_id, rd, handle))
+            yield handle
 
     result = drive(run_dir, run_id="seam",
                    main=ReplayFn([Turn(text="Investigation complete.")]),
@@ -367,6 +370,37 @@ def test_a_refused_branch_point_ends_the_run_through_the_store_exit_and_frees_it
                     store_factory=refusing)
     assert (summary["truncated_by"], summary["exit_reason"]) == ("store", "BranchError"), summary
     observe.RequestLogger.from_record(_run_handle_1165(rd).observability.wire_log).close()
+
+
+def test_a_main_session_that_will_not_open_ends_the_run_and_closes_the_store(tmp_path):
+    """Store setup can fail AFTER the store opened (the main session refused): the run ends
+    through the `truncated_by="store"` exit and the store it opened is closed (#1324)."""
+    ss = store_mod()
+    opened: list = []
+
+    class _RefusesSessions:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def new_session(self, agent_id):
+            raise ss.StoreError("the main session would not open")
+
+    inner = store_factory(tmp_path, sink=opened)
+
+    @contextlib.contextmanager
+    def refusing(case_id: str, run_dir: Path):
+        with inner(case_id, run_dir) as real:
+            yield _RefusesSessions(real)
+
+    rd = materialize(tmp_path, GOLDEN, run_id="session-refused")
+    summary = drive(rd, run_id="session-refused", main=ReplayFn([Turn(text="unreached")]),
+                    store_factory=refusing)
+    assert (summary["truncated_by"], summary["exit_reason"]) == ("store", "StoreError"), summary
+    assert len(opened) == 1, f"the run opened {len(opened)} stores"
+    assert not _still_open(opened[0]), "the refused setup left its store open"
 
 
 #: The request-limit run's base ceiling: a few rounds, far under the shipped

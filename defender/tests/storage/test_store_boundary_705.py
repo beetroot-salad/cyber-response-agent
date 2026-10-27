@@ -130,7 +130,7 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
     store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request(SECRET)], agent_id="main")
-    store.close()
+    store.connection.close()
 
     run_dir = base / "20260718t101500z-boxed"
     (run_dir / "gather_raw").mkdir(parents=True)
@@ -172,7 +172,7 @@ def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
     store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request(SECRET)], agent_id="main")
-    store.close()
+    store.connection.close()
 
     run_dir = base / "20260718t101500z-leak"
     gather_raw = run_dir / "gather_raw"
@@ -285,7 +285,7 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [user_request(slug), *complete_pair()], agent_id="main")
         sessions.append(session_id)
-        store.close()
+        store.connection.close()
 
     final = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     assert {row[0] for row in sql(final, "SELECT session_id FROM session")} == set(sessions)

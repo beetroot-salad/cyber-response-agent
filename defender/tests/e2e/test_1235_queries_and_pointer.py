@@ -204,15 +204,14 @@ def test_a_hand_copied_run_folder_carries_no_case_link(tmp_path):
     copy = tmp_path / "elsewhere" / fixture_uuid("run")
     shutil.copytree(run_dir, copy)
 
-    assert branch.source_store_if_any(  # lint-store-ownership: ok — asserted to open nothing
-        copy, source_run=_run_handle_1165(copy)) is None, (
+    assert branch.source_store_if_any(copy, source_run=_run_handle_1165(copy)) is None, (
         "a hand-copied folder opened a store through a link carried inside it")
 
     (copy / OLD_POINTER_NAME).write_text(json.dumps(_pointer(run_dir)), encoding="utf-8")
     with pytest.raises(branch.BranchError):
-        branch.source_store_if_any(copy, source_run=_run_handle_1165(copy))  # lint-store-ownership: ok — asserted to refuse
+        branch.source_store_if_any(copy, source_run=_run_handle_1165(copy))
 
-    handle = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
-    assert handle is not None, "the original run's sidecar opened no store"
-    with handle:
+    opened = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
+    assert opened is not None, "the original run's sidecar opened no store"
+    with opened:
         pass

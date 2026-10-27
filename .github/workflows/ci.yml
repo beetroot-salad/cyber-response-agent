@@ -727,11 +727,6 @@ jobs:
       - name: Close single-read fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_close_single_read.py
 
-      # Store ownership (#1324): every session-store open is owned by a `with`, an
-      # `enter_context` or a `return`, never closed by hand on some exits only.
-      - name: Store-ownership fence (empty allow-list)
-        run: defender/.venv/bin/python tooling/lint/lint_store_ownership.py
-
       # Paths resolve (#1080): the paths the lints' scope lists, the baselines' keys and CI's own
       # commands name still exist.
       - name: Paths-resolve fence (empty allow-list)

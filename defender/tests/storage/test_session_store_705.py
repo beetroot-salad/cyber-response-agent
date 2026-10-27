@@ -3,11 +3,8 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
-import gc
 import json
-import re
 import sqlite3
-import warnings
 import threading
 
 import pytest
@@ -81,26 +78,39 @@ def test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary(tmp_path
         f"a coerced coordinate must never reach the table; got {stored}")
 
 
-def test_a_store_dropped_while_open_warns_and_one_closed_first_does_not(tmp_path):
-    """A handle collected while its connection is still open names its file in an
-    `UnclosedStoreWarning`: the leak is reported where it happens, not left for SQLite to
-    clean up whenever the collector runs (#1324). A closed handle is collected silently."""
-    ss = store_mod()
-    # Opened bare, not through `make_store`: the test's own stack would hold it open.
-    leaked = ss.open_store(  # lint-store-ownership: ok — the leak under test
-        case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))
-    path = re.escape(str(leaked.path))
-    with pytest.warns(ss.UnclosedStoreWarning, match=path):
-        del leaked
+def _closed(store) -> bool:
+    """Asked of SQLite itself, not of anything the handle keeps."""
+    try:
+        store.connection.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True
+    return False
 
-    closed = make_store(tmp_path / "closed")
-    closed.close()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        del closed
-        gc.collect()
-    assert not [w for w in caught if issubclass(w.category, ss.UnclosedStoreWarning)], (
-        f"a closed store still warned: {[str(w.message) for w in caught]}")
+
+def test_a_store_is_open_exactly_for_its_with_block(tmp_path):
+    """The store opens when its `with` block starts and closes when the block ends, however it
+    ends (#1324). Called without `with`, the opener touches nothing: there is no connection to
+    forget to close."""
+    ss = store_mod()
+    sessions = SessionPaths(fixture_runs_base(runs_base(tmp_path)))
+    path = ss.store_path_for("case-alpha", sessions=sessions)
+
+    ss.open_store(case_id="case-alpha", sessions=sessions)
+    assert not path.exists(), "an opener never entered created the store"
+
+    with ss.open_store(case_id="case-alpha", sessions=sessions) as store:
+        assert path.is_file(), "control: entering the block creates the store"
+        assert not _closed(store), "control: inside the block it is open"
+    assert _closed(store), "the store outlived its block"
+
+    with pytest.raises(RuntimeError), ss.open_store(case_id="case-alpha", sessions=sessions) as raised:
+        raise RuntimeError("the block ends by an exception")
+    assert _closed(raised), "a block that raised left its store open"
+
+    ss.open_store_for_read(path)
+    with ss.open_store_for_read(path) as reader:
+        assert not _closed(reader)
+    assert _closed(reader), "the reader outlived its block"
 
 
 def test_reader_refuses_an_unknown_user_version(tmp_path):
@@ -118,7 +128,7 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
         "0 is the un-set sentinel (is:PO1) — a fresh, never-stamped file must not read "
         "as a valid version")
     assert ss.hydrate(store, session_id, role="analysis"), "positive control: known version reads"
-    store.close()
+    store.connection.close()
 
     for bogus in (0, ss.SCHEMA_VERSION + 1):
         raw = sqlite3.connect(str(path))

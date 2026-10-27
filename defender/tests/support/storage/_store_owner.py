@@ -1,9 +1,9 @@
 """The running test as the owner of the session stores its helpers open (#1324).
 
-A store handle must be closed by whoever opened it (`UnclosedStoreWarning` fails the suite
-otherwise). A test that opens one in a `with` owns it there. The shared helpers that hand a
-store back instead (`make_store`, `owned_store`, `reread`) enter it into the running test's `ExitStack`, which
-the autouse fixture in `tests/conftest.py` closes at teardown. A helper called with no test
+A store is open only inside a `with` block. A test that opens one in its own `with` owns it
+there. The shared helpers that hand a test a store instead (`make_store`, `owned_store`,
+`reread`) enter it into the running test's `ExitStack`, which the autouse fixture in
+`tests/conftest.py` closes at teardown. A helper called with no test
 running (a module-scoped fixture's setup) is refused: such a fixture opens its store in its own
 `with`.
 """
@@ -30,8 +30,8 @@ def stores_owned_by_the_test() -> Iterator[None]:
 
 
 def owning_stack() -> contextlib.ExitStack:
-    """The running test's `ExitStack`; a helper enters its store there, opened in the same
-    expression: `owning_stack().enter_context(contextlib.closing(open_store(...)))`."""
+    """The running test's `ExitStack`; a helper enters its store there:
+    `owning_stack().enter_context(open_store(...))`."""
     stack = _OWNER.get()
     if stack is None:
         raise RuntimeError(
@@ -45,11 +45,11 @@ def reread(handle_or_path: Any) -> Any:
     from defender.records import session_store as ss
 
     path = Path(getattr(handle_or_path, "path", handle_or_path))
-    return owning_stack().enter_context(contextlib.closing(ss.open_store_for_read(path)))
+    return owning_stack().enter_context(ss.open_store_for_read(path))
 
 
 def owned_store(**open_store_kwargs: Any) -> Any:
     """`open_store(**open_store_kwargs)`, closed when the test ends."""
     from defender.records import session_store as ss
 
-    return owning_stack().enter_context(contextlib.closing(ss.open_store(**open_store_kwargs)))
+    return owning_stack().enter_context(ss.open_store(**open_store_kwargs))

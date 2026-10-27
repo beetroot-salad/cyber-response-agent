@@ -48,17 +48,14 @@ def recorded_snapshot(run: Any) -> Any:
     from defender.investigation.run_state import RunState
     from defender.tests.support.storage._session_store_705 import store_factory
 
-    with tempfile.TemporaryDirectory() as folder:
-        store = store_factory(Path(folder))(run.run_dir.name, run.run_dir)
-        try:
-            session = store.new_session(agent_id="main")
-            bounds = challenge_gate.default_bounds()
-            SnapshotWriter(
-                store, session, run=run, state=RunState(run.run_dir, str(run.id)),
-                limits=DEFAULT_LIMITS, base_request_limit=bounds.base_request_limit,
-                extra_turns=bounds.extra_turns).record(1, challenge_gate.ReviewState())
-            snapshot = load(store, session, 1)
-            assert snapshot is not None, "fixture snapshot was not recorded"
-            return snapshot
-        finally:
-            store.close()
+    with tempfile.TemporaryDirectory() as folder, \
+            store_factory(Path(folder))(run.run_dir.name, run.run_dir) as store:
+        session = store.new_session(agent_id="main")
+        bounds = challenge_gate.default_bounds()
+        SnapshotWriter(
+            store, session, run=run, state=RunState(run.run_dir, str(run.id)),
+            limits=DEFAULT_LIMITS, base_request_limit=bounds.base_request_limit,
+            extra_turns=bounds.extra_turns).record(1, challenge_gate.ReviewState())
+        snapshot = load(store, session, 1)
+        assert snapshot is not None, "fixture snapshot was not recorded"
+        return snapshot

@@ -148,10 +148,10 @@ def prebranch_calls(source: Run, branch_message_id: int) -> frozenset[str]:
     from defender.investigation import branch
 
     run_dir = source.run_dir
-    store = branch.source_store_if_any(run_dir, source_run=source)
-    if store is None:
+    opened = branch.source_store_if_any(run_dir, source_run=source)
+    if opened is None:
         return frozenset()
-    with store:
+    with opened as store:
         session = branch.session_for_run(store, run_dir, source_run=source)
         leads = set(branch.leads_at(store, session, branch_message_id, run_dir, source_run=source))
     rows, _unreadable = load_queries_report(run_dir)

@@ -62,7 +62,6 @@ from ._payload import (
 )
 from ._write import (
     StoreHandle as StoreHandle,
-    UnclosedStoreWarning as UnclosedStoreWarning,
     _bare_connect as _bare_connect,
     _classify_move as _classify_move,
     _finish_connect as _finish_connect,

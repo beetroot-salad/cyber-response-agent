@@ -32,6 +32,8 @@ from defender.tests.e2e._box665 import (  # noqa: F401
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, is_dood
 from defender.records import SessionPaths
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+import contextlib
+from collections.abc import Iterator
 
 DEFENDER = Path(__file__).resolve().parents[2]
 #: `run_tree`'s run folder. #1187 (declared change 1): a run id is a canonical UUID — the
@@ -1030,9 +1032,11 @@ def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = 
 
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive
 
-    def factory(case_id: str, target: Path) -> Any:
-        return _StaleVersionStore(
-            ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(Path(target).parent))))  # lint-store-ownership: ok — a factory: the run that calls it closes the wrapper
+    @contextlib.contextmanager
+    def factory(case_id: str, target: Path) -> Iterator[Any]:
+        with ss.open_store(case_id=case_id,
+                           sessions=SessionPaths(fixture_runs_base(Path(target).parent))) as real:
+            yield _StaleVersionStore(real)
 
     replay = ReplayFn([Turn(text="done.")])
     drive(run_dir, run_id=run_id, main=replay, store_factory=factory)

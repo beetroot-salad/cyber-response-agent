@@ -35,10 +35,9 @@ def main() -> int:
     EP.mkdir(parents=True, exist_ok=True)
     as_of = launcher.branch_point_clock(SOURCE, N)
     fences = launcher._fence_count(SOURCE, N, continuation_prompt=CONT, as_of=as_of)
-    store = ss.open_store_for_read(ss.resolve_store_path(SOURCE))
-    sid = ss.resolve_session_id(SOURCE) or ss.main_session_id(store)
-    held = _frontier.leads_at(store, sid, N, SOURCE)
-    store.close()
+    with ss.open_store_for_read(ss.resolve_store_path(SOURCE)) as store:
+        sid = ss.resolve_session_id(SOURCE) or ss.main_session_id(store)
+        held = _frontier.leads_at(store, sid, N, SOURCE)
     all_leads = launcher._joined_leads(SOURCE, joined)
     # The seam hands back `JoinedLead`s since #1032; the questioner is shown the named
     # projection over them, as the launcher shows it.

@@ -272,7 +272,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         Path(body["store_path"]).unlink()
         for suffix in ("-wal", "-shm"):
             Path(str(body["store_path"]) + suffix).unlink(missing_ok=True)
-        store.close()
+        store.connection.close()
 
     # the standalone re-render really exits non-zero — the real script, the real argv
     # (`--tenant T <run_id>`, #1105 PR 2 declared change 7), the real broken input

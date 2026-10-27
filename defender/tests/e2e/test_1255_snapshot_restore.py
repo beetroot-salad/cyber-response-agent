@@ -497,7 +497,7 @@ def test_n4_a_source_with_no_fork_snapshot_is_refused_at_launch(tmp_path, caplog
     call = path_ids[LEGACY_BRANCH_CALL]  # a tool-calling MAIN response after the document landed
     assert S.calls_of(S.message_at(store, call)), "the legacy fixture's call row moved"
     spec = spec_at(store, run_dir, call)
-    store.close()
+    store.connection.close()
     caplog.set_level(logging.INFO)
 
     arm = S.drive_arm(tmp_path / "legacy", spec, S.Recorder([S.done()]))

@@ -286,7 +286,7 @@ def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(t
     exhausted = raised_by(handle.append, session_id, [text_response("x" * 64_000)],
                           agent_id="main", parent_id=r1, reason="fold")
     assert exhausted is not None, "the database must really have stopped growing"
-    real.close()
+    real.connection.close()
 
     reopened = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     assert head_of(reopened, session_id) == expected_head
