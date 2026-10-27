@@ -12,7 +12,6 @@ from pathlib import Path
 
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
-from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests.support.runtime.engine._declared869 import (
     Spawn,
@@ -26,6 +25,7 @@ from defender.tests.support.runtime.engine._declared869 import (
 )
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir
 from defender.learning.core.state import PITFALLS
 
@@ -54,16 +54,10 @@ def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
     return lane, paths, spawn
 
 
-def _run(lane, state, spawn: Spawn) -> int:
-    with C.draft_trees(lane) as trees:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, invoke=spawn,
-                                             trees=trees, batch=lane.batch)
-
-
 def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
     lane, paths, spawn = _mixed_batch(tmp_path, monkeypatch)
     state = open_state(paths)
-    _run(lane, state, spawn)
+    run_pitfalls(lane, state, spawn)
 
     consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
     assert set(consumed) == {"r:l-000:0", "r:l-001:0", "r:l-002:0"}
@@ -81,7 +75,7 @@ def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
 def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatch):
     lane, paths, spawn = _mixed_batch(tmp_path, monkeypatch, name="undeclared")
     state = open_state(paths)
-    _run(lane, state, spawn)
+    run_pitfalls(lane, state, spawn)
 
     consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
     assert consumed["r:l-002:0"]["consumed_category"] == "consumed_unattributable"

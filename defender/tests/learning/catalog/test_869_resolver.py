@@ -22,15 +22,13 @@ from defender.tests.support.runtime.engine._declared869 import (
     declared_systems,
     loop_log,
     pitfall_row,
-    seed_agent_files,
-    seed_product,
     seed_tree,
     write_adapter,
     write_agent_marker,
     write_marker,
 )
 from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation._lead_author_1134 import draft_lead_deps
+from defender.tests.support.learning.curation._lead_author_1134 import draft_lead_deps, lead_lane
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests.support.learning.core import _state1135
 from defender.learning.core.state import PITFALLS
@@ -77,16 +75,6 @@ def _recursive_marker_read_of(paths: object) -> set[str]:
     }
 
 
-def _lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, ...],
-          skills: tuple[str, ...] = (), catalog: tuple[str, ...] = (), name: str = "product",
-          extra: dict[str, str] | None = None) -> tuple[Path, C.DraftLane]:
-    """The resolver's two sources: a product checkout holding the adapters and a real batch of the
-    fixture tenant whose published agent half holds the markers (`markers`/`skills`/`catalog`, plus
-    agent-relative `extra`), so `lane.batch.base()` is a committed tree, as the lane hands it."""
-    product = seed_product(tmp_path, adapters=adapters, name=name)
-    files = {**seed_agent_files(markers=markers, skills=skills, catalog=catalog), **(extra or {})}
-    return product, C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files,
-                                 state_dir=tmp_path / f"state-{name}")
 
 
 # The markers are the tenant's (`agent/skills/<name>/execution.md`), read from a committed tree
@@ -96,8 +84,8 @@ def _lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, ...]
 
 
 def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
-    product, lane = _lane(tmp_path, adapters=("elastic", "cmdb"),
-                          markers=("elastic", "mcpsys"), skills=("elastic",))
+    product, lane = lead_lane(tmp_path, adapters=("elastic", "cmdb"),
+                              markers=("elastic", "mcpsys"), skills=("elastic",))
     base = lane.batch.base()
     assert set(base) == set(_committed_agent_paths(lane)), "base() is not the committed tree"
     got = declared_systems(product, agent=base)
@@ -108,14 +96,14 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
     assert _adapter_half_of(product) < set(got)
     assert _marker_half_of(base) < set(got)
 
-    other, lane2 = _lane(tmp_path, adapters=("ticket",), markers=("ticket",),
-                         name="other-product")
+    other, lane2 = lead_lane(tmp_path, adapters=("ticket",), markers=("ticket",),
+                             name="other-product")
     assert declared_systems(other, agent=lane2.batch.base()) == frozenset({"ticket"})
 
 
 def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(tmp_path):
-    product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic",),
-                          skills=("elastic",))
+    product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",),
+                              skills=("elastic",))
     # A `mcpsys` marker on disk, uncommitted, in every working tree the resolver could stat (the
     # draft, the product checkout under both spellings); only an uncommitted adapter counts.
     write_agent_marker(lane.root, "mcpsys")
@@ -138,7 +126,7 @@ def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(
 
 
 def test_the_marker_source_is_exactly_depth_one(tmp_path):
-    product, lane = _lane(
+    product, lane = lead_lane(
         tmp_path, adapters=("elastic",), markers=("elastic", "cmdb"), skills=("elastic",),
         catalog=("elastic",),
         extra={rel.removeprefix("agent/"): "# a marker whose parent directory name the model chose\n"
@@ -166,12 +154,12 @@ def test_declared_systems_raises_when_the_adapter_half_is_unresolvable(tmp_path)
     """An unreadable adapter half raises whatever the markers say. The committed tree is the
     caller's to read, so an unresolvable one is pinned where it is read:
     `test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`."""
-    product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic",))
+    product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",))
     base = lane.batch.base()
     assert declared_systems(product, agent=base) == frozenset({"elastic"})   # the control
 
-    no_adapters, lane2 = _lane(tmp_path, adapters=(), markers=("elastic",), skills=("elastic",),
-                               name="no-adapters")
+    no_adapters, lane2 = lead_lane(tmp_path, adapters=(), markers=("elastic",), skills=("elastic",),
+                                   name="no-adapters")
     (no_adapters / ADAPTERS_REL).rmdir()
     base2 = lane2.batch.base()
     with pytest.raises(LeadAuthorError):
@@ -183,8 +171,8 @@ def test_declared_systems_raises_when_the_adapter_half_is_unresolvable(tmp_path)
 
 def test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft(tmp_path):
     """The lane-level half of the committed-vs-working-tree rule."""
-    product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic", "basesys"),
-                          skills=("elastic",))
+    product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic", "basesys"),
+                              skills=("elastic",))
     write_agent_marker(lane.root, "draftsys")      # in the draft, never committed
     assert agent_marker_file(lane.root, "draftsys").is_file()
     assert f"{AGENT_SKILLS_REL}draftsys/execution.md" not in _committed_agent_paths(lane)
@@ -197,8 +185,8 @@ def test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft(tmp_pat
     assert deps.systems == declared_systems(product, agent=lane.batch.base())
 
     # An unresolvable committed tree refuses the deps; it never degrades to the adapter half.
-    _p2, broken = _lane(tmp_path, adapters=("elastic",), markers=("elastic", "basesys"),
-                        name="broken")
+    _p2, broken = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic", "basesys"),
+                            name="broken")
     shutil.rmtree(broken.clone / ".git" / "objects")
     with pytest.raises((DeliveryRefused, LeadAuthorError)):
         draft_lead_deps(broken)

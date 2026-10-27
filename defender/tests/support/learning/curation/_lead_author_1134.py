@@ -323,6 +323,31 @@ def product_lane(tmp_path: Path, product: Path) -> Any:
     return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=product)
 
 
+def lead_lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, ...],
+              skills: tuple[str, ...] = (), catalog: tuple[str, ...] = (), name: str = "product",
+              extra: dict[str, str] | None = None) -> tuple[Path, Any]:
+    """The declared-systems resolver's two sources: a product checkout holding `adapters`, and a
+    batch draft of the fixture tenant over the lead lanes whose agent half holds the markers
+    (`markers`/`skills`/`catalog`, plus agent-relative `extra`)."""
+    from defender.tests.support.learning.curation import _curator1134 as C
+    from defender.tests.support.runtime.engine._declared869 import seed_agent_files, seed_product
+
+    product = seed_product(tmp_path, adapters=adapters, name=name)
+    files = {**seed_agent_files(markers=markers, skills=skills, catalog=catalog), **(extra or {})}
+    return product, C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files,
+                                 state_dir=tmp_path / f"state-{name}")
+
+
+def run_pitfalls(lane: Any, state: Any, spawn: Any) -> int:
+    """`pitfalls_curator.run_pitfalls` over the draft lane's held trees and its batch."""
+    from defender.learning.leads import pitfalls_curator
+    from defender.tests.support.learning.curation import _curator1134 as C
+
+    with C.draft_trees(lane) as trees:
+        return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, invoke=spawn,
+                                             trees=trees, batch=lane.batch)
+
+
 @contextmanager
 def lane_scene(tmp_path: Path, lane: Any) -> Iterator[DraftScene]:
     """A `DraftScene` over a `_curator1134.DraftLane`'s draft: `repo` is the draft's root (it
