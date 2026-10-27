@@ -5,6 +5,7 @@ from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
+import gc
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -138,12 +139,28 @@ def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_ex
 def _finished_run(tmp_path_factory) -> tuple[Path, Path]:
     """A REAL finished run — the real driver, its default store factory, its own case pointer
     — driven ONCE for the module. `runs/run`, so `open_source_store`'s `runs_base =
-    run_dir.parent` is the base the run was handed and its store sits under the returned root."""
+    run_dir.parent` is the base the run was handed and its store sits under the returned root.
+
+    The default factory is wrapped only to keep its handle: the driver returns without closing
+    the store, and an unclosed connection left to the collector deletes the store's `-wal`/`-shm`
+    files whenever collection happens to run — inside a test's before/after snapshot (#1324)."""
+    from defender.investigation import driver
+
     root = tmp_path_factory.mktemp("source")
     run_dir = replay.materialize(root / "runs", replay.GOLDEN, run_id='1077-session-owner')
-    summary = replay.drive(run_dir, run_id="1077-session-owner", main=replay.ReplayFn([
-        replay.Turn(text="Nothing to do; stopping."),
-    ]))
+    opened = []
+
+    def default_store_kept(case_id: str, rd: Path):
+        opened.append(driver._default_store_factory(case_id, rd))
+        return opened[-1]
+
+    try:
+        summary = replay.drive(run_dir, run_id="1077-session-owner", main=replay.ReplayFn([
+            replay.Turn(text="Nothing to do; stopping."),
+        ]), store_factory=default_store_kept)
+    finally:
+        for handle in opened:
+            handle.close()
     assert summary.get("truncated_by") is None, (
         f"the source run did not finish ({summary}); nothing below is about its pointer")
     return root, run_dir
@@ -220,6 +237,9 @@ def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(
 
     pointer_file.write_text(json.dumps({**pointer, "case_id": None}), encoding="utf-8")
     before = _tree(root)
+    # A connection left open earlier and closed by the collector mid-test deletes the store's
+    # `-wal`/`-shm` files between the snapshots (#1324); collect here so a leak fails every time.
+    gc.collect()
     with pytest.raises(branch.BranchError) as info:
         branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir))
     assert isinstance(info.value.__cause__, InvalidCaseId), (
