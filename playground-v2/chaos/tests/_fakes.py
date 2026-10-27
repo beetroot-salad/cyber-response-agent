@@ -1,11 +1,9 @@
 """Injectable fakes for the chaos control plane (issue #401).
 
-The controller never shells out from a test. Every mutation it makes travels
-over an *exec seam* — a duck-typed object passed in as `execer=` (this repo's
-convention: fakes enter through the entry point's parameter seam, never
-`monkeypatch.setattr`). The real seam shells `docker --context soc-playground
-exec`; this one records what it was asked to do so tests can assert on the
-captured command/payload rather than on a canned return value.
+Every mutation the controller makes travels over an *exec seam*, a duck-typed
+object passed in as `execer=`. The real seam shells `docker --context soc-playground
+exec`; this one records what it was asked to do, so tests assert on the captured
+command/payload rather than on a canned return value.
 
 Seam contract (chaos/seam.py — what `chaos/ctl.py` may call, and all it may call):
 

@@ -144,13 +144,10 @@ _SKIP = S.JUNK_DIRS | {"tests"}
 
 
 def _copy_tree(root: Path) -> Path:
-    """`defender/` copied to `<root>/defender` (tests and caches left out, no `.venv`), and a
-    run-copy-shaped agent root `<root>/agent` whose `lessons/` holds `_CORPUS`. Returns `root`,
-    the copy's checkout root.
-
-    #1108 P4 (O1, O2): the product tree carries no corpus, so the copy holds none either (a
-    leftover `lessons*/` in this checkout is left out rather than removed after the fact); the
-    lessons engine reads `$DEFENDER_AGENT_DIR/lessons` (`_agent_root`)."""
+    """`defender/` copied to `<root>/defender` (tests, caches and any leftover `lessons*/` left
+    out, no `.venv`), and a run-copy-shaped agent root `<root>/agent` whose `lessons/` holds
+    `_CORPUS`: the lessons engine reads `$DEFENDER_AGENT_DIR/lessons` (#1108). Returns `root`,
+    the copy's checkout root."""
     root.mkdir(parents=True, exist_ok=True)
     dst = root / "defender"
     shutil.copytree(S.DEFENDER, dst, symlinks=True,
@@ -319,12 +316,9 @@ def _assert_answered_by(ran: list[str] | None, engine: Path, what: str) -> None:
 
 @functools.lru_cache(maxsize=1)
 def _box_allowlist() -> tuple[str, ...]:
-    """`S.box_import_allowlist()` plus the top-level EXTENSION modules of the same distributions,
-    which `importlib.metadata.packages_distributions()` misnames (it strips only the last suffix
-    of `_duckdb.cpython-311-x86_64-linux-gnu.so`), so the shared list lacks `_duckdb`, without
-    which duckdb itself cannot be imported. Same walk: the lock's `box_closure` (core plus the
-    `box` extra). Plus the interpreter's own sysconfig data module, which ships with the standard
-    library (the image's Python has its own) but is missing from `sys.stdlib_module_names`."""
+    """`S.box_import_allowlist()` plus the closure's top-level extension modules (`_duckdb`) and
+    the interpreter's sysconfig data module. The shared list now derives both itself, so the two
+    are equal."""
     from defender.box import _image
 
     lock = tomllib.loads((S.DEFENDER / "uv.lock").read_text(encoding="utf-8"))
@@ -498,7 +492,7 @@ def _p_survival(tmp: Path, co: Path) -> dict[str, Any]:
     return out
 
 
-#: sql_lanes_enforce_the_same_constraints: one argv table, both lanes. `{TMP}` is the test's tmp.
+#: One argv table, both lanes. `{TMP}` is the test's tmp.
 _LANE_TABLE: tuple[tuple[str, tuple[str, ...], bytes], ...] = (
     ("query", (_QUERY,), _PAYLOAD),
     ("declared", _DECLARED, _POSITIONAL),

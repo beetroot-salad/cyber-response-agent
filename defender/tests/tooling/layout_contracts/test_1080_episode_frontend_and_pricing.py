@@ -22,8 +22,8 @@ def _g(key: str):
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """test_1025's roots: the launcher's episodes root, the runs base and the learning state root
-    inside `tmp_path`, so no episode this file builds or launches lands in the checkout."""
+    """The launcher's episodes root, the runs base and the learning state root inside
+    `tmp_path`, so no episode this file builds or launches lands in the checkout."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
@@ -76,9 +76,8 @@ def _pricing_rows(usage_cost) -> list:
 
 
 def _main_deps_over_run_copy(tmp_path: Path) -> tuple[Any, Path]:
-    """MAIN deps through the real `bind` seam with the run's tenant agent root — a run copy's
-    `agent/` (`<T>/run-knowledge/<run_id>/agent/`, r3 data model) — handed through the
-    existing `RunScope(tenant_agent=...)` keyword, over a code tree holding no corpus."""
+    """MAIN deps from the real `bind`, a run copy's `agent/` (`<T>/run-knowledge/<run_id>/agent/`)
+    as `RunScope(tenant_agent=...)`, over a code tree holding no corpus."""
     from dataclasses import replace
 
     from defender.agents import MAIN_DEF
@@ -98,11 +97,9 @@ def _main_deps_over_run_copy(tmp_path: Path) -> tuple[Any, Path]:
 
 
 def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_not(tmp_path):
-    """Both consumers of the moved frontier engine push lessons from the RUN COPY (#1108 P4
-    O2: pushed lessons and the document tool's recall read the run copy's corpus; O-TEXT: the
-    model is shown it at `/agent/lessons/<name>`, the model view's agent root, never under
-    `/defender`). ASSUMED SEAM (S-G2): the push lanes' corpus is the deps' tenant agent root's
-    `lessons/` (`RunScope.tenant_agent`, already a `bind` keyword), not `defender_dir/lessons`."""
+    """Both consumers of the moved frontier engine (the fold push and the document tool's
+    recall) read the run copy's corpus, `RunScope.tenant_agent`'s `lessons/` rather than
+    `defender_dir/lessons`, and show the model the lesson at `/agent/lessons/<name>` (#1108)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.support.shared.contracts import _fold_936 as F
     from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson
@@ -131,15 +128,10 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
 
 def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
     g = _g("location_values")
-    # `lessons_frontier`'s cell is retired with its subject (#1108 P4 O4): the import-time
-    # `DEFAULT_CORPUS` (the checkout's corpus) becomes a function of an agent root, and S-A's
-    # symbol census (`tenant_1108_p4/test_census.py`) bans the constant. The golden's
-    # `lessons_frontier_REPO_ROOT` value is kept as base history and read by nothing.
-    # `lessons_fm`'s cell is retired the same way (OD12 class (i)): its `REPO_ROOT` existed only
-    # to root the checkout corpus (`LESSONS_DIR`) and the repo-relative `--show` paths into it;
-    # the corpus is now `$DEFENDER_AGENT_DIR/lessons` (O2), covered by
-    # `learning/retrieval/test_lessons_fm.py` (its corpus fixture and `--show` confinement cases).
-    # The golden's `lessons_fm_REPO_ROOT` value is kept as base history and read by nothing.
+    # The golden's `lessons_frontier_REPO_ROOT` and `lessons_fm_REPO_ROOT` cells are base history,
+    # read by nothing: the corpus is `$DEFENDER_AGENT_DIR/lessons` now, not a checkout path
+    # (#1108; `tenant_1108_p4/test_census.py` bans the old constant, and
+    # `learning/retrieval/test_lessons_fm.py` covers the corpus and `--show` confinement).
     assert Path(S.moved_module("reexec_into_venv", home=S.VENV)._DEFENDER_DIR).resolve() \
         == (S.REPO_ROOT / g["venv_DEFENDER_DIR"]).resolve()
 

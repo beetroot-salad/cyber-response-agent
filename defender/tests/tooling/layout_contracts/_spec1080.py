@@ -31,7 +31,9 @@ LESSONS_CONTENT = DEFENDER / "lessons"
 GOLDENS = SUITE / "goldens"
 
 
-#: The authoring-time self-check switch (module docstring). Read once, at import.
+#: `SPEC1080_AT_BASE=1`: the authoring self-check that captured the goldens at the base tree
+#: (before `defender/scripts/` was split); the locator then also answers with base definitions.
+#: Never set in CI. Read once, at import.
 AT_BASE = os.environ.get("SPEC1080_AT_BASE") == "1"
 
 # ======================================================================================
@@ -51,14 +53,12 @@ PRICING = "defender/configuration/_pricing.py"
 VENV = "defender/execution/_venv.py"
 QUERY_RULES = "defender/knowledge/_query_rules.py"
 
-#: The flat-tier query rules keep their BASE names (the 2026-10-04 cut: dF11's public rename is
-#: parked with #1165), their values byte-identical: this table is the IDENTITY map. It stays the
-#: one place every file of this suite reads a rule's spelling from, so a later rename is made
-#: HERE.
+#: Query rule base name -> its spelling; the identity map while the public rename is parked
+#: (#1165). Every file of this suite reads a rule's spelling from here, so a rename is made here.
 QUERY_RULE_PUBLIC = {"_json_safe_params": "_json_safe_params", "_request_key": "_request_key"}
 
-#: What the API program must never load: the learning loop and everything that was
-#: `defender.runtime` before #1308 placed it by layer. A package covers its submodules.
+#: What the API program must never load: the learning loop and every former `defender.runtime`
+#: module (#1308 placed them by layer). A package covers its submodules.
 API_FORBIDDEN = (
     "defender.learning", "defender.investigation", "defender.systems", "defender.providers",
     "defender.records.session_store", "defender.records.selection", "defender.records._wire",
@@ -73,7 +73,7 @@ def api_forbidden(modules: Iterable[str]) -> list[str]:
             if m in API_FORBIDDEN or m.startswith(tuple(f + "." for f in API_FORBIDDEN))]
 
 #: Directory names no census, locator or scan descends into: tool output, caches, virtualenvs,
-#: VCS metadata (s154). A directory holding its own `.git` (a nested checkout) is skipped too.
+#: VCS metadata. A directory holding its own `.git` (a nested checkout) is skipped too.
 JUNK_DIRS = frozenset({
     ".venv", "venv", "__pycache__", "node_modules", "build", "dist", ".git", ".mypy_cache",
     ".ruff_cache", ".pytest_cache", ".tox", ".hypothesis", ".eggs", "site-packages",
@@ -87,9 +87,8 @@ def rel(path: Path, root: Path = REPO_ROOT) -> str:
 
 
 def is_test_path(relpath: str) -> bool:
-    """The O1 test exemption, drawn by LOCATION ([155], auto): any file under a directory
-    named `tests`, plus any `conftest.py`. A `test_*.py` beside production code and the repo's
-    `tooling/testing/` are NOT exempt."""
+    """The test exemption, by location: any file under a directory named `tests`, plus any
+    `conftest.py`. A `test_*.py` beside production code and `tooling/testing/` are not exempt."""
     parts = relpath.split("/")
     return "tests" in parts[:-1] or parts[-1] == "conftest.py"
 
@@ -145,14 +144,14 @@ def dotted(relpath: str) -> str:
 
 
 # ======================================================================================
-# The symbol locator (dF0: homes are found by symbol)
+# The symbol locator: homes are found by symbol
 # ======================================================================================
 
 
 def module_level_names(source: bytes | str, filename: str = "<src>") -> list[str]:
     """Every name a module binds at module level by a `def`, `class` or assignment — including
     one nested in a module-level `if` / `try` / `with`, never one inside a function or class.
-    Imports are NOT definitions (d0: "defined as a def, class or module-level assignment")."""
+    Imports are not definitions."""
     tree = ast.parse(source, filename=filename)
     out: list[str] = []
 
@@ -209,17 +208,15 @@ def definitions(name: str, root: Path = REPO_ROOT) -> tuple[str, ...]:
     return _definition_index(str(root.resolve())).get(name, ())
 
 
-#: Where each symbol the locator is asked about lives at the BASE outside `defender/scripts/`
-#: (the exit-code vocabulary moves out of the circuit breaker, m1). `SPEC1080_AT_BASE` accepts
-#: these; nothing else does.
+#: Base homes outside `defender/scripts/` of symbols the locator is asked about (the exit-code
+#: vocabulary moved out of the circuit breaker). Only `AT_BASE` accepts these.
 _BASE_HOMES_OUTSIDE_SCRIPTS = ("defender/systems/circuit_breaker.py",)
 
 
 def home_of(name: str, *, home: str | None = None, root: Path = REPO_ROOT) -> str:
     """The ONE module outside `defender/scripts/` that defines `name` (optionally inside
-    `home`), repo-relative. Fails — with an `AssertionError` naming the symbol — when the
-    symbol has no such home (the move has not happened) or more than one (a duplicate
-    definition: the one-home rule). See the module docstring for `SPEC1080_AT_BASE`."""
+    `home`), repo-relative. Fails with an `AssertionError` naming the symbol when it has no
+    such home or more than one (a duplicate definition: the one-home rule). See `AT_BASE`."""
     defs = definitions(name, root)
     if AT_BASE:
         moved_defs = [d for d in defs if not under(d, "defender/scripts")]
@@ -251,10 +248,9 @@ def moved(name: str, *, home: str | None = None) -> Any:
 
 
 def query_rule(base_name: str) -> Any:
-    """A flat-tier query rule by its BASE spelling (`_json_safe_params`, `is_reserved_query_id`,
-    ...): the object defined under the spelling `QUERY_RULE_PUBLIC` gives it (the identity map
-    since the 2026-10-04 cut) in a flat-tier module. Under `SPEC1080_AT_BASE` the base
-    definition answers, so a behavioural test proves its golden at the base."""
+    """A flat-tier query rule by its base spelling (`_json_safe_params`, ...), under the spelling
+    `QUERY_RULE_PUBLIC` gives it. Under `AT_BASE` the base definition answers, so a behavioural
+    test proves its golden at the base."""
     public = QUERY_RULE_PUBLIC.get(base_name, base_name)
     if AT_BASE and public != base_name and not [
             d for d in definitions(public) if under(d, QUERY_RULES)]:
@@ -318,7 +314,7 @@ def canon(value: Any) -> Any:
 def outcome(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> dict[str, Any]:
     """What calling `fn` does, as a golden-comparable record: `{"returns": canon(value)}`, or
     `{"raises": <class short name>, "message": str(exc)}`. Short class names, because a moved
-    class keeps its name (GR9) while its module path changes."""
+    class keeps its name while its module path changes."""
     try:
         value = fn(*args, **kwargs)
     except Exception as e:  # noqa: BLE001 — the exception IS the observed outcome
@@ -327,7 +323,7 @@ def outcome(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> dict[str, A
 
 
 # ======================================================================================
-# Child processes (s127: every child is pinned to THIS tree)
+# Child processes (every child is pinned to this checkout)
 # ======================================================================================
 
 
@@ -335,9 +331,9 @@ def child_env(*, pythonpath: bool = True, inherit: Sequence[str] = ("PATH", "HOM
                                                                      "LC_ALL", "TZ"),
               **extra: str) -> dict[str, str]:
     """A minimal environment for a child: the few inherited keys named, `PYTHONPATH` set to
-    THIS checkout's root when `pythonpath` (never another checkout a developer's shell
-    names, s127), then `extra`. `pythonpath=False` is the bare-environment shape (the operator
-    shell, `run_sql_py`, J-PO3)."""
+    this checkout's root when `pythonpath` (never another checkout a developer's shell
+    names), then `extra`. `pythonpath=False` is the bare-environment shape (the operator
+    shell)."""
     env = {k: os.environ[k] for k in inherit if k in os.environ}
     env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     if pythonpath:
@@ -362,8 +358,8 @@ def python(*args: str | os.PathLike[str], **kw: Any) -> subprocess.CompletedProc
 
 
 # ======================================================================================
-# The box image's import closure (box_closure_*: "derived from pyproject.toml's core
-# dependencies and box extra" — through the lock, the way the image is built)
+# The box image's import closure: core dependencies plus the `box` extra, read through the
+# lock the way the image is built
 # ======================================================================================
 
 
@@ -372,9 +368,8 @@ def box_import_allowlist() -> tuple[str, ...]:
     """The top-level import names a box process may load: the standard library (implicit in
     `_import_blocker`'s `allow_only`), `defender`, `__main__`, `_virtualenv` (this venv's
     start-up hook, which no box has), and every import name of the distributions the image
-    installs — `box._image.box_closure(uv.lock, "defender")`, the walk the image build
-    itself trusts (core `dependencies` + the `box` extra, transitively), mapped to import names
-    through the installed distributions' metadata. NOT whatever the host venv carries (s119)."""
+    installs (`box._image.box_closure(uv.lock, "defender")`, the image build's own walk), mapped
+    through the installed distributions' metadata. Not whatever the host venv carries."""
     from defender.box import _image
 
     lock = tomllib.loads((DEFENDER / "uv.lock").read_text(encoding="utf-8"))
@@ -401,8 +396,8 @@ def box_import_allowlist() -> tuple[str, ...]:
     return tuple(sorted(tops | {"defender", "__main__", "_virtualenv", build_data}))
 
 
-#: Packages a box process must never load (box_closure_*): the agent framework, the model
-#: providers and the MCP stack. Checked against `sys.modules` in the child as well as refused.
+#: Packages a box process must never load: the agent framework, the model providers and the
+#: MCP stack. Checked against `sys.modules` in the child as well as refused.
 BOX_BLOCKED = ("pydantic_ai", "anthropic", "openai", "mcp", "fastmcp", "logfire", "httpx",
                "fastapi", "uvicorn", "toons")
 
@@ -429,7 +424,7 @@ def import_statements(relpath: str, source: bytes | str) -> Iterator[ImportStmt]
     """Every `import` / `from … import` in a module, wherever it sits (module level, function
     body, `try`, `if TYPE_CHECKING:`), relative forms resolved against the importer's package.
     Raises `SyntaxError` / `ValueError` for a file that cannot be parsed — the caller decides
-    (a census must name it, never skip it: [153])."""
+    (a census must name it, never skip it)."""
     tree = ast.parse(source, filename=relpath)
     pkg = dotted(relpath).split(".")
     if not relpath.endswith("__init__.py"):
@@ -461,10 +456,9 @@ def has_main_block(source: bytes | str) -> bool:
 
 
 def shim_exec_module(shim: str, root: Path | None = None) -> str:
-    """The dotted module a `bin/` shim runs — read off its `exec "$PY" -P -m <module>` line.
-    The 2026-10-04 post-review change (human) dissolved the wrappers: each shim puts its own
-    checkout root first on `PYTHONPATH` and runs its engine as a module. Fails when the shim
-    names no such line."""
+    """The dotted module a `bin/` shim runs, read off its `exec "$PY" -P -m <module>` line (each
+    shim puts its own checkout root first on `PYTHONPATH` and runs its engine as a module).
+    Fails when the shim names no such line."""
     text = ((root or REPO_ROOT) / "defender" / "bin" / shim).read_text(encoding="utf-8")
     for line in text.splitlines():
         toks = [t.strip('"') for t in line.split()]

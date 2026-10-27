@@ -314,7 +314,7 @@ def test_a_label_pass_that_changed_judge_mid_sweep_is_refused(tmp_path):
 
 
 def test_the_tag_names_the_judge_that_produced_it(tmp_path):
-    """§6: the judge runs at score time, so it is part of the tag. Two machines must not
+    """The judge runs at score time, so it is part of the tag. Two machines must not
     mint identically-named tags from different judges."""
     tag = score.score_tag("glm-5.2_effort-none_prompt-711", "claude-opus-5", "high")
     assert tag == (f"glm-5.2_effort-none_prompt-711__"
@@ -571,8 +571,8 @@ def test_an_explicitly_tagged_forbidden_value_is_caught_as_its_text_too(
 
 
 def test_a_required_instant_present_unquoted_is_not_reported_missing(tmp_path):
-    """O2, the mirror: `must_emit` is what stops a mutation case passing by saying nothing,
-    and it read the same `str(datetime)` — a satisfied requirement read as missing."""
+    """The leak check's mirror: `must_emit` (what stops a mutation case passing by saying
+    nothing) must read a typed instant as its text, or a met requirement reads as missing."""
     d = _case(tmp_path, kind="mutation",
               extra_manifest={"expectation": {"must_emit": [_INSTANT]}})
     landed = _projection_text(d, f"'@timestamp': {_INSTANT}")

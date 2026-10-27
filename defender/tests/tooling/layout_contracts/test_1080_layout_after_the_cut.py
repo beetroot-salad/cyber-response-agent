@@ -1,10 +1,6 @@
 """The tree's layout after the #1080 cut: the engines the `bin/` shims run, the lesson content
-folder, and where modules take their root from.
-
-The rest of what used to be asserted here (placement under `defender/scripts/`, nothing importing
-`defender.scripts.*`, every base name still defined, the old paths erroring) guarded the move
-out of `defender/scripts/`, which #1268 removed; nothing can be placed under or import from a
-folder that does not exist."""
+folder, and where modules take their root from. (`defender/scripts/` itself is gone, #1268, so
+nothing here guards placement under it or imports from it.)"""
 from __future__ import annotations
 
 import ast
@@ -13,7 +9,7 @@ import textwrap
 
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 
-#: One anchor name per moved engine; `S.home_of` finds the module that defines it today.
+#: One anchor name per moved engine; `S.home_of` finds the module that defines it.
 ANCHORS = ("passthrough_max_bytes", "_load_payload", "usage_cost", "reexec_into_venv", "cmd_tags",
            "match_lessons", "resolve_corpus", "load_case_mapping", "is_reserved_query_id")
 #: Each engine a shim's wrapper delegates to, by an anchor the engine defines.
@@ -107,10 +103,9 @@ def test_1080_the_moved_lessons_frontier_keeps_its_main_block():
             f"that the move must keep")
 
 def test_1080_no_python_module_lands_in_the_lesson_content_folder():
-    """The lesson content folder is a tenant's `agent/lessons/` (#1108 P4, decision 4: the
-    product tree holds none — S-A's `tenant_1108_p4/test_layout.py` pins that absence, O1), so
-    the content checked is the committed fixture tenant's: lessons and no code. The engines
-    stay out of the content folder's spelling and out of `scripts/`."""
+    """The lesson content folder is a tenant's `agent/lessons/` (the product tree holds none:
+    `tenant_1108_p4/test_layout.py` pins that), so the committed fixture tenant's is checked:
+    lessons and no code. The engines stay out of `defender/lessons`."""
     from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
     content = FIXTURE_AGENT / "lessons"

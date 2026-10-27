@@ -1,16 +1,10 @@
 """M1/O7 — the real exec seam never leaves the container.
 
-Every other test in this suite drives `ctl.activate`/`revert`/`status`
-through `FakeExecSeam` and never touches `chaos.ctl.DockerExecSeam` at all —
-by design, so the unit suite needs no live stack. That leaves the one line
-that actually decides O7 (no agent-attributable host-side network call)
-unexercised. A host-side `urllib`/`requests` hit against `127.0.0.1:8001`
-would still pass every other test in this file, and the design's own live
-check proved exactly that call leaves a `gateway -> cmdb:8080` flow in the
-agent's Zeek telemetry.
-
-`DockerExecSeam(run=...)` injects `subprocess.run` so this can be checked
-without actually shelling out.
+Every other test drives the controller through `FakeExecSeam`, so this file is the
+only check on `chaos.ctl.DockerExecSeam`, the line that decides O7 (no
+agent-attributable host-side network call): a host-side `urllib`/`requests` hit on
+`127.0.0.1:8001` leaves a `gateway -> cmdb:8080` flow in the agent's Zeek
+telemetry. `DockerExecSeam(run=...)` injects `subprocess.run`, so nothing shells out.
 """
 from __future__ import annotations
 
@@ -76,10 +70,9 @@ def _run_returning(stdout: str, rc: int = 0, stderr: str = ""):
 
 
 def test_an_http_error_from_elasticsearch_is_raised_not_returned():
-    """curl exits 0 on a 4xx/5xx. Under the old `(rc, body)` contract a
-    wrong password came back as rc 0 with `{"error":..., "status":401}`,
-    and the controller recorded a fault that never landed. The seam's only
-    outcomes are a payload or an exception."""
+    """curl exits 0 on a 4xx/5xx: read as rc 0, a wrong password's
+    `{"error":..., "status":401}` would record a fault that never landed. The
+    seam's only outcomes are a payload or an exception."""
     seam = ctl.DockerExecSeam(run=_run_returning('{"error": {"type": "security_exception"}, "status": 401}\n401'))
     with pytest.raises(SeamError) as info:
         seam.es_request("PUT", "/_ingest/pipeline/logs-system.auth@custom", {"processors": []})

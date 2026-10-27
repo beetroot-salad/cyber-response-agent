@@ -19,8 +19,7 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 GOLDEN = "queryrules"
 
-#: The two flat-tier rules `S.QUERY_RULE_PUBLIC` spells (the identity map since the 2026-10-04
-#: cut). Read from the shared table so every file of the suite agrees.
+#: The two flat-tier rules by base name; `_flat` spells them through `S.QUERY_RULE_PUBLIC`.
 _JSP = "_json_safe_params"
 _RK = "_request_key"
 
@@ -30,13 +29,9 @@ def _g() -> Any:
 
 
 def _flat_rule(base_name: str) -> tuple[str, str]:
-    """`(module relpath, name in that module)` of a flat-tier query rule.
-
-    Each rule is looked up inside `S.FLAT_TIER` under the spelling `S.QUERY_RULE_PUBLIC` gives
-    it (its base name: the table is the identity map since the 2026-10-04 cut). Under
-    `SPEC1080_AT_BASE` (the authoring self-check, never set in CI) the locator answers with the
-    base definition, so the behavioural tests prove their goldens against the base through the
-    same assertions."""
+    """`(module relpath, name in that module)` of a flat-tier query rule, looked up in
+    `S.QUERY_RULES` under the spelling `S.QUERY_RULE_PUBLIC` gives it. Under `S.AT_BASE` the
+    base definition answers, so the same assertions prove the goldens against the base."""
     public = S.QUERY_RULE_PUBLIC.get(base_name, base_name)
     if S.AT_BASE and public != base_name:
         try:
@@ -284,10 +279,9 @@ def roundtrip_call() -> dict[str, Any]:
 
 def drive_roundtrip(state: Any, *, request_key: Any, append: Any,
                     repeat_trip: Any) -> dict[str, Any]:
-    """s168: the live key, the row the writer stores, and the keys the learning side computes
-    from that row after it is read back from disk (the repository's typed row, the raw record,
-    the ledger's join key), plus the guard over the read-back rows with the live params — the
-    rows the run's `state` holds, each the written line read back (#1235)."""
+    """s168: the live key, the row the writer stores, the keys the learning side computes from
+    that row read back from disk (the typed row, the raw record, the ledger's join key), and the
+    guard over the read-back rows `state` holds, with the live params."""
     from defender.learning import lead_repository
     from defender.learning.branch import ledger
 

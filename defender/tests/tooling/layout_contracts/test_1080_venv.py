@@ -59,8 +59,8 @@ def helper_home() -> str:
 
 def code_tree(root: Path) -> Path:
     """`root/defender`: a copy of this checkout's `defender/` code, no venv, no lesson corpus;
-    `ONE_LESSON` is planted in the agent root beside it (`agent_root(root)`, #1108 P4 O1/O2: the
-    lessons shim reads `$DEFENDER_AGENT_DIR/lessons`, never the code tree). Returns the copy's
+    `ONE_LESSON` is planted in the agent root beside it (`agent_root(root)`: the lessons shim
+    reads `$DEFENDER_AGENT_DIR/lessons`, never the code tree, #1108). Returns the copy's
     checkout root."""
     src = S.DEFENDER.resolve()
 
@@ -413,7 +413,7 @@ def shim_with_stubs(root: Path, tmp: Path, bare: Path, shim: str, box: str | Non
 
 def sql_no_runtime(tmp: Path) -> dict[str, Any]:
     """The sql engine's own read of the mark: its missing-`duckdb` message under each spelling
-    (a shadow `duckdb` that fails to import, as test_1092's d28 plants it)."""
+    (a shadow `duckdb` that fails to import, as test_1092 plants it)."""
     shadow = tmp / "shadow"
     shadow.mkdir()
     (shadow / "duckdb.py").write_text("raise ImportError('duckdb blocked by the spec')\n",

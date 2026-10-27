@@ -70,7 +70,7 @@ def test_a_dev_case_is_not_ledgerable(tmp_path):
 
 
 def test_a_score_whose_tag_names_another_judge_is_refused(tmp_path, capsys):
-    """§6. `JUDGE_MODEL` has a fallback, so a tag naming opus-5 can hold a score another
+    """`JUDGE_MODEL` has a fallback, so a tag naming opus-5 can hold a score another
     model produced. Ledgering it would attest to a result nothing can attribute."""
     case_dir, tag = _case(tmp_path, judge_block={
         "model": "some-other-judge", "effort": EFFORT,

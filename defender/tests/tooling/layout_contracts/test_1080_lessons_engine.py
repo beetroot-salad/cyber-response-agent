@@ -169,9 +169,9 @@ def write_corpus(corpus: Path, lessons: Mapping[str, str]) -> Path:
 
 
 def agent_root(root: Path) -> Path:
-    """The agent root beside a code copy at `root` (`root/agent`, a run copy's `agent/` in shape):
-    what `DEFENDER_AGENT_DIR` names for that copy's shim. #1108 P4 (O1, O2): the code tree holds
-    no corpus; the engine reads `$DEFENDER_AGENT_DIR/lessons` (ASSUMED SEAM, S-G2)."""
+    """The agent root beside a code copy at `root` (`root/agent`, shaped like a run copy's
+    `agent/`): what `DEFENDER_AGENT_DIR` names for that copy's shim. The code tree holds no
+    corpus; the engine reads `$DEFENDER_AGENT_DIR/lessons` (#1108)."""
     return root / "agent"
 
 
@@ -399,7 +399,7 @@ S021_PLANTED_ARGV: tuple[tuple[str, ...], ...] = (
 
 
 def plant_links(root: Path, tmp: Path) -> None:
-    """RG6's planted entries inside a copy's corpus: links in and out, linked parents."""
+    """Planted entries inside a copy's corpus: links in and out, linked parents."""
     corpus = corpus_of(root)
     outside = tmp / "outside"
     write_corpus(outside, {"o.md": _lesson("o", desc="outside", sig="[o]", tel="[o]",
@@ -410,8 +410,8 @@ def plant_links(root: Path, tmp: Path) -> None:
     (corpus / "linkdir").symlink_to("../../defender/skills", target_is_directory=True)
     (corpus / "linkdir2").symlink_to(outside, target_is_directory=True)
     (root / "README.md").write_text("readme\n", encoding="utf-8")
-    # A sibling corpus beside the runtime one (U5 deleted `lessons-actor`, whose template this
-    # row once named): a file there exists and is still no lesson `--show` may print.
+    # A sibling corpus beside the runtime one: a file there exists and is still no lesson
+    # `--show` may print.
     write_corpus(agent_root(root) / "lessons-questioner", {"_TEMPLATE.md": "---\nname: t\n---\n"})
 
 
@@ -493,11 +493,10 @@ def _call_kind(argv: Sequence[str]) -> str:
 
 
 class RecordingShim:
-    """orient's shim seam (its `shim` keyword). Records every argv orient hands it and answers per call kind from a
-    data spec: `"real"` passes the call to orient's own `_shim` (the copy's real
-    `bin/defender-lessons` and the real engine), `None` is a failed shim and `""` an empty one —
-    the outcomes G22/RG5 observed of the real `_shim` (a missing binary, a NUL in argv and a
-    timeout answer `None`; so does an empty stdout). Injects and records; never classifies."""
+    """orient's `shim` seam: records every argv orient hands it and answers per call kind from a
+    data spec. `"real"` passes the call to orient's own `_shim` (the copy's real shim and
+    engine); `None` is a failed shim (the real `_shim`'s answer to a missing binary, a NUL in
+    argv, a timeout or an empty stdout) and `""` an empty one. Never classifies."""
 
     def __init__(self, spec: Mapping[str, str | None]) -> None:
         self.spec = dict(spec)
@@ -642,7 +641,7 @@ def observe_s185(tmp: Path) -> dict[str, Any]:
     return out
 
 
-#: The lanes' argv table: RG6's refusal table, the in-corpus spellings, and the flag allowlist.
+#: The lanes' argv table: the refusal rows, the in-corpus spellings, and the flag allowlist.
 LANE_ARGV: tuple[tuple[str, ...], ...] = (
     ("--show", "agent/lessons/sshd-one.md"),
     ("--show", "<TREE>/agent/lessons/sshd-one.md"),
@@ -760,8 +759,8 @@ def plant_import(path: Path, stmt: str) -> None:
 
 
 def _run_copy_agent(tmp: Path) -> Path:
-    """A run copy's `agent/` (`<T>/run-knowledge/<run_id>/agent/`, r3 data model) holding the
-    committed fixture tenant's made-up agent content (decision 4) — never the product tree."""
+    """A run copy's `agent/` (`<T>/run-knowledge/<run_id>/agent/`) holding the committed fixture
+    tenant's made-up agent content, never the product tree."""
     from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
     agent = tmp / "data" / "tenant" / "run-knowledge" / "run" / "agent"
@@ -770,12 +769,10 @@ def _run_copy_agent(tmp: Path) -> Path:
 
 
 def test_lessons_show_names_a_file_outside_the_corpus_after_the_engine_moved(tmp_path):
-    """#1108 P4 O2/O4 (was: the shim over the product tree's real corpus). The checkout's
-    `defender-lessons` reads the corpus of the agent root `DEFENDER_AGENT_DIR` names — the run
-    copy's `agent/` — not a corpus inside the code tree: `--show` names the run copy's file,
-    the listing names exactly the fixture's lessons (a lab lesson from the product tree in the
-    listing is the violation), and a code copy holding no corpus answers `--tags` the same.
-    ASSUMED SEAM (S-G2): the engine resolves `$DEFENDER_AGENT_DIR/lessons` on every lane."""
+    """The checkout's `defender-lessons` reads the corpus under `DEFENDER_AGENT_DIR` (a run
+    copy's `agent/`), not one inside the code tree: `--show` names the run copy's file, the
+    listing names exactly the fixture's lessons, and a code copy holding no corpus answers
+    `--tags` the same (#1108)."""
     engine_home()
     assert observe_s021(tmp_path) == golden("s021")
 
@@ -816,8 +813,8 @@ def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(t
     engine_home()
     seen = observe_s062(tmp_path, monkeypatch.setenv)
     assert seen == golden("s062")
-    # #1222 A6/O10: a failed vocabulary shim is named in its section, not dropped, so a row shows
-    # the section exactly when the run recorded a signature; an unsigned run is told so instead.
+    # A failed vocabulary shim is named in its section, not dropped (#1222), so a row shows the
+    # section exactly when the run recorded a signature; an unsigned run is told so instead.
     signed = {label for label, _v, sig, _spec, _g in ORIENT_ROWS if sig}
     assert {label for label, r in seen["orient"].items() if r["vocabulary_section"]} == signed
 
@@ -950,7 +947,7 @@ def descriptions(listing: str) -> dict[str, str]:
 
 
 def assert_breaks_list_flat(tags_out: str, listing: str) -> None:
-    """H8 (b): each hostile value lists on ONE line under its own dimension, written out in
+    """Each hostile value lists on ONE line under its own dimension, written out in
     `HOSTILE_LINES`; no column-0 header appears that the corpus did not declare; no row lists a
     blank value; and a description holding the same string lists as the tag does."""
     assert column0(tags_out) == [f"{dim}:" for dim in TAG_DIMENSIONS], (

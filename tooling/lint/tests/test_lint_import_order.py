@@ -50,8 +50,8 @@ def test_an_upward_import_is_found_however_it_is_spelled(tmp_path, src):
 
 
 def test_the_systems_package_reads_run_state_through_its_own_interface(tmp_path):
-    """#1308: `systems` sits below `investigation`, so it cannot import the run's live state (the old
-    `verbs` / `circuit_breaker` / `system_status` edges); it names the slice it needs itself."""
+    """`systems` sits below `investigation`, so it cannot import the run's live state; it names
+    the slice it needs itself (#1308)."""
     old = _tree(tmp_path / "old", {
         "systems/__init__.py": "",
         "systems/circuit_breaker.py": "from defender.investigation import run_state\n",

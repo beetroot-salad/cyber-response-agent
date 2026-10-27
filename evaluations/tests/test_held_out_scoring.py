@@ -78,15 +78,9 @@ def _scored(tmp_path: Path, runs: Path, fixtures: Path,
 
 
 def test_secondary_harness_run_dirs_are_not_claimed_by_the_primary_metric(tmp_path: Path):
-    """The regression the name rule existed for: the retired frozen-actor secondary metric
-    minted `sec-eval-gen{N}-{slug}-{attempt}` plus a `-replay` staging twin under the SAME runs
-    base, and a substring match claimed both.
-
-    #1187 declared change 14: no rule over names is left to get wrong. Folders named
-    `<slug>`, `sec-eval-gen7-<slug>-<x>` and its `-replay` twin, each recorded and each saying
-    the wrong answer, claim nothing; the fixture is scored from the run its index row names, by
-    id — and only that run says the right answer.
-    """
+    """Folders named `<slug>`, `sec-eval-gen7-<slug>-<x>` and its `-replay` twin (the retired
+    secondary metric's names, under the same runs base), each saying the wrong answer, claim
+    nothing: the fixture is scored only from the run its index row names, by id (#1187)."""
     runs = tmp_path / "runs"
     for name in (SLUG, f"sec-eval-gen7-{SLUG}-ab12cd34", f"sec-eval-gen7-{SLUG}-ab12cd34-replay"):
         _run(runs, name, says="malicious")
@@ -97,13 +91,9 @@ def test_secondary_harness_run_dirs_are_not_claimed_by_the_primary_metric(tmp_pa
 
 
 def test_no_run_id_convention_claims_a_fixture(tmp_path: Path):
-    """Was `test_run_id_conventions_that_do_claim_a_fixture`: the bare `--run-id <slug>`, a
-    `<slug>-<attempt>` suffix and the old minted `{utc_timestamp}-<slug>` shape each claimed
-    the fixture.
-
-    #1187 declared change 14: none does. With no index row for the slug, a recorded, reported
-    folder under any of those names leaves the slug `not_run`, out of the accuracy.
-    """
+    """With no index row for the slug, a recorded, reported folder named `<slug>`,
+    `<slug>-<attempt>` or `{utc_timestamp}-<slug>` leaves the slug `not_run`, out of the
+    accuracy (#1187)."""
     for name in (SLUG, f"{SLUG}-attempt2", f"20260718t101500z-{SLUG}"):
         runs = tmp_path / name / "runs"
         _run(runs, name, says="benign")
@@ -114,26 +104,15 @@ def test_no_run_id_convention_claims_a_fixture(tmp_path: Path):
 
 
 def test_the_alert_label_comes_from_the_fixture_folder_not_the_stem():
-    """Was `test_the_default_run_id_satisfies_the_convention`, which also pinned that the
-    `{stamp}-<slug>` id minted without `--run-id` was claimed by `_claimed_slug`.
-
-    #1187 declared change 14: `_claimed_slug` is gone and a minted id is a bare UUID carrying
-    no label (declared change 2), so that half is removed. What remains is the label's own
-    derivation, which this slice does not change: every fixture is `{slug}/alert.json`, so the
-    label comes from the parent dir, never the constant stem "alert".
-    """
+    """Every fixture is `{slug}/alert.json`, so the label comes from the parent dir, never the
+    constant stem "alert"."""
     assert _alert_label(HELD_OUT_FIXTURES / SLUG / "alert.json") == SLUG
     assert _alert_label(Path("/x/y/wazuh-5710.json")) == "wazuh-5710"
 
 
 def test_a_slug_that_prefixes_another_takes_nothing_from_its_row(tmp_path: Path):
-    """Was `test_longest_slug_wins_when_one_fixture_slug_prefixes_another`: the name matcher
-    had to survive a fixture set where one slug prefixes another.
-
-    #1187 declared change 14: a row names its slug exactly, so the prefix case dissolves.
-    `m05-lsass-access-v2`'s row scores its own run; `m05-lsass-access`, with no row, is
-    `not_run` — a `<slug>-v2-attempt1` folder notwithstanding.
-    """
+    """A row names its slug exactly: `m05-lsass-access-v2`'s row scores its own run, and
+    `m05-lsass-access`, with no row, is `not_run` despite a `<slug>-v2-attempt1` folder."""
     runs = tmp_path / "runs"
     _run(runs, f"{SLUG}-v2-attempt1", says="benign")
     v2 = _run(runs, says="benign")
@@ -144,11 +123,8 @@ def test_a_slug_that_prefixes_another_takes_nothing_from_its_row(tmp_path: Path)
 
 
 def test_the_newest_row_wins_not_the_newest_folder(tmp_path: Path):
-    """Was `test_most_recent_run_wins`: the folder with the newest mtime won.
-
-    #1187 declared change 14: the newest index row of a slug — the last appended — wins, and
-    folder age decides nothing. The run the newer row names is the OLDER folder.
-    """
+    """The newest index row of a slug (the last appended) wins and folder age decides nothing:
+    the run the newer row names is the OLDER folder."""
     runs = tmp_path / "runs"
     older_row = _run(runs, says="malicious")
     newer_row = _run(runs, says="benign")
@@ -161,14 +137,9 @@ def test_the_newest_row_wins_not_the_newest_folder(tmp_path: Path):
 
 
 def test_rows_naming_unresolvable_entries_score_wrong_and_cost_only_their_slug(tmp_path: Path):
-    """Was `test_index_survives_unresolvable_entries`: a dangling link and a regular file in the
-    runs dir, named after the slug, cost that candidate and not the eval.
-
-    #1187 declared change 14 (recheck X2): an entry is reached only through a row. A row naming
-    a dangling link, or a regular file, names no run: that slug scores WRONG (launched, no run
-    record) instead of vanishing from the denominator, and the eval goes on — the slug whose row
-    names a real run is scored as usual.
-    """
+    """A row naming a dangling link or a regular file names no run: that slug scores WRONG
+    (launched, no run record) instead of vanishing from the denominator, and the rest of the
+    eval goes on."""
     runs = tmp_path / "runs"
     fine = _run(runs, says="benign")
     dangling, a_file = str(uuid.uuid4()), str(uuid.uuid4())
@@ -196,7 +167,7 @@ def test_labeled_fixture_with_no_alert_is_excluded_loudly(tmp_path: Path, capsys
 
 
 def test_un_run_fixtures_are_surfaced_not_scored(tmp_path: Path):
-    """A fixture with no run is surfaced as not-run, never folded into the score — the denominator counts what was actually investigated."""
+    """The denominator counts only what was actually investigated."""
     fixtures_dir = tmp_path / "held-out"
     for slug, disposition in (("b01-case", "benign"), ("m01-case", "malicious")):
         member = fixtures_dir / slug
@@ -214,8 +185,8 @@ def test_un_run_fixtures_are_surfaced_not_scored(tmp_path: Path):
 
 
 def test_divergent_fixture_set_warns_that_it_was_never_netted(tmp_path: Path, capsys):
-    """The retired learning-queue write refused exactly one directory. Scoring a different set means
-    those runs were never refused, so the number may already be contaminated."""
+    """The contamination net refuses runs from exactly one directory: scoring a different set
+    means those runs were never refused, so the number may already be contaminated."""
     assert warn_if_outside_the_net(tmp_path) is True
     assert "NOT held out of learning" in capsys.readouterr().err
     assert warn_if_outside_the_net(HELD_OUT_FIXTURES) is False

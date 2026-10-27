@@ -346,8 +346,8 @@ def test_a_malformed_ledger_file_is_reported_and_does_not_block_the_others(
 
 
 def test_revert_cli_refuses_a_ref_combined_with_all():
-    """`revert chaos-abc --all` used to silently ignore the ref and revert
-    everything — including a fault another run was holding open."""
+    """`revert chaos-abc --all` must not silently ignore the ref and revert
+    everything, including a fault another run is holding open."""
     parser = ctl.build_arg_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["revert", "chaos-abc123", "--all"])

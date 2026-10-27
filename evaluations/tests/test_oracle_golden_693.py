@@ -82,7 +82,7 @@ SCORE_FILES = list(_committed_scores())
 @pytest.mark.parametrize(("case_dir", "score_path"), SCORE_FILES,
                          ids=lambda p: p.name)
 def test_every_checked_in_score_names_the_judge_in_its_tag(case_dir, score_path):
-    """§6: the judge runs at score time, so it is part of the tag."""
+    """The judge runs at score time, so it is part of the tag."""
     doc = json.loads(score_path.read_text(encoding="utf-8"))
     assert doc["tag"] == score_path.stem, "the artifact disagrees with its own filename"
     recorded = doc["judge"]

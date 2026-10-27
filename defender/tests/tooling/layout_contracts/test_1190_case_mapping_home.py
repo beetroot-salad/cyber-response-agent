@@ -40,11 +40,9 @@ def _moved(name: str) -> Any:
 
 
 def _writer_home() -> str:
-    """The write-back module's path, wherever it lives: `record_case_ticket`'s one home outside
-    `defender/scripts/` once #1165 has moved it (the locator's one-home rule decides), else its
-    one definition under `scripts/` — `investigation/ticket_writer.py`, which #1190 leaves in
-    place. Decided by the definitions, never by catching the locator's failure (that would also
-    swallow a duplicate home)."""
+    """The write-back module's path: `record_case_ticket`'s one home. Decided by the
+    definitions, never by catching the locator's failure (that would also swallow a duplicate
+    home)."""
     defs = S.definitions("record_case_ticket")
     if any(not S.under(d, "defender/scripts") for d in defs):
         return S.home_of("record_case_ticket")
@@ -132,8 +130,7 @@ def _records_at_run_start() -> tuple[Any, Any]:
 
 
 def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
-    """The record's mapping, as held. (The release predicate the ticket writer built from it was
-    observed here too, until #1221's amendment removed it; nothing reads a released status.)"""
+    """The record's mapping, as held."""
     return _norm({
         "record_good": _held(good.ticket_mapping),
         "record_bad": _held(bad.ticket_mapping),

@@ -1,10 +1,5 @@
-"""Regression suite for the PR #674 check_stub fixes.
-
-Same house style as test_mechanical_checks: drive the real script via subprocess and
-assert on the exit code and the identity named in the finding, never exact wording.
-Exit contract: 0 clean, 1 findings, 2 could-not-look. Every invocation passes
-`--python sys.executable` — the stub run must use a real interpreter with pytest.
-"""
+"""Regression suite for the PR #674 check_stub fixes. Every invocation passes
+`--python sys.executable`: the stub run must use a real interpreter with pytest."""
 from __future__ import annotations
 
 import sys
@@ -22,8 +17,8 @@ def _spec_repo(make_repo):
 
 
 def test_relative_suite_arg_from_nested_cwd_still_finds_the_suite(make_repo):
-    # Fix 2: main() used the arg as-given while run() moved cwd for pytest, so
-    # `cd tests && check_stub spec` made pytest hunt <rootdir>/spec and exit 2.
+    # run() moves cwd for pytest, so a suite arg used as given would make
+    # `cd tests && check_stub spec` hunt <rootdir>/spec and exit 2.
     r = _spec_repo(make_repo)
     r.write("tests/spec/test_spec.py", textwrap.dedent("""\
         from appx.summarize import summarize
@@ -43,9 +38,9 @@ def test_relative_suite_arg_from_nested_cwd_still_finds_the_suite(make_repo):
 
 
 def test_teardown_error_does_not_demote_a_vacuous_pass(make_repo):
-    # Fix 4a: a fixture whose teardown breaks against the null stub (cleaning up a path
-    # the stub never made) overwrote the call-phase PASS — the one finding this check
-    # exists for was misreported BROKEN.
+    # A fixture whose teardown breaks against the null stub (cleaning up a path the stub
+    # never made) must not overwrite the call-phase PASS, or the one finding this check
+    # exists for reads BROKEN.
     r = _spec_repo(make_repo)
     r.write("tests/spec/test_spec.py", textwrap.dedent("""\
         import pytest
@@ -71,9 +66,9 @@ def test_teardown_error_does_not_demote_a_vacuous_pass(make_repo):
 
 
 def test_existing_target_shadowing_the_stub_voids_the_run(make_repo):
-    # Fix 8: `python -m pytest` puts the cwd ahead of PYTHONPATH, so a --target module
-    # that EXISTS as a namespace-package module shadows the stub — the run silently
-    # classified real code. It must exit 2 with the shadowed message instead.
+    # `python -m pytest` puts the cwd ahead of PYTHONPATH, so a --target module that
+    # EXISTS as a namespace-package module shadows the stub and the run would silently
+    # classify real code. It must exit 2 with the shadowed message instead.
     r = _spec_repo(make_repo)
     r.write("appx/existing.py", "val = 3\n")
     r.write("tests/spec/test_spec.py", textwrap.dedent("""\
@@ -93,8 +88,8 @@ def test_existing_target_shadowing_the_stub_voids_the_run(make_repo):
 
 
 def test_module_skipped_at_collection_is_a_finding_not_a_clean_exit(make_repo):
-    # Fix 4b: importorskip'd modules emitted no per-test reports, so the file vanished
-    # and the run exited 0 — certifying tests that never ran.
+    # An importorskip'd module emits no per-test reports; the file must not vanish into
+    # an exit 0 that certifies tests that never ran.
     r = _spec_repo(make_repo)
     r.write("tests/spec/test_real.py", textwrap.dedent("""\
         from appx.summarize import summarize

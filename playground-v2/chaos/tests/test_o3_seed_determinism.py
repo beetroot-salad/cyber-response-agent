@@ -125,10 +125,8 @@ def test_data_drop_salt_is_the_seed_and_every_seed_gives_a_distinct_hash(profile
         mutations = resolve_mutations(profile, seed=seed, inventory=inventory)
         assert resolve_mutations(profile, seed=seed, inventory=inventory) == mutations
         condition = _drop_condition(mutations)
-        # The seed is the salt inside the drop hash (design's live check: salt 7
-        # dropped 1 of 4 lines, salt 42 dropped 2 of 4 — the seed selects the subset).
-        # Pinned exactly, not just "contains the salt" — an unrelated appended
-        # clause would still satisfy a substring check.
+        # The seed is the salt inside the drop hash. Pinned exactly, not just "contains
+        # the salt": an unrelated appended clause would still satisfy a substring check.
         assert condition == (
             f"ctx.message != null && ((ctx.message + '{seed}').hashCode() "
             "& 0x7fffffff) % 100 < 25"

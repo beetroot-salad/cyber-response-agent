@@ -77,8 +77,8 @@ def _clone(tmp_path: Path, up: Path, *, depth: int | None = None) -> Path:
     """Clone `up`'s `pr` branch and give it an `origin/main`.
 
     depth=None  -> full clone: origin/main resolves AND shares an ancestor with HEAD.
-    depth=N     -> the CI shape: a shallow graft, plus the `--depth=50` base-ref fetch
-                   that ci.yml used to run. origin/main RESOLVES; the merge-base does not.
+    depth=N     -> the CI shape: a shallow graft plus a `--depth=50` base-ref fetch.
+                   origin/main RESOLVES; the merge-base does not.
 
     The `file://` URL is mandatory — git ignores `--depth` for a local-path clone.
     """
@@ -114,7 +114,7 @@ def _run_gate(work: Path, tmp_path: Path, *, argv: list[str] | None = None,
 
 
 def test_unresolvable_base_ref_exits_2(tmp_path, capsys):
-    """No origin at all. The old gate printed a WARN and returned [] -> exit 0."""
+    """No origin at all."""
     repo = tmp_path / "solo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
@@ -133,8 +133,8 @@ def test_shallow_graft_without_merge_base_exits_2(tmp_path, capsys):
 
 
 def test_a_required_git_command_failing_raises_instead_of_returning_empty(tmp_path):
-    """The swallow itself. A git call the gate depends on can no longer degrade into `""`
-    — which is how a failed diff became "nothing was removed"."""
+    """A git call the gate depends on must not degrade into `""`: a failed diff would read as
+    "nothing was removed"."""
     work = _clone(tmp_path, _upstream(tmp_path))
 
     with pytest.raises(GATE.GitError) as exc:
@@ -143,8 +143,8 @@ def test_a_required_git_command_failing_raises_instead_of_returning_empty(tmp_pa
 
 
 def test_a_git_failure_inside_the_scan_exits_2(tmp_path, capsys):
-    """...and main() turns that into exit 2, never a clean report. Here the preflight
-    itself cannot run because the directory is not a repo at all."""
+    """`main()` turns a git failure into exit 2, never a clean report; here the preflight
+    itself fails because the directory is not a repo at all."""
     not_a_repo = tmp_path / "not-a-repo"
     not_a_repo.mkdir()
 

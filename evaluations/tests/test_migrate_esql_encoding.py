@@ -81,7 +81,7 @@ def real_control_record() -> dict:
 
     `attack_contribution.payload` never reaches a judge prompt — `load_lead_inputs` builds
     `baseline` from `controls` only — but it is `esql_payload` output living in `hidden/`,
-    so O2/O5 hold it to the same encoding and the migration must reach it.
+    so it is held to the same encoding and the migration must reach it.
     """
     query = 'FROM logs-*\n| WHERE host.ip == "172.18.0.11"\n| STATS BY host.name'
     return {
@@ -361,12 +361,7 @@ PLANTED = (
 @pytest.fixture(scope="module")
 def migrated_tree(tmp_path_factory):
     """A copy of the real `oracle_golden/` tree, three payload files hand-reverted to the
-    pre-#842 dict-row form, then migrated twice through `migrate_tree`.
-
-    Copied rather than driven over the checkout for the obvious reason, and copied WHOLE
-    rather than just `cases/` so `audits/` and `held_out_ledger.yaml` are in the blast
-    radius O4 measures.
-    """
+    pre-#842 dict-row form, then migrated twice through `migrate_tree`."""
     root = tmp_path_factory.mktemp("golden") / "oracle_golden"
     shutil.copytree(GOLDEN_DIR, root)
 

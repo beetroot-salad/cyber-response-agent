@@ -11,10 +11,9 @@ two sets:
 
 Both sides speak the stack's vocabulary — a dataset names exactly one
 pipeline, a mutation carries every field its processor touches — so every
-check is exact set membership. There is no glob to translate at check time,
-which is where the previous bypasses lived (a wider stream glob, a bare
-dataset name, a rename's untouched `to` field). Every case below is grounded
-in the committed rules, not in invented field names.
+check is exact set membership, with no glob to translate at check time (where
+bypasses hide: a wider stream glob, a bare dataset name, a rename's untouched
+`to` field). Every case below is grounded in the committed rules.
 """
 from __future__ import annotations
 
@@ -105,8 +104,8 @@ def test_schema_drift_remove_variant_is_guarded_too(profiles_dir, rules_dir):
 def test_schema_drift_on_an_ancestor_of_a_rule_key_field_is_refused(profiles_dir, rules_dir, params):
     """A rename/remove of an object field takes every field nested under it.
     An exact-string compare of the profile's target against the rules' field
-    names accepted all of these — none of them is literally a rule-key field,
-    every one of them silences a rule."""
+    names would accept all of these — none of them is literally a rule-key
+    field, every one of them silences a rule."""
     write_profile(profiles_dir, "drift-ancestor", "schema-drift", params)
     with pytest.raises(GuardRefused):
         check_profile(load_profile("drift-ancestor", profiles_dir=profiles_dir), rules_dir=rules_dir)
@@ -214,7 +213,7 @@ def test_check_mutations_gates_on_what_was_actually_resolved(rules_dir):
 
 def test_rule_key_fields_and_datasets_are_empty_for_an_empty_rules_dir(tmp_path):
     """The guard must actually read `rules_dir`, not answer from a fixed
-    table hand-transcribed from today's committed rules — a hardcoded set
+    table hand-transcribed from the committed rules — a hardcoded set
     would return the same fields regardless of what's on disk."""
     empty = tmp_path / "no-rules"
     empty.mkdir()

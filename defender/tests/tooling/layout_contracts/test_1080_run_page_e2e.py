@@ -32,7 +32,7 @@ def _lesson_fixture(tmp_path: Path):
     )
 
     tmp_path.mkdir(parents=True, exist_ok=True)
-    # #1108 P4 (O2): both lazy sites recall from the run copy's corpus, `<agent>/lessons`.
+    # Both lazy sites recall from the run copy's corpus, `<agent>/lessons` (#1108).
     deps, _run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = agent / "lessons"
     corpus.mkdir(parents=True, exist_ok=True)
