@@ -70,7 +70,7 @@ def test_the_prune_drops_every_inference_key(companion):
 
 
 def test_a_leads_plan_blocks_do_not_reach_a_lens():
-    """The POSITIVE control for the two `INFERENCE_LEAD_KEYS` members #933 added."""
+    """Positive control for the plan-block members of `INFERENCE_LEAD_KEYS`."""
     filled = parse_investigation(
         "```invlang\n"
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -414,7 +414,6 @@ _AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION = (
 
 
 def test_an_edge_named_twice_in_one_cell_is_one_citation():
-    """#969."""
     doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)
     cited = [res["supporting_edges"] for _lead, res in _walkers.iter_resolutions(doc)]
     assert cited == [["e-001"], ["e-001"], ["e-002"]], (
@@ -423,7 +422,7 @@ def test_an_edge_named_twice_in_one_cell_is_one_citation():
 
 
 def test_the_ablation_target_counts_resolutions_not_mentions():
-    """#969's consequence, and the reason the parse matters."""
+    """The consequence of the one-citation parse above (#969)."""
     from defender.investigation.review.projector import ablation_target
 
     doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)

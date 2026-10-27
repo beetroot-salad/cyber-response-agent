@@ -1,10 +1,8 @@
-"""#869 M2/O1 — resolve once at the boundary, thread the value inward non-Optional.
+"""#869: a lane resolves its systems once, at the boundary, and threads the value inward.
 
-#1108 P4 (O7, OD12 class ii): each lane runs over a batch draft (`_curator1134.draft_lane`, the
-tenant's `agent/skills`), its adapters in a scratch product checkout (`seed_product`, #1172);
-the lane entries take the batch (ASSUMED SEAMS S-H `run_pitfalls(..., batch=)`,
-`build_lead_author_deps(..., batch=)`). "Mid-tick" adapter landings commit to that product
-checkout; mid-tick markers/skills are written into the draft the box writes."""
+Each lane runs over a batch draft of the tenant's `agent/skills` (`_curator1134.draft_lane`) with
+its adapters in a scratch product checkout (`seed_product`), and takes the batch. Mid-tick adapter
+landings commit to that product checkout; mid-tick markers and skills go into the draft."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -52,8 +50,7 @@ def _lead(query_id: str, *, system: str = "elastic", verb: str = "esql") -> Exec
 
 
 def _run_dir() -> Path:
-    """A natural run where the drain rehydrates a row (`curation_run_dir`, #1105 PR 2); hand it
-    to the lane as `run_of(_run_dir())`."""
+    """A run folder the drain rehydrates a row from; hand it to the lane as `run_of(_run_dir())`."""
     d = curation_run_dir("run-x")
     (d / "gather_raw").mkdir(exist_ok=True)
     return d
@@ -62,8 +59,8 @@ def _run_dir() -> Path:
 def _lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, ...],
           skills: tuple[str, ...], catalog: tuple[str, ...], name: str = "product",
           extra: dict[str, str] | None = None):
-    """`seed_tree` after P4: the product checkout (`adapters`) and a batch draft of the tenant
-    (`markers`/`skills`/`catalog`, plus `extra`, agent-relative) over the lead lane."""
+    """The product checkout (`adapters`) and a batch draft of the tenant (`markers`/`skills`/
+    `catalog`, plus agent-relative `extra`) over the lead lanes."""
     product = seed_product(tmp_path, adapters=adapters, name=name)
     files = {**seed_agent_files(markers=markers, skills=skills, catalog=catalog), **(extra or {})}
     return product, C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files,
@@ -82,10 +79,8 @@ def _in_base(lane, rel: str) -> bool:
 
 
 def _lead_author_deps(lane, spawn: LeadAuthorSpawn):
-    """The real deps over the draft lane, with only the seams a hermetic drive must own
-    replaced: the spawn and `extract` (the two tables are a different seam with its own suite).
-    `systems` is NOT replaced — the value this lane resolves at its boundary is the thing under
-    test."""
+    """The real deps over the draft lane with only the spawn and `extract` replaced; `systems`
+    stays real, since the value resolved at the boundary is under test."""
     return draft_lead_deps(lane, invoke_agent=spawn, extract=lambda _run_dir: ([], []))
 
 
@@ -161,7 +156,7 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     before = head_sha(product)
     with pytest.raises(LeadAuthorError, match="mcpsys"):
         _pitfalls(lane, state, Spawn(land_an_adapter_then_plant, root=lane.root))
-    # The tree agrees ON THIS LANE'S OWN VALUE by the end of the tick — the TICK does not.
+    # By the end of the tick the tree declares mcpsys; the tick's resolved value still does not.
     assert "mcpsys" in adapter_declared_systems(product)
     assert persist.read_pitfalls(state), "the batch must survive a refused tick"
     assert before != head_sha(product), "the plant's own commit is the mid-tick change"
@@ -189,9 +184,7 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 
 def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys):
     """Lane 1 (lead author) leaves residue in the draft and refuses; lane 2 (pitfalls) then
-    commits into the same batch. The residue never lands: the drain re-syncs the draft per
-    claim (OD15), handed the tick's batch (OD16; ASSUMED SEAM `_drain_lead_author(...,
-    batch=)`, the spelling the drain's steps take)."""
+    commits into the same batch. The residue never lands: the drain re-syncs the draft per claim."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     _product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic",),
                            skills=("elastic",), catalog=("elastic",))

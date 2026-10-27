@@ -1,10 +1,5 @@
-"""Lessons-frontend api layer (serialize.build_view) contract guarantees.
-
-#1108 P4 (O1, O-U5, design "Data model and ownership"): the posture page reads a tenant's
-knowledge from an export, through `KnowledgePaths(agent_root)` — never the product tree, which
-holds no tenant knowledge after P4. The reader is pointed at an agent root (assumed seam:
-`build_view(agent_root=...)`, replacing today's `defender_dir=` / `of_defender_dir`). The retired
-corpora `lessons-actor`/`lessons-environment` are deleted (U5), so the page has no group for them.
+"""The lessons frontend's api layer (`serialize.build_view`): the posture page reads a tenant's
+knowledge from an export's agent root (`build_view(agent_root=...)`), never the product tree.
 """
 from __future__ import annotations
 
@@ -21,7 +16,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
-#: The groups the posture page shows after U5: the defender's corpus and the questioner's.
+#: The groups the posture page shows: the defender's corpus and the questioner's.
 LIVE_GROUPS = {"defender", "questioner"}
 
 #: The committed fixture tenant's lessons (`knowledge/tenant-fixture/agent/`), by group.
@@ -33,15 +28,13 @@ FIXTURE_TITLES = {
 
 @pytest.fixture
 def export_agent(tmp_path: Path, data_root: Path) -> Path:
-    """The fixture tenant's `agent/` inside a real export (O11's one helper: git-init the
-    fixture tenant, publish for real) — the root the frontend reads after P4."""
+    """The fixture tenant's `agent/` inside a real export: the root the frontend reads."""
     with published_tenant(tmp_path / "forge", root=data_root) as tenant:
         yield tenant.export.path / "agent"
 
 
 def test_o_u5_the_posture_page_has_only_the_live_groups(export_agent: Path):
-    """O-U5: the posture page names no retired corpus — its groups are exactly the defender's and
-    the questioner's, each with a label, blurb and declared metadata fields."""
+    """Exactly the live groups, each with a label, blurb and declared metadata fields."""
     groups = serialize.build_view(agent_root=export_agent)["groups"]
     assert set(groups) == LIVE_GROUPS
     for g in groups.values():
@@ -52,8 +45,8 @@ def test_o_u5_the_posture_page_has_only_the_live_groups(export_agent: Path):
 
 
 def test_o1_the_page_shows_the_exports_lessons_not_the_product_trees(export_agent: Path):
-    """O1/P-1: built from an export, the page shows exactly that export's lessons — the made-up
-    fixture's — in the record shape the page renders."""
+    """Built from an export, the page shows exactly that export's lessons, in the record shape it
+    renders."""
     groups = serialize.build_view(agent_root=export_agent)["groups"]
     assert {name: {rec["title"] for rec in g["lessons"]} for name, g in groups.items()} \
         == FIXTURE_TITLES
@@ -85,8 +78,7 @@ def test_skipped_lesson_gets_a_degraded_record(tmp_path):
     assert "frontmatter unavailable" in broken["description"]
     assert broken["metadata"] == {}
     assert broken["body"] == ""
-    # The spelling is relative to the tenant repo, never the product tree's `defender/...`; the
-    # exact prefix (`agent/`) is the agent root's own spelling, which r3 does not fix.
+    # Relative to the tenant repo, never `defender/...`; the exact prefix is left open.
     assert broken["source_path"].endswith("lessons/broken.md")
     assert not broken["source_path"].startswith(("defender/", "/"))
     json.dumps(lessons)
@@ -127,8 +119,8 @@ def _serialize_cli(*args: str) -> subprocess.CompletedProcess:
 
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1279_serialize_keeps_only_stdout_and_never_writes_into_the_tree(export_agent: Path):
-    """#1279 migration: the contract goes to stdout, with or without `--stdout`; the file mode is
-    gone — no `lessons.json` appears in the tree."""
+    """The contract goes to stdout with or without `--stdout`; no `lessons.json` is written into
+    the tree (#1279)."""
     in_tree = Path(serialize.__file__).resolve().parent / "lessons.json"
     before = in_tree.read_bytes() if in_tree.is_file() else None
     try:

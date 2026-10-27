@@ -64,8 +64,8 @@ def test_http_000_raises_even_when_curl_reports_success(monkeypatch, ctx):
 
 
 def test_a_missing_bastion_still_names_the_container(monkeypatch, ctx):
-    """The case the guard was ORIGINALLY written for, unchanged: `docker exec` fails before curl
-    runs, stdout is genuinely empty, and the fault keeps its `docker ps` hint."""
+    """`docker exec` fails before curl runs, so stdout is genuinely empty; the fault keeps its
+    `docker ps` hint."""
     _curl(monkeypatch, 125, "", 'Error: No such container: web-1')
     with pytest.raises(TransportFault) as exc:
         ticket_adapter.health_check(ctx)
@@ -74,8 +74,7 @@ def test_a_missing_bastion_still_names_the_container(monkeypatch, ctx):
 
 
 def test_a_live_service_still_answers(monkeypatch, ctx):
-    """The negative control — the widened guard must not turn a working transport into an
-    outage. A clean curl with a 200 returns the payload it always did."""
+    """Negative control: a clean curl with a 200 still returns its payload."""
     _curl(monkeypatch, 0, '{"status": "ok", "tickets": 3}\n200', "")
     assert ticket_adapter.health_check(ctx) == {
         "system": "ticket", "connected": True, "status": "ok", "tickets": 3,
@@ -83,8 +82,7 @@ def test_a_live_service_still_answers(monkeypatch, ctx):
 
 
 def test_an_http_error_is_still_the_upstreams_own_verdict(monkeypatch, ctx):
-    """And a service that DID answer keeps its own status: a 5xx stays a `TransportFault`
-    carrying the body, not a `curl reported HTTP 000`."""
+    """A service that answered keeps its own status: the 5xx fault carries the body, not `HTTP 000`."""
     _curl(monkeypatch, 0, '{"detail": "index closed"}\n503', "")
     with pytest.raises(TransportFault) as exc:
         ticket_adapter.health_check(ctx)

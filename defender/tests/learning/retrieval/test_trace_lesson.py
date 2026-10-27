@@ -12,8 +12,8 @@ from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 from defender.tests.support.shared._fixture_uuid import fixture_uuid as C
 
-#: The tenant whose natural runs the tracer walks (#1105 PR 2, J8: `--tenant` is required and
-#: `--runs-dir` is gone; the runs are `<data root>/<T>/runs`, opened through the repository).
+#: The tenant whose runs the tracer walks (`--tenant` is required; its runs are
+#: `<data root>/<T>/runs`, opened through the repository).
 TID = H1105.T_ID
 
 
@@ -31,8 +31,7 @@ def _load():
 
 
 def _tenant_runs_dir(tmp_path: Path) -> Path:
-    """The tenant's natural runs folder, as run setup makes it. #1187 (R1): it holds run folders
-    and their sidecars only — no `_tenant.json` is written or read."""
+    """The tenant's runs folder as run setup makes it: run folders and their sidecars only."""
     runs = tmp_path / "data" / TID / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     return runs
@@ -45,9 +44,9 @@ def _opened(tl) -> list:
 
 
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
-    """A finished run of case `name` (a LABEL): its folder, and so its case id, is
-    `fixture_uuid(name)` — #1187 (declared changes 1, 7): a run id is a canonical UUID and the
-    tracer refuses any other entry in `<T>/runs`. Assertions spell the id as `C(<label>)`."""
+    """A finished run of case `name` (a label). Its folder, and so its case id, is
+    `fixture_uuid(name)`: the tracer refuses any entry in `<T>/runs` that is not a UUID.
+    Assertions spell the id as `C(<label>)`."""
     rd = runs / C(name)
     rd.mkdir(parents=True)
     plant_alert(rd)

@@ -43,11 +43,10 @@ from defender.tests.support.integrations._roster1035 import (
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.state import PITFALLS
 
-#: The phrase O5 keeps: `test_hardening_772.py` matches the resolver's absent-directory
-#: message on it through `bind`, and M2 unifies BOTH cannot-read arms onto it.
+#: The resolver's message for every cannot-read arm (`test_hardening_772.py` matches it too).
 CANNOT_READ = "not a directory this process can read"
 
-#: The swallow's own log line — the shape `_run_curator_module` renders an `OSError` as.
+#: The suffix `_run_curator_module` logs when it swallows an `OSError`.
 CONTINUING = "(continuing)"
 
 #: An adapter whose `VERBS` literal the roster's cold read can parse, so a consumer that
@@ -58,7 +57,7 @@ QUERY_ADAPTER = (
     "VERBS = {'query': query}\n"
 )
 
-#: The names the anomaly fixture derives and the dispatch seam refuses — `verbs._system_of`
+#: The names `verbs._system_of` derives from the anomaly fixture; the dispatch seam refuses them.
 ANOMALY_NAMES = frozenset({"dir", ".hidden", "", "..", "change-mgmt"})
 
 
@@ -76,9 +75,7 @@ def _anomaly_adapters(adapters: Path) -> Path:
 
 
 def _repo_adapters(root: Path) -> Path:
-    """`<root>/defender/integrations` — the address every consumer that starts from a
-    repo root (`adapter_declared_systems`, `known_capabilities`) derives, and the one the
-    audit derives from `<root>/defender`."""
+    """`<root>/defender/integrations`, the adapters directory every consumer derives from a repo root."""
     return root / ADAPTERS_REL
 
 
@@ -97,7 +94,7 @@ def _expect_returned(verdict: ChildVerdict, value: object) -> None:
     )
 
 
-# M1 — the primitive itself
+# The primitive
 
 
 def test_read_roster_accepts_what_dispatches_and_reports_what_it_refused(tmp_path):
@@ -175,7 +172,7 @@ def test_read_roster_refuses_an_unsearchable_directory_as_nobody(tmp_path):
     assert str(shape_only) in verdict.message, verdict.describe()
 
 
-# P1 / P2 — the resolver (O1, O5)
+# The resolver
 
 
 def test_the_resolver_reports_an_unreadable_directory_as_its_own_fault_as_nobody(tmp_path):
@@ -220,8 +217,7 @@ def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped
     os.symlink("loop_adapter.py", adapters / "loop_adapter.py")
     assert (adapters / "loop_adapter.py").is_symlink()
 
-    # Any OTHER exception propagates out of this `try` and fails the test as itself — which
-    # is the pin: the `except` names the one class allowed to escape.
+    # Any other exception escapes the `try` and fails the test: only `LeadAuthorError` may escape.
     outcome: frozenset[str] | LeadAuthorError
     try:
         outcome = declared_systems.adapter_systems_under(adapters)
@@ -240,7 +236,7 @@ def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped
     assert declared_systems.adapter_systems_under(adapters) == frozenset({"cmdb"})
 
 
-# P4 — the drain seam (O2)
+# The drain seam
 
 
 def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
@@ -284,9 +280,7 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
 
 
 def _redirect_repo_root(monkeypatch, root: Path) -> None:
-    """Point the checkout at `root`. `_adapters_at_run_start` reads `_git.REPO_ROOT` at call
-    time to find the checkout's adapters directory, so the module constant is the address
-    to redirect."""
+    """Point the checkout at `root`: `_adapters_at_run_start` reads `_git.REPO_ROOT` at call time."""
     monkeypatch.setattr(_git, "REPO_ROOT", root)  # lint-monkeypatch: ok — a module constant read at call time; the checkout root has no other seam
 
 
@@ -326,8 +320,8 @@ def _run_start():
 def test_the_run_refuses_an_absent_checkout_adapters_directory_at_its_own_frame(
     tmp_path, monkeypatch,
 ):
-    """P6c (O6), the absent arm — the directory is the process's OWN checkout's, and "absent" is a
-    fault there, not an empty roster."""
+    """The adapters directory is the process's own checkout's, so its absence is a fault, not an
+    empty roster."""
     at_run_start = _run_start()
     run_tree = tmp_path / "run-tree"
     write(_repo_adapters(run_tree) / "cmdb_adapter.py", QUERY_ADAPTER)
@@ -345,7 +339,7 @@ def test_the_run_refuses_an_absent_checkout_adapters_directory_at_its_own_frame(
         _gating._capability_exists("cmdb")
 
 
-# P7 — the read-surface audit (O7)
+# The read-surface audit
 
 
 def _audit_tree(root: Path, *, skill_body: str) -> Path:
@@ -384,8 +378,7 @@ def test_the_read_surface_audit_never_reports_a_tree_it_could_not_read_as_clean(
 
 
 def test_the_read_surface_audit_refuses_an_absent_adapters_directory(tmp_path):
-    """P7 (O7), the absent arm — `audit_read_surfaces(<tree>/nowhere, {})` raises `RosterError`
-    naming the missing adapters directory; an absent tree must not report a clean audit."""
+    """An absent tree is a `RosterError` naming its adapters directory, never a clean audit."""
     tree = _audit_tree(tmp_path, skill_body="nothing advertised here")
     assert audit_read_surfaces(tree, {}) == ()
 
@@ -398,7 +391,7 @@ def test_the_read_surface_audit_refuses_an_absent_adapters_directory(tmp_path):
     )
 
 
-# P3 / P8 — one set, measured (O4)
+# One set across every consumer
 
 
 def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
@@ -437,9 +430,8 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
 
 
 def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths]:
-    """Two `mcpsys` rows queued over a tree whose adapters directory declares `cmdb` — the
-    P4 fixture, minus the privilege drop. The rows name a system no adapter declares so that
-    the readable control rotates them out without ever reaching a curator spawn."""
+    """Two `mcpsys` rows queued over a tree declaring only `cmdb`: no adapter declares `mcpsys`,
+    so the readable control rotates them out without spawning a curator."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
     repo = seed_tree(tmp_path, adapters=("cmdb",), markers=("elastic",), skills=("elastic",),
@@ -476,8 +468,8 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
     )
     assert graveyard_by_id(paths) == {}, "rows were retired for a host fault"
 
-    # The control restores the committed adapters directory itself (#1108 P4 deletes the
-    # per-claim worktree reset that used to put it back), then reads the same tree.
+    # The control restores the committed adapters directory itself (no per-claim reset does),
+    # then reads the same tree.
     _git.git(["checkout", "--", str(adapters)], cwd=repo)
     assert (adapters / "cmdb_adapter.py").is_file()
     drains._drain_pitfalls(
@@ -497,8 +489,7 @@ def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
         GOLDEN_AB3, ReplayFn, Turn, drive, materialize,
     )
 
-    # Control, same read: a run over the readable checkout DOES open its wire log, so the
-    # absent log below is "never opened", not a path no run ever writes.
+    # Control: a readable run opens its wire log, so the absent log below means "never opened".
     control = materialize(tmp_path / "control", GOLDEN_AB3, run_id='r-1035-ctl')
     drive(control, run_id="r-1035-ctl", main=ReplayFn([Turn(text="Investigation complete.")]))
     assert (control / "wire_logs").is_dir(), "the control run opened no wire log"

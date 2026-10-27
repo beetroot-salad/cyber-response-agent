@@ -1,6 +1,5 @@
-"""The lessons author's view of the corpus: which finding ids its lessons already cite.
-
-#1108 P4 (O7, OD7): the corpus is a batch draft's `agent/lessons` lane, not a product-shaped repo."""
+"""The lessons author's view of the corpus (a batch draft's `agent/lessons` lane): which finding
+ids its lessons already cite."""
 from __future__ import annotations
 
 import pytest
@@ -8,9 +7,8 @@ import pytest
 from defender.tests.support.learning.curation import _curator1134 as C
 
 
-# #1108 P4 (O7, OD7): the lessons author over a git-free draft, not `tmp_repo`'s product-shaped
-# repo. The config is built with the assumed `batch=` seam (`_curator1134.draft_author_cfg`) on
-# first use, so a test reaches its own body before that seam's absence fails it.
+# The lessons author over a git-free batch draft; `cfg` (`_curator1134.draft_author_cfg`) is
+# built on first use.
 class _DraftRepo:
     def __init__(self, lane):
         from defender.learning.author.lessons import run as author_mod

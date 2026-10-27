@@ -43,23 +43,18 @@ def _write_lesson(
 
 
 def _main_deps(tmp_path: Path):
-    """MAIN deps through the real `bind` seam — real compiled policy, real gate.
+    """Main's deps through the real `bind` seam (real compiled policy, real gate), returned with
+    the run and the defender tree they were bound over.
 
-    `test_append_only_write_lane_810.py::_main_deps` verbatim, plus the defender tree in the
-    return: the corpus `_tool_append_block` recalls against is `deps`-resolved
-    (`defender_dir/lessons`, MAIN's own `corpus_dirs` entry), so a hermetic test needs the
-    tmp tree the `bind` call was given.
-
-    HERE for the same reason `_write_lesson` is: three suites drive this seam, and reaching for
-    it inside a COLLECTED module is what loads that module twice in one session. The two
-    imports below stay lazy so this module costs nothing to import without the runtime extra.
+    It lives here, not in a collected test module, so importing it never loads a test module
+    twice; the imports stay lazy so this module needs no runtime extra.
     """
     from defender.agents import MAIN_DEF
     from defender.investigation.agent_definition import bind
 
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    # A run folder's name is its canonical UUID run id.
     run = tmp_path / fixture_uuid("run")
     run.mkdir()
     dfn = tmp_path / "defender"
@@ -73,13 +68,11 @@ def _main_deps(tmp_path: Path):
 
 
 def _run_copy_main_deps(tmp_path: Path):
-    """`_main_deps` bound over a run copy's agent root (#1108 P4): the recall's corpus is the run
-    copy's `lessons/` (`<T>/run-knowledge/<run_id>/agent/lessons`, threaded as
-    `RunScope(tenant_agent=...)`), never `defender_dir/lessons` (O2, O4).
+    """`_main_deps` bound over a run copy's agent root: the recall's corpus is the run copy's
+    `lessons/` (threaded as `RunScope(tenant_agent=...)`), never `defender_dir/lessons`.
 
     Returns `(deps, run, agent_root, defender_dir)`: the caller plants lessons under
-    `agent_root / "lessons"` and, where it wants a stale reader caught, a decoy under
-    `defender_dir`. Lazy imports, as `_main_deps`."""
+    `agent_root / "lessons"` and, to catch a stale reader, a decoy under `defender_dir`."""
     from dataclasses import replace
 
     from defender.agents import MAIN_DEF

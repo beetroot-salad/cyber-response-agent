@@ -1,4 +1,4 @@
-"""Review hardening for the corpus fold: utf-8 write pin under a C locale, pre-flight tolerance of unreadable lessons, one discovery rule, on_skip, Lesson.raw, windowed --all counts."""
+"""The corpus fold's edges: the UTF-8 write pin under a C locale, pre-flight tolerance of unreadable lessons, one discovery rule, `on_skip`, `Lesson.raw`, windowed `--all` counts."""
 from __future__ import annotations
 
 import subprocess
@@ -14,19 +14,18 @@ from defender.learning.core.config import LoopPaths
 from defender.tests.support.learning.curation._curator1134 import author_trees
 from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV
 from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa: E402
-from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
+from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 from defender.tests.support.learning.curation._curator1134 import open_state
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 
-#: The tenant whose runs the tracer walks — #1105 PR 2 (J8, declared change 10).
+#: The tenant whose runs the tracer walks.
 TID = H1105.T_ID
 
 
 def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2
-    (J8, declared change 10): the tracer takes a required `--tenant` and walks that tenant's runs
-    (`--runs-dir` is gone)."""
+    """The tenant's runs folder `<data root>/<T>/runs`, with its tenant record: the tracer takes a
+    required `--tenant` and walks that tenant's runs."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
     root = current_data_root()
@@ -75,9 +74,8 @@ def test_the_utf8_pin_covers_the_write_not_only_the_read(tmp_path):
 
 
 def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path):
-    """#1108 P4 (O1, O2): the product tree holds no corpus; the real committed corpus a lane
-    reads is a tenant's, named by `DEFENDER_AGENT_DIR` — here the committed fixture tenant's,
-    whose lesson descriptions carry non-ASCII."""
+    """The product tree holds no corpus; the real one is a tenant's, named by `DEFENDER_AGENT_DIR`
+    (here the committed fixture tenant's, whose descriptions carry non-ASCII)."""
     from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
     proc = subprocess.run(
@@ -93,8 +91,8 @@ def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path)
 
 
 def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsys):
-    """demand (review) — ``iter_lessons`` warn-SKIPS an unreadable lesson, so the id pre-flight
-    sitting beside it must not CRASH on one."""
+    """``iter_lessons`` warn-skips an unreadable lesson, so the id pre-flight beside it must not
+    crash on one."""
     paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     cfg = build_author_config(paths, trees=author_trees(paths), state=open_state(paths))
     d = cfg.corpus_dir
@@ -109,8 +107,7 @@ def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsy
 
 
 def test_the_discovery_rule_has_one_definition(tmp_path):
-    """demand (review) — the pre-flight's signature and the walk must not restate the discovery rule
-    at each other."""
+    """The pre-flight and the walk take their candidates from one rule, `iter_lesson_paths`."""
     d = tmp_path / "lessons"
     d.mkdir()
     (d / "b.md").write_text("---\nname: b\n---\nbody\n")
@@ -144,8 +141,7 @@ def test_on_skip_receives_exactly_the_warn_skipped_paths(tmp_path, capsys):
 
 
 def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
-    """demand (review) — ``Lesson.raw`` comes back FROM the parser that computed the fence offsets,
-    rather than being re-derived by the walk with its own ``text[4:find("\\n---", 4)]``."""
+    """``Lesson.raw`` comes from the parser that found the fences, not a re-derivation in the walk."""
     text = "---\nname: x\ndescription: d\n---\n\nbody --- with a fence-like line\n"
     fm, raw, body = split_frontmatter(text)
 
@@ -166,7 +162,7 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     (corpus / "rewritten.md").write_text(
         "---\nname: rewritten\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n"
     )
-    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10): run ids, `--tenant`
+    runs = _tenant_runs()
     _mk_run(runs, "case-old", disposition="benign",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-01T00:00:00+00:00"}])
     _mk_run(runs, "case-new", disposition="malicious",

@@ -1,4 +1,4 @@
-"""#869 M1/O4 — `declared_systems`, the resolver as a VALUE."""
+"""#869: `declared_systems`, the resolver as a value."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -37,8 +37,8 @@ from defender.learning.core.state import PITFALLS
 
 
 def _adapter_half_of(repo: Path) -> set[str]:
-    """The adapter source, computed HERE from the WORKING tree — an independent encoding of
-    the same rule the resolver must apply, never a call back into it."""
+    """The adapter half, computed here from the working tree: an independent oracle, never a call
+    into the resolver."""
     d = repo / ADAPTERS_REL
     return {
         verbs._system_of(p)
@@ -54,12 +54,10 @@ def _committed_agent_paths(lane: C.DraftLane) -> list[str]:
 
 
 def _marker_half_of(paths: object) -> set[str]:
-    """The marker source, computed HERE from a committed tree's repo-relative paths (NF1).
+    """The marker half, computed here from a committed tree's repo-relative paths.
 
-    `len(parts) == 2` is the DEPTH RULE, not a convenience: the marker address is
-    `agent/skills/<name>/execution.md` and nothing deeper. Dropping it turns this helper into
-    `_recursive_marker_read_of` below, which is the bug — so the depth is encoded here as an
-    independent ground truth and pinned as its own demand (`marker_source_is_exactly_depth_one`)."""
+    `len(parts) == 2` is the depth rule: the marker address is `agent/skills/<name>/execution.md`
+    and nothing deeper. Without it this helper is `_recursive_marker_read_of`, the bug."""
     out = set()
     for rel in paths:
         if not rel.startswith(AGENT_SKILLS_REL):
@@ -71,11 +69,8 @@ def _marker_half_of(paths: object) -> set[str]:
 
 
 def _recursive_marker_read_of(paths: object) -> set[str]:
-    """What the OBVIOUS implementation answers: every `execution.md` under `agent/skills/`,
-    filtered on the basename with no depth bound.
-
-    Not a control — the WRONG answer, computed so the depth demand can show its fixture really
-    does separate the two readings rather than asserting a difference no tree exhibits."""
+    """The wrong, depth-unbounded answer (every `execution.md` under `agent/skills/`), computed so
+    the depth test can show its fixture really separates the two readings."""
     return {
         Path(rel).parent.name for rel in paths
         if rel.startswith(AGENT_SKILLS_REL) and rel.endswith("/execution.md")
@@ -85,23 +80,19 @@ def _recursive_marker_read_of(paths: object) -> set[str]:
 def _lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, ...],
           skills: tuple[str, ...] = (), catalog: tuple[str, ...] = (), name: str = "product",
           extra: dict[str, str] | None = None) -> tuple[Path, C.DraftLane]:
-    """The resolver's two sources after P4 (O1, #1172): a product checkout holding the adapters
-    (`seed_product`) and a real batch of the fixture tenant whose PUBLISHED agent half holds the
-    markers (`markers`/`skills`/`catalog`, plus `extra`, agent-relative) — so `lane.batch.base()`
-    is a committed tree read from git's objects, the value the lane hands the resolver."""
+    """The resolver's two sources: a product checkout holding the adapters and a real batch of the
+    fixture tenant whose published agent half holds the markers (`markers`/`skills`/`catalog`, plus
+    agent-relative `extra`), so `lane.batch.base()` is a committed tree, as the lane hands it."""
     product = seed_product(tmp_path, adapters=adapters, name=name)
     files = {**seed_agent_files(markers=markers, skills=skills, catalog=catalog), **(extra or {})}
     return product, C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files,
                                  state_dir=tmp_path / f"state-{name}")
 
 
-# #1108 P4 (O1, OD12 class ii; owner ruling on repair r4 item 14): the markers are the tenant's
-# (`agent/skills/<name>/execution.md`) and the resolver takes the committed tree they are read
-# from as a value — `declared_systems(repo_root, *, agent=<a committed tree's repo-relative
-# paths>)`, README §2 — where it used to read `repo`'s HEAD itself. The adapter half stays the
-# product checkout's working tree (#1172). The committed-vs-working-tree rule is kept whole: at
-# the resolver (the marker half answers only from `agent`, never from any working tree, the
-# product's included) and at the lane (`test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`).
+# The markers are the tenant's (`agent/skills/<name>/execution.md`), read from a committed tree
+# handed in as `declared_systems(repo_root, *, agent=<its repo-relative paths>)`; the adapter half
+# is the product checkout's working tree. The committed-vs-working-tree rule is pinned at the
+# resolver and at the lane (`test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`).
 
 
 def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
@@ -125,9 +116,8 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
 def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(tmp_path):
     product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic",),
                           skills=("elastic",))
-    # A marker for `mcpsys` on disk in every working tree the resolver could stat — the draft
-    # the box writes, the product checkout under both the pre-P4 and the tenant spelling — and
-    # in none of them committed. Only an uncommitted adapter is meant to count.
+    # A `mcpsys` marker on disk, uncommitted, in every working tree the resolver could stat (the
+    # draft, the product checkout under both spellings); only an uncommitted adapter counts.
     write_agent_marker(lane.root, "mcpsys")
     write_agent_marker(product, "mcpsys")
     write_marker(product, "mcpsys")
@@ -173,12 +163,9 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
 
 
 def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
-    """The adapter half unreadable raises, whatever the markers say. The pre-P4 halves "no
-    `defender/skills/` tree at HEAD" and "`repo` is no git repository" raised because the resolver
-    read the committed tree itself; that read is now the caller's (OD12 class i: the mechanism
-    moved behind the `agent=` value), so the unresolvable committed tree is pinned where it is read
-    — `test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft` (an unreadable batch
-    base refuses the lane's deps, never an adapter-only answer)."""
+    """An unreadable adapter half raises whatever the markers say. The committed tree is the
+    caller's to read, so an unresolvable one is pinned where it is read:
+    `test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`."""
     product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic",))
     base = lane.batch.base()
     assert declared_systems(product, agent=base) == frozenset({"elastic"})   # the control
@@ -195,8 +182,7 @@ def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
 
 
 def test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft(tmp_path):
-    """The lane-level half of the committed-vs-working-tree rule: the lead-author lane's systems
-    are resolved over the batch's BASE (`Batch.base()`), never over the draft its box writes."""
+    """The lane-level half of the committed-vs-working-tree rule."""
     product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic", "basesys"),
                           skills=("elastic",))
     write_agent_marker(lane.root, "draftsys")      # in the draft, never committed

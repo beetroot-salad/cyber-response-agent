@@ -1,4 +1,4 @@
-"""#632 part 1: the verb grant, the scoped registry seam and the compiled policy. A registry cannot be built without a grant, a grant naming an unknown verb fails at load, a verb whose class contradicts its grant cannot be invoked, one broken adapter costs only its own system."""
+"""#632: the verb grant, the scoped registry seam and the compiled policy. A registry cannot be built without a grant, a grant naming an unknown verb fails at load, a verb whose class contradicts its grant cannot be invoked, one broken adapter costs only its own system."""
 from __future__ import annotations
 
 import importlib
@@ -38,8 +38,8 @@ from defender.systems.verbs import read_roster  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-#: TWO DEMANDS LEFT THIS FILE WITH #922, AND THEY ARE NOT REPLACED — recorded here rather than
-#: deleted silently, because their absence is a real reduction in what this suite witnesses.
+#: Unwitnessed while gather is the only shipped role with a verb grant (#922): two such roles in
+#: one process never share a scoped registry or catalog. Restore that pin with a second grant.
 
 def _elastic(rec: VerbRecorder, granted=(("elastic", "query"),), declared=("query", "esql")):
     table = recording_table(rec, {"elastic": declared})
@@ -61,7 +61,7 @@ def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
 def test_the_verb_grant_compiles_into_the_agent_policy(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    # #1106 M4: gather is bound with a RUN's grant (the playground tenant's here).
+    # Gather is bound with a run's grant (the playground tenant's here).
     gather_def = T1106.fixture_gather_def()
     policy = compile_policy_for(gather_def, run_dir)
 
@@ -154,8 +154,7 @@ def test_grant_authoring_integrity_rejects_a_bad_class_token_and_a_conflicting_d
 
 
 def test_a_verb_whose_declared_class_contradicts_its_grant_cannot_be_invoked(tmp_path: Path):
-    """A real verb_grant with one verb's declared verb_class contradicting the class the
-    grant expects fails the run CLOSED at first resolution, rather than executing the verb."""
+    """A class mismatch fails closed at first resolution instead of running the verb."""
     rec = VerbRecorder()
     table = recording_table(rec, {"elastic": ("query",)})
     registry = ScopedFakeVerbs(table, grant_of("gather", (("elastic", "query"),), verb_class="rw"))

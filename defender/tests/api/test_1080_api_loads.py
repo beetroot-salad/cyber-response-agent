@@ -1,9 +1,7 @@
-"""#1080 O4(c), #1131: the API program loads no runtime or `learning` module — the runtime being
-everything that was `defender.runtime` before #1308 (`_spec1080.API_FORBIDDEN`).
+"""The API program loads no runtime or `learning` module (#1080; the set is `_spec1080.API_FORBIDDEN`).
 
-Asked of Python itself rather than of the source: each `api` module is imported in a fresh
-interpreter and the modules it left loaded are read back, so a lazy door, a conditional import or
-any other route counts exactly as it executes."""
+Asked of Python rather than the source: each `api` module is imported in a fresh interpreter and
+the modules left loaded are read back, so a lazy or conditional import counts as it executes."""
 from __future__ import annotations
 
 import json
@@ -49,5 +47,5 @@ def test_an_api_module_loads_no_runtime_or_learning(module):
 def test_the_probe_sees_a_runtime_load():
     """Positive control: a module that does load the runtime is reported."""
     assert "defender.investigation.run_state" in api_forbidden(_loaded("defender.investigation.run_state"))
-    # and runtime code #1308 placed outside `investigation` still counts
+    # runtime code placed outside `investigation` counts too
     assert "defender.systems.verbs" in api_forbidden(_loaded("defender.systems.verbs"))

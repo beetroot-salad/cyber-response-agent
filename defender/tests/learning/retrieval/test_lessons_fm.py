@@ -8,8 +8,8 @@ import pytest
 
 
 def _load(tmp_lessons: Path):
-    """A FRESH module per call. The corpus is the one the `corpus` fixture's agent root names
-    (#1108 P4, O2: a lessons tool reads `$DEFENDER_AGENT_DIR/lessons` and no other corpus)."""
+    """A fresh module per call. The corpus is `$DEFENDER_AGENT_DIR/lessons`, which the `corpus`
+    fixture points at."""
     assert tmp_lessons.parent.name == "agent", "fixture: the corpus sits in an agent root"
     return load_module(DEFENDER / "investigation" / "lessons_engine" / "lessons_fm.py")
 

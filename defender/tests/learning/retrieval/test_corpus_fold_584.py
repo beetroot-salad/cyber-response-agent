@@ -1,4 +1,5 @@
-"""Executable spec for #584 — the last fold of the walk-duplication arc (#577 → #582 → #584)."""
+"""#584: the corpus readers (`iter_lessons`, the posture page's `build_view`, `trace_lesson`) share
+one walk and one skip rule."""
 from __future__ import annotations
 
 import importlib
@@ -20,16 +21,16 @@ from defender.hooks import record_lesson_load  # noqa: E402
 from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV  # noqa: E402
 from defender.tests.learning.curation.test_curator_manifest import _findings_lesson  # noqa: E402
 from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa: E402
-from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
+from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 
-#: The tenant whose runs the tracer walks — #1105 PR 2 (J8, declared change 10).
+#: The tenant whose runs the tracer walks.
 TID = H1105.T_ID
 
 
 def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2 (J8, declared..."""
+    """The tenant's runs folder `<data root>/<T>/runs`, with its tenant record."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
     root = current_data_root()
@@ -70,14 +71,15 @@ def _undecodable(corpus: Path, name: str = "undecodable.md") -> Path:
 
 
 def _oserror_members(corpus: Path) -> dict[str, str]:
-    """The two OSError members reachable as ROOT. A ``chmod 000`` file is VACUOUS here — the suite runs as euid..."""
+    """The two OSError members reachable as root (a ``chmod 000`` file is not: root reads it)."""
     (corpus / "foo.md").mkdir()
     (corpus / "dead.md").symlink_to(corpus / "nowhere-at-all.md")
     return {"foo.md": "IsADirectoryError", "dead.md": "FileNotFoundError"}
 
 
 def _crlf_lesson(corpus: Path, stem: str = "crlf") -> Path:
-    """A CRLF lesson whose BODY contains a line that looks like frontmatter. Both halves matter: the CRLF pins..."""
+    """A CRLF lesson whose body holds a frontmatter-looking line: the CRLF pins normalization, the
+    body line that `raw` stops at the closing fence."""
     p = corpus / f"{stem}.md"
     p.write_bytes(
         b"---\r\n"
@@ -90,9 +92,7 @@ def _crlf_lesson(corpus: Path, stem: str = "crlf") -> Path:
 
 
 def _fixture_agent(tmp_path: Path) -> Path:
-    """A made-up agent root with the live corpus dirs — the tree ``build_view(agent_root=)`` is
-    pointed at. #1108 P4: the reader takes an agent root (an export's `agent/`, assumed seam
-    replacing `defender_dir=`), and U5 deleted the retired `lessons-actor`/`lessons-environment`."""
+    """A made-up agent root holding the live corpus dirs, for ``build_view(agent_root=)``."""
     root = tmp_path / "agent"
     for d in ("lessons", "lessons-questioner"):
         (root / d).mkdir(parents=True)
@@ -101,8 +101,7 @@ def _fixture_agent(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def export_agent(tmp_path: Path, data_root: Path) -> Path:
-    """The fixture tenant's `agent/` inside a real export (#1108 P4 O11's one helper) — what the
-    posture page reads instead of the product tree (O1, P-1)."""
+    """The fixture tenant's `agent/` inside a real export: what the posture page reads."""
     with published_tenant(tmp_path / "forge", root=data_root) as tenant:
         yield tenant.export.path / "agent"
 
@@ -116,7 +115,7 @@ def _records(view: dict) -> list[dict]:
 
 
 def test_d2_fm_and_raw_are_discriminable_by_value(tmp_path):
-    """demand: d2 — the positional-swap fault stated on the VALUES, not on the shape."""
+    """A positional swap of `fm` and `raw` is caught on the values, not only the types."""
     mod = importlib.import_module("defender.knowledge._corpus")
     lesson = next(iter(mod.iter_lessons(_corpus_of(tmp_path, "good"))))
 
@@ -128,7 +127,7 @@ def test_d2_fm_and_raw_are_discriminable_by_value(tmp_path):
 
 
 def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, capsys):
-    """demand: d3 — ``Lesson.raw`` is EXACTLY the text between the fences that ``parse_frontmatter`` handed..."""
+    """``Lesson.raw`` is exactly the text between the fences, CRLF-normalized."""
     mod = importlib.import_module("defender.knowledge._corpus")
     corpus = tmp_path / "lessons"
     corpus.mkdir()
@@ -146,7 +145,7 @@ def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, capsys):
 
 
 def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
-    """demand: d5 (domain-outcome, R4: READ_ENCODING crosses_validation) — ``iter_lessons`` reads with an..."""
+    """``iter_lessons`` reads UTF-8 explicitly, so a non-ASCII lesson is not skipped under a C locale."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     (corpus / "cafe-lesson.md").write_bytes(
@@ -176,7 +175,7 @@ def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
 
 
 def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, capsys):
-    """demand: d6 (domain-outcome, R4: the FALSY member of a falsy_valid domain) — a lesson whose frontmatter is..."""
+    """``{}`` is falsy but valid frontmatter: the lesson is yielded silently."""
     mod = importlib.import_module("defender.knowledge._corpus")
     corpus = _corpus_of(tmp_path, "normal")
     (corpus / "empty-fm.md").write_text("---\n{}\n---\nbody\n")
@@ -189,7 +188,7 @@ def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, capsys):
 
 
 def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys):
-    """demand: d7 (domain-outcome, R4) — every ``FrontmatterError`` member of the corpus domain is warn-skipped,..."""
+    """Each ``FrontmatterError`` member is skipped and named exactly once on stderr."""
     mod = importlib.import_module("defender.knowledge._corpus")
     corpus = _corpus_of(tmp_path, "good")
     members = _frontmatter_error_members(corpus)
@@ -204,7 +203,7 @@ def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys)
 
 
 def test_d9_oserror_members_are_warn_skipped(tmp_path, capsys):
-    """demand: d9 (domain-outcome, R4) — the OSError arm of the guard, exercised by the two members that reach it..."""
+    """The guard's OSError arm, through the two members that reach it as root."""
     mod = importlib.import_module("defender.knowledge._corpus")
     corpus = _corpus_of(tmp_path, "good")
     members = _oserror_members(corpus)
@@ -218,9 +217,8 @@ def test_d9_oserror_members_are_warn_skipped(tmp_path, capsys):
 
 
 def test_d12_build_view_reads_only_the_agent_root_it_is_given(tmp_path, export_agent):
-    """demand: d12 (seam), #1108 P4 O1/O-U5 — ``build_view`` reads the agent root it is handed
-    (``agent_root=``) and nothing else: a made-up root shows only its own lesson, and the
-    fixture tenant's export shows its own lessons under exactly the two live groups."""
+    """A made-up root shows only its own lesson; the fixture tenant's export shows its own, under
+    exactly the two live groups."""
     root = _fixture_agent(tmp_path)
     _findings_lesson(root / "lessons", "fixture-only-lesson")
 
@@ -228,20 +226,20 @@ def test_d12_build_view_reads_only_the_agent_root_it_is_given(tmp_path, export_a
     assert _titles(view) == {"fixture-only-lesson"}
 
     exported = serialize.build_view(agent_root=export_agent)
-    assert set(exported["groups"]) == {"defender", "questioner"}  # O-U5: no retired group
+    assert set(exported["groups"]) == {"defender", "questioner"}  # no retired group
     assert _titles(exported) != _titles(view)
     assert all(g["lessons"] for g in exported["groups"].values())
 
 
 def _resolves_under(agent_root: Path, source_path: str) -> bool:
-    """`source_path` names a file of `agent_root`, spelled relative to the agent root or to the
-    repo holding it (r3 does not fix which; both are tenant-repo spellings, never `defender/`)."""
+    """`source_path` names a file of `agent_root`, relative to it or to the repo holding it (either
+    is a tenant-repo spelling)."""
     return any((base / source_path).is_file() for base in (agent_root, agent_root.parent))
 
 
 def test_d13_source_path_keys_off_the_injected_root(tmp_path, export_agent):
-    """demand: d13, #1108 P4 O1 — ``source_path`` is relative and keyed off the injected agent
-    root, never the module's location or the product tree's ``defender/`` spelling."""
+    """``source_path`` is relative to the injected agent root, never the module's location or a
+    ``defender/`` spelling."""
     root = _fixture_agent(tmp_path)
     _findings_lesson(root / "lessons", "fixture-lesson")
 
@@ -259,7 +257,7 @@ def test_d13_source_path_keys_off_the_injected_root(tmp_path, export_agent):
 
 
 def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
-    """demand: d14 — the FULL classification truth table over one fixture corpus, not a membership check."""
+    """The full classification truth table over one corpus, not a membership check."""
     root = _fixture_agent(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "good")
@@ -285,7 +283,7 @@ def test_d14_frontend_truth_table_has_no_silent_subtraction(tmp_path, capsys):
 
 
 def test_d15_empty_mapping_record_shape(tmp_path):
-    """demand: d15 (shape) — the ``{}``-lesson's rendered RECORD, field by field: ``title == path.stem`` (no..."""
+    """The ``{}``-lesson's rendered record, field by field (``title`` falls back to the stem)."""
     root = _fixture_agent(tmp_path)
     (root / "lessons" / "empty-fm.md").write_text("---\n{}\n---\nthe body\n")
 
@@ -299,7 +297,7 @@ def test_d15_empty_mapping_record_shape(tmp_path):
 
 
 def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
-    """demand: d16 — with an UNDECODABLE lesson AND an OSError lesson (a directory named ``foo.md``) in the..."""
+    """Undecodable and OSError lessons are listed as malformed and named; the build completes."""
     root = _fixture_agent(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "survivor")
@@ -316,7 +314,7 @@ def test_d16_build_completes_despite_a_bad_lesson(tmp_path, capsys):
 
 
 def test_d17_stdout_stays_a_json_protocol(tmp_path, capsys):
-    """demand: d17 (negative) — ``serialize.py --stdout`` is an api preview, i.e. a PROTOCOL: over a corpus..."""
+    """``serialize.py --stdout`` is a JSON protocol: skip warnings go to stderr, never stdout."""
     root = _fixture_agent(tmp_path)
     corpus = root / "lessons"
     _findings_lesson(corpus, "good")
@@ -331,13 +329,13 @@ def test_d17_stdout_stays_a_json_protocol(tmp_path, capsys):
 
 def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     tl = load_trace_lesson("trace_lesson_584")
-    _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
+    _tenant_runs()
     corpus = _corpus_of(tmp_path, "alpha", "beta")
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\ndescription: template\n---\nbody\n")
     (corpus / "unfenced.md").write_text("no fence at all\n")
     _undecodable(corpus)
 
-    rc = tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
+    rc = tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID])
     captured = capsys.readouterr()
     assert rc == 0, captured.err
 
@@ -353,30 +351,27 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 
 
 def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
-    """demand: d22 — the ``if not lessons_dir.is_dir(): return 1`` guard keys on the RESOLVED dir, not on the..."""
+    """The missing-dir guard keys on the resolved (injected) dir, not an import-time constant."""
     tl = load_trace_lesson("trace_lesson_584")
     missing = tmp_path / "no-such-corpus"
 
-    # #1105 PR 2 (J8, declared change 10): `--tenant` is required
     assert tl.main(["--all", "--lessons-dir", str(missing), "--tenant", TID]) == 1
     err = capsys.readouterr().err
-    # #1108 P4 O4: the CLI's import-time `LESSONS_DIR` constant is gone; the guard names the
-    # resolved (injected) dir and no other.
+    # The guard names the injected dir and no other.
     named = [ln for ln in err.splitlines() if "no lessons dir:" in ln]
     assert named == [f"no lessons dir: {missing}"], err
 
 
 def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     tl = load_trace_lesson("trace_lesson_584")
-    _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
-    # #1108 P4 O5: lessons sit under an agent root and the recogniser is told which one.
+    _tenant_runs()
+    # Lessons sit under an agent root, and the recogniser is told which one.
     corpus = _corpus_of(tmp_path / "agent", "foo-bar")
     lesson_path = corpus / "foo-bar.md"
 
     oracle = record_lesson_load.lesson_name(str(lesson_path), agent_root=tmp_path / "agent")
     assert oracle == "foo-bar"
 
-    # #1105 PR 2 (J8, declared change 10)
     assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
     first_column = capsys.readouterr().out.splitlines()[0].split("\t")[0]
     assert first_column == oracle
@@ -390,7 +385,7 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     (corpus / "foo-bar.md").write_text(
         "---\nname: foo_bar\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n"
     )
-    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10): run ids, `--tenant`
+    runs = _tenant_runs()
     _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
 
@@ -400,9 +395,9 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
 
 
 def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
-    """demand: d24 — ``iter_lessons`` is a DIRECTORY walk and structurally cannot serve ``trace_lesson <name>``,..."""
+    """``iter_lessons`` walks a directory, so ``trace_lesson <name>`` reads its one file itself."""
     tl = load_trace_lesson("trace_lesson_584")
-    _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
+    _tenant_runs()
     corpus = _corpus_of(tmp_path, "good")
     _undecodable(corpus, "corrupt.md")
     base = ["--lessons-dir", str(corpus), "--tenant", TID]

@@ -1,4 +1,4 @@
-"""#870 M5′ — the lane opens on the sentinel id, and on nothing else."""
+"""#870: the reducer lane opens on the bash-shim sentinel id, and on nothing else."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,11 +22,11 @@ DECLARED = frozenset({"elastic", "cmdb"})
 
 
 def _collect(*leads):
-    """The real collector over an empty catalog — the seam M5′ edits, driven directly."""
+    """The real collector over an empty catalog, driven directly."""
     return collect_general_failures(list(leads), RUN, catalog=[])
 
 
-# O3 / O3b — the row reaches the queue, normalized, whatever it was attributed to.
+# The row reaches the queue, normalized, whatever it was attributed to.
 
 
 def test_shim_row_enqueues_with_its_system_normalized():
@@ -92,7 +92,7 @@ def test_no_model_supplied_query_id_reaches_the_reducer_surface():
         systems=DECLARED,
     ))
     assert surfaces["reducer"] == []
-    # #1108 P4 (OD6): handoff paths are spelled repo-relative to the tenant repo.
+    # Handoff paths are spelled relative to the tenant repo.
     assert [e["path"] for e in surfaces["system"]] == [
         "agent/skills/elastic/execution.md"
     ]

@@ -64,8 +64,7 @@ def _hint(proc: subprocess.CompletedProcess) -> str:
 
 
 def _fill(template: str, subs: dict[str, str]) -> str:
-    """Substitute every `placeholder -> value` pair into `template`, in one place instead of
-    a bespoke `.replace()` chain per call site — order follows `subs`'s own insertion order."""
+    """Substitute each `placeholder -> value` pair into `template`, in `subs` order."""
     for placeholder, value in subs.items():
         template = template.replace(placeholder, value)
     return template
@@ -235,8 +234,7 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
 
 
 def test_the_hits_hint_column_list_is_derived_from_each_payloads_own_keys():
-    """The hits hint is checked above against ONE envelope, whose keys are the canonical
-    `index, total, returned, truncated, hits` — so a hint that hardcoded that list would pass."""
+    """The test above uses the canonical envelope keys, which a hardcoded column list would also print."""
     payload = json.dumps({
         "query": "user:alice", "hits": [{"user": "alice", "src": "10.0.0.1"}],
         "returned": 1, "note": "partial",
@@ -348,8 +346,7 @@ def test_the_lateral_join_hint_states_what_duckdb_actually_does():
 
 
 def test_query_error_on_flat_shape_hint_names_the_columns():
-    """On a flat payload the hint's job is just the column list plus "no `unnest`" — and the
-    `SELECT * FROM data` it offers is run here as the paired control."""
+    """The `SELECT * FROM data` the hint offers is run as the paired control."""
     payload = '{"host":"web-1","owner":"team.platform"}'
     proc = _sql(payload, "SELECT nope FROM data")
     assert proc.returncode == EXIT_QUERY_ERROR
@@ -385,8 +382,7 @@ def test_truncated_payload_warns_on_a_successful_query():
 
 
 def test_non_truncated_payload_emits_no_note():
-    """The note fires ONLY on `truncated` being set — the same query over the same shape with
-    the flag down is silent, so the signal keeps meaning something."""
+    """The same query with the flag down is silent, so the note keeps meaning something."""
     proc = _sql(
         '{"total":2,"returned":2,"truncated":false,"hits":[{"user":"a"}]}',
         "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'mallory'",
@@ -433,10 +429,8 @@ def test_empty_payload_is_an_error_not_an_empty_result(payload):
 
 
 def test_a_closed_stdin_is_refused_like_an_empty_one():
-    """fd 0 closed (Python's `sys.stdin` is None) carries no payload, the same as zero bytes:
-    exit 2 with the empty-payload message, never a traceback. Whether a launcher reopens a
-    closed fd 0 onto /dev/null differs by OS (uutils `env` does, GNU `env` does not), so the
-    engine has to answer both the same way."""
+    """A closed fd 0 (`sys.stdin` is None) is no payload, like zero bytes. Whether a launcher reopens
+    it onto /dev/null differs by OS (uutils `env` does, GNU `env` does not), so both must answer alike."""
     proc = run_sql_py("SELECT count(*) FROM data", closed_stdin=True)
     assert proc.returncode == EXIT_INPUT_ERROR, proc.stderr
     assert proc.stdout == ""
@@ -453,8 +447,7 @@ def test_a_huge_single_line_payload_is_read_whole():
 
 
 def test_markdown_payload_is_an_input_error():
-    """The other non-payload: an adapter's rendered text rather than JSON. Same contract —
-    exit 2, nothing on stdout, a message that names the cause."""
+    """An adapter's rendered text rather than JSON."""
     proc = _sql("## Query Results\n\n- **Matching events:** 197\n", "SELECT count(*) FROM data")
     assert proc.returncode == EXIT_INPUT_ERROR
     assert proc.stdout == ""
@@ -462,8 +455,7 @@ def test_markdown_payload_is_an_input_error():
 
 
 def test_a_real_payload_on_the_same_query_is_not_an_input_error():
-    """The control for the two above: the identical query over a well-formed payload exits 0
-    with rows, so "exit 2" is a judgement about the input and not about the query."""
+    """Control: the same query over a well-formed payload succeeds, so exit 2 judges the input."""
     assert _rows('{"hits":[{"user":"a"}]}', "SELECT count(*) AS n FROM data") == [{"n": 1}]
 
 

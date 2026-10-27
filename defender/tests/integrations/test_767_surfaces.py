@@ -21,8 +21,7 @@ DEFENDER_DIR = PATHS.defender_dir
 
 
 def _shipped_rows():
-    """The committed playground tenant's table (#1106 moved it out of `defender/`, and there
-    is no per-process cached reader any more)."""
+    """The committed playground tenant's verb-disposition table."""
     from defender.tests.support.tenancy import _tenants1106 as T1106
 
     return verb_dispositions.load_dispositions(
@@ -53,7 +52,6 @@ def _shipped_hits(pattern: str) -> dict[str, list[int]]:
 
 
 def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
-    """o6_no_model_write_reach — NEGATIVE."""
     rows = _shipped_rows()
     for role in sorted(verb_dispositions.KNOWN_ROLES):
         grant = verb_dispositions.grant_for(role, rows)
@@ -94,8 +92,7 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
 
 
 def test_767_list_tickets_still_granted_to_gather():
-    """o6_read_verb_still_granted — the POSITIVE CONTROL for every reach negative in this
-    file."""
+    """The positive control for every reach negative in this file."""
     rows = _shipped_rows()
     by_pair = {d.pair: d for d in rows}
     gather = verb_dispositions.grant_for("gather", rows)
@@ -111,7 +108,6 @@ def test_767_list_tickets_still_granted_to_gather():
 
 
 def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
-    """d6_transitions_route_not_confined — NEGATIVE."""
     allowlist = confinement.READ_ENDPOINT_ALLOWLIST["ticket"]
     assert all(method == "GET" for _, method in allowlist), (
         f"the ticket allowlist is no longer GET-only: {allowlist}"
@@ -136,8 +132,7 @@ def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
 
 
 def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
-    """d_adapter_http_confinement_capture_positive_control — PARITY, and the baseline the two
-    vias this design adds are a parity demand AGAINST."""
+    """Positive control: `guard_outbound` records the request it allows, not the one it refuses."""
     capture = confinement.TransportCapture()
     ctx = type("Ctx", (), {"capture": capture})()
 
@@ -159,7 +154,7 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
 
 
 def test_767_query_tool_is_only_ticket_reader(tmp_path):
-    """s3p_single_model_facing_reader — NEGATIVE, the path census."""
+    """A census of the shipped source."""
     consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get|release_list|release_get)\s*\(")
     assert consumers == {}, (
         f"a shipped module still screens ticket replies: {consumers} — #1221 removed both "

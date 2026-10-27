@@ -1,8 +1,7 @@
-"""#869 O3/RF6/RF7/FK-2/FK-17 — reported, never silently absorbed; and the durable record.
+"""#869: a dropped row is reported, never silently absorbed, and leaves a durable record.
 
-#1108 P4 (O7, OD12 class ii): the mixed pitfalls tick runs over a batch draft
-(`_curator1134.draft_lane`), adapters in a product checkout; what landed is read from the batch
-branch (`agent/...`), the lane entry takes the batch (ASSUMED SEAM S-H `run_pitfalls(..., batch=)`)."""
+The mixed pitfalls tick runs over a batch draft (`_curator1134.draft_lane`) with adapters in a
+product checkout; what landed is read from the batch branch (`agent/...`)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -34,12 +33,9 @@ DECLARED = frozenset({"elastic"})
 
 
 def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
-    """The mixed tick P9 executed: two `elastic` rows, one undeclared `elastik` row, and a
-    curator edit that produces a REAL commit.
-
-    P9 moved these demands onto the mixed batch on purpose. The all-dropped control is milder
-    — its sha is `None` (C37) — and cannot see the defect at all: it takes a batch that DOES
-    commit something for the dropped row to inherit a sha that has nothing to do with it."""
+    """Two `elastic` rows, one undeclared `elastik` row, and a curator edit that makes a real
+    commit: only a batch that commits gives the dropped row a sha it could wrongly inherit (an
+    all-dropped batch's sha is `None`)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     product = seed_product(tmp_path, adapters=("elastic",), name=f"product-{name}")
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product,
@@ -108,7 +104,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
                      catalog=())
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     state = open_state(paths)
-    # A natural run where the drain rehydrates the row (#1105 PR 2): the row is its address.
+    # A run folder the drain rehydrates the row from: the row is its address.
     run_dir = curation_run_dir("run-x")
     (run_dir / "gather_raw").mkdir()
     write(location_path(paths.state_root) / "author-queue" / "case-1.json",

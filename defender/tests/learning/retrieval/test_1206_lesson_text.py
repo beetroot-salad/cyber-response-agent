@@ -19,7 +19,7 @@ def _lesson(tmp_path: Path, text: str):
 
 
 def test_one_line_drops_every_control_character_whitespace_or_not():
-    """U+001F is `isspace()` in Python and not a TSV breaker, so it slipped through."""
+    """Including U+001F, which Python's `isspace()` accepts though it breaks no TSV."""
     assert one_line("a\x1fb") == "ab"
     assert one_line("a\x1b[2Kb") == "a[2Kb"
     assert one_line("a\u2028b\nc\td") == "a b c d"
@@ -61,7 +61,7 @@ def test_match_text_finds_a_listed_value_and_keeps_fields_apart(tmp_path):
 
 def test_match_text_keeps_every_key_in_its_raw_spelling_too(tmp_path):
     """A search that matched the frontmatter as written still matches: a selector map in a
-    block list, and a timestamp as the file spells it (review of #1226)."""
+    block list, and a timestamp as the file spells it."""
     lesson = _lesson(tmp_path, (
         "---\nname: l\n"
         "observed_nodes:\n  - {type: process, slot: attrs.user}\n"
