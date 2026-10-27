@@ -176,53 +176,6 @@ def _upstream_fault(detail: str) -> Exception:
     return sym("kit.faults", "UpstreamFault")(detail)
 
 
-class FakeTransport:
-    """A recording fake with `transport.docker_exec_curl`'s signature.
-
-    stdout is body + "\\n" + http_code, as `split_status` expects; `malformed="no-status-line"`
-    drops that line, a fault a caller must not read as a successful create.
-    Calls are recorded argv-shaped, so a test can check a derived name reached the transport as
-    a discrete argument rather than inside a shell string.
-    """
-
-    def __init__(self, *, fault: Fault = CLEAN, status: str = "200",
-                 body: dict | None = None) -> None:
-        self.fault = fault
-        self.status = status
-        self.body = body if body is not None else {"acknowledged": True}
-        self.calls: list[dict[str, Any]] = []
-
-    def __call__(  # noqa: PLR0913 — mirrors `docker_exec_curl`'s own signature (X9)
-            self, ctx: Any, container: str, url: str, *, method: str = "GET",
-                 headers: dict | None = None, body: dict | None = None,
-                 timeout_sec: int = 10, insecure: bool = False,
-                 auth: str | None = None, system: str | None = None,
-                 secrets: tuple[str, ...] = ()) -> tuple[int, str, str]:
-        self.calls.append({
-            "ctx": ctx, "container": container, "url": url, "method": method,
-            "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec,
-            "insecure": insecure, "auth": auth, "system": system, "secrets": secrets,
-        })
-        if self.fault.raise_after is not None and len(self.calls) > self.fault.raise_after:
-            raise _transport_fault(f"docker exec failed: {url}")
-        payload = json.dumps(self.body)
-        if self.fault.malformed == "no-status-line":
-            return 0, payload, ""
-        if self.fault.malformed == "truncated-json":
-            return 0, payload[: len(payload) // 2] + f"\n{self.status}", ""
-        if self.fault.malformed == "empty-body":
-            return 0, "", ""
-        if self.fault.hits(url):
-            return 0, json.dumps({"error": {"reason": f"refused {url}"}}) + "\n400", ""
-        return 0, payload + f"\n{self.status}", ""
-
-    @property
-    def methods(self) -> list[str]:
-        return [c["method"] for c in self.calls]
-
-    @property
-    def urls(self) -> list[str]:
-        return [c["url"] for c in self.calls]
 
 
 # --------------------------------------------------------------------------------------
@@ -1049,7 +1002,7 @@ __all__ = [
     "KNOWLEDGE_SHA", "NO_KNOWLEDGE_KEY", "OTHER_KNOWLEDGE_SHA",
     "branchable_investigation",
     "SOURCE_RUN_ID", "WORLDS",
-    "FakeAdapters", "FakeAgent", "FakeSpawn", "FakeTransport", "SERVED_SYSTEMS",
+    "FakeAdapters", "FakeAgent", "FakeSpawn", "SERVED_SYSTEMS",
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",
     "Fault", "base_capture", "captured_row",
     "archived_world", "base_world", "capture_call", "configured_layout", "ROSTER_NAME",

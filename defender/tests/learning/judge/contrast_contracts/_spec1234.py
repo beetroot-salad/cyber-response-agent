@@ -273,8 +273,6 @@ RETIRED_RECORD_FIELDS = ("judge_outcome", "verdict_word", "episode_outcome", "fa
 RETIRED_REPLY_WORDS = ("episode_outcome", "verdict_word")
 RETIRED_FINDING_FIELD = "evidence"  # on an investigator finding
 RETIRED_LANES = ("never_eligible", "withheld")
-#: The two retired enums by name.
-RETIRED_ENUMS = ("JUDGE_OUTCOME_ENUM", "_REPLY_OUTCOME_ENUM")
 
 #: Pointers that never resolve (`{label}` filled by `never_resolving`).
 NEVER_RESOLVE = ("judge.yaml", "worlds/{label}/judge/0.yaml", "wire_logs/x_framed_trace.jsonl",

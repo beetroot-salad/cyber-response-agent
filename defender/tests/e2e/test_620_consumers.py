@@ -603,7 +603,6 @@ def test_visualize_runtime_distinguishes_exit_64_from_infra(tmp_path):
         "exit-64 (agent-fixable) and exit-2 (infra) render the same class — error_class is unread"
 
 
-_ALL_SEVEN = ["elastic", "cmdb", "identity", "ticket", "change-mgmt", "host-state", "threat-intel"]
 _SPELLING_SPLIT = ["change-mgmt", "host-state", "threat-intel"]
 
 

@@ -30,7 +30,6 @@ DEFENDER = REPO_ROOT / "defender"
 #: `defender/cli/tenant.py` — the setup command, the ONLY production caller of
 #: `create_tenant`, driven here as a process.
 TENANT_PY = DEFENDER / "cli" / "tenant.py"
-RUN_PY = DEFENDER / "run.py"
 
 # ======================================================================================
 # The vocabulary the tests assert against, spelled once.

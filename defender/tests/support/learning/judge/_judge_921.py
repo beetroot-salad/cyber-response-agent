@@ -460,11 +460,6 @@ def rows(grade: Any) -> dict[str, dict]:
     return {row["world"]: row for row in worlds}
 
 
-def word_of(grade: Any) -> str:
-    """A `FamilyGrade`'s family-level `verdict_word`."""
-    return grade["verdict_word"] if isinstance(grade, dict) else grade.verdict_word
-
-
 def enqueued_rows(record: dict) -> list[dict]:
     """The finding rows a grade appended, read back off the queue file the record names
     (`enqueued_to`): the queue is a shared sink, and a guessed path may be a file the pass never
@@ -825,5 +820,5 @@ __all__ = [
     "fact", "provenance_record", "refusals", "reply_doc", "report_text",
     "runs_base",
     "oracle_row", "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
-    "rows", "word_of", "world_rows", "fixture_world_id", "write_ledger",
+    "rows", "world_rows", "fixture_world_id", "write_ledger",
 ]
