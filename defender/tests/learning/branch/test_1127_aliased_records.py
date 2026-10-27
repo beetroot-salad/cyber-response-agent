@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.learning.branch import episode as episode_mod
 from defender.learning.branch import outcome as outcome_mod
 

@@ -72,7 +72,7 @@ MODULES = (
 #: The O5 scan's modules: the same set (D6').
 O5_MODULES = MODULES
 #: The episode handle module, whose I/O must run through `hold` / `hold_new` and the `Held` verbs.
-HANDLE_MODULE = "episodes/_episode_handle.py"
+HANDLE_MODULE = "records/_episode_handle.py"
 
 #: D6's pinned vocabulary: the path seams, spelled by their own name wherever they come from.
 PATH_SEAMS = frozenset({

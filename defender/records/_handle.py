@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from defender.records import _alert_input
 from defender.records import _artifact_schema
-from defender.episodes import _episode_paths
+from defender.records import _episode_paths
 from defender.records import _provenance
 from defender.records import _report
 from defender import _io as _real_io

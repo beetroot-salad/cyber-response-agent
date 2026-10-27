@@ -10,7 +10,7 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender._model import model
 from defender.learning.judge.pointers import Assessment, PointerScope, assess, named_rows
 from defender.learning.judge.run import (

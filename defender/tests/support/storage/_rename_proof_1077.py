@@ -18,8 +18,8 @@ from pathlib import Path
 
 from defender import _yaml
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.episodes._episode_handle import Episode
-from defender.episodes._episode_paths import LAYOUT, EpisodePaths
+from defender.records._episode_handle import Episode
+from defender.records._episode_paths import LAYOUT, EpisodePaths
 from defender._io import bind
 from defender.records import RunPaths
 from defender.tests.support.shared._fixture_uuid import fixture_uuid

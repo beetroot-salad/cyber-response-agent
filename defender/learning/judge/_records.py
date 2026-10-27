@@ -18,7 +18,7 @@ from defender._io import Bound
 from defender._text import unwritable_value
 
 
-from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES
+from defender.records._episode_paths import LAYOUT, WORLD_LEAVES
 
 from defender.learning.branch.ledger import (
     normalized_source,

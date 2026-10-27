@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run-records name gate: no code outside the name-owner modules (every file of the runs
-repository package `defender/records/`, `defender/episodes/_episode_paths.py`,
-`defender/episodes/_episode_handle.py`, `defender/tenancy/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
+repository package `defender/records/`, `defender/records/_episode_paths.py`,
+`defender/records/_episode_handle.py`, `defender/tenancy/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
 composed part, or join a name onto a run or episode root.
 
 Four checks:
@@ -75,10 +75,10 @@ except ScanBlind as exc:
     _DOOR_BLIND = exc
 #: The folder that holds them.
 OWNER_PACKAGE = "records"
-#: The owners outside the package. `episodes/_episode_handle.py` owns the episode folder with
-#: `episodes/_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
+#: The owners outside the package. `records/_episode_handle.py` owns the episode folder with
+#: `records/_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
 #: runs repository's episode view is built, is an owner read.
-_OWNER_FLAT_MODULES = ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py")
+_OWNER_FLAT_MODULES = ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py")
 
 #: The owner modules by their path under `defender/`, the exempt set everything below is
 #: defined relative to. Matched by path, never by basename — a package submodule's basename
@@ -91,7 +91,7 @@ OWNER_MODULES: frozenset[str] = frozenset({
 
 #: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
-                               "api", "tenancy", "knowledge", "episodes", "configuration", "records", "kit")
+                               "api", "tenancy", "knowledge", "configuration", "records", "kit")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -212,7 +212,7 @@ def _accessor_names() -> frozenset[str]:
     `_astlib._OWNER_CLASS_ORIGINS`."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from defender.episodes._episode_paths import EpisodePaths  # noqa: PLC0415
+    from defender.records._episode_paths import EpisodePaths  # noqa: PLC0415
     from defender.records import RunPaths, SessionPaths  # noqa: PLC0415
 
     return frozenset(
@@ -571,7 +571,7 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             module = import_source(node, package)
-            # `from defender.episodes import _episode_paths` binds the module, not a name in it; record
+            # `from defender.records import _episode_paths` binds the module, not a name in it; record
             # it as well as `import x.y`, or the attribute arm below never sees it.
             for alias in node.names:
                 if f"{module}.{alias.name}" in _OWNER_MODULE_NAMES:
@@ -685,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         for f in found:
             print(f"  {f.display}")
         print(
-            "\nNo code outside defender/records/, episodes/_episode_paths.py, episodes/_episode_handle.py "
+            "\nNo code outside defender/records/, records/_episode_paths.py, records/_episode_handle.py "
             "and tenancy/_tenant.py "
             "may spell a run or episode record's name — reach it through the "
             "owner, or mark a deliberate diagnostic with "

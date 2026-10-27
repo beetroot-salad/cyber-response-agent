@@ -487,8 +487,8 @@ def box_mounted_arm_container(data_root: DataRoot, raw_id: object, episode_id: s
     link planted there is seen). The episode id is judged first (`EpisodeRefused`), the root and
     the id as every pre-acceptance site judges them (`TenantRefused`). A join: nothing is read
     or made."""
-    from defender.episodes._episode_handle import refuse_bad_episode_id
-    from defender.episodes._episode_paths import LAYOUT
+    from defender.records._episode_handle import refuse_bad_episode_id
+    from defender.records._episode_paths import LAYOUT
 
     episode_id = refuse_bad_episode_id(episode_id)
     return RunsBase(_unwrap_episodes_root(box_mounted_episodes(data_root, raw_id)) / episode_id / LAYOUT.runs)

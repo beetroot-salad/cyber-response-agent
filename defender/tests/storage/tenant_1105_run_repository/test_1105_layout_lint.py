@@ -48,7 +48,7 @@ def _lint() -> ModuleType:
                 "importable): D7's layout lint is not written yet")
 
 
-_CONTEXT = ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py", "runtime/run_tenant.py")
+_CONTEXT = ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py", "runtime/run_tenant.py")
 
 
 def _planted(tmp_path: Path) -> Path:
@@ -206,8 +206,8 @@ def test_1105_layout_lint_flags_a_star_import_from_the_door_or_an_owner(tmp_path
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
     modules = {f"learning/star_{i}.py": f"from {source} import *  # noqa: F403\n"
-               for i, source in enumerate(("defender.records", "defender.episodes._episode_paths",
-                                           "defender.episodes._episode_handle", "defender.tenancy._tenant"))}
+               for i, source in enumerate(("defender.records", "defender.records._episode_paths",
+                                           "defender.records._episode_handle", "defender.tenancy._tenant"))}
     for module, text in modules.items():
         _plant(root, module, text)
     _plant(root, "learning/star_control.py", "from os.path import *  # noqa: F403\n")

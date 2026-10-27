@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.learning.branch import _triplet_947 as P
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV, current_data_root

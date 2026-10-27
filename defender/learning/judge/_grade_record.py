@@ -22,11 +22,11 @@ from defender.learning.core.retired import (  # noqa: E402
 
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 
 
 
-from defender.episodes._episode_paths import LAYOUT  # noqa: E402
+from defender.records._episode_paths import LAYOUT  # noqa: E402
 
 
 

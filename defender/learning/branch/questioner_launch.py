@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 
 from defender._io import (

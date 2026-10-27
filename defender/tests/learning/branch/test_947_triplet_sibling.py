@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.records import RunPaths

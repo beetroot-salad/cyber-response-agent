@@ -17,7 +17,7 @@ from pydantic import SkipValidation
 
 from defender.records import _alert_input
 from defender._io import Bound
-from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
+from defender.records._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
     EVIDENCE_PUSH,
@@ -79,7 +79,7 @@ def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
 @dataclasses.dataclass
 class KnowledgeBodies:
     """Where a post-move sibling's lesson bodies are read (O6, #1108 P4): the tenant's export
-    at the family's knowledge pin (`episodes._knowledge_pin`: `<T>/exports/<commit>/agent/...`),
+    at the family's knowledge pin (`records._knowledge_pin`: `<T>/exports/<commit>/agent/...`),
     materialised from the clone's objects when absent — never `current`, the clone's HEAD or
     its working tree. `why` names what made the bodies unreadable (an `unversioned` or
     `unavailable` stamp, none recorded, or a commit that cannot be materialised); the export is

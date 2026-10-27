@@ -123,7 +123,7 @@ def test_arm_roster_capacity_matches_the_readable_wire_budget(count, expected_by
 
 @pytest.mark.parametrize("count", [799, 800])
 def test_host_publication_checks_roster_capacity_before_writing(tmp_path, count):
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
     from defender.runtime.branch import _family
 
     doc = _capacity_family(count)
@@ -141,7 +141,7 @@ def test_host_publication_checks_roster_capacity_before_writing(tmp_path, count)
 
 @pytest.mark.parametrize("count", [799, 800])
 def test_preflight_checks_the_same_roster_capacity_before_oracle_or_writes(tmp_path, count):
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
     from defender.learning.branch import cli
     from defender.runtime.branch import _family
     from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P

@@ -12,7 +12,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 pytest.importorskip("pydantic_ai")
 
 from defender._io import parse_jsonl_row, read_jsonl_rows  # noqa: E402
-from defender.episodes._episode_paths import LAYOUT, OracleStorePaths  # noqa: E402
+from defender.records._episode_paths import LAYOUT, OracleStorePaths  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     PASSTHROUGH,
     LedgerError,

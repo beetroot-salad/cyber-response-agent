@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 
 T_ID = H.VALID_ID
 X = fixture_uuid("case-x")

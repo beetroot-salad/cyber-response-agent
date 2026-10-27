@@ -230,7 +230,7 @@ def plant_run(runs_base: Path, run_id: str, *, alert: Mapping[str, Any] | bytes 
 
 def _episode_path(episode_dir: Path, key: str) -> Path:
     attr = COINED[key]
-    paths = sym("episodes._episode_paths", "EpisodePaths")(Path(episode_dir))
+    paths = sym("records._episode_paths", "EpisodePaths")(Path(episode_dir))
     value = getattr(paths, attr, None)
     assert value is not None, (
         f"EpisodePaths has no `{attr}` — the coined accessor for {key!r} (A1: launch copies the "

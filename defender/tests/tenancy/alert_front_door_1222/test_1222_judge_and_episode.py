@@ -30,7 +30,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 JUDGE = "learning.judge"
 CLI = "learning.branch.cli"
 ARCHIVE = "learning.branch.archive"
-EPISODE_HANDLE = "episodes._episode_handle"
+EPISODE_HANDLE = "records._episode_handle"
 CORPUS = "skills.invlang.corpus"
 INVLANG_CLI = "skills.invlang.cli"
 RUN = "run"

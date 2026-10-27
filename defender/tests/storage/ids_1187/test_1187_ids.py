@@ -185,7 +185,7 @@ def test_1187_o1_a_resumed_world_never_composes_its_arm_id(tmp_path):
 
 
 def test_1187_o1_the_episode_layout_spells_no_sibling_run_dir():
-    from defender.episodes import _episode_paths
+    from defender.records import _episode_paths
 
     for owner in (_episode_paths.EpisodeLayout, _episode_paths.LAYOUT):
         assert not hasattr(owner, "sibling_run_dir"), (

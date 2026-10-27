@@ -58,7 +58,7 @@ from defender._paths import adapters_under  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.tenancy import _tenant  # noqa: E402
-from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
@@ -488,13 +488,13 @@ def _resolve_run_tenant(
 
 def _family_pin(ns: argparse.Namespace, pin: str | None, episode: Any) -> str | None:
     """The commit a sibling (`--episode`) reads: its family's knowledge pin, read from the
-    episode, where only its launcher writes (`episodes._knowledge_pin`), so a sibling started or
+    episode, where only its launcher writes (`records._knowledge_pin`), so a sibling started or
     resumed by hand reads its family's knowledge, never a newer `current`. A `--knowledge-commit`
     naming another commit refuses. An episode with no pin (launched before the pin was
     recorded) keeps `pin` as given, as before. An ordinary run's `pin` is kept."""
     if episode is None:
         return pin
-    from defender.episodes._knowledge_pin import PinUnreadable, read_pin
+    from defender.records._knowledge_pin import PinUnreadable, read_pin
 
     try:
         family = read_pin(episode.view())
@@ -790,7 +790,7 @@ def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> tuple[R
     read."""
     if ns.episode is None:
         return ()
-    from defender.episodes._episode_handle import EpisodeRefused
+    from defender.records._episode_handle import EpisodeRefused
 
     try:
         return (_tenant.box_mounted_arm_container(data_root, ns.tenant, ns.episode),)
@@ -807,7 +807,7 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
     ordinary run."""
     if ns.episode is None:
         return None
-    from defender.episodes._episode_handle import EpisodeRefused
+    from defender.records._episode_handle import EpisodeRefused
     from defender.records import RunRefused
 
     try:

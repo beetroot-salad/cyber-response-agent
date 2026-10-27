@@ -15,7 +15,7 @@ from pathlib import Path, PurePath
 from defender._io import Bound
 from defender.records._report import ReportRead, parse_report_text
 from defender._vocab import normalized_disposition
-from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
+from defender.records._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
     normalized_source,
 )

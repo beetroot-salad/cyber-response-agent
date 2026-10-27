@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from defender.tenancy import _tenant
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
 from defender.cli import policy_cli

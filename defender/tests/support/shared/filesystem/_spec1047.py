@@ -81,7 +81,7 @@ def run_end_name() -> str:
     archive.py now holds no record name, and both the writer and this helper reach the same
     accessor on `_episode_paths`.
     """
-    return str(sym("episodes._episode_paths", "WORLD_LEAVES").run_end)
+    return str(sym("records._episode_paths", "WORLD_LEAVES").run_end)
 
 
 def sidecar_path(run_dir: Path) -> Path:

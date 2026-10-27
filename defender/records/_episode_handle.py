@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from defender import _io as _real_io
-from defender.episodes._episode_paths import (
+from defender.records._episode_paths import (
     LAYOUT, EpisodeRefused, _check_world_id, refuse_bad_episode_id,
 )
 
@@ -232,7 +232,7 @@ class Episode:
 
     @property
     def knowledge_pin(self) -> CreateRecord:
-        """The family's knowledge commit (`episodes._knowledge_pin`): created once, at launch."""
+        """The family's knowledge commit (`records._knowledge_pin`): created once, at launch."""
         return CreateRecord(*self._at(LAYOUT.knowledge_pin))
 
     @property

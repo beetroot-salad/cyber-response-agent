@@ -4,7 +4,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.shared.filesystem import _spec1047 as S
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,

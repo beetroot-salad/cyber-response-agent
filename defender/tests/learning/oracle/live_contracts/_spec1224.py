@@ -1198,14 +1198,14 @@ def load_world(ep: Path, label: str) -> Any:
     if not (ep / T.ROSTER_NAME).is_file():
         T.plant_roster(ep)
     arm_ids = {name: RunId.parse(arm) for name, arm in T.read_roster(ep).items()}
-    with mod("episodes._episode_handle").Episode.create(ep) as handle:
+    with mod("records._episode_handle").Episode.create(ep) as handle:
         family = fam.load_family(handle.view(), expected_episode_id=ep.name)
     return fam.resume_world_from(family, label, ep, arm_ids=arm_ids)
 
 
 def world_ledger(ep: Path, label: str) -> Any:
     """`Ledger.for_world(...).declare()` over the primed base — as the sibling builds it."""
-    episode = mod("episodes._episode_handle").Episode.create(Path(ep))
+    episode = mod("records._episode_handle").Episode.create(Path(ep))
     with contextlib.suppress(FileExistsError):
         episode.served_base.create("")
     return sym(LEDGER, "Ledger").for_world(episode, _episode_world_id(ep, label)).declare()

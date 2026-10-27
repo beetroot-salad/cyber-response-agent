@@ -12,7 +12,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound
 from defender.records._report import repeats_disposition
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (

@@ -82,7 +82,7 @@ _VE = "presentation/visualize_episode.py"
 #: module in no row gets no exemption.
 CATEGORIES: Mapping[str, Sequence[str]] = {
     # And every file of the runs repository (`_astlib.run_repository_files`, `_row_of`).
-    "owners": ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py"),
+    "owners": ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py"),
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
         "hooks/record_lead.py",
@@ -143,9 +143,9 @@ ALLOW_LIST: Sequence[tuple[str, str, str, int]] = ()
 
 
 #: Owner classes and their gated members, by canonical origin.
-_EPISODE = "defender.episodes._episode_handle.Episode"
-_EPISODE_PATHS = "defender.episodes._episode_paths.EpisodePaths"
-_EPISODE_LAYOUT = "defender.episodes._episode_paths.EpisodeLayout"
+_EPISODE = "defender.records._episode_handle.Episode"
+_EPISODE_PATHS = "defender.records._episode_paths.EpisodePaths"
+_EPISODE_LAYOUT = "defender.records._episode_paths.EpisodeLayout"
 _TENANT = "defender.tenancy._tenant.Tenant"
 _RUN = f"{_DOOR}.Run"
 _ARCHIVED = f"{_DOOR}.ArchivedWorld"
@@ -164,7 +164,7 @@ _GATED_MEMBERS: dict[str, frozenset[str]] = {
 _CONSTRUCTORS = frozenset({_RUN, _ARCHIVED, _REPOSITORY, _EPISODE_VIEW})
 _RUNS_DIRNAME = "RUNS_DIRNAME"
 #: Star imports of these modules bind gated names wholesale.
-_STAR_SOURCES = frozenset({_DOOR, "defender.episodes._episode_paths", "defender.episodes._episode_handle",
+_STAR_SOURCES = frozenset({_DOOR, "defender.records._episode_paths", "defender.records._episode_handle",
                            "defender.tenancy._tenant"})
 
 _OPTIONAL = frozenset({"Optional"})
