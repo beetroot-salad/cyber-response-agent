@@ -1,6 +1,6 @@
 """The records write gate gets the invlang validator handed in (#1309 d): it refuses, rather
-than passes text unvalidated, until the validator has registered, and the roots that write
-investigations register it by loading it."""
+than passes text unvalidated, until the validator has registered, and loading any module that
+writes or closes an investigation registers it."""
 from __future__ import annotations
 
 import os
@@ -56,8 +56,14 @@ def test_report_gate_needs_no_validator(unregistered):
     assert schema.validate_report("not frontmatter") is not None
 
 
-@pytest.mark.parametrize("module", ["defender.run_common", "defender.learning.branch.cli"])
-def test_a_writing_root_registers_the_validator_on_import(module):
+@pytest.mark.parametrize("module", [
+    "defender.investigation.permission",    # the model's writes
+    "defender.investigation.tools",         # the document tools
+    "defender.investigation.close_tool",    # the close
+    "defender.investigation.lead_zero",     # the harness's lead-zero row
+    "defender.investigation.branch",        # a branch arm's restored document
+])
+def test_every_investigation_writer_registers_the_validator_on_import(module):
     probe = (
         f"import {module}\n"
         "from defender.records import _artifact_schema as s\n"

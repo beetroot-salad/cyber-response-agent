@@ -44,8 +44,9 @@ class Diagnostic(Protocol):
 
 
 # The invlang validator lives above this layer, so it is handed in rather than imported: the
-# `skills.invlang.validate` package registers itself when it loads. Until it has, the gate
-# refuses every investigation write and close instead of passing text unvalidated.
+# `skills.invlang.validate` package registers itself when it loads, and the `investigation`
+# package, home of every writer and closer, loads it. Until it has, a write is refused and a
+# close raises, rather than either passing text unvalidated.
 _diagnose: Callable[[str, str | None], Sequence[Diagnostic]] | None = None
 _warn_diagnostics: Callable[[str], Sequence[Diagnostic]] | None = None
 
