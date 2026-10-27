@@ -28,8 +28,9 @@ STEPS = ("questioner", "preflight", "runs", "verify", "judge")
 #: the failure message (a test here that instead fails on the page is counted as red-content):
 #: the launcher hook that does not call the page on HEAD, the root-stamp accessor and the
 #: world-archive screen that do not exist yet, the two lint gates, a subprocess that cannot
-#: import an in-memory module, and the in-frame fault injection a microsecond stub is too
-#: fast for (`when_inside` re-arms every millisecond).
+#: import an in-memory module, and the in-frame fault injection that targets page functions
+#: the stub does not have (`when_inside` fires on entry to a named `_write_page` or
+#: `_render_document`).
 HEAD_REASONS: tuple[tuple[str, str, str], ...] = (
     ("the_launcher_renders_the_page_after_the_judge_frame", "the launcher did not write", "launcher hook absent on HEAD"),
     ("a_render_fault_is_printed_and_changes_neither", "", "launcher hook absent on HEAD"),
@@ -42,8 +43,8 @@ HEAD_REASONS: tuple[tuple[str, str, str], ...] = (
     ("the_four_baseline_entries_naming_this_page", "", "vulture baseline (not a page test)"),
     ("the_new_modules_tree_reads_are_censused", "", "tree-read lint census (not a page test)"),
     ("byte_identity_across_two_interpreter_processes", "ModuleNotFoundError", "a subprocess cannot import the in-memory stub"),
-    ("an_interrupt_during_the_render", "DID NOT RAISE", "fault injection: the stub is too fast for when_inside"),
-    ("a_render_that_raises_midway_keeps_the_previous_page", "DID NOT RAISE", "fault injection: the stub is too fast for when_inside"),
+    ("an_interrupt_during_the_render", "DID NOT RAISE", "fault injection: the stub has no function when_inside targets"),
+    ("a_render_that_raises_midway_keeps_the_previous_page", "DID NOT RAISE", "fault injection: the stub has no function when_inside targets"),
     ("judge_yaml_replaced_by_a_concurrent_re_grade", "never landed", "fault injection: the stub is too fast for when_inside"),
     ("draw_or_judge_yaml_record_is_rewritten_mid_render", "never landed", "fault injection: the stub is too fast for when_inside"),
 )

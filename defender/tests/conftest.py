@@ -46,27 +46,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--shard", default=None, metavar="I/N",
                      help="run only shard I of N: whole test files, balanced by recorded cost "
                           "(see tests/_shard.py); the shards together run every test once")
-    parser.addoption("--shard-durations", default=None, metavar="PATH",
-                     help="write each test file's worker-seconds in this run to PATH as JSON, "
-                          "the input `python -m defender.tests._shard merge` rebuilds weights from")
-
-
-#: test file -> worker-seconds so far, for `--shard-durations` (the controller's view under xdist).
-_DURATIONS: dict[str, float] = {}
-
-
-def pytest_runtest_logreport(report: pytest.TestReport) -> None:
-    file = report.nodeid.split("::", 1)[0]
-    _DURATIONS[file] = _DURATIONS.get(file, 0.0) + report.duration
-
-
-def pytest_sessionfinish(session: pytest.Session) -> None:
-    path = session.config.getoption("--shard-durations")
-    if path and not hasattr(session.config, "workerinput"):  # an xdist worker's view is partial
-        import json
-
-        Path(path).write_text(json.dumps(dict(sorted(_DURATIONS.items())), indent=1) + "\n",
-                              encoding="utf-8")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
