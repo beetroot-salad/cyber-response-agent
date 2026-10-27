@@ -48,6 +48,17 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    # #1306: the identity repository's contract runs over PostgreSQL as well as in memory
+    # (`postgres`-marked tests). Each shard gets its own server; every test uses its own schema.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
 
     steps:
       - uses: actions/checkout@v5
@@ -192,6 +203,7 @@ jobs:
         #                    _spec771.py deliberately routes through THIS job.
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
+          DEFENDER_TEST_POSTGRES_DSN: postgresql://postgres:postgres@localhost:5432/postgres
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25

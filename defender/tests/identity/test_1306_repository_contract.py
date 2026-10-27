@@ -1,6 +1,8 @@
 """#1306 IdentityRepository contract: one suite over the in-memory and the PostgreSQL repository (DC-4).
 
-The PostgreSQL run is marked `live` and needs DEFENDER_TEST_POSTGRES_DSN; CI runs the in-memory one only.
+The PostgreSQL run is marked `postgres` and needs DEFENDER_TEST_POSTGRES_DSN. CI's test job
+starts a PostgreSQL service and sets it, so both runs happen on every push; there an unset DSN
+fails rather than skips, so a broken service cannot turn the PostgreSQL half green by absence.
 """
 from __future__ import annotations
 
@@ -32,6 +34,17 @@ def _postgres_repo(dsn: str, schema: str):
     return PostgresIdentityRepository(dsn, schema=schema)
 
 
+def _dsn() -> str:
+    """The test database's address; skipped where none is set, but never in CI."""
+    dsn = os.environ.get(DSN_ENV)
+    if not dsn:
+        if os.environ.get("CI"):
+            pytest.fail(f"{DSN_ENV} is not set in CI; the test job's PostgreSQL service provides it")
+        pytest.skip(f"{DSN_ENV} is not set")
+    pytest.importorskip("psycopg")
+    return dsn
+
+
 def _drop_schema(dsn: str, schema: str) -> None:
     import psycopg
 
@@ -40,16 +53,13 @@ def _drop_schema(dsn: str, schema: str) -> None:
 
 
 @pytest.fixture(
-    params=["memory", pytest.param("postgres", marks=pytest.mark.live)],
+    params=["memory", pytest.param("postgres", marks=pytest.mark.postgres)],
 )
 def repo(request) -> Iterator[object]:
     if request.param == "memory":
         yield InMemoryIdentityRepository()
         return
-    dsn = os.environ.get(DSN_ENV)
-    if not dsn:
-        pytest.skip(f"{DSN_ENV} is not set")
-    pytest.importorskip("psycopg")
+    dsn = _dsn()
     schema = f"t_{uuid.uuid4().hex}"
     r = _postgres_repo(dsn, schema)
     try:
@@ -657,15 +667,12 @@ def test_last_seen_is_written_only_when_older_than_five_minutes(seeded):
     assert seeded.touch_session("never-issued", now=t1) is False
 
 
-# --- live only: database concurrency (owed checks, never in CI) ------------------------------
+# --- PostgreSQL only: database concurrency -------------------------------------------------
 
 
 @pytest.fixture
 def two_connections() -> Iterator[tuple[object, object]]:
-    dsn = os.environ.get(DSN_ENV)
-    if not dsn:
-        pytest.skip(f"{DSN_ENV} is not set")
-    pytest.importorskip("psycopg")
+    dsn = _dsn()
     schema = f"t_{uuid.uuid4().hex}"
     first = _postgres_repo(dsn, schema)
     second = _postgres_repo(dsn, schema)
@@ -678,7 +685,7 @@ def two_connections() -> Iterator[tuple[object, object]]:
         _drop_schema(dsn, schema)
 
 
-@pytest.mark.live
+@pytest.mark.postgres
 def test_concurrent_ensure_user_of_one_new_email_converge_on_one_user(two_connections):
     """Data model: the email unique index makes concurrent invites converge; one insert wins, the other reuses."""
     barrier = threading.Barrier(2)
@@ -705,7 +712,7 @@ def test_concurrent_ensure_user_of_one_new_email_converge_on_one_user(two_connec
         assert results[0].email == email.lower()
 
 
-@pytest.mark.live
+@pytest.mark.postgres
 def test_two_senders_cannot_claim_the_same_user(two_connections):
     """Flow 1: FOR UPDATE SKIP LOCKED — while one sender holds the pending user, the other gets nothing."""
     first, second = two_connections
