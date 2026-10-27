@@ -1,4 +1,5 @@
-"""#878 — four reachable faults on the runtime's own fault paths that ended the run with no disposition, and a rollback that closed an fd it no longer owned."""
+"""#878 — faults on the runtime's own fault paths that used to end a run with no disposition: an
+overlong basename the read gate allows (probing it raises ENAMETOOLONG), and a naive budget origin."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -19,7 +20,7 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
 _LONG_NAME = "n" * 300
 
 
-# F-15 — a path the read gate ALLOWS raises ENAMETOOLONG out of the `is_file()` probe
+# A path the read gate ALLOWS raises ENAMETOOLONG out of the `is_file()` probe.
 
 
 def _main_deps(tmp_path: Path):
@@ -28,8 +29,6 @@ def _main_deps(tmp_path: Path):
 
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True)
-    # No `salt=`: #875 removed the run-scoped delimiter from `bind`/`AgentDeps` entirely —
-    # a tool return is framed by `_untrusted.wrap_fresh`, which mints its own.
     return run_dir, bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
 
 

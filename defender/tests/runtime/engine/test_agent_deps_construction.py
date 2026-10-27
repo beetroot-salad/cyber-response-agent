@@ -1,4 +1,6 @@
-"""AgentDeps and subtypes cannot be constructed without an explicit policy and cwd anchor."""
+"""AgentDeps and subtypes cannot be constructed without an explicit policy and cwd anchor.
+
+A missing required field raises pydantic's `ValidationError`, never stdlib's `TypeError` (#1067)."""
 from __future__ import annotations
 
 import functools
@@ -21,7 +23,8 @@ _MAIN_POLICY = compile_policy_for(MAIN_DEF, run_dir=Path("/run"), defender_dir=P
 
 @functools.cache
 def _gather_policy():
-    """Gather's policy, compiled with a RUN's grant (#1106 M4: `GATHER_DEF` carries none) — lazily, so the module..."""
+    """Gather's policy, compiled with a run's grant (`GATHER_DEF` carries none), lazily so the module
+    collects before the tenant folder exists."""
     return compile_policy_for(
         T1106.fixture_gather_def(), run_dir=Path("/run"), defender_dir=Path("/dfn"))
 
@@ -33,14 +36,14 @@ def _ident(run_dir: Path) -> dict:
 
 
 def test_agent_deps_requires_policy(tmp_path):
-    """AgentDeps(run_dir, defender_dir, run_id, salt) with NO policy= -> ValidationError (the base has no..."""
-    with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
+    """`AgentDeps` without `policy=` raises: the base has no default to fall back to MAIN-shaped."""
+    with pytest.raises(ValidationError):
         tools.AgentDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
                         cwd_anchor=tmp_path)
 
 
 def test_agent_deps_accepts_explicit_policy(tmp_path):
-    """POSITIVE CONTROL for the requiredness negatives: AgentDeps(..., policy=_MAIN_POLICY) constructs, .policy..."""
+    """Positive control for the requiredness negatives: with `policy=` given, construction succeeds."""
     deps = tools.AgentDeps(**_ident(tmp_path), policy=_MAIN_POLICY)
     assert deps.policy is _MAIN_POLICY
     assert deps.role is AgentRole.MAIN
@@ -49,7 +52,7 @@ def test_agent_deps_accepts_explicit_policy(tmp_path):
 
 def test_agent_deps_requires_cwd_anchor(tmp_path):
     """AgentDeps cannot silently resolve relative paths against the ambient process cwd."""
-    with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
+    with pytest.raises(ValidationError):
         tools.AgentDeps(
             run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
             policy=_MAIN_POLICY,
@@ -57,13 +60,15 @@ def test_agent_deps_requires_cwd_anchor(tmp_path):
 
 
 def test_gather_deps_requires_policy(tmp_path):
-    """#535: GatherDeps(4 identity fields) with NO policy= now RAISES. The gather reader lane is anchored..."""
-    with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
+    """`GatherDeps` without `policy=` raises too: its reader lane is anchored per run, so there is no
+    static default."""
+    with pytest.raises(ValidationError):
         tools.GatherDeps(**_ident(tmp_path))
 
 
 def test_gather_deps_prod_construction_with_explicit_policy(tmp_path):
-    """Orphaned-consumer pin (tools_gather.py:315): the prod gather construction now passes an explicit per-run..."""
+    """Gather's production construction with an explicit per-run policy carries that policy, the
+    GATHER role and the lead id."""
     gather_policy = _gather_policy()
     deps = tools.GatherDeps(**_ident(tmp_path), lead_id="l-001", policy=gather_policy)
     assert deps.policy is gather_policy

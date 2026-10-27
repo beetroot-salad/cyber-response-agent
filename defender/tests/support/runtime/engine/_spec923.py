@@ -1,5 +1,4 @@
-"""Shared machinery for the #923 spec suite — NO test scripts (the leading underscore keeps
-pytest from collecting it)."""
+"""Shared builders and drivers for the #923 host-verdict spec suite (no tests here)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
@@ -13,23 +12,17 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture
 DEFENDER = Path(__file__).resolve().parents[4]
 GOLDEN_AB3 = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
 
-#: The fifth member, spelled and PLACED as F1 settled it: appended LAST to the ordered tuple.
-#: Safe only because it sorts last — the refusal text and the tool schema are read in one round
-#: trip, so a member that did not sort last would have to be INSERTED, not appended.
+#: The host-only fifth member, appended last to the ordered tuple. Safe only because it also
+#: sorts last: the refusal text and the tool schema are read in one round trip.
 MEMBER = "unresolved"
 
-#: The verdict that stays: the investigating model's own "I could not settle this", now priced.
+#: The investigating model's own "I could not settle this", which must pay a `ceiling_test` price.
 GAP_MEMBER = "inconclusive"
 
-#: What the no-review bypass does with EVERY member of the vocabulary — `False` for the host's
-#: own verdict it must skip, `True` for every model-authored member that must spend a review:
-#: the three confident ones and, since #992, `inconclusive` (its ceiling claim is what the
-#: review judges). Keyed per member and covering the whole enum, never written as the set of
-#: members that skip: a yes-set is identical before and after a sixth member joins
-#: `DISPOSITION_ENUM`, so it fires when the branch SHRINKS and never when the vocabulary GROWS —
-#: which is the direction J4's owed clause ("fails when the branch's verdict list drifts from
-#: the enum") was written for. A new member has to be given a cell here before the suite can go
-#: green.
+#: What the no-review bypass does per member: `False` for the host's own verdict (skips review),
+#: `True` for every model-authored one (spends a review; `inconclusive` too, whose ceiling claim
+#: the review judges). Keyed over the whole enum, not written as a skip-set: a skip-set passes
+#: unchanged when a sixth member joins `DISPOSITION_ENUM`, so a new member must get a cell here.
 BYPASS_BY_MEMBER: dict[str, bool] = {
     "benign": True,
     "false-positive": True,
@@ -40,57 +33,38 @@ BYPASS_BY_MEMBER: dict[str, bool] = {
 
 
 # ---------------------------------------------------------------------------------------
-# `:T conclude` rows — the price predicate's input classes, one constant per class.
-#
-# #923 §7 round 4 (human, POST-PHASE): the free-text "does this sentence name a source or
-# capability" predicate this section used to pin is RETIRED, not kept alongside anything —
-# leaving it in place meant `ceiling_test "unknown"` still bought a close, which is the exact
-# bug the redesign exists to remove. A `ceiling_test` row is now a RECEIPT: a pointer into this
-# run's own transcript the host verifies mechanically (a `:L findings` lead this run actually
-# dispatched, or the closed verb roster this codebase ships), never a judgment of prose. The
-# constants below are RESTATED against that new predicate; the demand slot each fills is
-# unchanged even where the shape of the input that fills it is not.
+# `:T conclude` rows — the price predicate's input classes, one constant per class. A
+# `ceiling_test` row is a RECEIPT the host verifies mechanically against this run's own
+# transcript (a `:L findings` lead it dispatched, or the closed verb roster), never as prose.
 # ---------------------------------------------------------------------------------------
 
-#: PAYS as `query-failed`: `ref=l-002` resolves to a `:L findings` lead THIS RUN dispatched
-#: (`LEADS` below) whose only recorded outcome is a `fail_reason` — the mechanical
-#: FK-plus-consistency check `_check_ceiling_receipt` runs, reusing `_lead_returned_a_result`
-#: (the SAME lookup `entity_check` uses) rather than judging what the note says.
-PAYING_ROW = "state=query-failed ref=l-002 note=EDR execve logs for web-1 never came back; the collector returned HTTP 503"
+#: Pays as `query-failed`: `ref=l-002` is a lead this run dispatched (`LEADS`) whose only
+#: outcome is a `fail_reason` — checked via `_lead_returned_a_result`, not by reading the note.
+PAYING_ROW ="state=query-failed ref=l-002 note=EDR execve logs for web-1 never came back; the collector returned HTTP 503"
 
-#: A second, DISTINCT paying receipt — a DIFFERENT lead (`l-003`, `query-empty`: it ran clean
-#: and recorded no `fail_reason`) — for the distinctness control. Two receipts naming two
-#: different `(state, ref)` pairs are two gaps, not a repeat.
+#: A distinct paying receipt (`l-003`, `query-empty`: ran clean, no `fail_reason`) for the
+#: distinctness control: two different `(state, ref)` pairs are two gaps, not a repeat.
 SECOND_PAYING_ROW = "state=query-empty ref=l-003 note=DNS query logs for web-1 came back with zero rows in the 30d window"
 
-#: PAYS as `nothing-to-try`: `cap=sandbox.detonate` names a capability that does not exist
-#: ANYWHERE in this codebase's closed verb roster (`defender/integrations/` declares no
-#: `sandbox` system) — checked negatively against that roster, never a judgment of prose. It is
-#: the row §7-round-4's widening exists for: the shipped escalation document's real gap is
-#: exactly this ("confirming C2 would require sandbox detonation or traffic-content inspection,
-#: and neither is in the runtime tool surface"), and it has no lead to point at because nothing
-#: was dispatchable — the one lane `ref=` cannot reach.
+#: Pays as `nothing-to-try`: `cap=sandbox.detonate` is absent from the closed verb roster (no
+#: `sandbox` system under `defender/integrations/`). The lane `ref=` cannot reach: nothing was
+#: dispatchable, so there is no lead to point at.
 CAPABILITY_ROW = "state=nothing-to-try cap=sandbox.detonate note=no detonation sandbox is available to this runtime, so the payload was never executed"
 
-#: DOES NOT PAY. The RETIRED free-text shape: no `state=`/`ref=`/`cap=`/`note=` fields at all,
-#: so it does not even PARSE as a receipt. THE discriminating negative of the whole redesign —
-#: a suite that omits it passes against exactly the predicate #923 exists to delete, the one
-#: that read any sentence about a limitation as a claim (`ceiling_test "unknown"` bought a
-#: close under it).
+#: Does not pay: free text with no `state=`/`ref=`/`cap=`/`note=` fields does not parse as a
+#: receipt. The discriminating negative — a predicate that read any sentence about a limitation
+#: as a claim would let it buy a close.
 HOST_ONLY_ROW = "web-1 could not be fully checked"
 
-#: DOES NOT PAY: `ref=l-001` is well-formed and resolves to a REAL lead, but `l-001` actually
-#: returned a result (`LEAD_RESULT` attaches it an observation) — the mechanical consistency
-#: check refuses a receipt that contradicts what its own referenced lead's row says happened,
-#: independent of anything the note claims.
+#: Does not pay: `ref=l-001` is a real lead, but one that returned a result (`LEAD_RESULT`), so
+#: the receipt contradicts its own lead's record whatever the note says.
 SOURCE_ONLY_ROW = "state=query-empty ref=l-001 note=claims a gap this lead's own record contradicts"
 
-#: The format's own "nothing to say" markers. C3 probed exactly the first two.
+#: The format's own "nothing to say" markers.
 EMPTY_ROWS = ("none", "")
 
-#: P10, executed: `is_conclude_empty_marker` normalizes case, whitespace and quoting but does
-#: NO Unicode normalization, so each of these renders to a human as the empty marker and
-#: currently PAYS. Verbatim from the probe's own ten spellings — the four that came back True.
+#: Spellings that render as the empty marker but are not it (`is_conclude_empty_marker` does no
+#: Unicode normalization); none of them may pay.
 CONFUSABLE_EMPTY_ROWS = (
     "n​one",          # zero-width space inside the word
     "nоne",           # Cyrillic о where the Latin o belongs
@@ -98,44 +72,25 @@ CONFUSABLE_EMPTY_ROWS = (
     "ｎｏｎｅ",  # fullwidth
 )
 
-#: Malformed spellings of a REAL member — the input class the §7-round-4 design change is
-#: about. Neither is a member: the first only becomes one if something strips it, the second
-#: only if something folds confusables. They are written here as the two directions that must
-#: agree after the change and disagree today:
-#:
-#: * `ZERO_WIDTH_MEMBER` is COERCED on read today — `normalized_disposition` strips it and
-#:   answers `malicious`, so a committed close no reader can tell from a clean one reads back
-#:   as clean. That is the half the design change removes.
-#: * `HOMOGLYPH_MEMBER` is refused everywhere today, and must stay refused: the route J24's
-#:   resolution pointed at (a confusable fold inside the shared normalizer) would have made it
-#:   equal to the member at four validating boundaries at once.
-#:
-#: Real input through the real primitive — these are written into a real `report.md` and handed
-#: to the real gates, never asserted against a fake's canned answer. The codepoints are P10's
-#: own (its ten-spelling probe measured both tricks paying against a checker that normalizes
-#: case, whitespace and quoting and does no Unicode normalization at all).
+#: Malformed spellings of a real member: a trailing zero-width space and a Cyrillic homoglyph.
+#: Every reader must treat them exactly as `NOT_A_MEMBER` (no zero-width strip, no confusable
+#: fold) and both write gates must refuse them. Written into a real `report.md` and handed to
+#: the real gates, never checked against a fake's canned answer.
 ZERO_WIDTH_MEMBER = "malicious\u200b"
 HOMOGLYPH_MEMBER = "m\u0430licious"   # Cyrillic а
 MALFORMED_MEMBER_SPELLINGS = (ZERO_WIDTH_MEMBER, HOMOGLYPH_MEMBER)
 
-#: The value that was never a member under any reading — the control every malformed spelling
-#: must now be treated IDENTICALLY to. "Malformed reads like unknown" is the whole of the read
-#: half, and it is an outcome rather than a mechanism, so it survives whichever way the
-#: implementer removes the coercion.
+#: A value that was never a member: the control every malformed spelling must read identically to.
 NOT_A_MEMBER = "not-a-disposition"
 
-#: P1, executed: `_row_states_something` returns a silent `False` for every one of these — no
-#: exception, no coercion. Reachable only against a programmatically built companion dict; the
-#: real parser's regex can only ever put `str` (or nothing) in the list.
+#: `_row_states_something` answers a silent `False` for each (no exception, no coercion).
+#: Reachable only through a hand-built companion dict: the parser only ever yields `str`.
 NON_STRING_ROWS = ([], {}, 0, 1, None, True, ["auditd on web-1 not retrieved"])
 
 
 def conclude(*, ceiling_test: tuple[str, ...] = (), **rows: str) -> str:
-    """One `:T conclude` fence, with `ceiling_test` written as REPEATED rows.
-
-    Repetition is the format's list syntax and it is the whole subject of two demands here, so
-    a builder that took a single scalar could not express either the duplicate-row case or the
-    several-rows case at all."""
+    """One `:T conclude` fence, with `ceiling_test` written as REPEATED rows (the format's list
+    syntax, which the duplicate-row and several-rows cases need)."""
     body = "".join(f"{k:<22} {v}\n" for k, v in rows.items())
     body += "".join(f"{'ceiling_test':<22} \"{row}\"\n" for row in ceiling_test)
     return "```invlang\n:T conclude\n" + body + "```\n"
@@ -145,22 +100,17 @@ def doc(*parts: str) -> str:
     return "".join(parts)
 
 
-#: A prologue vertex with every slot RESOLVED and a lead that came back with a result: the
-#: shape that pays `benign`'s and `false-positive`'s existing prices, so a scenario about the
-#: NEW price can drive the other keywords through the same document without their prices
-#: standing in the way.
+#: A fully resolved prologue vertex: with `LEAD_RESULT` it pays `benign`'s and
+#: `false-positive`'s prices, so a `ceiling_test` scenario can drive those keywords too.
 PROLOGUE = (
     "```invlang\n"
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"
     "v-001|compute|database-server/internal/known-corp|db-1|os=linux\n"
     "```\n"
 )
-#: Three leads, three shapes a `ceiling_test` receipt's `ref` can point at:
-#: `l-001` returns a RESULT (`LEAD_RESULT` below attaches it an observation) — pays
-#: `false-positive`'s `entity_check` and is the control a `ceiling_test` receipt must be
-#: REFUSED for pointing at (`SOURCE_ONLY_ROW`); `l-002` records a `fail_reason` and nothing
-#: else — the `query-failed` shape; `l-003` records neither a `fail_reason` nor any result —
-#: the `query-empty` shape.
+#: Three leads, one per shape a receipt's `ref` can point at: `l-001` returned a result
+#: (`LEAD_RESULT`; pays `false-positive`'s `entity_check`, and a receipt naming it is refused);
+#: `l-002` recorded only a `fail_reason` (`query-failed`); `l-003` recorded neither (`query-empty`).
 LEADS = (
     "```invlang\n"
     ":L findings [id|loop|name|target|fail_reason|tests|system|window]\n"
@@ -169,9 +119,8 @@ LEADS = (
     "l-003|1|dns-query-logs-web1|v-001|||elastic|30d\n"
     "```\n"
 )
-#: The identity is EDGED to `PROLOGUE`'s `v-001`, not just declared: #993 refuses a
-#: lead-declared vertex no `:E` row ever names, and a bare identity row with no edge is
-#: exactly the shape that rule exists to catch.
+#: The identity is edged to `PROLOGUE`'s `v-001`, not just declared: #993 refuses a
+#: lead-declared vertex no `:E` row names.
 LEAD_RESULT = (
     "```invlang\n"
     ":V l-001.observations.vertices [id|type|class|ident|attrs?]\n"
@@ -204,12 +153,9 @@ def paid(*rows: str, disposition: str = GAP_MEMBER, category: str = "data-ceilin
 
 
 def pays_every_price(disposition: str) -> str:
-    """A companion that owes NOTHING under any priced keyword, so a scenario about what happens
-    AFTER the price gate can drive every member of the vocabulary through one document.
-
-    Every price is paid rather than dodged: the prologue vertex carries no `??` slot (benign's),
-    the conclude states a detection defect and names a lead that returned a result
-    (false-positive's), and it names a `ceiling_test` receipt that pays (the new one)."""
+    """A companion that owes nothing under any priced keyword, so one document can drive every
+    member past the price gate. Each price is paid, not dodged: no `??` slot (benign), a
+    detection defect plus a lead that returned a result (false-positive), a paying receipt."""
     return doc(PROLOGUE, LEADS, LEAD_RESULT, conclude(
         disposition=disposition, confidence="high",
         **{"termination.category": "data-ceiling"},
@@ -220,14 +166,12 @@ def pays_every_price(disposition: str) -> str:
 
 
 # ---------------------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------------------
 # Driving the real entry points.
 # ---------------------------------------------------------------------------------------
 
 def _with_run_state(deps: Any) -> Any:
-    """`deps` carrying a run's state, as every MAIN the driver builds does: the enforced budget
-    hooks raise on deps that carry none (#1235 round 3)."""
+    """`deps` carrying a run's state, as the driver's MAIN does: the enforced budget hooks raise
+    on deps that carry none."""
     from dataclasses import replace
 
     from defender.records import Run
@@ -243,7 +187,7 @@ def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
     from defender.agents import MAIN_DEF
     from defender.investigation.agent_definition import bind
 
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    # A run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     if companion is not None:
@@ -253,17 +197,15 @@ def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
     return _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=dfn)), run_dir
 
 
-#: "no argument given", so an EXPLICIT `stages=None` reaches the gate as the unbound bundle it
-#: is — the composition fault the driver's own fall-through would produce, and one of the four
-#: conditions `_fail` exists for. A `None` default would make that case unreachable from here.
+#: Sentinel for "no argument given", so an explicit `stages=None` still reaches the gate as an
+#: unbound bundle (one of the faults `challenge_gate._fail` handles).
 _UNBOUND = object()
 
 
 def close(deps: Any, disposition: str, *, stages: Any = _UNBOUND, forced: bool = False,
           bounds: Any = None) -> Any:
-    """Drive the REAL close. `forced=True` is the HOST channel — the driver's retry-exhaustion
-    limb is its only production caller — and is what makes "any caller passing `forced` is the
-    host" drivable as a rule rather than as a list of names."""
+    """Drive the real close. `forced=True` is the host channel (its only production caller is the
+    driver's retry-exhaustion limb)."""
     from defender.investigation import challenge_gate
     from defender.investigation.close_tool import _close_investigation_async
     from defender.tests.support.runtime.permissions import _review_bundle
@@ -278,14 +220,11 @@ def close(deps: Any, disposition: str, *, stages: Any = _UNBOUND, forced: bool =
 
 
 def ab3_deps(tmp_path: Path) -> tuple[Any, Path]:
-    """MAIN deps over the shipped ab3 golden — a real investigation with real citable ids, which
-    a gate-overrule scenario needs: an ask naming anything the document did not record is
-    refused by the invented-identifier guard and fails the review as unreadable instead of
-    routing on it."""
+    """MAIN deps over the shipped ab3 golden, whose real citable ids a gate-overrule scenario
+    needs: an ask naming an id the document never recorded fails the review as unreadable."""
     from defender.agents import MAIN_DEF
     from defender.investigation.agent_definition import bind
 
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     (run_dir / "alert.json").write_bytes((GOLDEN_AB3 / "alert.json").read_bytes())
@@ -305,17 +244,15 @@ def real_targets(deps: Any) -> list[str]:
 
 
 def committed(run_dir: Path) -> dict:
-    """The committed report's frontmatter, read as the analyst reads it — through the shared
-    accessor, off `report.md` alone and with no access to the run's history."""
+    """The committed report's frontmatter, read through the shared accessor off `report.md` alone."""
     from defender.records._report import read_report
 
     return dict(read_report(run_dir / "report.md").frontmatter or {})
 
 
 def committed_verdict(run_dir: Path) -> str | None:
-    """The committed disposition read VERBATIM off the frontmatter line, not through the
-    normalizer: a value that only reads as the member after zero-width stripping is a close no
-    reader can tell from a clean one, and that is the thing this suite is about."""
+    """The committed disposition read verbatim off the frontmatter line, not through the
+    normalizer, so a zero-width-laced value is seen as written."""
     text = (run_dir / "report.md").read_text(encoding="utf-8")
     for line in text.splitlines():
         if line.startswith("disposition:"):
@@ -324,12 +261,9 @@ def committed_verdict(run_dir: Path) -> str | None:
 
 
 class StuckModel:
-    """A model that never stops retrying a call the gate refuses.
-
-    A REAL fault through the REAL primitive, not an imagined exception class: pydantic-ai
-    exhausts its own shared tool-retry budget and raises `UnexpectedModelBehavior`, which is
-    the ONLY condition the driver's retry-exhaustion limb handles. A fake agent whose `iter()`
-    raised would pin the handler against an exception nothing in production produces."""
+    """A model that keeps retrying a call the gate refuses, so pydantic-ai exhausts its own
+    tool-retry budget and raises `UnexpectedModelBehavior` — the real fault the driver's
+    retry-exhaustion limb handles, not an exception a fake agent invents."""
 
     __name__ = "Stuck"
 
@@ -342,8 +276,8 @@ class StuckModel:
 
 
 class NullStore:
-    """The store `_drive_agent` flushes through. Both call sites are already inside best-effort
-    try/except blocks in the driver, so this only has to exist."""
+    """The store `_drive_agent` flushes through; the driver's calls are best-effort, so it only
+    has to exist."""
 
     def last_render_len(self, _session_id: str) -> int:
         return 0
@@ -353,13 +287,9 @@ class NullStore:
 
 
 def drive_to_retry_exhaustion(deps: Any, *, review_stages: Any = None) -> tuple[Any, Any, Any]:
-    """Run the REAL agent loop until the retry budget is spent, so the driver's own forced-close
-    limb runs. Returns `(run, truncated_by, exit_reason)` — the exit class alone off the
-    driver's run-end record, for the callers that predate it.
-
-    `review_stages` is threaded so a scenario can observe that the forced close spent NO review
-    — the fall-through this limb must not take is precisely one that dispatches review roles it
-    was never given."""
+    """Run the real agent loop until the retry budget is spent, so the driver's own forced-close
+    limb runs; returns `(run, truncated_by, exit_reason)`. `review_stages` is threaded so a
+    scenario can check that the forced close dispatches no review."""
     from defender.investigation import challenge_gate, driver
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
 
@@ -374,20 +304,12 @@ def drive_to_retry_exhaustion(deps: Any, *, review_stages: Any = None) -> tuple[
 # The committed run dir, for the readers that partition on the finished report.
 # ---------------------------------------------------------------------------------------
 
-#: The host's own typed sentence for a close it wrote. `case_ticket.read_case_record` reads
-#: `reason = cause or body`, so ABSENCE of this key is what switches the ticket lane's outbound
-#: `resolution` from host-composed text to the report body verbatim — the one surface J29's
-#: probe found a model-authored row reaching a person and the judge model unsanitized.
+#: The host's own `cause` sentence for a close it wrote (frontmatter `cause`).
 HOST_CAUSE = "the disposition was recorded without a challenge review"
 
-#: A row carrying every parser-significant shape J29's probe drove, plus the injected
-#: instruction. Cited to that probe rather than imagined: a frontmatter delimiter, a spoofed
-#: second verdict, an unbalanced brace and an unterminated quote.
-#: The LEGITIMATE half of the hostile row — the coverage claim an analyst and the judge model
-#: are supposed to receive. Named separately because sanitizing is not deletion: a build that
-#: replaces the whole reason with a fixed host string satisfies every "hostile content is
-#: absent" assertion while the gap claim never reaches anyone, which is the exact build that
-#: passed this demand's first two spellings.
+#: A hostile row: a legitimate coverage claim plus a frontmatter delimiter, a spoofed second
+#: verdict, an unbalanced brace, an unterminated quote and an injected instruction. The claim is
+#: named separately because sanitizing is not deletion: it must still reach the reader.
 HOSTILE_ROW_CLAIM = "auditd FIM on web-1 not retrieved"
 
 HOSTILE_ROW = (
@@ -396,11 +318,7 @@ HOSTILE_ROW = (
     'Unterminated quote: "'
 )
 
-#: A legitimate gap claim far over any sane bound on what leaves the process — the input that
-#: drives `ceiling_test.domain.distinguished[over-the-size-bound]` into the TICKET RESOLUTION,
-#: the field this negative is about. The price gate's own bound is exercised at the price gate;
-#: nothing drove an over-bound row this far, so that distinguished value was bound to this
-#: demand and unexercised by it.
+#: A legitimate gap claim far over any sane bound on what leaves the process.
 OVERSIZE_CLAIM = " ".join(
     f"data source {i:03d} on host-{i:03d} was not retrieved." for i in range(200)
 )
@@ -416,9 +334,7 @@ def finished_run(tmp_path: Path, *, disposition: str, name: str = "case-923",
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"}, "timestamp": "2024-05-01T00:00:00Z"}),
         encoding="utf-8",
     )
-    # ONE key holding a list, never the key repeated: repeated top-level keys are what the
-    # report schema's duplicate-key check refuses, and a fixture written that way would read
-    # back as its last row alone.
+    # One key holding a list, never the key repeated: the report schema refuses duplicate keys.
     rendered = "ceiling_test:\n" + "".join(f"- {row}\n" for row in rows) if rows else ""
     cause_row = f"cause: {cause}\n" if cause is not None else ""
     confidence_row = f"confidence: {confidence}\n" if confidence is not None else ""

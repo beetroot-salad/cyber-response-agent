@@ -40,10 +40,7 @@ SALT = "0011223344556677"
 
 
 def _load_dryrun():
-    """Import `tooling/testing/compaction_dryrun.py` by path.
-
-    NOTE, carried from the demand: this script sits at the REPO ROOT, outside
-    `specGraph.codeRoots`, so nothing mechanical checks the demands bound to it (G21/F13)."""
+    """Import `tooling/testing/compaction_dryrun.py` by path: it sits outside the `defender` package."""
     return load_module(WORKTREE / "tooling" / "testing" / "compaction_dryrun.py",
                        name="compaction_dryrun_705")
 
@@ -131,7 +128,7 @@ def test_two_wire_log_constructions_under_one_key_do_not_silently_clobber_each_o
     assert len(after) > len(before)
 
 
-# the two-digest join — R7's restatement of O22
+# the two-digest join
 
 @pytest.mark.e2e
 def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
@@ -166,7 +163,7 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
     assert ss.SCHEMA_VERSION is not None  # the join is a store contract, not a log one
 
 
-# the consumers the census missed — survival
+# downstream readers of the verbatim log
 
 def test_compaction_dryrun_reader_survives_the_undelta_d_log(tmp_path):
     dryrun = _load_dryrun()

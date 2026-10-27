@@ -48,7 +48,7 @@ def _overrule(deps, *, ask=None, bounds=None):
     )
 
 
-# Demand #0 — the return-value contract.
+# The committed verdict.
 
 def test_a_host_terminated_close_commits_the_fifth_member_verbatim(tmp_path):
     """Every host-terminated close commits the literal string `unresolved` into `report.md`'s frontmatter `disposition` field, verbatim and unnormalized."""
@@ -71,10 +71,11 @@ def test_a_host_terminated_close_commits_the_fifth_member_verbatim(tmp_path):
     )
 
 
-# O2 — the five producers (coverage) and the universal (the obligation).
+# Every host producer.
 
 def test_all_three_gate_overrule_arms_commit_the_new_state(tmp_path):
-    """Each of the gate's three overrule arms — evidence-cannot-discriminate, nothing-left-to-ask, turn-budget-spent — commits `unresolved`, and `cause`..."""
+    """Each of the gate's three overrule arms commits `unresolved` and keeps its own `cause`, the
+    operator's only signal of which arm fired."""
     deps, run_dir = ab3_deps(tmp_path / "arm1")
     assert _overrule(deps).cause == CAUSE_EVIDENCE_CANNOT_DISCRIMINATE
     assert committed_verdict(run_dir) == MEMBER
@@ -124,7 +125,9 @@ def _slow_stage(seconds: float):
 
 
 def test_a_review_that_timed_out_raised_or_was_unreadable_emits_the_new_state(tmp_path):
-    """`challenge_gate._fail` — reached when a review stage times out, raises, returns text outside its own output contract, or has no reviewer bound to..."""
+    """`challenge_gate._fail` (a stage raised, timed out or answered outside its contract, or no
+    bundle was bound) commits `unresolved` with `CAUSE_REVIEW_INCOMPLETE`; `failure_kind` tells
+    the conditions apart."""
     from defender.investigation.review_roles import ReviewStages
 
     lens = _review_bundle.LENS_READING
@@ -173,7 +176,8 @@ def test_the_drivers_retry_exhaustion_close_commits_the_new_state(tmp_path):
 
 
 def test_the_investigating_models_own_close_still_commits_inconclusive(tmp_path):
-    """The investigating model reporting that it could not settle the case still commits `inconclusive` — priced, and the only remaining producer of that..."""
+    """The model's own priced `inconclusive` close still commits: the positive control for the
+    host-path negatives here."""
     deps, run_dir = main_deps(tmp_path, paid(PAYING_ROW))
     result = close(deps, GAP_MEMBER)
     assert result.outcome == "stands"
@@ -182,7 +186,9 @@ def test_the_investigating_models_own_close_still_commits_inconclusive(tmp_path)
 
 
 def test_a_model_authored_new_state_close_is_refused_without_spending_a_review(tmp_path):
-    """A close tool call supplying `unresolved` is refused, nothing is committed, and no review stage is dispatched — the model is OFFERED the member by..."""
+    """A model close supplying `unresolved` is refused with no commit and no review, although the
+    tool schema (derived from the ordered tuple) advertises it: both halves of that deliberate
+    divergence are pinned."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.close_tool import DispositionArg
@@ -201,10 +207,11 @@ def test_a_model_authored_new_state_close_is_refused_without_spending_a_review(t
     assert stages.calls == [], f"the refused close spent a review: {stages.calls}"
 
 
-# O3 — the committed report partitions on `disposition` alone.
+# The committed report partitions on `disposition` alone.
 
 def test_no_host_terminated_run_appears_in_the_gap_set(tmp_path):
-    """Partition committed reports on `disposition` ALONE"""
+    """Partitioned on `disposition` alone, the `inconclusive` reports hold no host-terminated run
+    and each names a gap."""
     from defender.records._report import read_report
 
     host_deps, host_run = ab3_deps(tmp_path / "host-overruled")
@@ -236,10 +243,11 @@ def test_no_host_terminated_run_appears_in_the_gap_set(tmp_path):
     assert rows, "a report in the gap set names no gap — the set carries no finding"
 
 
-# Survival, and the branch the whole partition rests on.
+# The forced close and the no-review bypass.
 
 def test_the_frameworks_forced_close_is_not_refused_by_the_new_price(tmp_path):
-    """The framework's retry-exhaustion close still commits a `report.md`"""
+    """The framework's retry-exhaustion close still commits a `report.md` (its `unresolved` owes
+    no price), while a model's `inconclusive` close of the same gapless document is refused."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run_dir = main_deps(tmp_path, gapless())
@@ -261,7 +269,8 @@ def test_the_frameworks_forced_close_is_not_refused_by_the_new_price(tmp_path):
 
 
 def test_the_no_review_bypass_matches_both_verdicts_and_no_others(tmp_path):
-    """The no-review bypass matches BOTH uncertain verdicts — `inconclusive` and `unresolved` — and NO others, and the `forced` flag buys no bypass of..."""
+    """The no-review bypass skips exactly the members `BYPASS_BY_MEMBER` marks and keys on the
+    verdict, not on `forced`: a confident forced close still spends its review."""
     assert set(BYPASS_BY_MEMBER) == set(DISPOSITION_ENUM), (
         f"the vocabulary and this expectation disagree: "
         f"+{sorted(set(DISPOSITION_ENUM) - set(BYPASS_BY_MEMBER))} "

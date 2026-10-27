@@ -42,7 +42,8 @@ def _body(report: str) -> str:
 
 
 def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
-    """A receipt is a TYPED record of one `:R consultations` row — the owning lead, the anchor"""
+    """A receipt is a frozen, typed record of one `:R consultations` row: lead, anchor, result,
+    reasoning, and the window both verbatim and parsed, so the guard and the report read one value."""
     (receipt,) = _receipts(BENIGN_DOC)
 
     assert dataclasses.is_dataclass(receipt)
@@ -100,7 +101,8 @@ def test_runtime_evidence_rows_project_off_the_consultation_bucket():
 
 
 def test_runtime_evidence_consultation_lands_in_report_body():
-    """A close projects every qualifying `:R consultations` row into `report.md`'s BODY — one"""
+    """A close renders one body line per qualifying `:R consultations` row, never into the capped
+    frontmatter (the whole-close half is `e2e/test_tacit_authz_e2e_983.py`)."""
     receipts = _receipts(BENIGN_DOC)
     assert len(receipts) == 1, "fixture control: the document carries one qualifying consultation"
     (receipt,) = receipts
@@ -167,7 +169,8 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
 
 
 def test_the_projection_and_the_render_read_one_set():
-    """Whatever `conclude_runtime_evidence_rows` hands back is what `render_report` writes —"""
+    """What `conclude_runtime_evidence_rows` hands back is what `render_report` writes: two rows
+    differing in every cell expose a collapsed, duplicated or canned render."""
     doc = scene.document(
         rows=scene.consult_block(
             scene.consultation_row(),

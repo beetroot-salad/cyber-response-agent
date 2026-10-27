@@ -34,8 +34,8 @@ def _gather_policy(tmp: Path) -> AgentPolicy:
 
 
 def _admits(policy: AgentPolicy, command: str, run_dir: Path) -> bool:
-    """Whether the agent's own gate would actually run `command` — the assertion that
-    turns "the hint mentions jq" into "the hint names a command this agent can run"."""
+    """Whether the agent's own gate would actually run `command`: what turns "the hint mentions a
+    reducer" into "the hint names a command this agent can run"."""
     return permission.decide_bash(
         command, policy=policy, run_dir=run_dir, defender_dir=_DEFENDER,
     ).allow
@@ -45,14 +45,14 @@ _MAIN_HINT = "Reduce it in a pipe, write the result to a file, then read that"
 
 
 def _hinted_command(hint: str) -> str:
-    """The runnable command out of a hint, with the `<filter>` placeholder bound (a
+    """The runnable command out of a hint (its last line), with any `<filter>` placeholder bound (a
     literal `<` is a redirect token the parser rejects before the allowlist sees it)."""
     return hint.rsplit("\n", 1)[1].strip().replace("'<filter>'", "'.a'")
 
 
 def test_overflow_hint_main_pipes_into_defender_sql_and_names_the_write_sink(tmp_path) -> None:
-    """main has `jq` AND a write tool. The reducer must be PIPED: `jq '<filter>' <path>`
-    is denied (main/gather `jq` is stdin-compute-only), which the last assertion pins."""
+    """Main's hint pipes the payload into `defender-sql`, names a write sink, and is a command
+    main's own gate admits."""
     run = tmp_path / "run"
     pol = _main_policy(tmp_path)
     hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
@@ -63,7 +63,8 @@ def test_overflow_hint_main_pipes_into_defender_sql_and_names_the_write_sink(tmp
 
 @pytest.mark.parametrize("policy_of", [_main_policy, _gather_policy], ids=["main", "gather"])
 def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path, policy_of) -> None:
-    """#1138 O8: the reduction the hint hands over has to be right whatever the payload's shape."""
+    """The hint's reduction (`DESCRIBE data`, never a whole-payload `count(*)`) is right whatever the
+    payload's shape, and runnable on each lane (#1138)."""
     run = tmp_path / "run"
     pol = policy_of(tmp_path)
     hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
@@ -73,7 +74,7 @@ def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path
 
 
 def test_a_captured_payload_is_read_at_the_CAPTURE_ceiling() -> None:
-    """The property the shared constant used to carry, kept after #832 split it."""
+    """A gather_raw capture is read only up to the payload view's passthrough ceiling."""
     from defender.investigation.payload_view import passthrough_max_bytes
 
     assert tools._cap_for(Path("/run/gather_raw/l-1/0.json")) == passthrough_max_bytes()
@@ -159,7 +160,8 @@ def _read_file_tool_output(run_dir: Path, path: Path) -> str:
 
 
 def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
-    """The load-bearing ordering: read_file caps FIRST, then untrusted-wraps, so"""
+    """`read_file` caps first and wraps second, so the truncation notice sits inside the frame and
+    the closing delimiter survives the cut."""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     alert = run_dir / "alert.json"
@@ -167,7 +169,7 @@ def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
 
     out = _read_file_tool_output(run_dir, alert)
 
-    # #875: the delimiter is minted at wrap time, so it is read off the return.
+    # The delimiter is minted at wrap time, so read it off the return.
     salt = frame_salt_of(out, "untrusted")
     opener, closer = f"<run-{salt}-untrusted>", f"</run-{salt}-untrusted>"
     assert out.startswith(opener), "untrusted read was not wrapped"

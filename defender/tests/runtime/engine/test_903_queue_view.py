@@ -39,7 +39,7 @@ TORN = '{"finding_id": "torn", '
 # the writers' exact shapes, as literals
 
 
-#: `drain.retire` — nested under `row`, with `attempts`, stamped by mechanism 3.
+#: `drain.retire` — nested under `row`, with `attempts` and a `retired_at` stamp.
 NESTED_STAMPED = {
     "finding_id": "g-1",
     "attempts": 3,
@@ -47,7 +47,7 @@ NESTED_STAMPED = {
     "retired_at": "2026-09-10T04:05:06+00:00",
     "row": {"finding_id": "g-1", "title": SCRIPT_PAYLOAD},
 }
-#: The same writer BEFORE mechanism 3 — an old record, which reads as `when: null`.
+#: The same writer's record from before the stamp existed, which reads as `when: null`.
 NESTED_UNSTAMPED = {
     "finding_id": "g-3",
     "attempts": 2,
@@ -67,14 +67,14 @@ FLAT_STAMPED = {
     "deadletter_reason": "row carries no value under 'finding_id'",
     "retired_at": "2026-09-12T07:08:09+00:00",
 }
-#: `pitfalls_curator._graveyard_dropped_rows` — nested, and NO `attempts` at all (D13).
+#: `pitfalls_curator._graveyard_dropped_rows` — nested, and NO `attempts` at all.
 CURATOR_DROP = {
     "pitfall_id": "p-9",
     "deadletter_reason": "undeclared-system:evil",
     "row": {"pitfall_id": "p-9", "system": "evil", "occurrences": 2},
 }
 
-#: `drain._record_stuck` — two records, the second stamped by mechanism 3.
+#: `drain._record_stuck` — three records; only the first predates the `recorded_at` stamp.
 STUCK_FIRST = {
     "fault_class": "TimeoutError",
     "row_ids": ["f-1"],
@@ -186,7 +186,7 @@ EXPECTED_TAINTED = [
 
 
 def _make_paths(tmp_path: Path) -> LoopPaths:
-    """`LoopPaths` over a state root that exists: the handle never creates it (#1135)."""
+    """`LoopPaths` over a state root that exists: the handle never creates it."""
     paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
     location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
     return paths
@@ -199,7 +199,7 @@ def _build(paths: LoopPaths) -> dict:
 
 
 def _graveyard_file(paths: LoopPaths, channel: Channel) -> Path:
-    """The channel's dead-letter sidecar, beside its queue (the layout is unchanged)."""
+    """The channel's dead-letter sidecar, beside its queue."""
     return location_path(paths.state_root) / channel.deadletter
 
 
@@ -427,7 +427,7 @@ def _channel(view: dict, name: str) -> dict:
 
 
 # --------------------------------------------------------------------------------------
-# the serializer — O6, O9, O7
+# the serializer
 
 
 def test_each_channel_carries_its_accent_and_whether_a_stuck_record_exists_for_it(view):
@@ -450,13 +450,15 @@ def test_queue_depth_is_the_readable_rows_of_the_pending_file(view):
 
 
 def test_unreadable_sums_a_channels_three_sidecars_counting_each_once(view):
+    """Findings' torn lines (one pending, two in the graveyard) sum to three; a count of files
+    holding a torn line would say two."""
     assert _channel(view, "findings")["unreadable"] == 3
     assert _channel(view, "questioner_findings")["unreadable"] == 0
     assert _channel(view, "pitfalls")["unreadable"] == 0
 
 
 # --------------------------------------------------------------------------------------
-# held — O3, per the lane's own marker
+# held, per the lane's own marker
 
 
 def test_findings_holds_are_every_row_carrying_held_reason_however_empty(view):
@@ -466,7 +468,7 @@ def test_findings_holds_are_every_row_carrying_held_reason_however_empty(view):
 
 
 # --------------------------------------------------------------------------------------
-# dead letters — O1, mechanism 2
+# dead letters
 
 
 def test_dead_letters_are_newest_first_and_normalised_field_by_field(view):
@@ -491,7 +493,7 @@ def test_a_channel_with_no_graveyard_file_lists_no_dead_letters(view):
 
 
 # --------------------------------------------------------------------------------------
-# stuck — O2, mechanism 4
+# stuck
 
 
 def test_stuck_is_the_last_record_of_the_report_with_its_own_time(view):
@@ -505,8 +507,8 @@ def test_stuck_is_the_last_record_of_the_report_with_its_own_time(view):
 
 
 def test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one(tmp_path):
-    """The other half of "structural": a findings root with NO stuck file at all still says
-    `has_stuck_record: true` — the lane records them, it just has not had one."""
+    """`has_stuck_record` is a property of the lane, not of its files: a findings root with no
+    stuck file at all still says `true`."""
     paths = _make_paths(tmp_path)
     _write_lines(location_path(paths.state_root) / FINDINGS.queue, [])
     ch = _channel(_build(paths), "findings")
@@ -515,7 +517,7 @@ def test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one(tm
 
 
 # --------------------------------------------------------------------------------------
-# set aside — O4, mechanism 6
+# set aside
 
 
 def test_failed_markers_from_both_queue_dirs_are_listed_and_told_apart(view):
@@ -597,11 +599,12 @@ def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
 
 
 # --------------------------------------------------------------------------------------
-# the header — O5
+# the header
 
 
 def test_stamped_view_uses_the_explicit_tenant_root_and_stamps_it(data_root, tmp_path, monkeypatch):
-    """#1186 O1/O3: the explicit tenant supplies state despite an old ambient override."""
+    """The explicit tenant supplies the state root despite an ambient
+    `DEFENDER_LEARNING_STATE_DIR`, and the view is stamped with when it was built."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     tenant = set_up_tenant(data_root)
@@ -633,7 +636,7 @@ def test_stamped_view_takes_the_paths_it_is_handed(paths):
 
 
 # --------------------------------------------------------------------------------------
-# the renderer — mechanism 7
+# the renderer
 
 
 def _embedded_data(page: str) -> dict:
@@ -748,7 +751,8 @@ def test_content_that_spells_a_placeholder_is_content(view):
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
         paths, data_root, run_visualizations_dir, monkeypatch):
-    """O1 (conflict updated from `..._beside_the_lessons_pages`): `main` writes the pages to `<root>/<T>/learning/`, not the tree."""
+    """`main` writes the four pages to the tenant's publish area (`<root>/<T>/learning/`),
+    replacing a stale page, and nothing into the source tree."""
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
@@ -773,12 +777,12 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
         assert queues["generated_at"]
         assert Path(queues["state_root"]) == location_path(tenant.learning)
         assert _channel(queues, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
-        # The quarantine dir is the tenant's own LoopPaths' (host-wide until #1108 P4), not the
-        # fixture's: its rows are not asserted here.
+        # The quarantine dir follows the tenant's own LoopPaths, not the fixture's: its rows are
+        # not asserted here.
         assert Path(queues["quarantine"]["tainted"]["dir"]) == LoopPaths.for_tenant(tenant).quarantine_dir
         assert _embedded_data((area / "queues.html").read_text(encoding="utf-8")) == queues
         lessons = json.loads((area / "lessons.json").read_text(encoding="utf-8"))
-        assert set(lessons["groups"]) == {"defender", "questioner"}  # U5 (#1108 P4)
+        assert set(lessons["groups"]) == {"defender", "questioner"}
         assert 'href="queues.html"' in (area / "lessons.html").read_text(encoding="utf-8")
         assert 'href="lessons.html"' in (area / "queues.html").read_text(encoding="utf-8")
         assert [p.name for p in run_visualizations_dir.iterdir()] == [tenant.id]
@@ -788,7 +792,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
 
 
 # --------------------------------------------------------------------------------------
-# #1279 O1/O4 — the learning pages are published per tenant, never into the source tree
+# the learning pages are published per tenant, never into the source tree
 
 _PAGE_NAMES = ("lessons.json", "lessons.html", "queues.json", "queues.html")
 
@@ -818,12 +822,13 @@ def _build_cli(tenant_id: str, data_root: Path, **env: str):
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1279_o1_two_tenants_each_keep_their_own_pages_in_their_own_publish_area(
         paths, data_root, run_visualizations_dir, order):
-    """O1: each tenant's four pages land in `<root>/<T>/learning/`, built in either order; none in the tree."""
+    """Each tenant's four pages land in `<root>/<T>/learning/`, built in either order; none in
+    the tree."""
     import shutil
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
 
-    # `create_tenant` admits one tenant per root; H5 plants the second by hand (F36).
+    # `create_tenant` admits one tenant per root; H5 plants the second by hand.
     a, b = H5.tenant(data_root, H.TID), H5.tenant(data_root, H.OTHER)
     shutil.copytree(location_path(paths.state_root), location_path(a.learning), dirs_exist_ok=True)
     Path(location_path(b.learning)).mkdir(parents=True, exist_ok=True)
@@ -859,7 +864,8 @@ def test_1279_o1_two_tenants_each_keep_their_own_pages_in_their_own_publish_area
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1279_o1_the_cli_builds_the_selected_tenants_state_not_an_ambient_one(
         paths, data_root, run_visualizations_dir, tmp_path):
-    """O1/#1186 O3 (moved with the pages): the CLI publishes the selected tenant's state, whatever a legacy variable names."""
+    """The CLI publishes the selected tenant's state, whatever a legacy
+    `DEFENDER_LEARNING_STATE_DIR` names."""
     import shutil
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
@@ -888,7 +894,8 @@ def test_1279_o1_the_cli_builds_the_selected_tenants_state_not_an_ambient_one(
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1279_o4_the_learning_build_outside_dev_refuses_naming_the_deployment(
         data_root, run_visualizations_dir):
-    """O4: with no publish destination (production), the build refuses, names the deployment, writes nothing."""
+    """With no publish destination (production), the build refuses, names the deployment and
+    writes nothing."""
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
@@ -910,8 +917,8 @@ def test_1279_o4_the_learning_build_outside_dev_refuses_naming_the_deployment(
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1279_a11_the_learning_build_in_dev_with_no_folder_set_refuses_naming_the_setting(
         data_root, run_visualizations_dir):
-    """A9/A11: in dev with no publish folder set there is nowhere to publish: the build refuses
-    cleanly, naming the setting, with no traceback, and writes nothing."""
+    """In dev with no publish folder set there is nowhere to publish: the build refuses cleanly,
+    naming the setting, with no traceback, and writes nothing."""
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
@@ -932,7 +939,7 @@ def test_1279_a11_the_learning_build_in_dev_with_no_folder_set_refuses_naming_th
 
 
 # --------------------------------------------------------------------------------------
-# O8 — the writers stamp what they write
+# the writers stamp what they write
 
 
 def _stamp(value) -> datetime:
@@ -966,8 +973,8 @@ def bare(tmp_path: Path) -> LoopPaths:
 
 
 def test_retire_stamps_the_dead_letter_it_writes(bare):
-    """O8, writer 1 of 4. A dead letter with no time is a row a human cannot place against
-    anything else that happened — and `when` is the only column the page can sort on."""
+    """A dead letter with no time is a row a human cannot place against anything else that
+    happened, and `when` is the only column the page can sort on."""
     ch = FINDINGS
     _write_lines(location_path(bare.state_root) / ch.queue, [{"finding_id": "a/0", "run_id": "a"}])
 
@@ -981,8 +988,8 @@ def test_retire_stamps_the_dead_letter_it_writes(bare):
 
 
 def test_retiring_an_unkeyable_row_stamps_its_flat_record(bare):
-    """O8, writer 2 of 4 — and the stamp rides on the FLAT shape without giving it a `row`
-    key, since that key is the very thing a reader branches on."""
+    """The stamp rides on the flat shape without giving it a `row` key, since that key is the
+    very thing a reader branches on."""
     ch = QUESTIONER_FINDINGS
     _write_lines(location_path(bare.state_root) / ch.queue, [])
 
@@ -997,8 +1004,8 @@ def test_retiring_an_unkeyable_row_stamps_its_flat_record(bare):
 
 
 def test_the_curators_dropped_row_carries_the_time_it_was_dropped(bare):
-    """O8, writer 3 of 4. This writer is the one with no `attempts` to date the record by
-    even loosely, so it is the one a missing stamp costs most."""
+    """This writer records no `attempts` to date the record by even loosely, so a missing stamp
+    costs it most."""
     rows = [{"pitfall_id": "p-9", "system": "evil", "occurrences": 2}]
 
     with _Clock() as clock, LearningState.open(bare) as state:
@@ -1011,6 +1018,8 @@ def test_the_curators_dropped_row_carries_the_time_it_was_dropped(bare):
 
 
 def test_recording_a_stuck_tick_stamps_when_it_was_recorded(bare):
+    """The stuck file is append-only and nothing clears it, so the band means "last faulted at",
+    not "stuck right now"; without `recorded_at` the page cannot say when that was."""
     ch = FINDINGS
 
     with _Clock() as clock, LearningState.open(bare) as state:
@@ -1023,7 +1032,3 @@ def test_recording_a_stuck_tick_stamps_when_it_was_recorded(bare):
     assert record["row_ids"] == ["a/0"]
     assert record["consecutive_ticks"] == 1
     clock.check(record.get("recorded_at"))
-
-
-# --------------------------------------------------------------------------------------
-# structural pins — O6, the cap's owner, the deferral closure, the ignore file

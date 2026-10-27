@@ -32,7 +32,6 @@ NUMERIC = "l-001"
 def env(tmp_path):
     """A run dir and a defender tree, both real on disk — `decide_read` resolves, so symlink and
     parent comparisons need files that exist."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run = tmp_path / fixture_uuid("run")
     (run / "gather_summaries").mkdir(parents=True)
     for name in ("alert.json", "investigation.md", "report.md", "executed_queries.jsonl",
@@ -62,7 +61,9 @@ def _gather(env):
 # F-09 — the payload shape and the lead-id validators are ONE alphabet
 
 def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
-    """The end-to-end path the defect broke: a lettered id is CLAIMED, its payload is PERSISTED"""
+    """A lettered lead id is claimed, its payload persisted, and gather may `cat` and `read_file`
+    that exact path; driven through the real functions, since the defect was one of them writing
+    what another refused."""
     assert claim_lead({
         "run_dir": str(env.run), "lead_id": LETTERED,
         "goal": "who logged in", "what_to_summarize": ["actor"],
@@ -81,6 +82,8 @@ def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
 
 
 def test_f09_the_widening_stays_shut(env):
+    """Widening the lead-id alphabet did not widen the payload family, and non-ASCII digits
+    (`٣.json`) stay out."""
     gather = _gather(env)
     for bad in (f"gather_raw/{NUMERIC}/evil.sh", "gather_raw/evil.json",
                 f"gather_raw/{NUMERIC}/٣.json", "gather_raw/l-a b/0.json",
@@ -105,9 +108,8 @@ def test_f09_main_is_still_denied_the_payload_either_way(env):
 # F-19 — a confined agent's own run dir is not a hole in its confine
 
 def _staged(env, run_dir):
-    """A learning run dir in the state the SECOND pass over a run id starts the actor in: the
-    previous pass's `persist_run` already staged the case into it. Uses the real
-    `_copy_shared_inputs`, so a change to what persist stages shows up here."""
+    """A learning run dir as a second pass over a run id finds it: the previous pass already staged
+    the case into it (through the real `_copy_shared_inputs`)."""
     persist._copy_shared_inputs(env.run, run_dir)
     (run_dir / "source_refs.yaml").write_text("normalized_disposition: malicious\n",
                                               encoding="utf-8")
@@ -116,8 +118,8 @@ def _staged(env, run_dir):
 
 
 def test_f19_main_still_reads_its_own_run_artifacts(env):
-    """The other control: the run's OWN agents write and re-read these files. MAIN declares no
-    confine, so nothing about its access to its own investigation changed."""
+    """MAIN declares no confine, so it still reads its own run's investigation and report on both
+    surfaces."""
     main = compile_policy_for(MAIN_DEF, run_dir=env.run, defender_dir=env.dfn)
     assert main.read_confine == ()
     for name in ("investigation.md", "report.md"):

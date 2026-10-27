@@ -21,8 +21,8 @@ from defender.investigation import record_query as rq
 LEAD = "l-001"
 
 
-#: The payload text a seeded SUCCESS row stands for (#877 F-9): the fixture derives both its
-#: digest and its content hash from it rather than stating either.
+#: The payload text a seeded SUCCESS row stands for: the fixture derives both its digest and its
+#: content hash from it rather than stating either.
 _SEEDED_PAYLOAD = "abcdefghijkl"
 
 
@@ -35,7 +35,7 @@ def _row(
     PRODUCTION helpers — a fixture that restated either would be asserting its own arithmetic
     against the domain filter under test. A failed row's persisted payload text is `""`, which
     is what both writers hash, so every failure shares one content hash and the digest is what
-    separates two of them (#877 F-9)."""
+    separates two of them."""
     return {
         "lead_id": lead,
         "seq": seq,
@@ -60,7 +60,7 @@ def _above(seq: int, **kw) -> dict:
     return _row(seq, query_id=_query_rules.ABOVE_GUARD_QUERY_ID, **kw)
 
 
-# ITEM 2 — the hardcoded `@timestamp` descending sort.
+# ITEM 2 — the `@timestamp` sort order is the lead's to choose.
 
 def _body(**kw) -> dict:
     args = {
@@ -79,7 +79,8 @@ def test_the_default_sort_is_unchanged_newest_first():
 
 
 def test_a_lead_can_ask_for_the_start_of_its_window():
-    """THE DEFECT (item 2)."""
+    """A lead can ask for the oldest end of its window (`sort="asc"`): a capped result otherwise
+    holds only the newest docs, which may all postdate the alert."""
     assert _body(sort="asc")["sort"] == [{"@timestamp": {"order": "asc"}}]
     # The window is untouched by the order — the same bracket, read from the other end.
     asc = _body(sort="asc", time_start="2026-08-07T11:30:00Z", time_end="2026-08-07T12:00:00Z")
@@ -106,7 +107,8 @@ def test_an_unusable_sort_is_refused_and_says_what_the_two_orders_are():
 
 
 def test_the_result_envelope_says_which_end_of_the_window_it_holds():
-    """The other half of item 2's complaint."""
+    """The result envelope records its sort order, so a payload read off disk later still says
+    which end of the window it holds."""
     docs = [{"@timestamp": "2026-08-07T11:40:23Z"}]
     env = ea.search_envelope("logs-*", docs, total=142, truncated=True, sort="asc")
     assert env["sort"] == "asc"
@@ -124,12 +126,12 @@ def test_the_sort_param_is_visible_to_the_model_on_both_search_verbs():
     assert "sort" not in declared_params(ea.esql)
 
 
-# ITEM 3 — ask (2)'s repeat notice never fired for a FAILING repeat.
+# ITEM 3 — the repeat notice for a FAILING repeat.
 
 def _write(tmp_path: Path, rows: list[dict]):  # noqa: ANN202 — a `RunState` (#1235)
     """A run that starts holding `rows` — a branch sibling's inherited prefix, handed to the
-    run's state the way seeding hands it (`RunState.inherit_rows`, #1235 round 2). Returns the
-    state: the live reader (`repeat_note` here) reads it, never `executed_queries.jsonl`."""
+    run's state the way seeding hands it (`RunState.inherit_rows`). Returns the state: the live
+    reader (`repeat_note` here) reads it, never `executed_queries.jsonl`."""
     from defender.investigation.run_state import RunState
 
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -139,7 +141,8 @@ def _write(tmp_path: Path, rows: list[dict]):  # noqa: ANN202 — a `RunState` (
 
 
 def test_a_repeat_whose_calls_keep_failing_is_named(tmp_path):
-    """THE DEFECT (item 3)."""
+    """A repeat whose calls keep failing is named too (that population is the likeliest to loop);
+    two failures match on their `exit=...` digest."""
     digest = "exit=1; Elasticsearch query failed (HTTP 400): parse_exception"
     state = _write(tmp_path, [_row(0, exit_code=1, digest=digest)])
     note = rq.repeat_note(
@@ -205,10 +208,11 @@ def test_the_exit_code_selects_wording_and_never_whether_a_note_fires(tmp_path):
     assert rq.repeat_note(state, LEAD, **kw) is not None, "the default changed behaviour"
 
 
-# ITEM 4 — the argument-schema repeat class had no guard and no record.
+# ITEM 4 — the companion guard for the argument-schema repeat class.
 
 def test_the_companion_guard_counts_what_the_first_guard_cannot_see():
-    """THE DEFECT (item 4)."""
+    """`rejection_trip` bounds the repeats the argument schema turns back, which never reach the
+    first guard (their rows carry `ABOVE_GUARD_QUERY_ID`); each row belongs to exactly one guard."""
     rejections = [_above(0), _above(1)]
     assert rq.rejection_trip(rejections[:1], LEAD, system="elastic", verb="query",
                              params={"native_query": "FROM logs"}, system_key="") is None
@@ -229,7 +233,9 @@ def test_the_companion_guard_counts_what_the_first_guard_cannot_see():
 
 
 def test_the_infra_half_of_the_above_guard_rows_stays_the_breakers():
-    """The domain is narrower than `ABOVE_GUARD_QUERY_ID` alone, by `error_class`."""
+    """The domain is narrower than `ABOVE_GUARD_QUERY_ID` alone, by `error_class`: infra (exit 2)
+    adapter-load rows are the circuit breaker's, and counting them here would turn an outage into
+    a lead-level dead end."""
     load_errors = [_above(0, exit_code=2), _above(1, exit_code=2)]
     assert error_class_for_exit(2) == INFRA_ERROR_CLASS
     assert error_class_for_exit(64) == AGENT_FIXABLE_ERROR_CLASS
@@ -257,7 +263,9 @@ def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
 
 
 def test_the_fingerprint_gives_three_answers_and_each_one_is_a_decision():
-    """`system_fingerprint(raw, recorded)` is where the coarsened row's identity is minted."""
+    """`system_fingerprint(raw, recorded)` gives `""` when the row kept its system or the raw string
+    is blank, else a fixed sha256 of it: a table one build records is replayed by a later build,
+    which a per-process `hash()` would break."""
     assert rq.system_fingerprint("ghostone", "elastic") == "", \
         "a row that kept its system took a fingerprint too, splitting that system's count"
     assert rq.system_fingerprint("elastic", "elastic") == ""
@@ -273,7 +281,8 @@ def test_the_fingerprint_gives_three_answers_and_each_one_is_a_decision():
 
 
 def test_the_fingerprint_hashes_the_whole_string_exactly_as_the_model_wrote_it():
-    """`ghostone`/`ghosttwo`/`ghostthree` cannot pin this on their own."""
+    """The raw string is hashed unnormalised and untruncated, so the variants a model actually
+    produces (environment suffixes, case, a stray space) stay distinct."""
     for raw in ("elastic-prod", "elastic-staging", "Elastic", " elastic ", "\u00e9lastic"):
         assert rq.system_fingerprint(raw, "") == \
             hashlib.sha256(raw.encode("utf-8")).hexdigest(), \
@@ -299,7 +308,8 @@ def test_an_unencodable_system_string_is_fingerprinted_rather_than_raising():
 
 
 def test_two_undeclared_systems_are_two_counts_at_the_predicate():
-    """THE DEFECT (#871)."""
+    """Two undeclared systems (both recorded as `system=""`) are two counts: a different ghost
+    does not inherit the count, the same ghost still trips (#871)."""
     one, two = rq.system_fingerprint("ghostone", ""), rq.system_fingerprint("ghosttwo", "")
     params = {"native_query": "FROM logs"}
     mixed = [dict(_above(0, system=""), system_key=one),
@@ -320,7 +330,8 @@ def test_two_undeclared_systems_are_two_counts_at_the_predicate():
 
 
 def test_the_identity_is_the_pair_and_the_request_half_still_counts():
-    """`system_key` EXTENDS the identity;"""
+    """`system_key` extends the identity rather than replacing it: different requests or verbs
+    under one ghost do not group, one request under one ghost still does."""
     ghost = rq.system_fingerprint("ghostone", "")
     varied = [dict(_above(0, system="", params={"native_query": "FROM one"}), system_key=ghost),
               dict(_above(1, system="", params={"native_query": "FROM two"}), system_key=ghost)]
@@ -343,7 +354,8 @@ def test_the_identity_is_the_pair_and_the_request_half_still_counts():
 
 
 def test_a_call_with_no_readable_system_inherits_no_ghosts_count():
-    """The other direction of the wildcard, and the one no arm here reaches."""
+    """A call with no readable system (key `""`) does not inherit a count named ghosts earned,
+    while two blank rows still bound a third blank call."""
     params = {"native_query": "FROM logs"}
     ghosts = [dict(_above(0, system=""), system_key=rq.system_fingerprint("ghostone", "")),
               dict(_above(1, system=""), system_key=rq.system_fingerprint("ghosttwo", ""))]
@@ -360,8 +372,8 @@ def test_a_call_with_no_readable_system_inherits_no_ghosts_count():
 
 
 def test_an_invisible_system_string_is_no_more_readable_than_an_empty_one():
-    """N5's equivalence class is "nothing a reader could tell apart from an empty argument",
-    and `.strip()` is not that question."""
+    """Zero-width, format and control codepoints (which `.strip()` keeps) mint no fingerprint, like
+    an empty system, so invisible variants form one repeat group; a readable character mints one."""
     invisible = ["\u200b", "\u200b\u200b", "\ufeff", "\u200c\u200d", "\u2060", "\u00ad",
                  "\x00", "\x00\x00"]
     for raw in invisible:
@@ -396,8 +408,8 @@ def test_the_dead_end_message_asks_the_same_readability_question_the_fold_does()
 
 
 def test_readability_is_a_fixed_function_of_the_string_not_of_the_interpreter():
-    """WHICH predicate answers N5, pinned — the arm above pins that invisible strings fold, and
-    every predicate that folds them passes it."""
+    """Private-use and unassigned codepoints count as readable (`str.isprintable()` says no to
+    both): a private-use name is visible, and what is unassigned moves with the Unicode database."""
     for raw in ("\ue000", "\uf8ff", "\U000f0000", "\u0378", "\U0002fffe"):
         assert rq.names_something_readable(raw), \
             f"{raw!r} was folded into the no-readable-system group; if it is unassigned today " \
@@ -418,7 +430,9 @@ def test_a_non_string_system_is_coerced_rather_than_raising():
 
 
 def test_a_row_written_before_the_fourteenth_column_existed_still_counts():
-    """THE COERCION, and it is load-bearing."""
+    """A row from before the `system_key` column (key missing or `None`) reads as `""`: it still
+    counts against a call with no fingerprint (`""`, or the replay oracle's `None`), not a
+    fingerprinted one."""
     params = {"native_query": "FROM logs"}
     keyless = [_above(0), _above(1)]
     assert "system_key" not in keyless[0], \

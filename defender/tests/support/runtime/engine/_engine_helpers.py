@@ -8,18 +8,12 @@ from defender.providers import BuiltModel
 
 
 def fake_model(fn):
-    """A `make_model` stand-in returning `fn` as the model.
-
-    settings=None — a FunctionModel needs no provider settings.
-    """
+    """A `make_model` stand-in returning `fn` as the model (no settings: a FunctionModel needs none)."""
     return lambda model, effort: BuiltModel(FunctionModel(fn), None)
 
 
 def flatten_messages(messages) -> str:
-    """Every str-valued part content across `messages`, newline-joined.
-
-    What a test asserts against when it wants "did the model see the tool's return".
-    """
+    """Every str-valued part content across `messages`, newline-joined: what the model saw."""
     out = []
     for msg in messages:
         for part in getattr(msg, "parts", []):
@@ -71,7 +65,7 @@ def replay_turns(turns, *, seen=None, capture=flatten_messages):
 
 
 def learning_run_dir(tmp_path):
-    """The per-case leg-output dir three engine suites each made by hand."""
+    """A fresh per-case leg-output dir under `tmp_path`."""
     lrd = tmp_path / "learning_run"
     lrd.mkdir()
     return lrd

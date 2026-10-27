@@ -39,7 +39,8 @@ def test_under_the_ceiling_the_payload_is_verbatim(tmp_path):
 
 
 def test_the_key_name_decides_nothing_above_the_ceiling(tmp_path):
-    """The load-bearing property."""
+    """Renaming the list changes neither the decision, the kept counts nor the elisions: no key name
+    is consulted. The names are equal-length, since a longer key does cost budget."""
     hits = _docs(60)
     _, known = pv.walk(json.loads(_lucene(hits, key="hits")), 1200)
     _, exotic = pv.walk(json.loads(_lucene(hits, key="zzzz")), 1200)
@@ -48,10 +49,11 @@ def test_the_key_name_decides_nothing_above_the_ceiling(tmp_path):
     assert known[0].kind == "list"
 
 
-# O1 — the view never asserts a limitation the payload in context does not have.
+# The view never asserts a limitation the payload in context does not have.
 
 def test_a_complete_empty_envelope_carries_no_prohibition(tmp_path):
-    """THE regression."""
+    """A complete, empty envelope is shown whole with no "do not count" prohibition: its zero is the
+    one exact fact it holds."""
     view = _view(_lucene([]), ceiling=65536, run_dir=tmp_path)
     assert "Do NOT count" not in view
     assert "not count" not in view.lower()
@@ -59,7 +61,7 @@ def test_a_complete_empty_envelope_carries_no_prohibition(tmp_path):
     assert json.loads(view)["total"] == 0
 
 
-# O3 — a view can never be mistaken for the payload.
+# A view can never be mistaken for the payload.
 
 def test_every_shortened_list_carries_a_marker_in_its_own_scope(tmp_path):
     """A silently-shortened array is valid JSON that parses clean and counts wrong. The marker
@@ -78,7 +80,7 @@ def test_the_marker_names_how_many_were_dropped(tmp_path):
     assert f"{60 - kept} of 60" in body["hits"][-1]
 
 
-# O5 — a kept element is a WHOLE element. Only long string leaves clip.
+# A kept element is a WHOLE element. Only long string leaves clip.
 
 def test_kept_elements_keep_every_field(tmp_path):
     docs = _docs(60, fields=12)
@@ -110,7 +112,7 @@ def test_a_payload_with_no_list_at_all_is_walked(tmp_path):
     assert pv.ELISION_PREFIX in body["ps_output"]
 
 
-# N6 — no key is privileged. "The bulk" is a fact about bytes.
+# No key is privileged. "The bulk" is a fact about bytes.
 
 def test_a_small_sibling_list_survives_while_the_bulk_is_elided(tmp_path):
     payload = json.dumps({
@@ -134,7 +136,7 @@ def test_the_bulk_is_whichever_list_is_big(tmp_path):
     assert [e.path for e in elisions] == ["columns"]
 
 
-# O4 — server-side capping and view-side elision are two facts, never one.
+# Server-side capping and view-side elision are two facts, never one.
 
 def test_a_capped_envelope_states_the_servers_own_total(tmp_path):
     view = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
@@ -193,7 +195,8 @@ def test_a_string_leaf_of_escaped_characters_stays_inside_the_budget(tmp_path):
 
 
 def test_a_mixed_offset_timestamp_batch_does_not_crash_the_view(tmp_path):
-    """`sort` comparing a NAIVE `fromisoformat` result with an AWARE one raises `TypeError` —"""
+    """A batch mixing naive and offset-bearing timestamps renders its range instead of raising
+    `TypeError` from a naive/aware comparison: a naive value reads as UTC."""
     docs = [
         {"@timestamp": "2026-08-07T11:00:00Z", "m": "x" * 300},
         {"@timestamp": "2026-08-07T10:00:00", "m": "y" * 300},
@@ -215,7 +218,7 @@ def test_the_disk_path_is_offered_when_the_view_elides(tmp_path):
 
 
 def test_the_full_payload_footer_offers_a_reduction_correct_for_any_shape(tmp_path):
-    """#1138 O8: the `full payload` arm's example reduction must be right on every payload shape."""
+    """The `full payload` arm's example reduction must be right on every payload shape."""
     view = _view(_lucene(_docs(60)), ceiling=1200, run_dir=tmp_path)
     assert f"full payload: {tmp_path / RUN}" in view, "premise: this view is the full-payload arm"
     footer = view.partition(f"full payload: {tmp_path / RUN}")[2]
@@ -225,21 +228,23 @@ def test_the_full_payload_footer_offers_a_reduction_correct_for_any_shape(tmp_pa
 
 
 def test_a_server_capped_payload_is_never_offered_a_count_over_its_own_file(tmp_path):
-    """The file on disk holds the SERVER'S SLICE."""
+    """The file on disk holds only the server's slice, so a `count(*)` over it returns the cap: the
+    view must not offer one."""
     view = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
     assert "NEVER count the returned docs" in view
     assert "count(*)" not in view
     assert str(tmp_path / RUN) in view
 
 
-# #877 F-10 — the envelope may not derive a fact from itself.
+# The envelope may not derive a fact from itself (#877).
 
 def _esql_rows(n: int) -> list[list]:
     return [[f"host-{i:04d}", i] for i in range(n)]
 
 
 def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
-    """THE regression, driven through the REAL adapter shape rather than a hand-built dict."""
+    """An ES|QL payload at the row cap is never called complete (its `row_count` is computed from the
+    rows it carries), driven through the real adapter shape."""
     from defender.integrations.elastic_adapter import esql_payload
 
     payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
@@ -255,7 +260,8 @@ def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
 
 
 def test_an_unknown_envelope_is_not_offered_as_a_full_payload_to_count(tmp_path):
-    """THE SAME CLAIM, ONE LINE FURTHER DOWN."""
+    """The footer reads the same `Completeness` as the prose: an `unknown` envelope is neither named
+    a full payload nor offered a `count(*)`."""
     from defender.integrations.elastic_adapter import esql_payload
 
     payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
@@ -288,7 +294,8 @@ def _json_block(view: str) -> str:
 
 
 def test_a_list_never_collapses_to_a_bare_marker(tmp_path):
-    """Found against the LIVE stack, not in a fixture."""
+    """A list whose elements each outgrow their share (a real alert document exceeds the whole 8 KB
+    ceiling) still shows a squeezed element with its field names, never a bare marker."""
     fat = [{f"field_{j}": f"value-{i}-{j}-{'x' * 40}" for j in range(60)} for i in range(20)]
     view = _view(_lucene(fat, total=37442), ceiling=8192, run_dir=tmp_path)
     body = json.loads(_json_block(view))
@@ -321,7 +328,8 @@ def _esql(rows: list[list], names: list[str]) -> str:
 
 
 def test_a_too_wide_row_keeps_cells_the_way_a_too_wide_record_keeps_fields(tmp_path):
-    """The sibling of `test_a_list_never_collapses_to_a_bare_marker`, for the other element shape — and the regression #834 would have shipped without it."""
+    """The positional-row sibling of `test_a_list_never_collapses_to_a_bare_marker`: a too-wide row
+    keeps its leading cells and marks the cut."""
     names = [f"col_{j}" for j in range(1657)]
     row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
     view = _view(_esql([row], names), ceiling=8192, run_dir=tmp_path)
@@ -335,7 +343,8 @@ def test_a_too_wide_row_keeps_cells_the_way_a_too_wide_record_keeps_fields(tmp_p
 
 
 def test_a_named_cell_is_bound_to_the_RIGHT_name(tmp_path):
-    """The misattribution guarantee, which is what a positional encoding has to earn."""
+    """A kept cell is bound to the right column: cells and column names are each kept as leading
+    prefixes, so index `i` means `i` on both sides (their counts may differ)."""
     names = [f"col_{j}" for j in range(1657)]
     row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
     body = json.loads(_json_block(_view(_esql([row], names), ceiling=8192, run_dir=tmp_path)))
@@ -371,7 +380,8 @@ def test_the_elision_marker_for_a_row_counts_cells_not_elements(tmp_path):
 
 
 def test_a_list_whose_ONE_element_was_salvaged_is_not_marked_as_shortened():
-    """A marker means a real cut, or it means nothing."""
+    """A one-element list whose element was squeezed is not marked as shortened: the cut is recorded
+    inside the row, where it happened."""
     names = [f"col_{j}" for j in range(1657)]
     row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
     obj = json.loads(_esql([row], names))

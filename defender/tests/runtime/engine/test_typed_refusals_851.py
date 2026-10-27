@@ -154,16 +154,16 @@ def test_f25_a_symlink_loop_operand_refuses_rather_than_raising(tmp_path):
 
 
 def test_f25_an_ordinary_corpus_write_still_lands(tmp_path):
-    """Positive control: the fail-safe returns False for an UNRESOLVABLE operand only. A
-    resolvable one still runs the RS15 check and then the real gate, and commits."""
+    """Positive control: only an UNRESOLVABLE operand is refused; a resolvable one passes the real
+    gate and commits."""
     deps, corpus = _curator_scene(tmp_path)
     _tool_write_file(deps, rel("lessons", "ok.md"), "body\n")
     assert (corpus / "ok.md").read_text(encoding="utf-8") == "body\n"
 
 
 def test_f26_a_lone_surrogate_is_denied_on_a_non_artifact_path(tmp_path):
-    """The gate's contract is to RETURN a Decision, never propagate (its `RESOLVE_ERRORS`
-    rule) — and that contract was only literally true on the artifact branch."""
+    """The write gate RETURNS a deny for unencodable content on a non-artifact path too, never
+    raising."""
     deps, corpus = _curator_scene(tmp_path)
     d = permission.decide_write(
         corpus / "x.md", f"body {SURROGATE}\n",
@@ -246,8 +246,8 @@ def test_empty_or_non_scalar_rule_id_has_no_signature(rule_id):
 
 
 def test_f23_a_signature_carrying_a_nul_is_no_signature_and_orients(tmp_path):
-    """A NUL in a signature was an argv element `subprocess.run` raised a bare `ValueError` on;
-    it is not key-shaped, so it is recorded as no signature and orientation never sees it."""
+    """A signature carrying a NUL (an argv element `subprocess.run` would raise on) is not
+    key-shaped, so it is recorded as no signature and orientation never sees it."""
     assert _sig("rule\x00id") is None
     out = _orient(tmp_path, "rule\x00id")
     assert isinstance(out, str)

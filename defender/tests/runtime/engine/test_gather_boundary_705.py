@@ -117,7 +117,7 @@ def test_over_depth_args_does_not_abort_the_whole_gather_boundary_query(tmp_path
 
     try:
         rows = dict(sql(store, "SELECT message_id, lead_id FROM gather_boundary"))
-    except sqlite3.OperationalError as exc:  # the shipped behaviour adv:PO2 measured
+    except sqlite3.OperationalError as exc:  # the whole-query abort this test guards against
         pytest.fail(f"one crafted args row aborted the whole boundary query: {exc}")
     assert rows[poison] is None
     assert [rows[m] for m in healthy] == [f"l-{i:03d}" for i in range(9)], (

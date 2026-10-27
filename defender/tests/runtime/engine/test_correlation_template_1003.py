@@ -46,7 +46,7 @@ def _shipped_shaped_grant(tmp_path: Path) -> VerbGrant:
 
 def _template_text(tid: str, *, verb: str | None, status: str = "established") -> str:
     """A minimal template document in the catalog's own shape (`SCHEMA.md`). `verb=None`
-    OMITS the `verb:` line — the malformed shape #1003's O6 is about."""
+    OMITS the `verb:` line, the malformed shape."""
     verb_line = f"verb: {verb}\n" if verb is not None else ""
     return textwrap.dedent(f"""\
         ---
@@ -90,7 +90,7 @@ def _templates(catalog: Path) -> list:
 
 class _NeverWalked:
     """A `templates` iterable that FAILS the test if anything iterates it — how a withheld
-    lead proves the id was not consulted (O6, second sentence)."""
+    lead proves the id was not consulted."""
 
     def __iter__(self):
         raise AssertionError(
@@ -197,11 +197,10 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
 
     tree = tmp_path / "repo" / "defender"
     tree.mkdir(parents=True)
-    # The run's tenant, planted outside the tree (its table grants the lead elastic.alerts).
-    # #1108 P4 (O1, O2): the catalog the run start frame reads is the tenant's own agent root
-    # (`agent/skills/gather/queries/`), so the template the config names is planted THERE and
-    # the checkout-shaped `tree` handed as `defender_dir` holds no catalog at all — a frame
-    # that still read `defender_dir`'s catalog finds no `elastic.other-alerts` and refuses.
+    # The run's tenant, planted outside the tree (its table grants the lead elastic.alerts). The
+    # run-start frame reads the tenant's own catalog, so the configured template is planted
+    # there and `tree` (handed as `defender_dir`) holds none: a frame reading `defender_dir`'s
+    # catalog would find no `elastic.other-alerts` and refuse.
     knowledge = T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"),
                                    lead_zero="correlation_template: elastic.other-alerts\n")
     _plant(knowledge / "agent" / "skills" / "gather" / "queries", "elastic", "other-alerts",
@@ -239,7 +238,8 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
 
 
 def test_a_planted_backend_dispatches_on_its_own_system(tmp_path):
-    """O1, by mechanism (N4: no second template ships)."""
+    """A correlation template planted for another backend dispatches on that backend's system (no
+    second template ships, so it is planted)."""
     from defender.investigation.lead_zero import CorrelationDispatch, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
@@ -368,7 +368,7 @@ def test_a_template_binding_the_health_check_verb_is_not_a_dispatch_target(tmp_p
 @pytest.mark.parametrize("bad_id", [
     "not-an-id", "Elastic.x", "elastic.",
     # A second dot: `resolve_query_id` refuses it (a second unvalidated path component at
-    # the draft writer), so the lead could not bind it as its own id (adversary H6).
+    # the draft writer), so the lead could not bind it as its own id.
     "elastic.correlate.alerts",
     # A path shape and a render shape — the query tool's own forbidden characters.
     "elastic.a/b", "elastic.a#b",

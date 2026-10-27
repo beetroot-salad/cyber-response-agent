@@ -1,4 +1,7 @@
-"""#631 — the seams the enforced posture hangs on: the posture bit, the limits passthrough, the tier table, the flag, the retry ceiling, the two pool roots, and the CI wiring."""
+"""#631 — the seams the enforced posture hangs on: the posture bit, the limits passthrough, the
+tier table, the flag and the retry ceiling. Every fake enters through an injection seam
+(`build_agent_core`'s `make_model`, the `limits` kwarg, the real environment `env_bool` reads);
+nothing is patched onto a module."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -49,7 +52,8 @@ FLAG = "DEFENDER_BUDGET_ENFORCE"
 
 
 class ScriptedModel:
-    """Emits one scripted turn per model request; past the script, text (which ends the loop). The same shape..."""
+    """One scripted turn per model request; past the script, text (which ends the loop). A value
+    for `build_agent_core`'s `make_model` seam."""
 
     __name__ = "Scripted"
 
@@ -68,8 +72,7 @@ class ScriptedModel:
 
 
 def _run_dir(tmp_path: Path, name: str = "run") -> Path:
-    """A run folder under `tmp_path`, `name` its label (or its id, when already a UUID)."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    """A run folder under `tmp_path`, named by its UUID run id (`name` is a label, or the id itself)."""
     rd = tmp_path / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     (rd / "gather_raw").mkdir(parents=True)
     (rd / "alert.json").write_text(json.dumps({"rule": {"name": "probe"}}))
@@ -77,7 +80,8 @@ def _run_dir(tmp_path: Path, name: str = "run") -> Path:
 
 
 def _state(run_dir: Path, run_id: str = "r"):
-    """The run's state, as `run_investigation` starts it (#1235 round 2): the budget a driven agent counts..."""
+    """The run's state as `run_investigation` starts it: the budget a driven agent counts against,
+    carried on its deps."""
     from defender.investigation.run_state import RunState
 
     return RunState(run_dir, run_id)
@@ -93,7 +97,8 @@ def _seed_calls(state, n: int) -> None:
 
 def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | None = None,
                 agent_id: str = "main", request_limit: int = 40):
-    """Build ONE agent through the real `build_agent_core` and drive it — the real hooks, the real tools, the..."""
+    """Build one agent through the real `build_agent_core` (real hooks, tools and gate) and drive it
+    with a scripted `FunctionModel`; `state` is the `RunState` its deps carry."""
     model = ScriptedModel(turns)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     from dataclasses import replace as _replace
@@ -129,7 +134,8 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | No
 
 
 def test_budget_kill_is_not_control_flow(tmp_path):
-    """The budget kill type is absent from query_tool.CONTROL_FLOW_EXCEPTIONS and passes through BOTH of that..."""
+    """`BudgetKill` is not in `CONTROL_FLOW_EXCEPTIONS`, so it passes both of that tuple's except
+    sites and `_run_gather`'s handler to reach the driver, never recorded as a query fault."""
     assert BudgetKill not in CONTROL_FLOW_EXCEPTIONS
     assert not any(issubclass(BudgetKill, t) for t in CONTROL_FLOW_EXCEPTIONS)
 
@@ -198,7 +204,8 @@ def test_budget_kill_is_not_control_flow(tmp_path):
 
 
 def _drive_gather_query(run_dir: Path, registry, state):
-    """Drive ONE real `query` call on a real GATHER agent against an injected verb registry — the seam..."""
+    """Drive one real `query` call on a real gather agent against an injected verb registry; the
+    caller hands in the run state, since this folder never goes through the driver."""
     import asyncio
     from dataclasses import replace
 
@@ -228,7 +235,8 @@ def _drive_gather_query(run_dir: Path, registry, state):
 
 
 def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_path):
-    """_make_hooks takes the budget-posture bit as a REQUIRED keyword parameter — constructing it without one..."""
+    """`_make_hooks` takes the posture bit as a required keyword: a caller that states nothing fails
+    loudly instead of running unenforced."""
     sig = inspect.signature(driver._make_hooks)
     posture = sig.parameters["enforce"]
     assert posture.kind is inspect.Parameter.KEYWORD_ONLY
@@ -245,7 +253,8 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
 
 
 def test_limits_threaded_from_boundary(tmp_path):
-    """The driver resolves DEFAULT_LIMITS ONCE at the boundary and threads it inward through check_budgets'..."""
+    """Limits are threaded inward from the boundary: an injected cap of 3, not `DEFAULT_LIMITS`, is
+    what refuses."""
     for fn, param in ((driver.run_investigation, "limits"),
                       (driver.build_agent_core, "limits"),
                       (driver._make_hooks, "limits")):
@@ -270,7 +279,8 @@ def test_limits_threaded_from_boundary(tmp_path):
 
 
 def test_the_hook_counts_on_the_state_the_deps_carry_and_on_nothing_else(tmp_path):
-    """#1235 round 2: the budget hook counts each executed call on the `RunState` the deps carry and on nothing..."""
+    """The budget hook counts on the `RunState` the deps carry, nothing keyed by the folder: two runs
+    on one folder each count only their own call, and a call on a state at its cap is refused."""
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1, "wall_clock_timeout": 3600,
               "grace_seconds": 600}
     run_dir = _run_dir(tmp_path, "one-folder")
@@ -294,7 +304,9 @@ def test_the_hook_counts_on_the_state_the_deps_carry_and_on_nothing_else(tmp_pat
 
 
 def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
-    """No environment variable and no config file changes any cap, and no per-signature default layers one —..."""
+    """No environment variable or config file changes a cap. The sweep runs in a child process:
+    reloading `budget_enforcer` here would rebind `BudgetKill`/`DEFAULT_LIMITS`, which sibling
+    tests hold by identity."""
     before = dict(DEFAULT_LIMITS)
 
     probe = (
@@ -316,7 +328,8 @@ def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
 
 
 def test_unknown_tool_tiers_as_core(tmp_path):
-    """A tool absent from the tail table tiers as core — the restrictive arm — so adding a tool to either ToolSet..."""
+    """A tool missing from the tail table tiers as core (the restrictive arm), so a newly registered
+    tool inherits the tight cap and raises no `KeyError`."""
     assert tier("a_tool_that_does_not_exist", AgentRole.MAIN) == "core"
     assert tier("", AgentRole.GATHER) == "core"
     assert tier("read_file", AgentRole.GATHER) == "core"
@@ -325,7 +338,9 @@ def test_unknown_tool_tiers_as_core(tmp_path):
 
 
 def test_tier_table_over_the_real_census(tmp_path):
-    """The tail tier is exactly MAIN's read_file and append_block; every GATHER tool is core including read_file,..."""
+    """Over the registered census, MAIN's tail tier is exactly `read_file`, `append_block` and
+    `fix_row`, and every gather tool (and `gather` itself) is core; on a tripped pool MAIN's bash is
+    refused while `append_block` still lands, so MAIN can always record what it knows."""
     main_names = _registered_names(MAIN_DEF)
     gather_names = _registered_names(T1106.fixture_gather_def())
     assert {"read_file", "append_block", "fix_row", "bash", "gather"} <= main_names
@@ -352,7 +367,7 @@ def test_tier_table_over_the_real_census(tmp_path):
 
 
 def test_same_tool_name_on_two_agents(tmp_path):
-    """A tool name that is tail on MAIN is core on GATHER, simultaneously and in the same run: `read_file` is..."""
+    """`read_file` is tail on MAIN and core on gather at once: tiers are keyed on (tool, agent)."""
     assert tier("read_file", AgentRole.MAIN) == "tail"
     assert tier("read_file", AgentRole.GATHER) == "core"
 
@@ -382,7 +397,8 @@ def test_same_tool_name_on_two_agents(tmp_path):
 
 
 def _registered_names(defn) -> set[str]:
-    """The REGISTERED tool-name census, read off a real Agent — the same route SC5 used, so the tier table is..."""
+    """The registered tool-name census, read off a real Agent: what the framework dispatches, not a
+    hand-kept list."""
     logger = observe.RequestLogger(Path(os.devnull))
     agent = driver.build_agent_core(
         defn, deps_type=defn.deps_cls, instructions="probe", logger=logger,
@@ -399,7 +415,7 @@ def _registered_names(defn) -> set[str]:
 
 
 def test_gather_keeps_its_request_limit(tmp_path):
-    """GATHER_REQUEST_LIMIT stays 40, the bound a multi-dimension lead needs, and it is still the ceiling a..."""
+    """`GATHER_REQUEST_LIMIT` stays 40 and is still what stops a subagent that never ends."""
     assert driver.GATHER_REQUEST_LIMIT == 40
 
     from pydantic_ai.exceptions import UsageLimitExceeded
@@ -413,7 +429,7 @@ def test_gather_keeps_its_request_limit(tmp_path):
 
 
 def test_enforce_flag_defaults_off(monkeypatch):
-    """DEFENDER_BUDGET_ENFORCE is read through env_bool and defaults to False when UNSET, so interactive..."""
+    """`DEFENDER_BUDGET_ENFORCE` defaults off when unset, and the empty string reads as off too."""
     monkeypatch.delenv(FLAG, raising=False)
     assert driver.enforcement_enabled() is False
     monkeypatch.setenv(FLAG, "")
@@ -426,7 +442,8 @@ def test_enforce_flag_defaults_off(monkeypatch):
 
 
 def test_enforce_flag_unrecognized_token(monkeypatch):
-    """An unrecognized token for DEFENDER_BUDGET_ENFORCE raises FatalConfigError at startup rather than being..."""
+    """An unrecognized `DEFENDER_BUDGET_ENFORCE` token raises `FatalConfigError` instead of reading
+    as off."""
     monkeypatch.setenv(FLAG, "maybe")
     with pytest.raises(FatalConfigError):
         driver.enforcement_enabled()
@@ -435,7 +452,7 @@ def test_enforce_flag_unrecognized_token(monkeypatch):
 def test_retired_learning_state_override_cannot_redirect_tenant_state(
     tmp_path, monkeypatch, d9_tenant, data_root,
 ):
-    """O1: a retired ambient root cannot change accepted runs or actual tenant state reads."""
+    """The retired `DEFENDER_LEARNING_STATE_DIR` cannot redirect a tenant's runs or learning state."""
     from defender.tenancy import _tenant
     from defender.learning.core.config import LoopPaths
     from defender.learning.core.state import FINDINGS, LearningState
