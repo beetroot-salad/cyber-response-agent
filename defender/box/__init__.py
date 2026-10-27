@@ -116,6 +116,7 @@ from ._docker import (
     require_image,
     resolve_rootfs,
 )
+from ._host_env import provider_scrubbed_environ, run_env
 from ._lifecycle import (
     _check_mount_sentinel,
     _create_argv,
@@ -142,6 +143,8 @@ from ._lifecycle import (
 #: Re-exports: each name's home is the module it is imported from.
 
 __all__ = [
+    "provider_scrubbed_environ",
+    "run_env",
     "BoxRuns",
     "box_for_run",
     "ALIAS_PROFILE_PATH",

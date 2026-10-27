@@ -35,8 +35,8 @@ path and does not discover samples from the source tree.
 systems a run may call and whether they are up; `records/` owns shared
 run identities and persistence for runtime, learning, and presentation, and defines
 investigation inputs, artifact schemas, provenance, and report values; `kit/` holds what
-crosses the adapter boundary (faults, the verb decorator, the call context adapters see); `episodes/` owns
-episode storage and addresses.
+crosses the adapter boundary (faults, the verb decorator, the call context adapters see). Episode
+storage and addresses are part of `records/` (#1309 c).
 The `_io` API delegates low-level JSON, guarded writes, and descriptor views to `_filesystem/`.
 
 Python modules and importable directories use snake_case. Documentation keeps kebab-case names;
@@ -64,8 +64,7 @@ defender/
   bin/              # stable command wrappers used by permission checks
   tenancy/          # tenant identity, registration, acceptance, census, settings, case tickets, and the run's knowledge export
   knowledge/        # tenant knowledge layout, corpora, query rules, and scaffolding
-  episodes/         # episode identities, layout, storage handles, and the family manifest
-  records/          # run identities, layout, lookup, inputs, schemas, provenance, reports, the session store, and the run-end record
+  records/          # run and episode identities, layout, lookup, inputs, schemas, provenance, reports, the session store, the run-end record, and the family manifest
   kit/              # the adapter contract: faults, @verb, the adapter-facing call context
   configuration/    # environment parsing and model pricing
   learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),

@@ -486,7 +486,7 @@ class _Episode:
 
 
 def _pinned_episode(tmp_path: Path, commit: str | None) -> _Episode:
-    from defender.episodes._knowledge_pin import pin_text
+    from defender.records._knowledge_pin import pin_text
 
     folder = tmp_path / "episode"
     folder.mkdir(parents=True)
@@ -524,7 +524,7 @@ def test_a_sibling_of_an_episode_launched_before_pins_keeps_its_flag(tmp_path):
 def test_the_judge_reads_lesson_bodies_at_the_familys_pin_not_a_siblings_stamp(tmp_path):
     import json
 
-    from defender.episodes._episode_paths import LAYOUT
+    from defender.records._episode_paths import LAYOUT
     from defender.learning.judge import _pass_knowledge
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 

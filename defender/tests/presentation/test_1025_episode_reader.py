@@ -403,7 +403,7 @@ def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
     """The one reader of the draw files reads each leaf through the screened read, like every other
     reader of the episode tree."""
     enqueue = J.mod("learning.judge.enqueue")
-    owner = J.mod("episodes._episode_paths")
+    owner = J.mod("records._episode_paths")
     episode_dir = tmp_path / "ep"
     label = "b"
     draw_dir = owner.EpisodePaths(episode_dir).world(T.fixture_world_id(label)).draws

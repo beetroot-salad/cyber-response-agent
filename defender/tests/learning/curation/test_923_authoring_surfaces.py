@@ -112,7 +112,7 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
     )
 
     # The third surface: a world entry declaring the host's verdict, refused at the manifest.
-    from defender.episodes._family import FamilyError, parse_world
+    from defender.records._family import FamilyError, parse_world
 
     def _world(disposition: str) -> dict:
         return {"label": "b", "world_id": T.fixture_world_id("b"), "role": "B",

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 
 from defender._io import (
@@ -48,9 +48,9 @@ from defender.records import (
 
 from defender.investigation import branch
 
-from defender.episodes import _family
+from defender.records import _family
 
-from defender.episodes._family import (
+from defender.records._family import (
     Family,
 )
 

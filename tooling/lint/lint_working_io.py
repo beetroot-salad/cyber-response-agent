@@ -41,7 +41,7 @@ ROOTS = (
     "investigation", "hooks", "box", "systems", "providers", "records/session_store",
     "records/run_end.py", "records/selection.py", "records/_wire.py", "records/_seeded.py",
     "tenancy/tenant_settings.py", "tenancy/case_ticket.py", "tenancy/run_knowledge.py",
-    "episodes/_family.py", "_exception_groups.py",
+    "records/_family.py", "_exception_groups.py",
 )
 READERS = frozenset({
     "read_jsonl_rows", "read_jsonl_rows_report", "read_text_soft", "read_text_utf8",

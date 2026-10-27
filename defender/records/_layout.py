@@ -86,7 +86,7 @@ JSONL_EXT = ".jsonl"
 AGENT_TRACE_SUFFIX = "_trace.jsonl"
 AGENT_FRAMED_TRACE_SUFFIX = "_framed_trace.jsonl"
 #: The episode layout's `served/` prefix — here because the lint gate's part set is read off
-#: this module; `episodes/_episode_paths.py` imports it.
+#: this module; `records/_episode_paths.py` imports it.
 SERVED_PREFIX = "served/"
 
 #: Generic suffixes, not discriminating parts; the gate catches hand-rolled compositions of

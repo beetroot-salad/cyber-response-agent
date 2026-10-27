@@ -28,8 +28,7 @@ from ._deps import run_of, AgentDeps, GatherDeps, _BASH_TIMEOUT_S, _BASH_VERB, _
 
 
 def _bash_env(deps: AgentDeps) -> dict[str, str]:
-    from defender import run_common
-    return run_common.run_env(
+    return box_mod.run_env(
         deps.defender_dir, deps.run_dir,
         tenant_agent=deps.tenant.agent if deps.tenant is not None else None)
 

@@ -82,7 +82,7 @@ def walk_owner() -> frozenset[str]:
     door's own map, so a module the door gains is an owner the day it serves a name) and the
     episode handle. Read when a scan asks, so a door that cannot be read is that scan's
     ScanBlind."""
-    return frozenset({*run_repository_files(), "episodes/_episode_handle.py"})
+    return frozenset({*run_repository_files(), "records/_episode_handle.py"})
 
 
 def owned(rel: str) -> bool:

@@ -6,7 +6,6 @@ module only reads."""
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import stat
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from pathlib import Path
 
 from defender import _io
 from defender.records._locations import _unwrap_exports_root, _unwrap_knowledge_lock
+from defender.records._run_id import OID
 from defender.tenancy._tenant import Tenant
 
 
@@ -23,8 +23,6 @@ class DeliveryRefused(Exception):
 
 #: The pointer file in `<T>/exports/` naming the latest published export.
 POINTER = "current"
-#: A full git object id (SHA-1 or SHA-256).
-OID = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
 
 @dataclass(frozen=True)

@@ -71,6 +71,13 @@ PROGRAMS: dict[str, Extractor] = {
 }
 
 
+def path_operands(argv: list[str]) -> list[str]:
+    """The words of `argv` the permission grammar treats as paths: a claimed `rm`'s operands,
+    else the program's extractor. An unknown program raises `KeyError`."""
+    extract = rm_target_files if argv[0] == "rm" else PROGRAMS[argv[0]]
+    return extract(argv) or []
+
+
 
 SEG = r"[\w.@=+-]+"
 TREE = rf"{SEG}(?:/{SEG})*"

@@ -145,7 +145,7 @@ def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_coun
     (ep.dir / "runs" / f"{E.EPISODE_ID}-orphan").mkdir()
     orphan = T.fixture_world_id("orphan")
     E.plant_raw(ep.dir / "worlds" / orphan / "judge" / "0.yaml", b"- not: [a mapping")
-    with pytest.raises(T.sym("episodes._family", "FamilyError"), match="not declared"):
+    with pytest.raises(T.sym("records._family", "FamilyError"), match="not declared"):
         render(ep)
     manifest = E.sample_manifest()
     manifest["worlds"].append(T.world_doc("orphan", role="B", axis="orphan fact"))

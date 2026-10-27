@@ -9,7 +9,7 @@ import re
 import pytest
 import yaml
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
@@ -19,7 +19,7 @@ def _questioner():
 
 
 def _family_mod():
-    return T.mod("episodes._family")
+    return T.mod("records._family")
 
 
 # registration, and everything that moves with it

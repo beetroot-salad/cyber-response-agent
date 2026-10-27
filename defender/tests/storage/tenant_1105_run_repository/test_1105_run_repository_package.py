@@ -18,7 +18,7 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 #: The layout's 10 public IMPORTED names, which the door does not serve (D1.3, R4-42).
 LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations", "dataclasses",
                    "errno", "is_plain_entry", "re", "refuse_bad_case_id", "stat")
-#: The private layout helpers `episodes/_episode_paths.py` imports from the submodule (R4-27).
+#: The private layout helpers `records/_episode_paths.py` imports from the submodule (R4-27).
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 
 

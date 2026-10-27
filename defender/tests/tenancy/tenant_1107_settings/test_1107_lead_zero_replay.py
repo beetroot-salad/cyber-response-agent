@@ -73,7 +73,7 @@ def _sibling_episode(tmp_path: Path, doc: dict, *, label: str) -> Path:
     record and no episodes variable; the launcher's RUNS step (`start_runs`, through
     `T.episode_view`) makes `runs/` and writes the arm roster the sibling reads its arm id from
     (O4b)."""
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
 
     root = current_data_root()
     episode_id = fixture_uuid(f"1107-{label}")

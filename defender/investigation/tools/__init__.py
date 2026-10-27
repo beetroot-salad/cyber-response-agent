@@ -201,7 +201,7 @@ async def _prepare_fix_row(ctx: RunContext[AgentDeps], tool_def: Any) -> Any:
 
 def _register_deferred_tools(agent, tools: ToolSet, verbs: Any = None) -> None:
     if tools.lesson_read:
-        from defender.learning.author.lesson_read import register_lesson_read_tool
+        from defender.investigation.tools.lesson_read import register_lesson_read_tool
 
         register_lesson_read_tool(agent)
 

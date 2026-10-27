@@ -25,7 +25,7 @@ from typing import Any, NamedTuple
 
 from defender.records import _provenance
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 
 
@@ -49,9 +49,9 @@ from defender.learning.branch.ledger import Ledger
 
 from defender.investigation import branch
 
-from defender.episodes import _family
+from defender.records import _family
 
-from defender.episodes._family import (
+from defender.records._family import (
     runnable_worlds,
 )
 
@@ -256,17 +256,21 @@ def _not_admitted(reader: Any, call: _Original) -> str | None:
 
 
 
+#: The checkout's `defender/`, from this file's own location (not `$DEFENDER_DIR`).
+_DEFENDER_DIR = Path(__file__).resolve().parents[2]
+
+
 def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) -> Any:
     """The host-side context pre-flight's reads run in: the episode's tenant record, the
     family's branch-point clock, and no capture (pre-flight is not a run and writes no query
     row). `DEFENDER_RUNS_BASE` is the source run's container — the tenant's natural runs folder
     — from the source `Run`'s own hand-out, not `run_env`'s `run_dir.parent`."""
-    from defender.run_common import DEFENDER_DIR, run_env
+    from defender.box import run_env
     from defender.systems.verbs import VerbContext
 
-    env = run_env(DEFENDER_DIR, Path(episode_dir))
+    env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
-    return VerbContext(defender_dir=DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
+    return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
                        capture=None, tenant=tenant, as_of=as_of)
 
 

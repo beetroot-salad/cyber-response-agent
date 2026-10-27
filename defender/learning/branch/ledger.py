@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from defender._io import read_jsonl_rows
-from defender.episodes._episode_handle import AppendRecord, Episode
+from defender.records._episode_handle import AppendRecord, Episode
 from defender.records import artifact_file
 from pydantic import ValidationInfo, field_validator
 

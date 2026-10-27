@@ -14,7 +14,7 @@ def test_d1_tenantpaths_owner_class(tmp_path):
     """Root acquisition is rejected before a value can escape through a local or call."""
     source = (
         "from defender.tenancy._tenant import accept_tenant\n"
-        "from defender.episodes._episode_paths import EpisodePaths\n\n"
+        "from defender.records._episode_paths import EpisodePaths\n\n"
         "def direct(root, t, d, run_id):\n"
         "    return accept_tenant(root, t, defender_dir=d).runs / run_id\n\n"
         "def through_a_local(root, t, d, run_id):\n"

@@ -8,7 +8,7 @@ import pytest
 
 from defender import _io
 from defender.records import _alert_input
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.learning.judge.render import episode_alert
 
 

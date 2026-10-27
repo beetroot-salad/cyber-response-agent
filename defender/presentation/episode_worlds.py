@@ -11,7 +11,7 @@ from typing import Any
 
 
 
-from defender.episodes._episode_paths import WORLD_LEAVES
+from defender.records._episode_paths import WORLD_LEAVES
 
 
 

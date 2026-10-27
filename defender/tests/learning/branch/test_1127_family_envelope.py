@@ -13,8 +13,8 @@ import pytest
 import yaml
 
 from defender import _yaml
-from defender.episodes._episode_handle import Episode
-from defender.episodes._family import FamilyError, load_family, parse_family, write_family
+from defender.records._episode_handle import Episode
+from defender.records._family import FamilyError, load_family, parse_family, write_family
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.shared.filesystem.test_1127_params_nesting_limit import raised
 
@@ -202,8 +202,8 @@ from pathlib import Path
 
 import yaml
 
-from defender.episodes._episode_handle import Episode
-from defender.episodes._family import FamilyError, load_family
+from defender.records._episode_handle import Episode
+from defender.records._family import FamilyError, load_family
 
 start = time.monotonic()
 try:

@@ -218,7 +218,7 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
 # Decision 12 — composed-identifier collisions
 
 def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_dir):
-    from defender.episodes._world_label import world_label_fault
+    from defender.records._world_label import world_label_fault
 
     assert world_label_fault("plain") is None, "positive control: a delimiter-free label passes"
     for label in ("has-dash", "a-b"):

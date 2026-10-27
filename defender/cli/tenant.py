@@ -95,6 +95,7 @@ from defender.tenancy import _tenant  # noqa: E402
 from defender._io import guarded_mkdir, read_plain_bytes, write_guarded  # noqa: E402
 from defender.tenancy._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
 from defender.systems import run_tenant  # noqa: E402
+from defender.learning.core import state as learning_state  # noqa: E402
 from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.tenancy import case_ticket  # noqa: E402
 
@@ -133,8 +134,8 @@ def setup(tenant_id: str, learning_state_from: Path | None = None, *,
         _settings_files_parse(settings)
         run_tenant.resolve_run_tenant_or_refuse(
             settings, tenant_id=tid, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=True)
-        _tenant.provision_learning(root, tid, learning_state_from, repo_root=_REPO_ROOT,
-                                   create_row=not has_row)
+        learning_state.provision_learning(root, tid, learning_state_from, repo_root=_REPO_ROOT,
+                                          create_row=not has_row)
         if learning_state_from is not None:
             print(f"learning state adopted from {learning_state_from}")
         tenant = _tenant.accept_tenant(root, tid, defender_dir=_DEFENDER_DIR)

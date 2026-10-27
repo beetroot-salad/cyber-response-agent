@@ -285,7 +285,7 @@ def test_o5_a_provider_down_run_hands_its_class_to_the_post_steps_and_renders(tm
 
 def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
-    from defender.episodes._episode_handle import Episode
+    from defender.records._episode_handle import Episode
 
     assert P.PROVIDER_DOWN_EXIT not in P.TAKEN_EXITS
     assert P.sym("run", "UNSERVABLE_EXIT") != P.PROVIDER_DOWN_EXIT

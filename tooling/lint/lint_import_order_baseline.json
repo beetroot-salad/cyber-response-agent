@@ -1,10 +1,6 @@
 {
   "//": "lint_import_order baseline (#1080): upward imports and per-package breaches accepted until their owner issue resolves them. Each reason names that owner (#<n>). The list only shrinks: an entry no import matches fails. Regenerate with `python tooling/lint/lint_import_order.py --update-baseline`.",
   "entries": {
-    "box/_lifecycle.py:defender.run_common": "#1309 (e): run_common used as a library",
-    "box/_spec.py:defender.investigation.permission.grant": "#1309 (h): the box imports the permission policy",
-    "box/_stage.py:defender.run_common": "#1309 (e): run_common used as a library",
-    "episodes/_knowledge_pin.py:defender.tenancy._exports": "#1309 (b): run storage and episodes import tenancy",
     "imports-adapters:cli/tacit_cli.py:defender.integrations.tacit_knowledge_adapter": "#1172: the tacit CLI reaches into the tacit adapter's private helpers",
     "imports-adapters:investigation/ticket_writer.py:defender.integrations._stub_transport": "#1172: the ticket writer posts through the adapters' shared transport",
     "imports-adapters:skills/connect/examples/example_adapter.py:defender.integrations._stub_transport": "#1172: the connect skill's example adapter uses the shared transport",
@@ -13,22 +9,11 @@
     "learning/_pydantic_stage.py:defender.agents": "#1309 (f): learning imports rendering and entry points",
     "learning/branch/cli.py:defender.presentation.visualize_episode": "#1309 (f): learning imports rendering and entry points",
     "learning/branch/cli.py:defender.run": "#1309 (f): learning imports rendering and entry points",
-    "learning/branch/preflight.py:defender.run_common": "#1309 (e): run_common used as a library",
     "learning/frontend/build.py:defender.presentation.publisher": "#1309 (f): learning imports rendering and entry points",
     "learning/frontend/build.py:defender.presentation.visualize_primitives": "#1309 (f): learning imports rendering and entry points",
     "learning/frontend/build.py:defender.presentation.visualize_run": "#1309 (f): learning imports rendering and entry points",
     "records/_artifact_schema.py:defender.skills.invlang.validate": "#1309 (d): Python in model-facing folders",
-    "records/_handle.py:defender.episodes._episode_paths": "#1309 (c): run layout imports episodes",
     "records/_held.py:defender.tenancy._tenant": "#1309 (b): run storage and episodes import tenancy",
-    "records/_lookup.py:defender.episodes._episode_handle": "#1309 (c): run layout imports episodes",
-    "records/_lookup.py:defender.episodes._episode_paths": "#1309 (c): run layout imports episodes",
-    "records/_lookup.py:defender.episodes._family": "#1309 (c): run layout imports episodes",
-    "records/_lookup.py:defender.tenancy._tenant": "#1309 (b): run storage and episodes import tenancy",
-    "investigation/orient.py:defender.run_common": "#1309 (e): run_common used as a library",
-    "investigation/publish_launch.py:defender.run_common": "#1309 (e): run_common used as a library",
-    "investigation/tools/__init__.py:defender.learning.author.lesson_read": "#1309 (g): imports into learning from below",
-    "investigation/tools/_bash.py:defender.run_common": "#1309 (e): run_common used as a library",
-    "tenancy/_tenant.py:defender.learning.core.config": "#1309 (g): imports into learning from below",
-    "tenancy/_tenant.py:defender.learning.core.state": "#1309 (g): imports into learning from below"
+    "records/_lookup.py:defender.tenancy._tenant": "#1309 (b): run storage and episodes import tenancy"
   }
 }

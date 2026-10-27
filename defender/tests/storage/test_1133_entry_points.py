@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 import yaml
 
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.records import WIRE_LOG_NAMES
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
@@ -642,7 +642,7 @@ MARKER = "host-manifest-1133-never-read"
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink"])
 def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it(tmp_path, kind):
-    fam = T.mod("episodes._family")
+    fam = T.mod("records._family")
     doc = T.family_doc()
     doc["worlds"][1]["story"] = MARKER
     ep = T.episode(tmp_path, doc=doc)

@@ -348,7 +348,7 @@ def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_cha
     bad = 'w"x<i>'
     rogue = ep.dir / "worlds" / T.fixture_world_id(bad)
     E.plant_raw(rogue / "judge" / "0.yaml", "findings: [{claim: BAD-WORLD-CLAIM}]\n")
-    with pytest.raises(T.sym("episodes._family", "FamilyError"), match="not declared"):
+    with pytest.raises(T.sym("records._family", "FamilyError"), match="not declared"):
         render(ep)
     shutil.rmtree(rogue)
     doc = E.sample_grade()

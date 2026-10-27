@@ -380,7 +380,7 @@ RETIRED_FAMILY_FIELDS = ("continuation_prompt",)
 def _declared_family_fields() -> set[str]:
     import dataclasses
 
-    return {f.name for f in dataclasses.fields(sym("episodes._family", "Family"))}
+    return {f.name for f in dataclasses.fields(sym("records._family", "Family"))}
 
 
 def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs/source",
@@ -501,7 +501,7 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
 def _plant_source_input(ep: Path, source_run_dir: str | None, source_run_id: str | None = None) -> None:
     """The source run's alert and record, as a launch copies them into the episode (#1222 A1):
     the source run's own when it holds them, else a plain one."""
-    from defender.episodes._episode_paths import EpisodePaths
+    from defender.records._episode_paths import EpisodePaths
     from defender.records import RunPaths
     from defender.tests.support.storage._alert_plant import plant_alert
 
@@ -1202,7 +1202,7 @@ def refusals() -> tuple[type[BaseException], ...]:
         SystemExit, EstateError, LedgerError, BranchError, ConfinementFault,
         AdapterFault, ValueError,
     ]
-    for dotted, name in (("episodes._family", "FamilyError"),
+    for dotted, name in (("records._family", "FamilyError"),
                          ("learning.judge", "JudgeRefused")):
         out.append(sym(dotted, name))
     return tuple(out)

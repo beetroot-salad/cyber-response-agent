@@ -84,7 +84,7 @@ def test_branch_spec_refuses_a_mistyped_field_as_branch_error(field_name, bad):
 
 
 def test_family_fact_refuses_a_non_string_entity_as_family_error():
-    from defender.episodes._family import FamilyError, parse_world
+    from defender.records._family import FamilyError, parse_world
 
     with pytest.raises(FamilyError, match=r"worlds\['b'\]\.facts\[0\]\.entities names True"):
         parse_world({"label": "b", "world_id": T.fixture_world_id("b"), "role": "B", "story": "s", "axis": "x",

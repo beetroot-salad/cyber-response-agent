@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.records import RUN_LAYOUT
 from defender.execution import bash_exec

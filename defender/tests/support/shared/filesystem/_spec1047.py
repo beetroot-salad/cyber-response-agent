@@ -81,7 +81,7 @@ def run_end_name() -> str:
     archive.py now holds no record name, and both the writer and this helper reach the same
     accessor on `_episode_paths`.
     """
-    return str(sym("episodes._episode_paths", "WORLD_LEAVES").run_end)
+    return str(sym("records._episode_paths", "WORLD_LEAVES").run_end)
 
 
 def sidecar_path(run_dir: Path) -> Path:
@@ -356,7 +356,7 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
         _spec1107.plant(root, "t1047", configs={})
         record = _spec1107.resolve(root, "t1047")
     return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
-            "env": mod("run_common").run_env(_tenants1106.DEFENDER, Path(run_dir))}
+            "env": mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir))}
 
 
 def receipt_path(run_dir: Path) -> Path:

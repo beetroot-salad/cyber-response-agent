@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES
+from defender.records._episode_paths import LAYOUT, WORLD_LEAVES
 from defender._io import Bound
 from defender._model import model
 from defender.learning.judge.calls import (

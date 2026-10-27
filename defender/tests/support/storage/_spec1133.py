@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from defender import _io
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.records import WIRE_LOG_NAMES
 from defender.tests.shared.filesystem.test_1111_rooted_io import (  # noqa: F401 — re-exported for the #1133 suite
     DEADLINE,
@@ -32,7 +32,7 @@ from defender.tests.shared.filesystem.test_1111_rooted_io import (  # noqa: F401
     raised_by,
 )
 
-HANDLE_MODULE = "defender.episodes._episode_handle"
+HANDLE_MODULE = "defender.records._episode_handle"
 
 #: The world, token, wire-log name and draw index the composing records are addressed with.
 WORLD_ID = fixture_uuid("world:1133:b")
@@ -100,7 +100,7 @@ RECORD_ARGS: dict[str, tuple[Any, ...]] = {
 # ---------------------------------------------------------------------------------------
 
 def handle() -> Any:
-    """`defender.episodes._episode_handle`, imported per call."""
+    """`defender.records._episode_handle`, imported per call."""
     return importlib.import_module(HANDLE_MODULE)
 
 

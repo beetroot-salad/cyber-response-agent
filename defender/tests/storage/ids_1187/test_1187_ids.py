@@ -138,7 +138,7 @@ def _family_doc_for(episode_id: str, *labels: str) -> dict:
 @pytest.mark.parametrize("label", ["b", LONG_LABEL, "w" * 220, "w" * 1000, "a-b"],
                          ids=["short", "200-bytes", "220-bytes", "1000-bytes", "invalid"])
 def test_1187_o3_labels_follow_their_own_rule(label):
-    from defender.episodes import _family
+    from defender.records import _family
 
     doc = _family_doc_for(S.new_id(), label)
     if label == "a-b":
@@ -163,7 +163,7 @@ def _attribute(obj: object, name: str) -> tuple[str, object]:
 
 def test_1187_o1_a_resumed_world_never_composes_its_arm_id(tmp_path):
     from defender.records import RunId
-    from defender.episodes import _family
+    from defender.records import _family
 
     episode_id = S.new_id()
     family = _family.parse_family(_family_doc_for(episode_id, "b"))
@@ -185,7 +185,7 @@ def test_1187_o1_a_resumed_world_never_composes_its_arm_id(tmp_path):
 
 
 def test_1187_o1_the_episode_layout_spells_no_sibling_run_dir():
-    from defender.episodes import _episode_paths
+    from defender.records import _episode_paths
 
     for owner in (_episode_paths.EpisodeLayout, _episode_paths.LAYOUT):
         assert not hasattr(owner, "sibling_run_dir"), (

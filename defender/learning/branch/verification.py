@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 
 
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 
 from defender._io import (
@@ -35,7 +35,7 @@ from defender.records import (
 
 
 from defender.learning.branch import outcome as outcome_mod
-from defender.episodes._family import load_family
+from defender.records._family import load_family
 
 
 

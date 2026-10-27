@@ -2,7 +2,7 @@
 
 The inventory issue #1076 asked for: one page naming every record kind a run has and where it
 lives. #1077 turns that inventory into the file-backed `Run` handle: `defender/records/_layout.py`
-(`RunPaths`), `defender/episodes/_episode_paths.py` (`EpisodePaths`) and `defender/tenancy/_tenant.py` own every
+(`RunPaths`), `defender/records/_episode_paths.py` (`EpisodePaths`) and `defender/tenancy/_tenant.py` own every
 name a run or episode record carries, and `defender/records/_handle.py` (`Run`, `RunRecord`,
 `RecordHandle`, `ArchivedWorld`) wraps them into the handle application code addresses by
 `(tenant_id, run_id)`.

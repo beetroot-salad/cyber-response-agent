@@ -22,7 +22,7 @@ CONTROL_PAGE = "skills/handbook/content/runtime-loop.md"
 
 
 def test_p4_the_family_manifest_declares_no_continuation_prompt():
-    family = T.sym("episodes._family", "Family")
+    family = T.sym("records._family", "Family")
     names = {f.name for f in dataclasses.fields(family)}
     assert {"source_run_id", "branch_message_id", "as_of"} <= names, names
     assert "continuation_prompt" not in names, (
@@ -31,7 +31,7 @@ def test_p4_the_family_manifest_declares_no_continuation_prompt():
 
 
 def test_p4_a_manifest_without_a_continuation_prompt_loads():
-    parse = T.sym("episodes._family", "parse_family")
+    parse = T.sym("records._family", "parse_family")
     doc = T.family_doc()
     doc.pop("continuation_prompt", None)
 

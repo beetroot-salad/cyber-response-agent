@@ -17,7 +17,7 @@ from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 from defender._io import ALIAS_READ_REFUSAL  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.learning.author.curator_engine import CuratorDeps  # noqa: E402
-from defender.learning.author.lesson_read import _tool_lesson_read  # noqa: E402
+from defender.investigation.tools.lesson_read import _tool_lesson_read  # noqa: E402
 from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.investigation.tools import (  # noqa: E402

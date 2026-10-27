@@ -90,7 +90,7 @@ def test_corpus_author_reads_a_lesson_written_by_an_earlier_model_via_lesson_rea
     tmp_path,
 ):
     """The actual CORPUS_AUTHOR `_tool_lesson_read` tail frames an earlier model's lesson body once."""
-    from defender.learning.author.lesson_read import _tool_lesson_read
+    from defender.investigation.tools.lesson_read import _tool_lesson_read
 
     deps, corpus, _ = _corpus_author_deps_scene(tmp_path, BoxResult(0, b"", b""))
     lesson = corpus / "prior-lesson.md"

@@ -34,7 +34,7 @@ ROSTER_PROBE = f"ledger {T.fixture_world_id('a')}.jsonl missing; run {ROSTER['a'
 
 def _family(episode_id: str):
     doc = T.family_doc(episode_id=episode_id, source_run_id=PINNED_SOURCE)
-    return T.sym("episodes._family", "parse_family")(doc)
+    return T.sym("records._family", "parse_family")(doc)
 
 
 def _arm_ids() -> dict:
@@ -47,7 +47,7 @@ def _arm_ids() -> dict:
 def _known(episode_id: str) -> frozenset[str]:
     """The family's set over the roster (#1187 declared change 15: `family_identities(family,
     arm_ids)`)."""
-    return T.sym("episodes._family", "family_identities")(_family(episode_id), _arm_ids())
+    return T.sym("records._family", "family_identities")(_family(episode_id), _arm_ids())
 
 
 def _redact(detail, known):
@@ -66,7 +66,7 @@ def test_family_identities_are_every_arms_run_id_and_token_plus_the_episodes_own
     composed (#1187 deletes `arm_run_id_for`).
     #1187 declared change 15
     """
-    fam = T.mod("episodes._family")
+    fam = T.mod("records._family")
     family = _family(PINNED_EPISODE)
     expected = {PINNED_EPISODE, *ROSTER.values()}
     for world in family.worlds:

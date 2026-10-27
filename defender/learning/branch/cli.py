@@ -57,8 +57,8 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
 
 from defender.records import _alert_input, _provenance
 from defender.records._locations import DataRoot
-from defender.episodes._episode_handle import Episode
-from defender.episodes._knowledge_pin import pin_text
+from defender.records._episode_handle import Episode
+from defender.records._knowledge_pin import pin_text
 from defender._io import (
     NotPlainEntry,
 )
@@ -83,7 +83,7 @@ from defender.tenancy import _tenant
 from defender._git import REPO_ROOT
 from defender.investigation import branch
 from defender.records import session_store
-from defender.episodes._family import (
+from defender.records._family import (
     FamilyError,
     load_family,
     runnable_worlds,
@@ -180,7 +180,7 @@ def _copy_source_input(episode: Episode, raw: bytes, record_text: str,
                        knowledge_commit: str | None = None) -> None:
     """Put the source run's alert and its record in the episode, once (A1): the judge's whole
     input about the alert, and every sibling's own; and the family's knowledge pin, when the
-    launcher decided one (`episodes._knowledge_pin`)."""
+    launcher decided one (`records._knowledge_pin`)."""
     episode.source_alert.create(raw)
     episode.source_record.create(record_text)
     if knowledge_commit is not None:

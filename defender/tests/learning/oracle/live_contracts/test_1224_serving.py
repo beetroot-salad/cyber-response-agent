@@ -726,7 +726,7 @@ def test_p019_base_answer_has_a_single_enormous_string_value(tmp_path, shape):
         assert json.loads(rows[0]["payload_text"]) == base
         assert len(_stored(ep, "b", "idp", "query", BOB)) == 1
     # The ledger's own reader still reads the world's file.
-    S.sym(S.LEDGER, "Ledger").for_world(S.mod("episodes._episode_handle").Episode.create(ep), TOKEN_B)
+    S.sym(S.LEDGER, "Ledger").for_world(S.mod("records._episode_handle").Episode.create(ep), TOKEN_B)
 
 
 def test_p021_base_answer_values_with_control_characters_nul_bidi_and_zero_width(tmp_path):
@@ -747,7 +747,7 @@ def test_p021_base_answer_values_with_control_characters_nul_bidi_and_zero_width
     assert len(rows) == 1
     assert rows[0]["source"] == S.PASSTHROUGH
     assert json.loads(rows[0]["payload_text"])["rows"][0]["note"] == hostile
-    S.sym(S.LEDGER, "Ledger").for_world(S.mod("episodes._episode_handle").Episode.create(ep), TOKEN_B)
+    S.sym(S.LEDGER, "Ledger").for_world(S.mod("records._episode_handle").Episode.create(ep), TOKEN_B)
 
 
 def test_input_call_params_cannot_be_stored(tmp_path):

@@ -36,7 +36,7 @@ from defender.learning.judge.enqueue import (
 
 
 
-from defender.episodes._family import (
+from defender.records._family import (
     BASE_ROLE, world_id_for,
 )
 

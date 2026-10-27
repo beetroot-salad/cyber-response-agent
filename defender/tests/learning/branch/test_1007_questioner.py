@@ -144,7 +144,7 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     from types import SimpleNamespace
 
     orient = W.mod("investigation.orient")
-    run_common = W.mod("run_common")
+    box_mod = W.mod("box")
     signature = "rule-v2-cross-tier-ssh-pivot"
     agent = tmp_path / "agent"
     W.questioner_lesson(
@@ -159,7 +159,7 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
 
     run_dir = tmp_path / "run"
     run_dir.mkdir(exist_ok=True)
-    env = run_common.run_env(Path(orient.__file__).resolve().parents[1], run_dir,
+    env = box_mod.run_env(Path(orient.__file__).resolve().parents[1], run_dir,
                              tenant_agent=agent)
     section = orient._build_lessons_section(env, signature, orient._shim)
 

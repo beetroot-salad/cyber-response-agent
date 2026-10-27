@@ -164,10 +164,10 @@ def _branched_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
     `WorldRegistry` answers."""
     from defender.records import RunId
 
-    family = T.sym("episodes._family", "parse_family")(
+    family = T.sym("records._family", "parse_family")(
         T.family_doc(episode_id=PINNED_EPISODE, source_run_id="live-lever-up-20260930-sudo"))
     arm_ids = {T.fixture_world_id(label): RunId.parse(text) for label, text in ROSTER.items()}
-    known = T.sym("episodes._family", "family_identities")(family, arm_ids)
+    known = T.sym("records._family", "family_identities")(family, arm_ids)
     plain = _faulting_backend(rec, detail)
 
     class _World(FakeVerbs):

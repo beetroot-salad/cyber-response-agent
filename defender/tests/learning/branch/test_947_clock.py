@@ -23,8 +23,8 @@ from defender._paths import PATHS  # noqa: E402
 from defender.learning.branch.estate.registry import EstateError  # noqa: E402
 from defender.tests.learning.oracle.live_contracts._spec1224 import build_registry  # noqa: E402
 from defender.systems.verbs import read_roster  # noqa: E402
-from defender.episodes._episode_handle import Episode  # noqa: E402
-from defender.episodes._episode_paths import BASE_FILENAME, SERVED_DIRNAME  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
+from defender.records._episode_paths import BASE_FILENAME, SERVED_DIRNAME  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     PASSTHROUGH,
     Ledger,

@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
+from defender import box as box_mod
 from defender.records import _alert_input
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
@@ -206,8 +207,7 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
     run_shim = shim if shim is not None else _shim
     view = ModelView.for_run(Path(run_dir), Path(defender_dir), tenant_agent)
     try:
-        from defender import run_common
-        env = run_common.run_env(defender_dir, run_dir, tenant_agent=tenant_agent)
+        env = box_mod.run_env(defender_dir, run_dir, tenant_agent=tenant_agent)
     except Exception:  # noqa: BLE001 — orientation must never break the run
         env = {}
     # The alert is read once, checked against the digest the run recorded at its start; the

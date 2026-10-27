@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _view_run_1165
 

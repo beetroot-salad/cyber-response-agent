@@ -8,7 +8,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 from pydantic_ai.exceptions import ModelRetry
 
 from defender.agents import LEAD_AUTHOR_DEF, MAIN_DEF
-from defender.learning.author.lesson_read import _tool_lesson_read
+from defender.investigation.tools.lesson_read import _tool_lesson_read
 from defender.box import BoxResult
 from defender.investigation.tools import _format_bash_result, _tool_bash, _tool_read_file
 from defender.tests.support.learning.curation._frames680 import (

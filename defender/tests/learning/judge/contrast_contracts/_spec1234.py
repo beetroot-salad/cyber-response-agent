@@ -64,7 +64,7 @@ VOCAB = "_vocab"
 REPORT = "records._report"
 PROMPT = "learning._prompt"
 VISUALIZE = "presentation.visualize_episode"
-FAMILY_LOADER = "episodes._family"
+FAMILY_LOADER = "records._family"
 CLI = "learning.branch.cli"
 RUN = "run"
 
@@ -1421,7 +1421,7 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000,
         samples = fam.read_samples_record(bound)
         try:
             pre = outcome.read_outcome(bound)
-            failed = outcome.failed_worlds(bound, pre, family=T.sym("episodes._family", "parse_family")(manifest))
+            failed = outcome.failed_worlds(bound, pre, family=T.sym("records._family", "parse_family")(manifest))
         except outcome.OutcomeUnreadable:
             pre, failed = None, {}
         world = next(w for w in manifest["worlds"] if w["label"] == label)

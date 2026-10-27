@@ -5,12 +5,12 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 import pytest
 
-from defender.episodes._episode_handle import Episode
+from defender.records._episode_handle import Episode
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 
 def _family():
-    return T.mod("episodes._family")
+    return T.mod("records._family")
 
 
 def _load(doc):
@@ -224,7 +224,7 @@ def test_947_write_family_renders_a_fact_entity_as_one_scalar(tmp_path):
 
 @pytest.mark.parametrize("length", [220, 1000])
 def test_world_labels_do_not_bound_artifact_paths(tmp_path, length):
-    from defender.episodes._episode_paths import LAYOUT
+    from defender.records._episode_paths import LAYOUT
     from uuid import UUID
 
     label = "w" * length

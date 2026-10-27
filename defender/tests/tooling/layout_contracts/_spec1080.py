@@ -63,7 +63,7 @@ API_FORBIDDEN = (
     "defender.learning", "defender.investigation", "defender.systems", "defender.providers",
     "defender.records.session_store", "defender.records.selection", "defender.records._wire",
     "defender.records.run_end", "defender.tenancy.case_ticket", "defender.tenancy.run_knowledge",
-    "defender.tenancy.tenant_settings", "defender.episodes._family", "defender._exception_groups",
+    "defender.tenancy.tenant_settings", "defender.records._family", "defender._exception_groups",
 )
 
 

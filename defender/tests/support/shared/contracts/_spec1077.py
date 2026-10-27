@@ -37,12 +37,12 @@ NOT_ROOT = pytest.mark.skipif(
 # The coined module names. ONE place, so a rename is one edit.
 # ======================================================================================
 
-#: The handle module. D6(a)'s exempt owner set is `records/_layout.py`, `episodes/_episode_paths.py`,
+#: The handle module. D6(a)'s exempt owner set is `records/_layout.py`, `records/_episode_paths.py`,
 #: `tenancy/_tenant.py` and "the handle"; the other three are underscore-prefixed private modules
 #: beside `_io.py` and `records/_provenance.py`, so the handle follows the same convention.
 HANDLE_MODULE = "records._handle"
 TENANT_MODULE = "tenancy._tenant"
-EPISODE_MODULE = "episodes._episode_paths"
+EPISODE_MODULE = "records._episode_paths"
 #: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
 #: repository package — which absorbed the layout (`_layout.py`, formerly the flat-tier
 #: run-path module) and the handle (`_handle.py`, formerly the flat-tier run-handle module) —
@@ -51,7 +51,7 @@ EPISODE_MODULE = "episodes._episode_paths"
 #: gains is an owner without a list edit; the record-format modules beside them are not.
 RUN_REPOSITORY_FILES = tuple(sorted(
     f"records/{m}.py" for m in {"__init__", *_records_door._HOMES.values()}))
-OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py")
+OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py")
 
 
 def handle() -> Any:
@@ -65,7 +65,7 @@ def tenant() -> Any:
 
 
 def episode_paths() -> Any:
-    """`defender/episodes/_episode_paths.py::EpisodePaths` — the episode layout's owner (D1)."""
+    """`defender/records/_episode_paths.py::EpisodePaths` — the episode layout's owner (D1)."""
     return mod(EPISODE_MODULE)
 
 

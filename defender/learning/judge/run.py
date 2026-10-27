@@ -7,7 +7,7 @@ from defender._model import model
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender._text import unwritable_value
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
 from defender.learning.core.retired import (

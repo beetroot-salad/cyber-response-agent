@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
-from defender.episodes._episode_paths import LAYOUT
+from defender.records._episode_paths import LAYOUT
 from defender.records._run_id import uuid_id_fault
 from defender.investigation.branch import source_alert
-from defender.episodes._family import family_identities
+from defender.records._family import family_identities
 from defender.records import Run
 from defender._io import read_jsonl_rows, read_text_utf8
 from defender.knowledge._query_rules import ParamsTooDeep, _json_safe_params

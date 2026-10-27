@@ -412,7 +412,7 @@ def test_unsandboxed_opt_out_uniform_across_tiers(tmp_path, monkeypatch):
 
 
 def test_unboxed_opt_out_env_receives_no_allowlist_filtering(tmp_path):
-    from defender.run_common import run_env
+    from defender.box import run_env
     from defender import providers
 
     run_dir = make_run_dir(tmp_path)

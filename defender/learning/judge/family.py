@@ -15,13 +15,13 @@ from pathlib import Path, PurePath
 from defender._io import Bound
 from defender.records._report import ReportRead, parse_report_text
 from defender._vocab import normalized_disposition
-from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
+from defender.records._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
     normalized_source,
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
-from defender.episodes._family import (
+from defender.records._family import (
     BASE_ROLE,
     FamilyError,
     ManifestPredatesOracle,

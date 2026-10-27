@@ -56,7 +56,7 @@ MODULES = (
     "learning/judge/_grade_record.py",
     "learning/judge/_records.py",
     "learning/judge/enqueue.py",
-    "episodes/_family.py",
+    "records/_family.py",
     "presentation/visualize_episode.py",
     "presentation/episode_models.py",
     "presentation/episode_transcript.py",
@@ -72,7 +72,7 @@ MODULES = (
 #: The O5 scan's modules: the same set (D6').
 O5_MODULES = MODULES
 #: The episode handle module, whose I/O must run through `hold` / `hold_new` and the `Held` verbs.
-HANDLE_MODULE = "episodes/_episode_handle.py"
+HANDLE_MODULE = "records/_episode_handle.py"
 
 #: D6's pinned vocabulary: the path seams, spelled by their own name wherever they come from.
 PATH_SEAMS = frozenset({
@@ -428,7 +428,7 @@ NB_READERS = frozenset({
     # (#1105 PR 2 deleted `episode_dir_for` — the owner's `episode_dir` — and
     # `sibling_runs_base`, F-13.)
     ("learning.branch.cli", "sibling_argv"),
-    ("episodes._family", "resume_world_from"),
+    ("records._family", "resume_world_from"),
     ("run", "main"),
     # The root-binding readers (O3, N-b).
     ("learning.judge", "read_grade"),

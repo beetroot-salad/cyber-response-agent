@@ -17,7 +17,7 @@ from defender.learning.branch.seams import model_seam
 from defender.learning.lead_repository import joined, questioner_leads
 from defender.records import session_store as ss
 from defender.investigation.branch import _frontier
-from defender.episodes._family import check_identities, parse_family, write_family
+from defender.records._family import check_identities, parse_family, write_family
 
 import argparse
 _ap = argparse.ArgumentParser()
