@@ -837,26 +837,16 @@ def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path, tmp_path: Path):
     assert pending == []
 
 
-def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
+def _capture_engine(monkeypatch) -> dict:
     """Patch the engine's ``run_author_stage``, which the spawn looks up at call time, to capture
-    the kwargs it is handed and return a canned rc (or raise)."""
+    the user prompt it is handed (`cap["user_prompt"]`) and return rc 0."""
     from defender.learning.leads import lead_author_engine
 
     cap: dict = {}
 
     def _fake(**kwargs):
-        cap.update(kwargs)
-        # Flatten the StageWiring/StageContext fields the cases assert on onto `cap`.
-        if (w := kwargs.get("wiring")) is not None:
-            cap.update(system_prompt_file=w.prompt_path, model=w.model,
-                       effort=w.effort, trace_name=w.trace_name, label=w.label)
-        if (c := kwargs.get("ctx")) is not None:
-            cap.update(user_prompt=c.user, learning_run_dir=c.learning_run_dir,
-                       repo_root=c.repo_root, request_limit=c.request_limit,
-                       timeout=c.wall_clock_timeout, box=c.box, salt=c.salt)
-        if raise_exc is not None:
-            raise raise_exc
-        return rc
+        cap["user_prompt"] = kwargs["ctx"].user
+        return 0
 
     monkeypatch.setattr(  # lint-monkeypatch: ok — the spawn spine has no DI seam; capture engine kwargs
         lead_author_engine, "run_author_stage", _fake

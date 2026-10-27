@@ -114,15 +114,6 @@ def real(*paths: Path) -> list[str]:
     return sorted(os.path.realpath(p) for p in paths)
 
 
-def refused_value_error(fn: Callable[[], Any], what: str) -> None:
-    """`fn()` raises `ValueError` (the type is the contract, not the wording)."""
-    try:
-        got = fn()
-    except ValueError:
-        return
-    pytest.fail(f"{what}: answered {got!r}, not ValueError")
-
-
 #: Each member's trees, by the `LoopPaths` attribute that names each (and the folder name
 #: `relocated_paths` moves it to).
 TREE_ATTRS: dict[DrainLabel, tuple[tuple[str, str], ...]] = {
@@ -393,7 +384,7 @@ def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves
 
 
 @pytest.mark.parametrize("label", UNKNOWN_LABELS)
-def test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held(
+def test_a_non_member_raises_at_the_holder_and_nothing_is_held(
         tmp_path: Path, label: object):
     """Only the holder half: the box is built from the batch's lanes, never from a label."""
     lf = _leaf(tmp_path)
@@ -438,7 +429,7 @@ def test_a_tree_missing_from_the_leaf_is_refused_never_skipped(tmp_path: Path):
 
 
 @pytest.mark.parametrize("label", KNOWN)
-def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
+def test_the_held_trees_follow_whatever_trees_paths_names(
         tmp_path: Path, label: DrainLabel):
     asked: list[tuple[Path, str]] = []
     paths = relocated_paths(asked)(repo_root=tmp_path / MAIN,

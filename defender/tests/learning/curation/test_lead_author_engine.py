@@ -287,6 +287,20 @@ def test_run_stage_require_output_matrix(tmp_path):
         assert _go(False, "real story", "pc") == "real story"   # positive control
 
 
+def _engine_run(tmp_path: Path, rd: Path, repo_root: Path, fn, trace: str) -> str:
+    """`_run_lead_author_pydantic` as model `m` (system prompt `_prompt(tmp_path)`, user prompt
+    `u`, up to 6 requests) over `repo_root`, its fake model running `fn`, its trace `trace` under
+    the run dir `rd`."""
+    with override_allow_model_requests(False):
+        return _run_lead_author_pydantic(
+            StageWiring(prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name=trace,
+                        label="la"),
+            StageContext(learning_run_dir=rd, user="u", request_limit=6,
+                         wall_clock_timeout=config.lead_author_timeout(), repo_root=repo_root),
+            make_model=_fake_model(fn),
+        )
+
+
 # a repo-relative file op resolves against the lane tree, not the process cwd
 
 def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch):
@@ -296,22 +310,7 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
     monkeypatch.chdir(decoy)
     rel = "skills/gather/queries/elastic/new.md"
     fn = _tool_then_text([("write_file", {"path": rel, "content": "BODY-42"})], "done")
-    with override_allow_model_requests(False):
-        out = _run_lead_author_pydantic(
-            StageWiring(
-                prompt_path=_prompt(tmp_path), model="m",
-                effort=None, trace_name="f2.jsonl",
-                label="la",
-            ),
-            StageContext(
-                learning_run_dir=rd,
-                user="u",
-                request_limit=6,
-                wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=_agent(wt),
-            ),
-            make_model=_fake_model(fn),
-        )
+    out = _engine_run(tmp_path, rd, _agent(wt), fn, "f2.jsonl")
     assert out == "done"
     landed = _agent(wt) / "skills" / "gather" / "queries" / "elastic" / "new.md"
     assert landed.is_file()                                       # positive: real write, in the worktree
@@ -324,22 +323,7 @@ def test_write_into_new_subtree_creates_parents(tmp_path):
     rel = "skills/cmdb/_draft/auth.md"              # cmdb/ absent in the draft
     assert not (_agent(wt) / "skills" / "cmdb").exists()
     fn = _tool_then_text([("write_file", {"path": rel, "content": "PROMOTED"})], "done")
-    with override_allow_model_requests(False):
-        out = _run_lead_author_pydantic(
-            StageWiring(
-                prompt_path=_prompt(tmp_path), model="m",
-                effort=None, trace_name="newdir.jsonl",
-                label="la",
-            ),
-            StageContext(
-                learning_run_dir=rd,
-                user="u",
-                request_limit=6,
-                wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=_agent(wt),
-            ),
-            make_model=_fake_model(fn),
-        )
+    out = _engine_run(tmp_path, rd, _agent(wt), fn, "newdir.jsonl")
     assert out == "done"
     landed = _agent(wt) / "skills" / "cmdb" / "_draft" / "auth.md"
     assert landed.read_text() == "PROMOTED"
@@ -351,22 +335,7 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
     decoy.mkdir()
     monkeypatch.chdir(decoy)
     before = os.getcwd()
-    with override_allow_model_requests(False):
-        _run_lead_author_pydantic(
-            StageWiring(
-                prompt_path=_prompt(tmp_path), model="m",
-                effort=None, trace_name="cwd.jsonl",
-                label="la",
-            ),
-            StageContext(
-                learning_run_dir=rd,
-                user="u",
-                request_limit=4,
-                wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=_agent(wt),
-            ),
-            make_model=_fake_model(_replay("done")),
-        )
+    _engine_run(tmp_path, rd, _agent(wt), _replay("done"), "cwd.jsonl")
     assert os.getcwd() == before
 
 
@@ -374,22 +343,7 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     rel = "skills/gather/queries/elastic/e.md"
     fn = _tool_then_text([("write_file", {"path": rel, "content": "X"})], "  ")
-    with override_allow_model_requests(False):
-        out = _run_lead_author_pydantic(
-            StageWiring(
-                prompt_path=_prompt(tmp_path), model="m",
-                effort=None, trace_name="e.jsonl",
-                label="la",
-            ),
-            StageContext(
-                learning_run_dir=rd,
-                user="u",
-                request_limit=6,
-                wall_clock_timeout=config.lead_author_timeout(),
-                repo_root=_agent(wt),
-            ),
-            make_model=_fake_model(fn),
-        )
+    out = _engine_run(tmp_path, rd, _agent(wt), fn, "e.jsonl")
     assert out == "  "
     assert (_agent(wt) / "skills" / "gather" / "queries" / "elastic" / "e.md").read_text() == "X"
 
@@ -443,23 +397,8 @@ def test_run_author_stage_sources_key_before_run():
 
 def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
     rd, wt = _run_dir(tmp_path), _worktree(tmp_path)
-    with override_allow_model_requests(False):
-        for name in ("run-A.7.trace.jsonl", "run-B.7.trace.jsonl"):
-            _run_lead_author_pydantic(
-                StageWiring(
-                    prompt_path=_prompt(tmp_path), model="m",
-                    effort=None, trace_name=name,
-                    label="la",
-                ),
-                StageContext(
-                    learning_run_dir=rd,
-                    user="u",
-                    request_limit=4,
-                    wall_clock_timeout=config.lead_author_timeout(),
-                    repo_root=wt,
-                ),
-                make_model=_fake_model(_replay("done")),
-            )
+    for name in ("run-A.7.trace.jsonl", "run-B.7.trace.jsonl"):
+        _engine_run(tmp_path, rd, wt, _replay("done"), name)
     a, b = (rd / WIRE_LOG_DIR / "run-A.7.trace.jsonl",
             rd / WIRE_LOG_DIR / "run-B.7.trace.jsonl")
     assert a.is_file()

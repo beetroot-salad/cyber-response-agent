@@ -4,12 +4,8 @@ import contextlib
 import dataclasses
 import errno
 import gc
-import json
-import logging
 import os
 import shutil
-import subprocess
-import sys
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path, PurePosixPath
@@ -17,7 +13,6 @@ from typing import Any
 
 import pytest
 
-from defender import _io
 from defender.knowledge._corpus import (
     Lesson,
     QueryTemplate,
@@ -30,6 +25,7 @@ from defender.knowledge._corpus import (
 from defender._frontmatter import split_frontmatter
 from defender._io import ALIAS_READ_REFUSAL, bind, hold
 from defender.learning.leads import lead_neighbors as ln
+from defender.tests.support.learning.curation._lead_author_1134 import logged as said
 from defender.tests.support.learning.curation._shared_readers_1134 import (
     NOBODY,
     REFUSAL_ROUTES,
@@ -37,6 +33,7 @@ from defender.tests.support.learning.curation._shared_readers_1134 import (
     RefusesFolder,
     RefusesFolders,
     SpellingRecorder,
+    UNCOMMON_ERRNOS,
     SwapsFolderBetweenListings,
     VanishesOnOpen,
     kernel_watch,
@@ -44,11 +41,11 @@ from defender.tests.support.learning.curation._shared_readers_1134 import (
     run_readers,
 )
 from defender.tests.support.learning.curation._tree_listing_1134 import (
-    CHILD_DEADLINE,
     REMOVAL_MOMENTS,
     CallRecorder,
     ListingFaults,
     descriptors_under,
+    run_child_of,
 )
 from defender.tests.shared.filesystem.test_1111_rooted_io import Planted, census, in_time, plant_leaf
 
@@ -323,12 +320,12 @@ def rqt_root(probe: str, form: str) -> str:
 
 
 @contextlib.contextmanager
-def rqt_called_as(scene: Scene, probe: str, form: str, os_: Any = os,
-                  where: Path | None = None) -> Iterator[tuple[tuple[Any, ...], dict[str, Any]]]:
+def rqt_called_as(scene: Scene, probe: str, form: str,
+                  os_: Any = os) -> Iterator[tuple[tuple[Any, ...], dict[str, Any]]]:
     """`read_query_template`'s `(args, kwargs)` for `probe` in `form`: the bare Path; a Bound
     on the catalog with `"<sys>/x.md"`; a held `skills` view with the prefixed name (`str`, or
-    `PurePosixPath`); the held `skills` view under `gather/queries` with `"<sys>/x.md"`.
-    `where` defaults to the folder the name is relative to."""
+    `PurePosixPath`); the held `skills` view under `gather/queries` with `"<sys>/x.md"`. `where`
+    is the folder the name is relative to."""
     if form == "path":
         yield (scene.t / probe,), {}
         return
@@ -343,7 +340,7 @@ def rqt_called_as(scene: Scene, probe: str, form: str, os_: Any = os,
             if form == "held-view-under":
                 view = view.under(below(CATALOG, "skills"))
         named = PurePosixPath(name) if form == "held-purepath" else name
-        yield (view, named), {"where": where if where is not None else scene.t / where_rel}
+        yield (view, named), {"where": scene.t / where_rel}
 
 
 def rqt_expected(scene: Scene, probe: str) -> tuple[QueryTemplate, str]:
@@ -352,12 +349,6 @@ def rqt_expected(scene: Scene, probe: str) -> tuple[QueryTemplate, str]:
 
 def probe_id(probe: str) -> str:
     return PurePosixPath(probe).name
-
-
-def said(caplog: pytest.LogCaptureFixture) -> list[str]:
-    """The warnings the defender's loggers logged since the last clear."""
-    return [r.getMessage() for r in caplog.records
-            if r.levelno >= logging.WARNING and r.name.startswith("defender")]
 
 
 def rqt_quietly(caplog: pytest.LogCaptureFixture, args: tuple[Any, ...],
@@ -1043,24 +1034,10 @@ def rqt_scenarios(tmp: Path, case: str, rel: str, forms: Iterable[str]) -> list[
 
 
 def run_reader_child(scenarios: list[dict[str, Any]], mode: str = "unprivileged") -> dict[str, Any]:
-    """`_shared_readers_1134.child` in a fresh interpreter over THIS tree's `defender`, under
-    `CHILD_DEADLINE`: `unprivileged` (drop to `NOBODY` when root) or `audit`."""
-    source = Path(_io.__file__).resolve().parents[1]
-    path = [str(source), *([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else [])]
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(path), "PYTHONDONTWRITEBYTECODE": "1"}
-    try:
-        done = subprocess.run(
-            [sys.executable, "-c",
-             "from defender.tests.support.learning.curation._shared_readers_1134 import child; child()"],
-            input=json.dumps({"mode": mode, "scenarios": scenarios}), capture_output=True,
-            text=True, env=env,
-            cwd=source, timeout=CHILD_DEADLINE, check=False)
-    except subprocess.TimeoutExpired:
-        pytest.fail(f"the reader child did not finish within {CHILD_DEADLINE}s")
-    assert done.returncode == 0, f"the reader child failed: {done.stderr[-4000:]}"
-    answer = json.loads(done.stdout)
-    assert "child_failed" not in answer, answer
-    return answer
+    """`_shared_readers_1134.child` in a fresh interpreter (`run_child_of`): `unprivileged` (drop
+    to `NOBODY` when root) or `audit`."""
+    return run_child_of("defender.tests.support.learning.curation._shared_readers_1134",
+                        {"mode": mode, "scenarios": scenarios})
 
 
 def _open_up(top: Path) -> None:
@@ -1442,10 +1419,6 @@ def test_a_folder_refused_once_is_warned_from_that_one_listing(scene, reader, fo
                                           if not under(r, f"{CATALOG}/wazuh")])
     assert said(caplog) == [f"warn: skipping {where}/wazuh ({os.strerror(errno.EIO)})"]
     assert seam.asked == 1, f"wazuh was listed {seam.asked} times; its one listing decides"
-
-
-#: Errnos outside the ones every other row uses: whatever `entries()` says is the reason.
-UNCOMMON_ERRNOS = (errno.ENOMEM, errno.EMFILE, errno.ESTALE, errno.ENOTCONN)
 
 
 @pytest.mark.parametrize("err", UNCOMMON_ERRNOS, ids=errno.errorcode.get)

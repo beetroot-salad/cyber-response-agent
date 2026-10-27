@@ -3,8 +3,6 @@ from __future__ import annotations
 import errno
 import logging
 import os
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -15,10 +13,19 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.lane_trees import DrainTrees, kind_at
 from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
-from defender.tests.support.learning.curation._lead_author_1134 import draft_scene_over, outcome, place, raised, write
+from defender.tests.support.learning.curation._lead_author_1134 import (
+    GHOST,
+    discover,
+    draft_scene_over,
+    logged,
+    outcome,
+    place,
+    product_lane,
+    raised,
+    write,
+)
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
-from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder
+from defender.tests.support.learning.curation._shared_readers_1134 import REFUSAL_ROUTES, UNCOMMON_ERRNOS, RefusesFolder
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.support.learning.core._state1135 import run_of
 from defender.tests.learning.curation.test_1134_lead_author_handle import (
@@ -40,9 +47,6 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
 )
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
-#: Errnos no other row uses (as in `test_1134_shared_readers`), so a reader special-casing the
-#: common ones is caught.
-UNCOMMON_ERRNOS = (errno.ENOMEM, errno.EMFILE, errno.ESTALE, errno.ENOTCONN)
 #: Every errno a refused listing is driven with here.
 REFUSED_ERRNOS = (errno.EACCES, errno.EIO, *UNCOMMON_ERRNOS)
 
@@ -51,25 +55,13 @@ def _bad_fd(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
 
 
-def _draft_lane(tmp_path: Path) -> C.DraftLane:
-    """`_worktree`'s seeded `skills/` as the tenant's `agent/skills` (one export commit) under a
-    batch with the lead lane `skills`; the product checkout keeps the adapters and no corpus."""
-    repo = _worktree(tmp_path)
-    agent = tmp_path / "agent-src"
-    shutil.copytree(repo / "defender" / "skills", agent / "skills")
-    subprocess.run(["git", "rm", "-r", "-q", "defender/skills"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "the product holds no corpus"], cwd=repo,
-                   check=True)
-    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=repo)
-
-
 def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
         tmp_path: Path, monkeypatch, caplog):
     """With no deps the tick opens its own trees over the batch's draft, mints each draft there
     and reaches its agent, leaving no descriptor open below the draft."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     caplog.set_level(logging.DEBUG)
-    lane = _draft_lane(tmp_path)
+    lane = product_lane(tmp_path, _worktree(tmp_path))
     run_dir = _run_dir(("wazuh.hunt-creds", "wazuh", "esql"),
                        ("elastic.hunt-creds", "elastic", "esql"))
 
@@ -167,10 +159,6 @@ def test_kind_at_on_the_mount_point_answers_from_its_own_listing(scene, route: s
     assert kind_at(scene.repo, closed.tree_for, rel) == "other"
 
 
-SKILL_SYSTEMS = frozenset({"elastic", "wazuh"})
-GHOST = "discover_system_drafts: skipped undeclared directory 'ghost'"
-
-
 @pytest.fixture
 def skills(tmp_path: Path) -> Path:
     """A `skills/` tree: two declared systems with a pending draft each, and an undeclared
@@ -182,25 +170,14 @@ def skills(tmp_path: Path) -> Path:
     return root
 
 
-def _discover(skills: Path, os_: Any) -> list[Path]:
-    with DrainTrees.open((skills,), os_=os_) as trees:
-        return lead_author.discover_system_drafts(
-            skills=trees.mount(skills).view(), where=skills, systems=SKILL_SYSTEMS)
-
-
-def _warnings(caplog) -> list[str]:
-    return [r.getMessage() for r in caplog.records
-            if r.levelno >= logging.WARNING and r.name.startswith("defender")]
-
-
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
 @pytest.mark.parametrize("deny", ["wazuh", "wazuh/_draft"])
 def test_discover_takes_a_refused_folders_one_listing_as_final(
         skills: Path, deny: str, route: str, caplog):
     refuser = RefusesFolder(skills / deny, route, errno.EACCES, once=True)
-    assert _discover(skills, refuser) == [skills / "elastic/_draft/a.md"]
+    assert discover(skills, refuser) == [skills / "elastic/_draft/a.md"]
     assert refuser.asked == 1, f"the folder was asked for {refuser.asked} times"
-    assert _warnings(caplog) == [GHOST, f"warn: skipping {skills / deny} ({os.strerror(errno.EACCES)})"]
+    assert logged(caplog) == [GHOST, f"warn: skipping {skills / deny} ({os.strerror(errno.EACCES)})"]
 
 
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
@@ -209,6 +186,6 @@ def test_discover_takes_a_refused_folders_one_listing_as_final(
 def test_discover_warns_an_uncommon_refusal_in_its_own_words(
         skills: Path, deny: str, err: int, route: str, caplog):
     refuser = RefusesFolder(skills / deny, route, err)
-    assert _discover(skills, refuser) == [skills / "elastic/_draft/a.md"]
+    assert discover(skills, refuser) == [skills / "elastic/_draft/a.md"]
     assert refuser.refused > 0
-    assert _warnings(caplog) == [GHOST, f"warn: skipping {skills / deny} ({os.strerror(err)})"]
+    assert logged(caplog) == [GHOST, f"warn: skipping {skills / deny} ({os.strerror(err)})"]

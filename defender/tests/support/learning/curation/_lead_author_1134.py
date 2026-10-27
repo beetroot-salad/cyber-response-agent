@@ -15,6 +15,7 @@ import pytest
 from defender._io import Bound, Held, hold
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.tests.support.learning.curation._curator1134 import clear
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
@@ -33,28 +34,19 @@ def lead_trees(paths: LoopPaths) -> DrainTrees:
     return open_drain_trees(paths, LEAD_AUTHOR_DRAIN_LABEL)
 
 
-def lane_tree_for(repo: Path) -> TreeForFn:
-    """The lead drain's `trees.tree_for` over the repo at `repo` (the root git-status names are
-    relative to). The trees stay open while the returned bound method is referenced."""
-    return lead_trees(LoopPaths(repo_root=repo, state_dir=repo / "defender" / "learning")).tree_for
-
-
-def lead_deps(paths: LoopPaths, *, state: Any = None, **replaced: Any) -> Any:
-    """`build_lead_author_deps(paths, trees=<the lead drain's trees over paths>)`, with the
-    `replaced` fields swapped in (`dataclasses.replace`). The deps hold the trees' `Held` and
-    bound `tree_for`, so the trees stay open while the deps are referenced; a refusal closes
-    them and propagates."""
+def lead_deps(paths: LoopPaths) -> Any:
+    """`build_lead_author_deps(paths, trees=<the lead drain's trees over paths>)`. The deps hold
+    the trees' `Held` and bound `tree_for`, so the trees stay open while the deps are referenced;
+    a refusal closes them and propagates."""
     from defender.learning.leads import lead_author
     from defender.tests.support.learning.curation._curator1134 import open_state
 
     trees = lead_trees(paths)
     try:
-        deps = lead_author.build_lead_author_deps(
-            paths, state=state if state is not None else open_state(paths), trees=trees)
+        return lead_author.build_lead_author_deps(paths, state=open_state(paths), trees=trees)
     except BaseException:
         trees.close()
         raise
-    return dataclasses.replace(deps, **replaced) if replaced else deps
 
 
 def held_skills(root: Path) -> Held:
@@ -151,13 +143,6 @@ def scene_over(tmp_path: Path, repo: Path) -> Iterator[Scene]:
                     trees=trees)
 
 
-def clear(at: Path) -> None:
-    if at.is_symlink() or at.is_file():
-        at.unlink()
-    elif at.is_dir():
-        shutil.rmtree(at)
-
-
 def write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -249,12 +234,6 @@ def errors(caplog: pytest.LogCaptureFixture) -> list[str]:
 # `agent/` at the batch base, with no `.git`); its rules take that root and repo-relative
 # `agent/skills/...` names, and the adapters stay in the product checkout. The helpers above
 # serve the suites that still use a product-shaped tree (`defender/skills`).
-
-
-def draft_tree_for(root: Path) -> TreeForFn:
-    """The lead lane's `tree_for` over the tenant-shaped root `root` (it holds `agent/skills`):
-    names are `agent/skills/...`. The trees stay open while the bound method is referenced."""
-    return DrainTrees.open((root / "agent" / "skills",)).tree_for
 
 
 def draft_lead_deps(lane: Any, *, state: Any = None, **replaced: Any) -> Any:
@@ -356,3 +335,22 @@ def lane_scene(tmp_path: Path, lane: Any) -> Iterator[DraftScene]:
     with DrainTrees.open((lane.skills_dir,)) as trees:
         yield DraftScene(tmp=tmp_path, repo=lane.root, outside=outside, paths=lane.paths,
                          run_dir=run_dir, trees=trees, product=lane.paths.repo_root)
+
+
+# ---------------------------------------------------------------------------------------
+# System-draft discovery over a `skills/` tree
+# ---------------------------------------------------------------------------------------
+
+#: The systems the discovery rows declare; an undeclared `ghost/` folder draws `GHOST`.
+SKILL_SYSTEMS = frozenset({"elastic", "wazuh"})
+GHOST = "discover_system_drafts: skipped undeclared directory 'ghost'"
+
+
+def discover(skills: Path, os_: Any | None = None) -> list[Path]:
+    """`discover_system_drafts` over `skills`, held by `DrainTrees.open` (over `os_` when given),
+    declaring `SKILL_SYSTEMS`."""
+    from defender.learning.leads import lead_author
+
+    with DrainTrees.open((skills,), **({"os_": os_} if os_ is not None else {})) as trees:
+        return lead_author.discover_system_drafts(
+            skills=trees.mount(skills).view(), where=skills, systems=SKILL_SYSTEMS)

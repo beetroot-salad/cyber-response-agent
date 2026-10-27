@@ -403,7 +403,6 @@ def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     w = world(tmp_path)
     asked: list[str] = []
-    seen: list[list[str]] = []
 
     class CountsTheAsk(LoopPaths):
         @property
@@ -424,7 +423,6 @@ def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
     drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL)
 
     assert asked == []
-    assert seen == []
     assert "held_reason" not in pending(paths, FINDINGS)[0]
     assert descriptors_under(w.repo) == []
 

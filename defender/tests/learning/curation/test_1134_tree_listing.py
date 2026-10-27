@@ -15,7 +15,8 @@ from typing import Any
 
 import pytest
 
-from defender import _io
+from defender import _io, _tree_listing
+from defender._tree_listing import entry_kind
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.curation._tree_listing_1134 import (
     FD_MARGIN,
@@ -54,7 +55,6 @@ from defender.tests.support.learning.curation._tree_listing_1134 import (
     run_unprivileged,
     set_mode,
     state_tree,
-    tree_listing,
 )
 from defender.tests.shared.filesystem.test_1111_rooted_io import in_time
 
@@ -81,16 +81,12 @@ UNDER = "v/w"
 
 
 def TL() -> Any:  # noqa: N802 — names the module it hands back
-    """`defender._tree_listing`, resolved per call: a missing module fails the calling row."""
-    return tree_listing()
-
-
-def entry_kind(view: Any, name: Any) -> Any:
-    return TL().entry_kind(view, name)
+    """`defender._tree_listing` (`test_1177_shared_listing` reaches it through this)."""
+    return _tree_listing
 
 
 def list_tree(view: Any, depth: Any) -> Any:
-    return TL().list_tree(view, depth=depth)
+    return _tree_listing.list_tree(view, depth=depth)
 
 
 @pytest.fixture
@@ -139,7 +135,7 @@ def to_depth(rows: dict[str, str], depth: int) -> dict[str, str]:
 def assert_kind(got: Any, *, name: str, folder: str, kind: str | None = None,
                 absent: bool = False, reason: str | None = None) -> None:
     """`got` is an `EntryKind` with exactly these fields, in exactly one state."""
-    assert type(got) is TL().EntryKind, f"entry_kind answered a {type(got).__name__}"
+    assert type(got) is _tree_listing.EntryKind, f"entry_kind answered a {type(got).__name__}"
     assert sum((got.kind is not None, got.absent, got.reason is not None)) == 1, (
         f"entry_kind's answer is not in exactly one state: {got!r}")
     assert (got.name, got.folder, got.kind, got.absent, got.reason) == (
@@ -148,7 +144,7 @@ def assert_kind(got: Any, *, name: str, folder: str, kind: str | None = None,
 
 def listed(got: Any) -> dict[str, str]:
     """A listed `TreeListing`'s entries; its types and orders checked."""
-    assert type(got) is TL().TreeListing, f"list_tree answered a {type(got).__name__}"
+    assert type(got) is _tree_listing.TreeListing, f"list_tree answered a {type(got).__name__}"
     assert (got.absent, got.reason) == (False, None), f"the top was not listed: {got!r}"
     assert type(got.entries) is dict, f"entries is a {type(got.entries).__name__}, not a dict"
     assert type(got.refused) is dict, got
@@ -172,13 +168,13 @@ def assert_tree(got: Any, entries: dict[str, str], refused: dict[str, str] | Non
 
 
 def assert_tree_absent(got: Any) -> None:
-    assert type(got) is TL().TreeListing, f"list_tree answered a {type(got).__name__}"
+    assert type(got) is _tree_listing.TreeListing, f"list_tree answered a {type(got).__name__}"
     assert (got.absent, got.reason, got.entries, got.refused, got.gone) == (
         True, None, None, {}, ()), f"an absent top listed as {got!r}"
 
 
 def assert_tree_refused(got: Any, reason: str) -> None:
-    assert type(got) is TL().TreeListing, f"list_tree answered a {type(got).__name__}"
+    assert type(got) is _tree_listing.TreeListing, f"list_tree answered a {type(got).__name__}"
     assert (got.absent, got.reason, got.entries, got.refused, got.gone) == (
         False, reason, None, {}, ()), f"a refused top answered {got!r}, not {reason!r}"
 
@@ -476,7 +472,7 @@ def test_finding_6_list_tree_refuses_a_depth_that_is_not_a_positive_int_before_a
     with bound_in(state, scratch, rec) as view:
         rec.calls.clear()
         with pytest.raises(ValueError):  # noqa: PT011 — the type is the contract, not the wording
-            TL().list_tree(view, depth=depth)
+            _tree_listing.list_tree(view, depth=depth)
         assert rec.calls == [], f"list_tree(depth={depth!r}) reached the os_ seam: {rec.calls}"
     assert census(scratch.tmp) == before
 

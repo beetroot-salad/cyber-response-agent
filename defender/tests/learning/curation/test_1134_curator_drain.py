@@ -358,6 +358,7 @@ def test_attribution_reads_the_claims_own_bytes_never_the_corpus_again(tmp_path,
 
     assert got == ("rc", 0), got
     assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
+    assert ("read", PLANTED) not in log, f"the held corpus was read again: {log}"
 
 
 @pytest.mark.parametrize("mode", ["same mode", "made executable"])

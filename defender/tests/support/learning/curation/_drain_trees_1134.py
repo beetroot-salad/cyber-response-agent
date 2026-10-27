@@ -6,13 +6,12 @@ import dataclasses
 import importlib
 import json
 import os
-import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from defender.tests.support.learning.curation._tree_listing_1134 import fd_path
+from defender.tests.support.learning.curation._tree_listing_1134 import fd_path, run_child_of
 
 #: What every write control lands: a NUL, CRLF and bytes that are not UTF-8, so no text path
 #: can reproduce them. A byte-exact control reads the file itself (the test's own read, by
@@ -153,22 +152,6 @@ def child() -> None:
 
 
 def watch_in_child(scenarios: list[dict[str, Any]], *, deadline: float) -> dict[str, Any]:
-    """`child` over `scenarios` in a fresh interpreter whose `defender` is the one beside this
-    file (its own tree first on `PYTHONPATH`), bounded by `deadline` seconds."""
-    tree = Path(__file__).resolve().parents[5]
-    inherited = os.environ.get("PYTHONPATH")
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
-               PYTHONPATH=os.pathsep.join([str(tree), *([inherited] if inherited else [])]))
-    entry = "from defender.tests.support.learning.curation._drain_trees_1134 import child; child()"
-    try:
-        done = subprocess.run([sys.executable, "-c", entry], input=json.dumps(
-            {"scenarios": scenarios}), capture_output=True, text=True, env=env, cwd=tree,
-            timeout=deadline, check=False)
-    except subprocess.TimeoutExpired as e:
-        raise AssertionError(f"the watching child ran past its {deadline}s deadline") from e
-    if done.returncode:
-        raise AssertionError(f"the watching child exited {done.returncode}: {done.stderr[-4000:]}")
-    answer = json.loads(done.stdout)
-    if "child_failed" in answer:
-        raise AssertionError(f"the watching child failed: {answer['child_failed']}")
-    return answer["rows"]
+    """`child` over `scenarios` in a fresh interpreter (`run_child_of`), bounded by `deadline`
+    seconds."""
+    return run_child_of(__name__, {"scenarios": scenarios}, deadline=deadline)["rows"]

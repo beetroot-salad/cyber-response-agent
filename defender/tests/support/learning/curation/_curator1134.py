@@ -14,8 +14,8 @@ from typing import Any
 from defender._io import REFUSED_ALIAS, Bound, Held, NotPlainEntry, RecordRead, hold, open_unnamed_at
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
-from defender.tests.support.learning.core._state1135 import state_for_paths as open_state  # noqa: F401 — re-export: this module's tests open their handle through it
 from defender.tests.support.learning.curation._tree_listing_1134 import RealOs, fd_path, last_component
+from defender.tests.support.learning.core._state1135 import state_for_paths as open_state  # noqa: F401 — re-export: this module's tests open their handle through it
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
 #: `None` outside the lane's mounts.
@@ -27,27 +27,14 @@ TreeForFn = Callable[[Path | str], "tuple[Held, str] | None"]
 # ---------------------------------------------------------------------------------------
 
 
-def make_mount_points(paths: LoopPaths) -> None:
-    """Make each of the author label's mount points under `paths` that is missing (a drain
-    working copy always has both; a fixture repo may lack `lessons-questioner/`). An empty folder
-    is invisible to `git status`, so this changes no fixture's tree as git sees it."""
-    for mount in AUTHOR_DRAIN_LABEL.writable_trees(paths):
-        mount.mkdir(parents=True, exist_ok=True)
-
-
 def author_trees(paths: LoopPaths) -> DrainTrees:
     """The author drain's trees over `paths`, open: `open_drain_trees(paths, AUTHOR_DRAIN_LABEL)`,
-    the two held corpus mounts both curators work through, after `make_mount_points`."""
-    make_mount_points(paths)
+    the two held corpus mounts both curators work through. A missing mount point is made first
+    (a fixture repo may lack `lessons-questioner/`); an empty folder is invisible to `git status`,
+    so this changes no fixture's tree as git sees it."""
+    for mount in AUTHOR_DRAIN_LABEL.writable_trees(paths):
+        mount.mkdir(parents=True, exist_ok=True)
     return open_drain_trees(paths, AUTHOR_DRAIN_LABEL)
-
-
-def seamed_trees(paths: LoopPaths, os_: Any) -> DrainTrees:
-    """`author_trees`, but held over `os_` (`DrainTrees.open(..., os_=os_)`): every verb and read
-    of each mount then goes through that seam. How a fault no root process can make for real
-    (EACCES, EIO, ENOSPC) reaches the drain."""
-    make_mount_points(paths)
-    return DrainTrees.open(AUTHOR_DRAIN_LABEL.writable_trees(paths), os_=os_)
 
 
 def author_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None, manifest_seed: str | None = None,
@@ -63,30 +50,20 @@ def author_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None, manifest_se
     return dataclasses.replace(cfg, **replaced) if replaced else cfg
 
 
-def questioner_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None,
-                   manifest_seed: str | None = None, box: Any = None, state: Any = None,
-                   **replaced: Any) -> Any:
-    """The REAL questioner config, as `author_cfg` builds the lessons one."""
+def questioner_cfg(paths: LoopPaths) -> Any:
+    """The REAL questioner config over `author_trees(paths)`."""
     from defender.learning.author.questioner import run as questioner_run
 
-    cfg = questioner_run.build_questioner_config(
-        paths, state=state if state is not None else open_state(paths),
-        trees=trees if trees is not None else author_trees(paths),
-        manifest_seed=manifest_seed, box=box)
-    return dataclasses.replace(cfg, **replaced) if replaced else cfg
-
-
-def held_corpus(root: Path) -> Held:
-    """`root` held as a corpus mount is (made first if missing: a drain's mount point always
-    exists), for a call that takes the corpus `Held` by itself."""
-    root.mkdir(parents=True, exist_ok=True)
-    return hold(root)
+    return questioner_run.build_questioner_config(
+        paths, state=open_state(paths), trees=author_trees(paths))
 
 
 def corpus_view(root: Path) -> Bound:
-    """The view of `root` held as a corpus mount: what `build_curator_user_prompt(corpus=...)`
-    takes, with `corpus_dir=root` as its spelling."""
-    return held_corpus(root).view()
+    """The view of `root` held as a corpus mount (made first if missing: a drain's mount point
+    always exists): what `build_curator_user_prompt(corpus=...)` takes, with `corpus_dir=root`
+    as its spelling."""
+    root.mkdir(parents=True, exist_ok=True)
+    return hold(root).view()
 
 
 # ---------------------------------------------------------------------------------------
@@ -98,7 +75,6 @@ def corpus_view(root: Path) -> Bound:
 OUT_MARK = "outside-bytes-1134-c5"
 
 LESSONS_REL = "defender/lessons/"
-SIBLING_REL = "defender/lessons-questioner/"
 
 
 def lesson_text(*ids: str, mark: str = "", **frontmatter: Any) -> str:
@@ -183,15 +159,6 @@ def plant_alias(kind: str, at: Path, target: Path) -> None:
     (plant_link if kind == "symlink" else plant_hardlink)(at, target)
 
 
-def alias_left(kind: str, at: Path, target: Path) -> bool:
-    """The plant `plant_alias` made is still where it was: the same symlink, or a hard link
-    sharing `target`'s inode."""
-    if kind == "symlink":
-        return is_link_to(at, target)
-    return (os.path.lexists(at) and not os.path.islink(at)
-            and os.stat(at).st_ino == os.stat(target).st_ino)
-
-
 def leaf_refusal(exc: BaseException | None) -> bool:
     """`exc` is the core's refusal of a non-plain entry AT a name, exactly (`NotPlainEntry`, not
     a subclass test): a symlink, hard link, FIFO or folder at the leaf."""
@@ -219,7 +186,7 @@ def warnings_naming(caplog: Any, entry: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------------------
-# `os_` seams (over the real `os`) and a journalling `Held`
+# An `os_` seam over the real `os`, and a journalling `Held`
 # ---------------------------------------------------------------------------------------
 
 
@@ -288,31 +255,6 @@ class RecordingOs(RealOs):
         del self.trace[:]
 
 
-class FailsOn(RealOs):
-    """The real `os` as a handle's `os_` seam, except that a call to `verb` (on the leaf `leaf`
-    when given, else on any) raises the plain `OSError(code)` a failing disk gives: `ENOSPC` on
-    the `rename` that lands a replace-write, `EIO` or `EACCES` on an `unlink`. It is no refusal
-    of the tree's shape (not `NotPlainEntry`), so it is never passed over as one. `raised` counts
-    the failures, so a test can show the failing call was reached."""
-
-    def __init__(self, verb: str, code: int, *, leaf: str | None = None) -> None:
-        self.verb, self.code, self.leaf, self.raised = verb, code, leaf, 0
-
-    def __getattr__(self, name: str) -> Any:
-        real = getattr(os, name)
-        if name != self.verb:
-            return real
-
-        def fail(*a: Any, **k: Any) -> Any:
-            target = a[1] if name == "rename" and len(a) > 1 else (a[0] if a else None)
-            if self.leaf is not None and os.fspath(target) != self.leaf:
-                return real(*a, **k)
-            self.raised += 1
-            raise OSError(self.code, os.strerror(self.code))
-
-        return fail
-
-
 _ROOT_FLAGS = os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC
 
 
@@ -376,8 +318,36 @@ class JournalHeld(Held):
 # ---------------------------------------------------------------------------------------
 
 
+class _HeldCorpora:
+    """What `World` and `DraftWorld` share: the held mounts of `trees` over the subclass's
+    `corpus_dir` and `sibling_dir`, and marked files in `outside`, where every link points."""
+
+    @property
+    def corpus(self) -> Held:
+        """The held `lessons/` mount, as the lane takes it: `trees.mount(corpus_dir)`."""
+        return self.trees.mount(self.corpus_dir)
+
+    @property
+    def sibling(self) -> Held:
+        return self.trees.mount(self.sibling_dir)
+
+    @property
+    def view(self) -> Bound:
+        return self.corpus.view()
+
+    @property
+    def tree_for(self) -> TreeForFn:
+        return self.trees.tree_for
+
+    def target(self, name: str, text: str | bytes | None = None) -> Path:
+        """A file outside the repo carrying the mark (or `text`)."""
+        at = self.outside / name
+        put(at, text if text is not None else lesson_text("f1", mark=OUT_MARK))
+        return at
+
+
 @dataclasses.dataclass
-class World:
+class World(_HeldCorpora):
     """A committed repo carrying both curator corpora, a folder outside it where every link
     points, and the author drain's trees over the repo, open for as long as the world is
     referenced."""
@@ -398,32 +368,9 @@ class World:
     def sibling_dir(self) -> Path:
         return self.paths.lessons_questioner_dir
 
-    @property
-    def corpus(self) -> Held:
-        """The held `lessons/` mount, as the lane takes it: `trees.mount(lessons_dir)`."""
-        return self.trees.mount(self.corpus_dir)
-
-    @property
-    def sibling(self) -> Held:
-        return self.trees.mount(self.sibling_dir)
-
-    @property
-    def view(self) -> Bound:
-        return self.corpus.view()
-
-    @property
-    def tree_for(self) -> TreeForFn:
-        return self.trees.tree_for
-
     def cfg(self, **replaced: Any) -> Any:
         """The REAL lessons config over these trees."""
         return author_cfg(self.paths, trees=self.trees, state=self.state, **replaced)
-
-    def target(self, name: str, text: str | bytes | None = None) -> Path:
-        """A file outside the repo carrying the mark (or `text`)."""
-        at = self.outside / name
-        put(at, text if text is not None else lesson_text("f1", mark=OUT_MARK))
-        return at
 
     def git(self, *args: str, check: bool = True) -> Any:
         from defender.tests.support.learning.curation._drain719 import git
@@ -433,18 +380,6 @@ class World:
     def commit(self, message: str = "seed") -> None:
         self.git("add", "-A")
         self.git("commit", "-q", "-m", message)
-
-    def head(self) -> str:
-        return self.git("rev-parse", "HEAD").stdout.strip()
-
-    def head_text(self, rel: str) -> str | None:
-        """`rel`'s blob in HEAD (a symlink's blob is its target), or `None` when HEAD lacks it."""
-        proc = self.git("cat-file", "-p", f"HEAD:{rel}", check=False)
-        return proc.stdout if proc.returncode == 0 else None
-
-    def head_mode(self, rel: str) -> str | None:
-        out = self.git("ls-tree", "HEAD", "--", rel).stdout.split()
-        return out[0] if out else None
 
 
 def world(tmp_path: Path) -> World:
@@ -489,10 +424,8 @@ DRAFT_AGENT_FILES: dict[str, str] = {
 }
 AUTHOR_LANES = ("lessons", "lessons-questioner")
 LEAD_LANES = ("skills",)
-#: Repo-relative spellings: commit, ChangeSet and handoff paths are `agent/...`.
+#: The lessons lane's repo-relative spelling: commit, ChangeSet and handoff paths are `agent/...`.
 DRAFT_LESSONS_REL = "agent/lessons/"
-DRAFT_SIBLING_REL = "agent/lessons-questioner/"
-DRAFT_SKILLS_REL = "agent/skills/"
 
 _DRAFT_SEQ = iter(range(1, 1_000_000))
 
@@ -598,10 +531,9 @@ def draft_agent(at: Path, files: dict[str, str | bytes] | None = None) -> Path:
 
 def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
                files: dict[str, str | bytes] | None = None, agent: Path | None = None,
-               batch_id: str = "b1", state_dir: Path | None = None,
-               product: Path | None = None) -> DraftLane:
+               state_dir: Path | None = None, product: Path | None = None) -> DraftLane:
     """The fixture tenant published for real over its own data root (its agent content
-    `draft_agent(files)`, or `agent`), then the real `start_batch(batch_id, lanes=lanes)`: the
+    `draft_agent(files)`, or `agent`), then the real `start_batch("b1", lanes=lanes)`: the
     draft is built from that export, no branch yet. `files` are agent-relative
     (`"lessons/x.md"`). `product` is the product checkout `paths.repo_root` names (adapters; a
     scratch folder with no corpus by default). Each call gets its own data root, so a test may
@@ -612,7 +544,7 @@ def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
     scene = tmp_path / f"draft-lane-{n}"
     source = agent if agent is not None else draft_agent(scene / "agent-source", files)
     with published_tenant(scene / "forge", root=scene / "data", agent=source) as t:
-        batch = t.open_delivery().start_batch(batch_id, lanes=lanes)
+        batch = t.open_delivery().start_batch("b1", lanes=lanes)
         clone = t.clone
     state = state_dir if state_dir is not None else scene / "state"
     state.mkdir(parents=True, exist_ok=True)
@@ -658,12 +590,11 @@ def draft_questioner_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
 
 
 @dataclasses.dataclass
-class DraftWorld:
+class DraftWorld(_HeldCorpora):
     """`World` over a draft lane (`draft_lane`) carrying both curator corpora as the batch's
     declared lanes, a folder outside the tenant's data root where every link points, and the
     lane's held mounts over the draft, open for as long as the world is referenced. `cfg()` is
-    the real lessons config over the draft; every head observation reads the batch branch (what
-    the commit-maker made)."""
+    the real lessons config over the draft."""
 
     tmp: Path
     lane: DraftLane
@@ -683,44 +614,17 @@ class DraftWorld:
     def sibling_dir(self) -> Path:
         return self.lane.sibling_dir
 
-    @property
-    def corpus(self) -> Held:
-        return self.trees.mount(self.corpus_dir)
-
-    @property
-    def sibling(self) -> Held:
-        return self.trees.mount(self.sibling_dir)
-
-    @property
-    def view(self) -> Bound:
-        return self.corpus.view()
-
-    @property
-    def tree_for(self) -> TreeForFn:
-        return self.trees.tree_for
-
     def cfg(self, **replaced: Any) -> Any:
         return draft_author_cfg(self.lane, trees=self.trees, state=self.state, **replaced)
 
     def questioner_cfg(self, **replaced: Any) -> Any:
         return draft_questioner_cfg(self.lane, trees=self.trees, state=self.state, **replaced)
 
-    def target(self, name: str, text: str | bytes | None = None) -> Path:
-        at = self.outside / name
-        put(at, text if text is not None else lesson_text("f1", mark=OUT_MARK))
-        return at
 
-    def head(self) -> str:
-        return self.lane.tip()
-
-    def head_text(self, rel: str) -> str | None:
-        return self.lane.text_at_tip(rel)
-
-
-def draft_world(tmp_path: Path, *, files: dict[str, str | bytes] | None = None) -> DraftWorld:
-    """A `DraftWorld`: the fixture tenant's batch over `draft_agent(files)` (agent-relative),
-    lanes `lessons` and `lessons-questioner`, an `outside/` folder, the draft's trees open."""
-    lane = draft_lane(tmp_path, files=files)
+def draft_world(tmp_path: Path) -> DraftWorld:
+    """A `DraftWorld`: the fixture tenant's batch over `draft_agent()`, lanes `lessons` and
+    `lessons-questioner`, an `outside/` folder, the draft's trees open."""
+    lane = draft_lane(tmp_path)
     outside = lane.tmp / "outside"
     outside.mkdir()
     return DraftWorld(tmp=lane.tmp, lane=lane, outside=outside, trees=draft_trees(lane),
