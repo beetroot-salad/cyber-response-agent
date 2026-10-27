@@ -41,6 +41,7 @@ from defender.api.models import (  # noqa: E402
     SystemSettings,
 )
 from defender.tenancy._tenant import TenantRefused  # noqa: E402
+from defender.tests.tooling.layout_contracts._spec1080 import api_forbidden  # noqa: E402
 from defender.api.ports import (  # noqa: E402
     ApiDeps,
     Conflict,
@@ -245,14 +246,13 @@ def test_the_happy_path_table_covers_every_route() -> None:
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
     probe = (
         "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
-        "print(json.dumps(sorted(m for m in sys.modules "
-        "if m.startswith(('defender.investigation', 'defender.learning')))))"
+        "print(json.dumps(sorted(sys.modules)))"
     )
     out = subprocess.run(
         [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
         encoding="utf-8", check=True,
     )
-    assert json.loads(out.stdout) == []
+    assert api_forbidden(json.loads(out.stdout)) == []
 
 
 # --- login and tenant ----------------------------------------------------------------------

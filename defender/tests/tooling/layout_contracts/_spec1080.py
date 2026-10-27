@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 import tomllib
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -56,6 +56,21 @@ QUERY_RULES = "defender/knowledge/_query_rules.py"
 #: one place every file of this suite reads a rule's spelling from, so a later rename is made
 #: HERE.
 QUERY_RULE_PUBLIC = {"_json_safe_params": "_json_safe_params", "_request_key": "_request_key"}
+
+#: What the API program must never load: the learning loop and everything that was
+#: `defender.runtime` before #1308 placed it by layer. A package covers its submodules.
+API_FORBIDDEN = (
+    "defender.learning", "defender.investigation", "defender.systems", "defender.providers",
+    "defender.records.session_store", "defender.records.selection", "defender.records._wire",
+    "defender.records.run_end", "defender.tenancy.case_ticket", "defender.tenancy.run_knowledge",
+    "defender.tenancy.tenant_settings", "defender.episodes._family", "defender._exception_groups",
+)
+
+
+def api_forbidden(modules: Iterable[str]) -> list[str]:
+    """The `API_FORBIDDEN` modules among `modules`."""
+    return [m for m in modules
+            if m in API_FORBIDDEN or m.startswith(tuple(f + "." for f in API_FORBIDDEN))]
 
 #: Directory names no census, locator or scan descends into: tool output, caches, virtualenvs,
 #: VCS metadata (s154). A directory holding its own `.git` (a nested checkout) is skipped too.
