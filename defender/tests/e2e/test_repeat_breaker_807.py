@@ -185,7 +185,7 @@ def _run_inherited(
     assert planted == source, (planted, source)
     # Branch at a tool-calling MAIN response after the document landed (#1255).
     spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
-    store.close()
+    store.connection.close()
     # Run folders are named by canonical UUID run ids (#1187).
     sibling = root / "defender-runs" / fixture_uuid("run-sibling-807")
     RunPaths(sibling).gather_raw.mkdir(parents=True)

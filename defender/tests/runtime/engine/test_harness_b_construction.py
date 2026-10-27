@@ -30,6 +30,7 @@ from defender._agent_role import AgentRole  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
 from defender.investigation.tools import AgentDeps  # noqa: E402
 from defender.records import SessionPaths
+from defender.tests.support.storage._store_owner import owned_store
 
 _DEFENDER = Path(__file__).resolve().parents[3]
 
@@ -213,9 +214,7 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
 def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
     """MAIN's extra capabilities are exactly one `ProcessHistory` whatever `DEFENDER_COMPACTION`
     says: the flag only gates whether a fold runs inside it."""
-    from defender.records import session_store
-
-    store = session_store.open_store(case_id="case-harness", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs")))
+    store = owned_store(case_id="case-harness", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs")))
     session_id = store.new_session(agent_id="main")
 
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)

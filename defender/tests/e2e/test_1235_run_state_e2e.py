@@ -124,7 +124,7 @@ class Branched:
         assert not (source / "gather_raw" / f"{LEAD}.lead.json").exists(), (
             "the legal source carries a claim for l-001, so the sibling could not re-dispatch it")
         self.spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
-        store.close()
+        store.connection.close()
         # A run id is a canonical UUID, so the folder is fixture_uuid(<label>).
         self.sibling = tmp_path / "defender-runs" / fixture_uuid("run-sibling-1235")
         RunPaths(self.sibling).gather_raw.mkdir(parents=True)

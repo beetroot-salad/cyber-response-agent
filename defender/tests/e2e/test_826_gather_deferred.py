@@ -40,6 +40,8 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     q,
     raising,
 )
+from defender.tests.support.storage._store_owner import reread
+import contextlib
 
 pytestmark = pytest.mark.e2e
 
@@ -72,12 +74,12 @@ class _Res:
     def sessions(self) -> dict[str, str | None]:
         """`agent_id -> truncated_by` for every session this run opened, read straight out of
         the real SQLite file rather than through any reader under test."""
-        store = self.stores[-1]
-        return {
-            agent_id: truncated
-            for agent_id, truncated in sql(
-                store, "SELECT agent_id, truncated_by FROM session ORDER BY rowid")
-        }
+        with session_store.open_store_for_read(self.stores[-1].path) as store:
+            return {
+                agent_id: truncated
+                for agent_id, truncated in sql(
+                    store, "SELECT agent_id, truncated_by FROM session ORDER BY rowid")
+            }
 
 
 def _dispatch(lead: str, system: str = "elastic") -> tuple[str, dict]:
@@ -210,7 +212,7 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
     drive(run_dir, run_id="d826-store", main=main, gather=gather,
           verbs=elastic_ok(rec), store_factory=store_factory(tmp_path, sink=stores))
 
-    sessions = dict(sql(stores[-1], "SELECT agent_id, truncated_by FROM session"))
+    sessions = dict(sql(reread(stores[-1]), "SELECT agent_id, truncated_by FROM session"))
     assert sessions[f"gather:{LEAD}"] == session_store.TRUNCATED_BY_DEAD_END, \
         "the cut-off lead's session carries no terminator — it reads as one that finished"
     assert sessions["gather:l-002"] is None, \
@@ -248,12 +250,14 @@ def test_a_broken_store_cannot_turn_a_lost_terminator_into_a_lost_lead(tmp_path)
     real_factory = store_factory(tmp_path)
     wrapped: list[_UnstampableStore] = []
 
+    @contextlib.contextmanager
     def factory(case_id: str, run_dir_: Path):
         # The sink collects the WRAPPER, not the handle underneath it: `attempts` is the
         # observation this test turns on, and the inner handle never sees the call.
-        handle = _UnstampableStore(real_factory(case_id, run_dir_))
-        wrapped.append(handle)
-        return handle
+        with real_factory(case_id, run_dir_) as real:
+            handle = _UnstampableStore(real)
+            wrapped.append(handle)
+            yield handle
 
     drive(run_dir, run_id="d826-nostamp", main=main, gather=gather,
           verbs=elastic_ok(rec), store_factory=factory)
@@ -285,7 +289,7 @@ def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
 
     stamped = [
         reason for (reason,) in sql(
-            stores[-1], "SELECT truncated_by FROM session WHERE truncated_by IS NOT NULL")
+            reread(stores[-1]), "SELECT truncated_by FROM session WHERE truncated_by IS NOT NULL")
     ]
     assert stamped, "no session was stamped at all — the scenario stopped cutting one off"
     for reason in stamped:
@@ -354,7 +358,7 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
         "model-authored params crossed into main's context on a refusal path"
 
     # The session terminator covers this stop too.
-    assert dict(sql(res.stores[-1], "SELECT agent_id, truncated_by FROM session"))[
+    assert dict(sql(reread(res.stores[-1]), "SELECT agent_id, truncated_by FROM session"))[
         f"gather:{LEAD}"] == session_store.TRUNCATED_BY_DEAD_END
 
 

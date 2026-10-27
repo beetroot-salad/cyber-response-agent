@@ -20,6 +20,7 @@ from pydantic_ai.messages import (  # noqa: E402
 
 from defender.tests.support.storage._session_store_705 import (
     complete_pair,
+    is_open,
     make_store,
     nine_row_fixture,
     part_kind_zoo,
@@ -32,6 +33,7 @@ from defender.tests.support.storage._session_store_705 import (
     user_request,
 )
 from defender.records import SessionPaths
+from defender.tests.support.storage._store_owner import owned_store
 
 
 # the handle, the connection, the schema version
@@ -75,6 +77,32 @@ def test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary(tmp_path
         f"a coerced coordinate must never reach the table; got {stored}")
 
 
+def test_a_store_is_open_exactly_for_its_with_block(tmp_path):
+    """The store opens when its `with` block starts and closes when the block ends, however it
+    ends (#1324). Called without `with`, the opener touches nothing: there is no connection to
+    forget to close."""
+    ss = store_mod()
+    sessions = SessionPaths(fixture_runs_base(runs_base(tmp_path)))
+    path = ss.store_path_for("case-alpha", sessions=sessions)
+
+    ss.open_store(case_id="case-alpha", sessions=sessions)
+    assert not path.exists(), "an opener never entered created the store"
+
+    with ss.open_store(case_id="case-alpha", sessions=sessions) as store:
+        assert path.is_file(), "control: entering the block creates the store"
+        assert is_open(store), "control: inside the block it is open"
+    assert not is_open(store), "the store outlived its block"
+
+    with pytest.raises(RuntimeError), ss.open_store(case_id="case-alpha", sessions=sessions) as raised:
+        raise RuntimeError("the block ends by an exception")
+    assert not is_open(raised), "a block that raised left its store open"
+
+    ss.open_store_for_read(path)
+    with ss.open_store_for_read(path) as reader:
+        assert is_open(reader)
+    assert not is_open(reader), "the reader outlived its block"
+
+
 def test_reader_refuses_an_unknown_user_version(tmp_path):
     ss = store_mod()
     store = make_store(tmp_path)
@@ -89,15 +117,16 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
         "0 is the un-set sentinel (is:PO1) — a fresh, never-stamped file must not read "
         "as a valid version")
     assert ss.hydrate(store, session_id, role="analysis"), "positive control: known version reads"
-    store.close()
+    store.connection.close()
 
     for bogus in (0, ss.SCHEMA_VERSION + 1):
         raw = sqlite3.connect(str(path))
         raw.execute(f"PRAGMA user_version = {bogus}")
         raw.commit()
         raw.close()
-        with pytest.raises(ss.UnknownSchemaVersion):
-            ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))
+        with pytest.raises(ss.UnknownSchemaVersion), ss.open_store(
+                case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path)))):
+            pass
 
 
 # payloads — round-trip, coercion, unknown fields, the encoding
@@ -365,11 +394,10 @@ def test_a_session_ends_on_an_incomplete_pair_only_when_truncated_by_is_set(tmp_
 
 def test_an_append_is_one_commit_per_render_boundary(tmp_path):
     """A second connection never observes a `message` row without its `message_payload` row."""
-    ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
-    observer = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    observer = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
 
     samples: list[tuple[int, int]] = []
 
@@ -393,7 +421,7 @@ def test_an_append_is_one_commit_per_render_boundary(tmp_path):
 def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(tmp_path):
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    owner = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = owner.new_session(agent_id="main")
 
     counts = {"gather-a": 20, "gather-b": 10}
@@ -402,12 +430,12 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
 
     def leg(agent_id: str, n: int) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
-            barrier.wait(timeout=10)
-            for i in range(n):
-                handle.append(session_id, [text_response(f"{agent_id}-{i}")],
-                              agent_id=agent_id, seq=i)
-            handle.close()
+            with ss.open_store(case_id="case-alpha",
+                               sessions=SessionPaths(fixture_runs_base(base))) as handle:
+                barrier.wait(timeout=10)
+                for i in range(n):
+                    handle.append(session_id, [text_response(f"{agent_id}-{i}")],
+                                  agent_id=agent_id, seq=i)
         except BaseException as exc:  # noqa: BLE001 — the assertion is "no error at all"
             errors.append(exc)
 
@@ -430,7 +458,7 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
 def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp_path):
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    owner = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = owner.new_session(agent_id="main")
 
     per_leg = 15
@@ -440,11 +468,11 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
 
     def leg(tag: str) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
-            barrier.wait(timeout=10)
-            for i in range(per_leg):
-                handle.append(session_id, [text_response(f"{tag}-{i}")], agent_id=agent_id)
-            handle.close()
+            with ss.open_store(case_id="case-alpha",
+                               sessions=SessionPaths(fixture_runs_base(base))) as handle:
+                barrier.wait(timeout=10)
+                for i in range(per_leg):
+                    handle.append(session_id, [text_response(f"{tag}-{i}")], agent_id=agent_id)
         except BaseException as exc:  # noqa: BLE001 — the assertion is "no error at all"
             errors.append(exc)
 

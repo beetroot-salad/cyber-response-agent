@@ -470,14 +470,12 @@ def branch_message_id(source: Any, *, tool: str = "gather") -> int:
     from defender.investigation import branch
     from defender.records import session_store
 
-    store = branch.source_store_if_any(source.run_dir, source_run=source)
-    assert store is not None, f"the natural run {source.run_dir} kept no session store"
-    try:
+    opened = branch.source_store_if_any(source.run_dir, source_run=source)
+    assert opened is not None, f"the natural run {source.run_dir} kept no session store"
+    with opened as store:
         session = session_store.main_session_id(store)
         ids = session_store.path_row_ids(store, session)
         messages = session_store.hydrate(store, session, role="analysis")
-    finally:
-        store.close()
     assert len(ids) == len(messages), "the main path and its messages are not aligned"
     hits = [row for row, msg in zip(ids, messages, strict=True)
             if isinstance(msg, ModelResponse)

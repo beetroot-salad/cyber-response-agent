@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
+import contextlib
 import importlib
 import json
 import sqlite3
@@ -15,6 +16,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.records import SessionPaths  # noqa: E402
+from defender.tests.support.storage._store_owner import owning_stack  # noqa: E402
 from pydantic_ai.messages import (  # noqa: E402
     ModelRequest,
     ModelResponse,
@@ -125,15 +127,26 @@ def runs_base(tmp_path: Path) -> Path:
 
 
 def make_store(tmp_path: Path, *, case_id: str = "case-alpha"):
-    """Open a real per-case store under a real runs base."""
+    """Open a real per-case store under a real runs base, closed when the test ends."""
     ss = store_mod()
-    return ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))
+    return owning_stack().enter_context(
+        ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path)))))
 
 
 def sql(store, query: str, params: tuple = ()) -> list[tuple]:
     """Read rows straight out of the real file — the observation channel that does
     not go through the reader under test."""
     return list(store.connection.execute(query, params).fetchall())
+
+
+def is_open(store) -> bool:
+    """Whether `store`'s connection still answers — asked of SQLite itself, not of any flag the
+    handle keeps."""
+    try:
+        store.connection.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return False
+    return True
 
 
 def mid_pair_session(store, *, agent_id: str = "main"):
@@ -242,13 +255,13 @@ class FaultStore:
             return
         path = Path(self._real.path)
         if f.mode == "absent":
-            self._real.close()
+            self._real.connection.close()
             path.unlink(missing_ok=True)
             for suffix in ("-wal", "-shm"):
                 Path(str(path) + suffix).unlink(missing_ok=True)
             path.parent.chmod(0o500)
         elif f.mode == "corrupt":
-            self._real.close()
+            self._real.connection.close()
             path.write_bytes(b"this is not a database, it is attacker text\n" * 64)
         elif f.mode == "locked":
             # Re-issued on the REAL connection the store is about to append through, so the
@@ -309,17 +322,19 @@ class FaultStore:
 def store_factory(tmp_path: Path, *, fault: StoreFault | None = None,
                   case_id: str | None = None, sink: list | None = None):
     """The `run_investigation(store_factory=…)` callable: `factory(case_id, run_dir)` returns
-    an open per-case store handle. `sink` collects the handles the run opened, so a test can
-    read the rows after the run ends."""
+    the per-case store the run opens in its `with`. `sink` collects the handles the run opened;
+    the run closes them, so a test reads the rows back with `reread`."""
     base = runs_base(tmp_path)
 
+    @contextlib.contextmanager
     def factory(run_case_id: str, run_dir: Path):
         ss = store_mod()
-        real = ss.open_store(case_id=case_id or run_case_id, sessions=SessionPaths(fixture_runs_base(base)))
-        handle = FaultStore(real, fault) if fault is not None else real
-        if sink is not None:
-            sink.append(handle)
-        return handle
+        with ss.open_store(case_id=case_id or run_case_id,
+                           sessions=SessionPaths(fixture_runs_base(base))) as real:
+            handle = FaultStore(real, fault) if fault is not None else real
+            if sink is not None:
+                sink.append(handle)
+            yield handle
 
     return factory
 

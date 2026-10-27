@@ -322,11 +322,8 @@ def test_o4_fork_store_location(tmp_path, data_root):
     base.mkdir(parents=True)
     src = H.source_run(base)
     br = H.mod("investigation.branch")
-    store = br.open_source_store(src, source_run=_run_handle_1165(src))
-    try:
+    with br.open_source_store(src, source_run=_run_handle_1165(src)) as store:
         as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))
-    finally:
-        store.close()
     # Compat: the retired prompt reaches the spec only while the spec still declares it.
     retired = ({B947.RETIRED_PROMPT_FIELD: H.CONTINUATION}
                if B947.declares_retired_prompt() else {})
@@ -335,12 +332,9 @@ def test_o4_fork_store_location(tmp_path, data_root):
     sib = (data_root / TID / "episodes" / T.EPISODE_ID / "runs"
            / fixture_uuid("o4-fork-sibling-b"))
     sib.mkdir(parents=True)
-    store = br.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))("minted-case", sib)
-    try:
+    with br.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))("minted-case", sib) as store:
         session_id, _history = br.open_main_session(store, spec, _sibling_state(sib), run=fixture_run(sib), source_run=fixture_run(spec.source_run_dir))
         br.attach_case_pointer(store, spec, _run_handle_1165(sib), case_id="minted-case", session_id=session_id)
-    finally:
-        store.close()
 
     pointer = json.loads(RunPaths(sib).session_pointer().read_text(encoding="utf-8"))
     assert not (sib / "session_store_pointer.json").exists(), (

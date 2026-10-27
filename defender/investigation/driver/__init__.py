@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from contextlib import AbstractContextManager
 import json
 import logging
 import os
@@ -152,10 +153,12 @@ def _log_node(node: Any) -> None:
         _logger.info("· end")
 
 
-StoreFactory = Callable[[str, Path], Any]
+#: `factory(case_id, run_dir)` hands back the run's store as a context manager: the store opens
+#: when the run's `with` block starts and closes when the run ends, however it ends (#1324).
+StoreFactory = Callable[[str, Path], AbstractContextManager[Any]]
 
 
-def _default_store_factory(case_id: str, run_dir: Path) -> Any:
+def _default_store_factory(case_id: str, run_dir: Path) -> AbstractContextManager[Any]:
     return session_store.open_store(case_id=case_id, sessions=RunPaths(run_dir).session_paths())
 
 
@@ -497,7 +500,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
 ) -> dict:
     """End a run whose cause of death arrived BEFORE MAIN's first request (a run-level kill
     while the correlation lead ran): the same exit MAIN's own kill takes — the session and the
-    run-end record name the class, the trace is written, the log is released — with the agent
+    run-end record name the class, the trace is written — with the agent
     never started, so no output and no forced close."""
     _flush_run_end(None, store, session_id, truncated_by)
     end = run_end.RunEnd(truncated_by, closed_before_cut=False)
@@ -513,7 +516,6 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
             write_guarded(RunPaths(run_dir).tool_trace, "")
         except OSError as fallback_err:
             _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
-    logger.close()
     return _run_summary(
         output=None, model_name=model_name, requests=logger.n_requests, end=end,
         exit_reason=exit_reason, case_id=case_id, store_path=store.path,
@@ -531,7 +533,7 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
 
     A run-level kill or a store fault while the lead runs ends the run the way MAIN's own would,
     with the agent never started. An interrupt, a cancellation or a run folder that refuses the
-    lead's summary releases the wire log and the store, then propagates."""
+    lead's summary propagates (the run's block releases the wire log and the store)."""
     from .. import lead_zero as lead_zero_mod
 
     def stop(truncated_by: str, exit_reason: str) -> dict:
@@ -560,22 +562,9 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")
             return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
-        logger.close()
-        with contextlib.suppress(Exception):
-            store.close()
         raise
     return lead_zero_mod.render_correlation_section(
         outcome, grant_home=tenant.table_pointer), None
-
-
-async def _drive_releasing_log(logger: Any, *args: Any, **kwargs: Any) -> Any:
-    """`_drive_agent`, releasing the wire log when the run ends by an escaping exception (a
-    world that went unservable, #1224), so a resume into the same run dir can open it again."""
-    try:
-        return await _drive_agent(*args, **kwargs)
-    except BaseException:
-        logger.close()
-        raise
 
 
 def _branch_snapshot(store: Any, resume: Any, source_run: Run | None) -> branch.ForkSnapshot | None:
@@ -715,127 +704,115 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # read shape.
     logger = observe.RequestLogger.from_record(run.observability.wire_log)
 
-    # The live review bundle is built here, after the logger, so review calls are logged and
-    # priced with the run's own `RequestLogger`.
-    #
-    # `model_override` is the operator's raw `--model`, not the resolved `model_name`, so the
-    # review's own pinned default stays reachable.
-    #
-    # A missing prompt asset raises here; close the logger so its path is not left registered
-    # in `observe._ACTIVE_PATHS` (which would block a later run in this process).
-    try:
+    # The wire log and the store are released by this block, on every exit however the run ends:
+    # a path left in `observe._ACTIVE_PATHS` would refuse a later run on this run dir, and a
+    # store left open is closed at a random moment by the garbage collector (#1324). A caller
+    # that wants the rows afterwards reopens the summary's `store_path`.
+    with contextlib.ExitStack() as owns_the_run:
+        owns_the_run.callback(logger.close)
+        # The live review bundle is built here, after the logger, so review calls are logged and
+        # priced with the run's own `RequestLogger`.
+        #
+        # `model_override` is the operator's raw `--model`, not the resolved `model_name`, so the
+        # review's own pinned default stays reachable.
         stages = (
             review_stages if review_stages is not None
             else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
                 run_dir, defender_dir, logger=logger, model_override=model_override,
             )
         )
-    except BaseException:
-        logger.close()
-        raise
 
-    case_id = uuid.uuid4().hex
-    # Default and resume precedence live in `_resolve_store_factory`.
-    store = None
-    try:
-        factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
-        store = factory(case_id, run_dir)
-        # A resume joins the source run's case, so the case pointer comes from the store, not
-        # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
-        # resumed MAIN inherits the investigation document as well as the message history.
-        session_id, resume_history = branch.open_main_session(
-            store, resume, state, run=run, source_run=source_run)
-        # Written after the session opens, so a refused branch leaves no pointer naming the
-        # source run's store. Rebound so `_run_summary` names the case this run joined.
-        case_id = branch.attach_case_pointer(
-            store, resume, run, case_id=case_id, session_id=session_id)
-    # A refused branch point (`BranchError`) is a setup failure like a store fault; letting it
-    # escape would leave the connection and the wire log open.
-    except (sqlite3.Error, session_store.StoreError, branch.BranchError, OSError) as e:
-        # Setup is outside `_drive_agent`'s handler; end the run through the
-        # `truncated_by="store"` exit without driving a turn.
-        _logger.error(f"store setup failed ({e!r}); ending the run")
-        if store is not None:
-            # `factory()` may have succeeded before a later call failed.
-            try:
-                store.close()
-            except Exception as close_err:  # noqa: BLE001 — best-effort on an already-failing path
-                _logger.error(f"store close after setup failure also failed "
-                              f"({close_err!r})")
-        logger.close()
-        return _run_summary(
-            output=None, model_name=model_name, requests=logger.n_requests,
-            end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
-            exit_reason=type(e).__name__, case_id=case_id, store_path=None,
+        case_id = uuid.uuid4().hex
+        # Default and resume precedence live in `_resolve_store_factory`.
+        try:
+            factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
+            store = owns_the_run.enter_context(factory(case_id, run_dir))
+            # A resume joins the source run's case, so the case pointer comes from the store,
+            # not the uuid minted above (they match on a fresh run). `run_dir` is passed because
+            # a resumed MAIN inherits the investigation document as well as the message history.
+            session_id, resume_history = branch.open_main_session(
+                store, resume, state, run=run, source_run=source_run)
+            # Written after the session opens, so a refused branch leaves no pointer naming the
+            # source run's store. Rebound so `_run_summary` names the case this run joined.
+            case_id = branch.attach_case_pointer(
+                store, resume, run, case_id=case_id, session_id=session_id)
+        # A refused branch point (`BranchError`) is a setup failure like a store fault.
+        except (sqlite3.Error, session_store.StoreError, branch.BranchError, OSError) as e:
+            # Setup is outside `_drive_agent`'s handler; end the run through the
+            # `truncated_by="store"` exit without driving a turn.
+            _logger.error(f"store setup failed ({e!r}); ending the run")
+            return _run_summary(
+                output=None, model_name=model_name, requests=logger.n_requests,
+                end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
+                exit_reason=type(e).__name__, case_id=case_id, store_path=None,
+            )
+
+        # One execution clock covers correlation and MAIN, including a stop before MAIN.
+        run_started = time.monotonic()
+
+        # The correlation lead runs to its end BEFORE the opening message is built (A4): the message
+        # carries its framed summary or the one sentence naming its ending, and nothing about
+        # correlation arrives later. `correlation` is `None` when this run dispatches none.
+        correlation_section: str | None = None
+        if correlation is None and resume is None:
+            # A fresh drive with no verb registry runs no lead: there is no third state between
+            # "dispatched" and "withheld", so MAIN is told the lead was withheld.
+            from ..lead_zero import CorrelationOutcome, render_correlation_section
+            from ..lead_zero._spec import ENDING_WITHHELD
+
+            correlation_section = render_correlation_section(
+                CorrelationOutcome(ending=ENDING_WITHHELD), grant_home=tenant.table_pointer)
+        if correlation is not None:
+            correlation_section, stopped = await _correlation_phase(
+                correlation, run=run, run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
+                verbs=lead_zero_verbs, limits=limits, make_model=make_model, logger=logger, box=box,
+                store=store, session_id=session_id, case_id=case_id, model_name=model_name,
+                catalog=correlation_catalog,
+                tenant=tenant, run_state=state, deadline=correlation_deadline, run_started=run_started)
+            if stopped is not None:
+                return stopped
+        prompt = _opening_prompt(
+            resume, run_dir, alert_path, defender_dir,
+            systems=tuple(roster.accepted), correlation_section=correlation_section,
+            # The systems down NOW — after the correlation lead, which can take one down (O-5b).
+            down=system_status.down_notes(state, roster.accepted),
+            orient_shim=orient_shim, tenant_agent=tenant.agent,
         )
 
-    # One execution clock covers correlation and MAIN, including a stop before MAIN.
-    run_started = time.monotonic()
+        snapshot, limits, gate_bounds, usage = _resume_from(
+            _branch_snapshot(store, resume, source_run), state, limits, gate_bounds)
 
-    # The correlation lead runs to its end BEFORE the opening message is built (A4): the message
-    # carries its framed summary or the one sentence naming its ending, and nothing about
-    # correlation arrives later. `correlation` is `None` when this run dispatches none.
-    correlation_section: str | None = None
-    if correlation is None and resume is None:
-        # A fresh drive with no verb registry runs no lead: there is no third state between
-        # "dispatched" and "withheld", so MAIN is told the lead was withheld.
-        from ..lead_zero import CorrelationOutcome, render_correlation_section
-        from ..lead_zero._spec import ENDING_WITHHELD
+        agent = build_agent(
+            defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
+            store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
+            toolset=toolset, catalog=catalog, gather_grant=tenant.grants.gather,
+        )
+        deps = replace(
+            bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box,
+                 scope=RunScope(tenant_agent=tenant.agent)),
+            run_id=run_id,
+            # The run's tenant record and its state ride on MAIN's deps so every gather lead it
+            # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —
+            # #1106 M3, #1107, #1235.
+            tenant=tenant,
+            run_state=state,
+            run=run,
+        )
 
-        correlation_section = render_correlation_section(
-            CorrelationOutcome(ending=ENDING_WITHHELD), grant_home=tenant.table_pointer)
-    if correlation is not None:
-        correlation_section, stopped = await _correlation_phase(
-            correlation, run=run, run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
-            verbs=lead_zero_verbs, limits=limits, make_model=make_model, logger=logger, box=box,
-            store=store, session_id=session_id, case_id=case_id, model_name=model_name,
-            catalog=correlation_catalog,
-            tenant=tenant, run_state=state, deadline=correlation_deadline, run_started=run_started)
-        if stopped is not None:
-            return stopped
-    prompt = _opening_prompt(
-        resume, run_dir, alert_path, defender_dir,
-        systems=tuple(roster.accepted), correlation_section=correlation_section,
-        # The systems down NOW — after the correlation lead, which can take one down (O-5b).
-        down=system_status.down_notes(state, roster.accepted),
-        orient_shim=orient_shim, tenant_agent=tenant.agent,
-    )
+        agent_run, end, exit_reason = await _drive_agent(
+            agent, prompt, deps, store, session_id, gate_bounds, resume_history,
+            usage=usage, snapshots=_snapshot_writer(snapshot, deps, store, session_id, limits,
+                                                    gate_bounds),
+        )
+        wall_ms = (time.monotonic() - run_started) * 1000.0
 
-    snapshot, limits, gate_bounds, usage = _resume_from(
-        _branch_snapshot(store, resume, source_run), state, limits, gate_bounds)
-
-    agent = build_agent(
-        defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
-        store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
-        toolset=toolset, catalog=catalog, gather_grant=tenant.grants.gather,
-    )
-    deps = replace(
-        bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box,
-             scope=RunScope(tenant_agent=tenant.agent)),
-        run_id=run_id,
-        # The run's tenant record and its state ride on MAIN's deps so every gather lead it
-        # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —
-        # #1106 M3, #1107, #1235.
-        tenant=tenant,
-        run_state=state,
-        run=run,
-    )
-
-    agent_run, end, exit_reason = await _drive_releasing_log(
-        logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
-        usage=usage, snapshots=_snapshot_writer(snapshot, deps, store, session_id, limits,
-                                                gate_bounds),
-    )
-    wall_ms = (time.monotonic() - run_started) * 1000.0
-
-    result = agent_run.result if agent_run is not None else None
-    _write_trace_or_empty(run_dir, store, session_id, wall_ms)
-    logger.close()
-    output = result.output if result is not None else None
-    return _run_summary(
-        output=output, model_name=model_name, requests=logger.n_requests,
-        end=end, exit_reason=exit_reason, case_id=case_id, store_path=store.path,
-    )
+        result = agent_run.result if agent_run is not None else None
+        _write_trace_or_empty(run_dir, store, session_id, wall_ms)
+        output = result.output if result is not None else None
+        return _run_summary(
+            output=output, model_name=model_name, requests=logger.n_requests,
+            end=end, exit_reason=exit_reason, case_id=case_id, store_path=store.path,
+        )
 
 
 #: Re-exports; each name's home is the module it is imported from.

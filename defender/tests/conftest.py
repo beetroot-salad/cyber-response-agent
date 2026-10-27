@@ -156,6 +156,16 @@ def data_root(tmp_path_factory, monkeypatch, request) -> Iterator[Path]:
                 entry.unlink(missing_ok=True)
 
 
+@pytest.fixture(autouse=True)
+def _test_owns_its_stores() -> Iterator[None]:
+    """Stores a shared helper hands a test are closed when the test ends (#1324): see
+    `support/storage/_store_owner.py`."""
+    from defender.tests.support.storage._store_owner import stores_owned_by_the_test
+
+    with stores_owned_by_the_test():
+        yield
+
+
 @pytest.fixture
 def d9_tenant(data_root) -> str:
     """D9's one tenant, created in this test's data root through the real `create_tenant`,

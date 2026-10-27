@@ -651,12 +651,10 @@ def recorded_branch(tmp_path, monkeypatch):
     _tenant_id, run_dir = C.record_source(tmp_path)
     source = C.opened_source(run_dir)
     branch_id = C.branch_response(run_dir, tool="read_file", arg_suffix=f"/{C.LESSONS[1]}.md")
-    store = branch_mod().source_store_if_any(run_dir, source_run=source)
-    assert store is not None, "the recorded source left no session store"
-    try:
+    opened = branch_mod().source_store_if_any(run_dir, source_run=source)
+    assert opened is not None, "the recorded source left no session store"
+    with opened as store:
         yield store, run_dir, branch_id, source
-    finally:
-        store.close()
 
 
 def test_a_spec_whose_clock_disagrees_with_its_branch_point_is_refused(recorded_branch):
