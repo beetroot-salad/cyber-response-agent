@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
 from defender._vocab import normalized_disposition
+from defender.records._artifact_schema import register_invlang_validator
 from .. import _walkers, vocab
 from .._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw, _unquote
 from .._types import Block, RowError
@@ -319,6 +320,10 @@ def validate_companion(
     return [
         d.message for d in diagnose(proposed_text, current_text) if d.severity != "warning"
     ]
+
+
+# The records write gate sits below this package, so it is handed the validator here, at load.
+register_invlang_validator(diagnose, warn_diagnostics)
 
 
 #: Re-exports: each name's real home is the module it comes from. Kept because callers import

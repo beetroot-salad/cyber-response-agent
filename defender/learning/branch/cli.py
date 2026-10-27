@@ -50,6 +50,7 @@ _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 #: Renders an episode's page from its runs repository and id; the entry supplies it.
 PageRenderer = Callable[["RunsRepository[Tenant]", str], Path]
 
+import defender.skills.invlang.validate  # noqa: F401 — loading it registers the validator the records write gate needs
 from defender.records import _alert_input, _provenance
 from defender.records._locations import DataRoot
 from defender.records._episode_handle import Episode

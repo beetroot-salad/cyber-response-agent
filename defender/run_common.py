@@ -15,6 +15,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import defender.skills.invlang.validate  # noqa: F401 — loading it registers the validator the records write gate needs
 from defender import _io
 from defender.records import _alert_input
 from defender.records import _provenance

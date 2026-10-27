@@ -360,12 +360,12 @@ def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, caps
     def _boom(_text, _current):
         raise RecursionError("validator blew up")
 
-    original = schema.diagnose
-    schema.diagnose = _boom
+    original = schema._diagnose
+    schema._diagnose = _boom
     try:
         assert schema.committed_investigation_reason("anything") is None
     finally:
-        schema.diagnose = original
+        schema._diagnose = original
 
     assert "could not be validated" in capsys.readouterr().err, "the fault must be logged"
 
