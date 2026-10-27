@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from defender.tenancy import _tenant
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.records._tenant_id import TenantRefused
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +105,7 @@ def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(
     assert Path(runs.open(_rid(r1)).run_dir) == Path(location_path(t.runs)) / r1, "the folder put back"
 
     foreign = H.raised(runs.resolve, RunAddress(H.U_ID, r1))
-    assert isinstance(foreign, _tenant.TenantRefused), (
+    assert isinstance(foreign, TenantRefused), (
         f"resolve of another tenant's address must stay the caller's TenantRefused: {foreign!r}")
 
 

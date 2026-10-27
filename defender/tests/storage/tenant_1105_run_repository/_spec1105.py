@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.records._tenant_id import TenantId
 
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
@@ -113,7 +114,7 @@ def tenant(root: Path, tenant_id: str = T_ID) -> Any:
     if not row.is_file():
         others = [p for p in root.iterdir() if p.name != tenant_id]
         if not others:
-            _tenant.create_tenant(fixture_data_root(root), _tenant.TenantId(tenant_id))
+            _tenant.create_tenant(fixture_data_root(root), TenantId(tenant_id))
         else:
             row.write_text(json.dumps(
                 {"tenant_id": tenant_id, "created_at": "2026-10-04T00:00:00+00:00"},

@@ -408,7 +408,8 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
 # --- third round: the binding is judged once, when read ----------------------------------------
 
 def test_an_issuer_role_that_is_not_a_plain_name_is_a_refused_binding(p4_tenant):
-    from defender.tenancy._tenant import TenantRefused, read_forge_binding
+    from defender.tenancy._tenant import read_forge_binding
+    from defender.records._tenant_id import TenantRefused
 
     bind_forge(p4_tenant, issuer_role="tenant role!")
     with pytest.raises(TenantRefused, match="issuer_role"):

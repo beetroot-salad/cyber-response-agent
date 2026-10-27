@@ -40,6 +40,7 @@ from defender.systems.verb_dispositions import (  # noqa: E402
     dispositions_path,
     grant_for,
 )
+from defender.records._tenant_id import TenantRefused
 
 #: The product repo's own knowledge folders this gate walks: the template `tenant.py scaffold`
 #: copies, and the frozen fixture the tests run as. A real tenant's folder lives in its own
@@ -74,7 +75,7 @@ def main(argv: list[str]) -> int:
     for name, folder in _folders(root):
         try:
             _tenant.check_knowledge_folder(folder, tenant_id=None)
-        except _tenant.TenantRefused as refusal:
+        except TenantRefused as refusal:
             print(f"lint_verb_disposition_census: {name}: a run would refuse this folder: "
                   f"{refusal}", file=sys.stderr)
             worst = 2

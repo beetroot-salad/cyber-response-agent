@@ -2,7 +2,7 @@
 the bottom layer every lookup works through, and the argument checks the lookups share."""
 from __future__ import annotations
 
-from defender.records._locations import (LegacyEpisodesRoot, LegacyRunsRoot, RunsBase, _unwrap_data_root, _unwrap_legacy_episodes_root, _unwrap_legacy_runs_root, _unwrap_runs_base, _unwrap_tenant_root)
+from defender.records._locations import (DataRoot, EpisodesRoot, TenantRoot, LegacyEpisodesRoot, LegacyRunsRoot, RunsBase, _unwrap_data_root, _unwrap_legacy_episodes_root, _unwrap_legacy_runs_root, _unwrap_runs_base, _unwrap_tenant_root)
 
 import contextlib
 import errno
@@ -11,12 +11,12 @@ import stat
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from defender import _io
-from defender.records._run_id import run_id_fault
 from defender._shown import quoted, shown
-from defender.tenancy._tenant import Tenant, TenantRefused
+from defender.records._run_id import run_id_fault
+from defender.records._tenant_id import TenantId, TenantRefused
 from defender.records._errors import RunRefused
 from defender.records._id import RunId
 from defender.records._layout import _SIDECAR_SUFFIXES, _STAGED_TAIL
@@ -28,10 +28,44 @@ RETIRE_COMMAND = "defender/cli/retire_legacy_runs.py"
 # -- the arguments ----------------------------------------------------------------------------
 
 
-def require_accepted_tenant(tenant: object) -> Tenant:
-    """`tenant`, when it is an accepted `Tenant`; else `TypeError` (S2: the tenant is never a
-    bare id, a path or a carrier the repository would have to trust or re-accept)."""
-    if not isinstance(tenant, Tenant):
+class RecordTenant:
+    """What the record stores read of a tenant: its id, its data root and where its folders are.
+    The accepted `Tenant` (tenancy) is the one real subclass; its construction token is what
+    makes a value of this type an accepted tenant. The five locations are ordinary properties
+    that raise, not abstract ones, so a frozen dataclass can satisfy `id` and `data_root` with
+    fields and override the rest."""
+
+    id: TenantId
+    data_root: DataRoot
+
+    @property
+    def tenant_root(self) -> TenantRoot:
+        raise NotImplementedError
+
+    @property
+    def runs(self) -> RunsBase:
+        raise NotImplementedError
+
+    @property
+    def runs_legacy(self) -> LegacyRunsRoot:
+        raise NotImplementedError
+
+    @property
+    def episodes(self) -> EpisodesRoot:
+        raise NotImplementedError
+
+    @property
+    def episodes_legacy(self) -> LegacyEpisodesRoot:
+        raise NotImplementedError
+
+
+_T = TypeVar("_T", bound=RecordTenant)
+
+
+def require_accepted_tenant(tenant: _T) -> _T:
+    """`tenant`, when it is shaped like an accepted tenant; else `TypeError` (S2: the tenant is
+    never a bare id, a path or a carrier the repository would have to trust or re-accept)."""
+    if not isinstance(tenant, RecordTenant):
         raise TypeError(f"the runs repository takes an accepted Tenant, not "
                         f"{type(tenant).__name__}")
     return tenant
@@ -183,7 +217,7 @@ def level_fault(exc: OSError) -> str:
     return f"cannot be opened ({exc.strerror or exc})"
 
 
-def hold_tenant_folder(tenant: Tenant, io: Any) -> _io.Held:
+def hold_tenant_folder(tenant: RecordTenant, io: Any) -> _io.Held:
     """`<data root>/<T>` held no-follow — the top of every walk (#1187 S-iso): its ancestors are
     the data root, followed as configuration; `<T>` itself never is. A link there (one swapped
     in after acceptance), something other than a directory, or a folder that is gone is
@@ -208,7 +242,7 @@ def hold_level(parent: _io.Held, name: str, where: Path, *, io: Any, create: boo
         raise TenantRefused(f"{what} {where} {level_fault(exc)}") from None
 
 
-def walk_from_tenant(tenant: Tenant, io: Any, names: tuple[str, ...], *,
+def walk_from_tenant(tenant: RecordTenant, io: Any, names: tuple[str, ...], *,
                      create: bool = False) -> _io.Held:
     """`<T>/<names...>` held, every level off its parent's handle and no-follow (see the module
     docstring); each parent is closed once its child is held, and the caller closes what this
@@ -228,7 +262,7 @@ def walk_from_tenant(tenant: Tenant, io: Any, names: tuple[str, ...], *,
     return held
 
 
-def tenant_levels(tenant: Tenant, folder: Path) -> tuple[str, ...]:
+def tenant_levels(tenant: RecordTenant, folder: Path) -> tuple[str, ...]:
     """`folder`'s names below `<T>` (`tenant.runs` is `("runs",)`), so a walk takes every name
     from the tenant's own layout and spells none."""
     return Path(folder).relative_to(_unwrap_tenant_root(tenant.tenant_root)).parts
@@ -433,7 +467,7 @@ def _judge_destination(plan: RetirePlan, lane: _Lane, io: Any) -> None:
         held.close()
 
 
-def plan_retire(tenant: Tenant, old_episodes_root: Path | None, *, io: Any) -> RetirePlan:
+def plan_retire(tenant: RecordTenant, old_episodes_root: Path | None, *, io: Any) -> RetirePlan:
     """The one-time command's plan (#1187 Flow 6 steps 1-2, S-move), with nothing moved."""
     tenant_held = hold_tenant_folder(tenant, io)
     try:
@@ -464,7 +498,7 @@ def plan_retire(tenant: Tenant, old_episodes_root: Path | None, *, io: Any) -> R
     return plan
 
 
-def _plan_old_episodes(plan: RetirePlan, tenant: Tenant, root: Path, io: Any) -> None:
+def _plan_old_episodes(plan: RetirePlan, tenant: RecordTenant, root: Path, io: Any) -> None:
     lane = _Lane(None, root, tenant.episodes_legacy)
     plan.lanes.append(lane)
     real = root.resolve()

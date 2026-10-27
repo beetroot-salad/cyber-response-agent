@@ -1670,7 +1670,7 @@ def publish_planted(tmp_path: Path, planted: Planted) -> tuple[Any, str | None]:
     refuses the folder (a scenario that plants a broken tenant on purpose); `(None, None)` when
     the tenant was never placed (no row). Re-driving the same tenant publishes its edits."""
     from defender.learning.author.version_control import DeliveryRefused, LockBusy
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
     if not (Path(planted.root) / planted.tenant_id / "tenant.json").is_file():

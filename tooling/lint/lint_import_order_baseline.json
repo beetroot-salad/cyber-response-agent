@@ -12,8 +12,6 @@
     "learning/frontend/build.py:defender.presentation.publisher": "#1309 (f): learning imports rendering and entry points",
     "learning/frontend/build.py:defender.presentation.visualize_primitives": "#1309 (f): learning imports rendering and entry points",
     "learning/frontend/build.py:defender.presentation.visualize_run": "#1309 (f): learning imports rendering and entry points",
-    "records/_artifact_schema.py:defender.skills.invlang.validate": "#1309 (d): Python in model-facing folders",
-    "records/_held.py:defender.tenancy._tenant": "#1309 (b): run storage and episodes import tenancy",
-    "records/_lookup.py:defender.tenancy._tenant": "#1309 (b): run storage and episodes import tenancy"
+    "records/_artifact_schema.py:defender.skills.invlang.validate": "#1309 (d): Python in model-facing folders"
   }
 }

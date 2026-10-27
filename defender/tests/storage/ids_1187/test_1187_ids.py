@@ -15,6 +15,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
+from defender.records._tenant_id import TenantId
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
@@ -91,10 +92,9 @@ def test_1187_o2_episode_id_rule_asks_for_no_room_for_a_label():
 
 
 def _address_fields() -> dict[str, object]:
-    from defender.tenancy import _tenant
     from defender.records import RunId
 
-    return {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(S.SAMPLE_UUID)}
+    return {"tenant_id": TenantId(H.T_ID), "run_id": RunId.parse(S.SAMPLE_UUID)}
 
 
 def test_1187_o2_run_address_admits_canonical_uuid_run_and_episode_ids():

@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import ValidationError
 
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 
 from .models import (
     RECORD_ID_PATTERN,

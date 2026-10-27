@@ -16,8 +16,9 @@ from pathlib import Path
 
 from defender import _io
 from defender import run_common
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+from defender.records._tenant_id import TenantId
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 
@@ -180,7 +181,7 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     carrier = RunTenant(tenant=t, grants=None, correlation=None, systems={},
                         ticket_mapping=None)
 
-    for bad in (t.id, _tenant.TenantId(t.id), location_path(t.runs), carrier):
+    for bad in (t.id, TenantId(t.id), location_path(t.runs), carrier):
         rec = H.RecordingIO()
         err = H.raised(lambda io, bad=bad: RunsRepository(bad, io=io), rec)
         assert type(err) is TypeError, f"RunsRepository({type(bad).__name__}) raised {err!r}"

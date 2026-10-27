@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from defender.tenancy._tenant import TenantRefused
+from defender.records._tenant_id import TenantRefused
 
 from defender.tenancy import case_ticket
 from defender.investigation import ticket_writer

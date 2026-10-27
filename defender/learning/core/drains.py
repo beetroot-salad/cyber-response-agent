@@ -53,6 +53,7 @@ from defender.learning.core.state import (
     PendingDelivery,  # noqa: F401 — re-export: the delivery record the drains and the pin name
     StateRefused,
 )
+from defender.records._tenant_id import TenantRefused
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -405,7 +406,7 @@ def _tenant_acceptor(tenant: Tenant | None) -> Callable[[object], Tenant]:
         return tenant.accept_requested_tenant
     try:
         return functools.partial(_tenant.requested_tenant, _tenant.resolve_data_root())
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         raise FatalConfigError(str(refused)) from refused
 
 
@@ -517,7 +518,6 @@ def _rehydrate(
     per tenant per tick, a refusal included — then the run opened through that tenant's
     repository, which never follows a link at its name. Else the refusal, logged: the
     tenant's `TenantRefused`, or the open's `RunRefused` (`RunAbsent` when the run is gone)."""
-    from defender.tenancy import _tenant
     from defender.records import RunRefused
 
     address = claim.address
@@ -525,7 +525,7 @@ def _rehydrate(
     if key not in accepted:
         try:
             accepted[key] = accept_tenant(address.tenant_id)
-        except _tenant.TenantRefused as refused:
+        except TenantRefused as refused:
             _logger.warning(f"{claim.identity}: its tenant cannot be accepted ({refused})")
             accepted[key] = refused
     tenant = accepted[key]
@@ -678,7 +678,6 @@ def _open_delivery(
     binding's origin), its own clients closed on exit. A missing binding or config is decided
     locally, before any request (O9); every refusal is `_Refused`, naming why."""
     from defender.learning.author import version_control as vc
-    from defender.tenancy import _tenant
 
     tenant = paths.tenant
     if tenant is None:
@@ -690,7 +689,7 @@ def _open_delivery(
             delivery = opened.enter_context(vc.opened_delivery(
                 tenant, defender_dir=process_defender_dir(), client=client, identity=identity,
                 issuer_config=issuer_config, issuer_transport=issuer_transport))
-        except _tenant.TenantRefused as unbound:
+        except TenantRefused as unbound:
             raise _Refused(
                 f"the tenant {tenant.id} has no usable forge binding: {unbound}") from None
         except (vc.DeliveryRefused, vc.ForgejoAuthError) as refused:

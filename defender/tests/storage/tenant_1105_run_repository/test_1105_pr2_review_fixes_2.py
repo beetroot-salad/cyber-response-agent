@@ -14,6 +14,7 @@ from defender.tenancy import _tenant
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.tests.storage.tenant_1105_run_repository import test_1105_pr2_review_fixes as R1
+from defender.records._tenant_id import TenantId, TenantRefused
 
 
 @pytest.fixture(autouse=True)
@@ -109,14 +110,14 @@ def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d
 
     root = _tenant.resolve_data_root()
     direct = _tenant.accept_tenant(fixture_data_root(root), d9_tenant, defender_dir=process_defender_dir())
-    for raw in (d9_tenant, _tenant.TenantId(d9_tenant)):
+    for raw in (d9_tenant, TenantId(d9_tenant)):
         got = _tenant.requested_tenant(fixture_data_root(root), raw)
         assert isinstance(got, _tenant.Tenant)
         assert (got.id, Path(location_path(got.runs)), Path(location_path(got.data_root))) == (
             direct.id, Path(location_path(direct.runs)), Path(location_path(direct.data_root))), raw
     for bad in (None, "../x", "no-such-tenant"):
         assert isinstance(H.raised(_tenant.requested_tenant, root, bad),
-                          _tenant.TenantRefused), bad
+                          TenantRefused), bad
 
 
 @pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map"])
@@ -200,7 +201,7 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     judge = J.scripted_judge()
     err = H.raised(grade_episode, other.runs_repository(), episode_id, judge=judge,
                    state=env_state())
-    assert isinstance(err, (JudgeRefused, RunRefused, _tenant.TenantRefused,
+    assert isinstance(err, (JudgeRefused, RunRefused, TenantRefused,
                             FileNotFoundError)), f"another tenant graded the episode: {err!r}"
     assert not (ep / "judge.yaml").exists(), "a grade was written for another tenant"
     assert P.tree(state_dir) == before, "the refused grade touched the learning state"

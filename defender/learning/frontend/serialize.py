@@ -22,6 +22,7 @@ from defender._clock import z_seconds
 from defender.knowledge._corpus import iter_lessons
 from defender._io import json_safe, use_utf8_stdio
 from defender.knowledge._knowledge import LESSONS, LESSONS_QUESTIONER, KnowledgePaths
+from defender.records._tenant_id import TenantRefused
 
 
 def _json_safe(obj):
@@ -185,7 +186,7 @@ def main(argv: list[str]) -> int:
         try:
             tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), args.tenant)
             agent_root = published_agent_root(tenant)
-        except (_tenant.TenantRefused, DeliveryRefused) as refused:
+        except (TenantRefused, DeliveryRefused) as refused:
             parser.error(str(refused))
     sys.stdout.write(dump_contract(stamped_view(agent_root)))
     return 0

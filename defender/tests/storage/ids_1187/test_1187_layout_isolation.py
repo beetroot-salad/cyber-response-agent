@@ -33,7 +33,7 @@ def _rid(text: str):
 
 def _refusals():
     """The repository's two refusal classes (S-iso: a link refuses with either, naming the level)."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     from defender.records import RunRefused
 
     return (TenantRefused, RunRefused)
@@ -286,6 +286,7 @@ def _b_ids(b: dict) -> dict[str, str]:
 def test_a_link_at_the_tenant_folder_is_refused_at_acceptance_and_the_real_folder_accepts(
         tmp_path, data_root):
     from defender.tenancy import _tenant
+    from defender.records._tenant_id import TenantRefused
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
 
     _two_tenants(data_root)
@@ -295,7 +296,7 @@ def test_a_link_at_the_tenant_folder_is_refused_at_acceptance_and_the_real_folde
     b_before = S.tree(S.tenant_dir(data_root, B_ID))
 
     err = S.raised(_tenant.accept_tenant, fixture_data_root(data_root), A_ID, defender_dir=H5.DEFENDER)
-    assert isinstance(err, _tenant.TenantRefused), f"acceptance through a linked <A> gave {err!r}"
+    assert isinstance(err, TenantRefused), f"acceptance through a linked <A> gave {err!r}"
     assert str(link) in S.message(err), f"the refusal does not name <A>: {S.message(err)!r}"
     assert S.tree(S.tenant_dir(data_root, B_ID)) == b_before, "acceptance changed B's tree"
 
