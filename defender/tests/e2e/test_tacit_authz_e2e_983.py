@@ -51,9 +51,8 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
 
 def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     """A gather registry whose `tacit-knowledge.lookup` IS the shipped adapter's, repointed at
-    the fixture tree under `root` and at `AS_OF`. #1108 P4 (O1, O4): the registry is the run's
-    agent knowledge, so `root` is handed as the run tenant's agent root (`RunTenant.agent`),
-    not as `defender_dir`."""
+    the fixture tree under `root` and at `AS_OF`. The registry is the run's agent knowledge, so
+    `root` is handed as the run tenant's agent root, not as `defender_dir`."""
     from defender.systems.verbs import VerbContext
     from defender.kit.verbs import declared_params
     from defender.integrations import tacit_knowledge_adapter
@@ -150,7 +149,7 @@ def _authz_verdicts(text: str) -> list[str]:
     return [row.get("verdict", "") for row in _authz_rows(text)]
 
 
-# ---------------------------------------------------------------- O1: benign becomes reachable
+# ---------------------------------------------------------------- benign becomes reachable
 
 
 def test_registry_hit_lets_a_container_root_case_close_benign(tmp_path):
@@ -194,7 +193,7 @@ def test_registry_hit_lets_a_container_root_case_close_benign(tmp_path):
 
 def test_a_citation_the_lookup_never_returned_does_not_close_benign(tmp_path):
     """The same run, with the lookup MISSING and the model citing an entry id anyway: the close
-    does not reach `benign` (demand `authz_anchor_id_is_receipted`, O2)."""
+    does not reach `benign`."""
     doc = scene.benign_document(
         rows=scene.consult_block(scene.lookup_miss_row(), scene.consultation_row())
         + scene.authz_block(scene.authz_row(anchor_id=scene.FABRICATED_ENTRY_ID)),
@@ -245,7 +244,7 @@ def test_runtime_evidence_lands_in_a_benign_report_body(tmp_path):
     )
 
 
-# ---------------------------------------------------------------- O2: the three fakes
+# ---------------------------------------------------------------- the three fakes
 
 
 def test_expired_entry_falls_through_to_indeterminate(tmp_path):

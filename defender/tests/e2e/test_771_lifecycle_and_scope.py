@@ -1,4 +1,4 @@
-"""#771 — lifecycle half: the §7 D2 scan-verdict marker (written on both reap arms, kept outside the tree it judges, unmarked tree reads unverified), fail-closed partial scans, guarded setup writers, and box-start / teardown fault handling."""
+"""#771 — lifecycle half: the scan-verdict marker (written on both reap arms, kept outside the tree it judges, unmarked tree reads unverified), fail-closed partial scans, guarded setup writers, and box-start / teardown fault handling."""
 from __future__ import annotations
 
 import contextlib
@@ -39,8 +39,7 @@ DEFENDER = Path(__file__).resolve().parents[2]
 
 
 class _Recorder:
-    """A recording `stop_box`/`scrub_tree` pair for driving `stop_and_scrub` directly — the
-    seams the reap pair already carries as REQUIRED keyword arguments."""
+    """Recording `stop_box`/`scrub_tree` seams for driving `stop_and_scrub` directly."""
 
     def __init__(self, *, stop_fault: BaseException | None = None):
         self.events: list[str] = []
@@ -56,7 +55,7 @@ class _Recorder:
         scrub_mod.scrub(tree)
 
 
-# §7 D2 — the scan that never ran
+# The scan that never ran
 @pytest.mark.parametrize("in_flight", [False, True], ids=["teardown-fault", "in-flight-failure"])
 def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
     tree = run_tree(tmp_path)
@@ -141,12 +140,8 @@ def test_a_verdict_planted_inside_the_tree_is_never_read_as_one(tmp_path):
     assert forged.is_file(), "the consumer removed the planted entry — reading must not sanitize"
 
 
-# #1108 P4 OD12(i): `test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive`
-# drove `learning.core.quarantine.preserve_tainted_tree`, deleted with its only caller (the legacy
-# `AuthorBranch` worktree delivery): a tainted tree is no longer archived for forensics. No
-# successor pins a preserving writer — an OPEN OWNER ITEM in
-# `tests/tenancy/tenant_1108_p4/README.md` §6. The verdict's siting outside the tree stays pinned
-# above (the forged in-tree verdict is never read).
+# A tainted tree is no longer archived for forensics, so nothing pins a preserving writer: an
+# open owner item in `tests/tenancy/tenant_1108_p4/README.md` §6.
 
 
 def test_a_partial_reap_scan_failure_fails_closed_over_the_whole_tree(tmp_path):
@@ -224,9 +219,8 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     alert = tmp_path / "alert.json"
     alert.write_text('{"id": "a-771"}\n', encoding="utf-8")
 
-    # ARM 1 — the run dir's creation is exclusive: a directory a RUN has been in is refused, and
-    # touched in no way. A container from that run may still be mounted on the tree. (#1279 O8:
-    # there is no resume, so setup-only leftovers are refused too.)
+    # ARM 1: run-dir creation is exclusive; an existing run dir (a container from that run may
+    # still mount it) is refused and left untouched.
     first_run = run_common.materialize_run(alert, tenant=tenant)
     first = first_run.run_dir
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
@@ -241,14 +235,12 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     assert (first / "report.md").read_text(encoding="utf-8") == "FIRST RUN\n", (
         "the refused mint overwrote the earlier run's artifact"
     )
-    # The complementary condition: a FRESH run under the same base materializes, so the refusal
-    # above is the existing directory and not a mint that fails on everything.
+    # A fresh run under the same base still materializes, so the refusal is specific.
     fresh = run_common.materialize_run(alert, tenant=tenant).run_dir
     assert fresh.is_dir(), "no run dir can be minted at all under this base"
     assert fresh != first, "a fresh run minted the same directory the refusal was about"
 
-    # ARM 2 — a reference taken while the tree was alive is a reference to the OBJECT. This
-    # re-probes the kernel rule on every run rather than pinning a one-time observation of it.
+    # ARM 2: a directory fd taken while the tree was alive pins the old object, not the path.
     pinned = os.open(str(first), os.O_RDONLY | os.O_DIRECTORY)
     try:
         from defender.tests.support.storage._alert_plant import unseal_fixture_input
@@ -272,7 +264,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     finally:
         os.close(pinned)
 
-    # ARM 3 — the half this codebase owns: what the box actually pins.
+    # ARM 3: the half this codebase owns, what the box's bind mounts pin.
     run = run_tree(tmp_path / "boxed")
     rec = AliasProbeDocker(BAN_IN_FORCE)
     box_mod.start_box(run, DEFENDER, docker=rec)
@@ -295,8 +287,6 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
 
 
 def test_a_planted_hard_link_still_refuses_the_guarded_write(tmp_path):
-    """guarded_write_refuses_a_hard_link — the guarded primitive refuses a HARD LINK planted at
-    an artifact name, not only a symlink: the aliased file outside the tree keeps its bytes."""
     run = run_tree(tmp_path)
     target = outside(tmp_path)
     original = target.read_bytes()
@@ -315,16 +305,15 @@ def test_a_planted_hard_link_still_refuses_the_guarded_write(tmp_path):
 
 
 def write_guarded_hardlink_arm(path: Path) -> None:
-    """Drive the guarded primitive at `path` — split out so the demand's test body reads as
-    one assertion about one observable."""
+    """Drive the guarded primitive at `path`."""
     from defender.tests.e2e._spec771 import write_guarded
 
     write_guarded(path, "REDIRECTED\n")
 
 
 def test_the_box_start_fault_removes_the_container_it_created(tmp_path):
-    """box_start_fault_reaps_its_container — a box whose ban probe failed is removed rather than
-    left running, so a faulted start leaks no container holding the shared tree open."""
+    """A missing ban faults box start, and the faulted start removes its container rather than
+    leave it holding the shared tree open."""
     rec = AliasProbeDocker(BAN_ABSENT)
     with pytest.raises(ban_not_in_force_error()):
         box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec)

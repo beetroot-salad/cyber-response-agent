@@ -33,7 +33,7 @@ def test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus(tmp_path)
                      defender_dir=dtree, cwd_anchor=repo)
     assert ok.allow, "the in-scope rm was refused (positive control failed)"
 
-# N3 — the host-side write tools never cross the box; the scan (S7)
+# Host-side write tools never cross the box
 def test_host_side_write_tools_write_live_tree_in_process(tmp_path):
     from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF, SHIPPED_LESSON_CORPORA
 

@@ -1,4 +1,4 @@
-"""E2E script for #585 — the template index reaches the gather subagent for real."""
+"""#585 — the template index reaches the gather subagent, end to end."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,10 +32,9 @@ class _KeyRecordingReplay(ReplayFn):
         self.keys.append(settings.get("openai_prompt_cache_key"))
         return super().__call__(messages, info)
 
-#: #1108 P4 (O1, O2): the gather index lists the RUN's tenant catalog (its run copy's
-#: `agent/skills/gather/queries/`), never the checkout's — the product tree holds no catalog.
-#: The tenant here is the committed fixture set up under the test's data root, plus the
-#: made-up templates below, written into that tenant's own `agent/` (decision 4: no lab content).
+#: The gather index lists the run's tenant catalog (`agent/skills/gather/queries/`), never the
+#: checkout's. The tenant is the committed fixture plus the made-up templates below, written
+#: into its own `agent/`.
 _CATALOG_REL = Path("skills") / "gather" / "queries"
 
 #: The template the scripted gather binds, an off-target sibling comes from the fixture
@@ -79,9 +78,8 @@ def _ids(catalog: Path, status: str) -> set[str]:
 
 
 def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
-    """d3 + d4 + d17, through the real driver against the run's TENANT catalog (#1108 P4 O2:
-    the gather prompt's index is the tenant's, shown at its `/agent/...` model path; O1: no
-    template of the checkout's is indexed or spelled)."""
+    """Through the real driver, the gather prompt indexes the run's tenant catalog (established
+    ids only, at its `/agent/...` model path), never the checkout's."""
     from defender.tests.e2e._replay_harness import FakeVerbs
 
     tenant, catalog = _tenant_catalog()
@@ -124,8 +122,8 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
 
     assert "cmdb." in dispatch
 
-    # O2/O-TEXT: the locator the model is shown is the tenant catalog's path in the model view
-    # (`/agent` is the run copy's `agent/`), and no checkout catalog spelling reaches the wire.
+    # The model is shown the tenant catalog's path in the model view (`/agent` is the run copy's
+    # `agent/`), never a checkout catalog path.
     assert "/agent/skills/gather/queries/elastic/sshd-auth-history.md" in dispatch, (
         "the bound template is not shown at the tenant catalog's model path")
     assert "/defender/skills/gather/queries/" not in dispatch, (

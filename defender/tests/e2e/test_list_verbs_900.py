@@ -1,4 +1,4 @@
-"""Executable spec for #900 — `list_verbs`, gather's verb/param discovery tool."""
+"""#900 — `list_verbs`, gather's verb/param discovery tool."""
 from __future__ import annotations
 
 import asyncio
@@ -52,8 +52,8 @@ _ADAPTERS = DEFENDER / "integrations"
 LEAD = "l-001"
 
 def _shipped_gather_grant():
-    """The shipped gather grant — the committed playground tenant's (#1106 M4: `GATHER_DEF`
-    carries none; a run's grant is projected from its tenant's table)."""
+    """The shipped gather grant: the committed playground tenant's (`GATHER_DEF` carries none;
+    a run's grant is projected from its tenant's table)."""
     from defender.tests.support.tenancy import _tenants1106 as T1106
 
     return T1106.fixture_grants().gather
@@ -89,14 +89,14 @@ _KEY_RE = re.compile(r"""["'](?P<name>[A-Za-z_][A-Za-z0-9_]*)["']\s*:""")
 _is_name = is_system_name
 
 #: The type spellings a descriptor may claim, and a value of the WRONG type for each. A claim
-#: is only honest if `validate_params` refuses the mismatch (O3).
+#: is only honest if `validate_params` refuses the mismatch.
 _MISMATCH: dict[str, Any] = {
     "bool": "yes", "int": "20", "float": "x", "str": 123, "list": "x", "dict": "x",
 }
 
 
 def _parse(out: str) -> dict[tuple[str, str], dict[str, str]]:
-    """`{(system, verb): {param: descriptor}}` — the whole of this spec's rendering contract."""
+    """`{(system, verb): {param: descriptor}}`: all of the rendering these tests rely on."""
     calls: dict[tuple[str, str], dict[str, str]] = {}
     for m in _CALL_RE.finditer(out):
         if not (_is_name(m.group("system")) and _is_name(m.group("verb"))):
@@ -164,12 +164,12 @@ def _binding(fn: Any, names: Any) -> dict[str, Any]:
 
 
 def _registry() -> ModuleVerbRegistry:
-    """The PRODUCTION registry under gather's own grant — the shipped surface O1/O5 are about."""
+    """The production registry under gather's own grant: the shipped surface."""
     return ModuleVerbRegistry(read_roster(_ADAPTERS), _shipped_gather_grant())
 
 
 def _granted(registry: VerbRegistry, system: str) -> dict[str, Any]:
-    """`{verb: fn}` for what the grant admits — the oracle O5's filter must reproduce."""
+    """`{verb: fn}` for what the grant admits: the oracle the published set must match."""
     return {
         verb: registry.decide(system, verb).fn
         for verb in sorted(registry.verbs(system))
@@ -218,8 +218,7 @@ def _deps(tmp_path: Path):
 
 
 def _ask(registry: VerbRegistry, system: str, tmp_path: Path) -> str:
-    """Drive the REAL registered `list_verbs` once. Reds per-test as "not registered" until the
-    tool exists, rather than at import."""
+    """Drive the real registered `list_verbs` once."""
     agent = _agent(registry)
     registered = agent._function_toolset.tools
     assert "list_verbs" in registered, (
@@ -235,8 +234,8 @@ def _ask(registry: VerbRegistry, system: str, tmp_path: Path) -> str:
 
 
 def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
-    """O1 — for every granted `(system, verb)` on the SHIPPED registry, the params the tool
-    names are exactly `model_facing_params(fn)`: no extra, none missing."""
+    """For every granted verb of the shipped registry: no extra param, none missing, and a
+    wrapper-only param is neither published nor accepted."""
     registry = _registry()
     seen_verbs = seen_params = seen_reserved = 0
 
@@ -292,7 +291,7 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
 
 
 def test_o1_every_published_param_is_accepted_and_an_unpublished_one_is_refused(tmp_path):
-    """O1, the heart of the suite — the round trip through the ENFORCER."""
+    """The round trip through the enforcer, `validate_params`."""
     registry = _registry()
     checked = 0
 
@@ -318,8 +317,8 @@ def test_o1_every_published_param_is_accepted_and_an_unpublished_one_is_refused(
 
 
 def test_o1_the_required_optional_split_and_the_defaults_round_trip(tmp_path):
-    """O1, defaults half — the tool publishes each param's default, and the required/optional
-    split it thereby asserts is the one `validate_params` enforces."""
+    """The tool publishes each param's default, and the required/optional split that implies is
+    the one `validate_params` enforces."""
     registry = _registry()
     saw_default_value = 0
 
@@ -398,7 +397,7 @@ def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path
 
 
 def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path):
-    """O3 — the case the shipped adapters do not reach, driven through the registry seam."""
+    """A case no shipped adapter reaches, driven through the registry seam."""
     registry = _ScopedVerbs(
         {"synthetic": {"unresolved": _unresolved_verb, "resolved": _resolved_verb}},
         VerbGrant(role="gather", entries=(("synthetic", "unresolved", "r"),
@@ -481,8 +480,8 @@ def test_o4_an_unknown_system_degrades_loudly_and_names_it(tmp_path):
 
 
 def test_o4_a_failing_adapter_is_a_named_line_and_the_other_systems_still_answer(tmp_path):
-    """O4 — a system whose adapter cannot be imported degrades to a NAMED answer, and the
-    failure is contained to that system."""
+    """A system whose adapter cannot be imported degrades to a named answer, contained to that
+    system."""
     def probe(ctx: VerbContext, *, host: str, limit: int = 10) -> list[dict]:
         return []
 
@@ -587,13 +586,13 @@ def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_pa
 
 
 def _resolved_verb(ctx: VerbContext, *, host: str, limit: int = 10) -> list[dict]:
-    """The control for the O3 pair: annotations that resolve, so `_resolved_hints` reports them
-    and `validate_params` really checks them."""
+    """The control: annotations that resolve, so `_resolved_hints` reports them and
+    `validate_params` really checks them."""
     return []
 
 
 def _unresolved_verb(ctx: VerbContext, *, host: str, window: _WindowSpec = "24h") -> list[dict]:
-    """A verb whose annotations DO NOT resolve — `_WindowSpec` is a TYPE_CHECKING-only import,
-    so `get_type_hints` raises NameError at runtime and `_resolved_hints` returns `{}` for the
-    whole function, `host` included. This module carries `from __future__ import annotations`"""
+    """A verb whose annotations do not resolve: `_WindowSpec` is a TYPE_CHECKING-only import, so
+    `get_type_hints` raises NameError and `_resolved_hints` returns `{}` for the whole function,
+    `host` included (`from __future__ import annotations` keeps the def importable)."""
     return []

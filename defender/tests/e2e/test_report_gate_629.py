@@ -1,5 +1,5 @@
-"""#629 — the investigation.md size-bound legs of `tests/spec_graph_629-report-output-structure.yaml`
-that survive #774 unchanged: the mid-run lifecycle legs (lc1-lc3)."""
+"""#629 — `investigation.md`'s size bound holds mid-run: an over-bound write or edit is refused
+and leaves the file as it was, and an edit may bring an over-bound file back under."""
 from __future__ import annotations
 
 
@@ -34,7 +34,7 @@ def _deps(tmp_path):
 
 def test_investigation_crosses_bound_mid_run(tmp_path):
     deps, run = _deps(tmp_path)
-    p = model_path(run / "investigation.md", run_dir=run)   # #1255 P1: the model's spelling
+    p = model_path(run / "investigation.md", run_dir=run)   # the model's spelling
     runtime_tools._tool_write_file(deps, p, GOLDEN_INV)
     over = GOLDEN_INV.rstrip() + "\n" + "x" * (INV_BOUND + 5000) + "\n"
     with pytest.raises(ModelRetry):
@@ -44,7 +44,7 @@ def test_investigation_crosses_bound_mid_run(tmp_path):
 
 def test_edit_file_splice_pushes_investigation_over_bound(tmp_path):
     deps, run = _deps(tmp_path)
-    p = model_path(run / "investigation.md", run_dir=run)   # #1255 P1: the model's spelling
+    p = model_path(run / "investigation.md", run_dir=run)   # the model's spelling
     runtime_tools._tool_write_file(deps, p, GOLDEN_INV)
     current = (run / "investigation.md").read_text(encoding="utf-8")
     anchor = current.rstrip()[-40:]
@@ -56,7 +56,7 @@ def test_edit_file_splice_pushes_investigation_over_bound(tmp_path):
 
 def test_edit_file_splice_pulls_investigation_under_bound(tmp_path):
     deps, run = _deps(tmp_path)
-    p = model_path(run / "investigation.md", run_dir=run)   # #1255 P1: the model's spelling
+    p = model_path(run / "investigation.md", run_dir=run)   # the model's spelling
     pad = "x" * (INV_BOUND + 5000)
     over = GOLDEN_INV.rstrip() + "\n" + pad + "\n"
     (run / "investigation.md").write_text(over, encoding="utf-8")

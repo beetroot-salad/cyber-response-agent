@@ -1,5 +1,4 @@
-"""#611 slice 1 — the executable spec for the `query` tool, the VERBS registry, and
-capture-as-a-capability."""
+"""#611 — the `query` tool, the VERBS registry, and capture as a capability."""
 from __future__ import annotations
 
 import json
@@ -94,9 +93,8 @@ class _Run:
 
     @property
     def own_rows(self) -> list[dict]:
-        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
-        the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
-        pre-ORIENT resolution against `GOLDEN_AB3`'s alert."""
+        """`.rows` without #808's harness-authored leads (`l-000`/`l-00c`), which run against
+        every alert."""
         from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
@@ -116,12 +114,12 @@ class _Run:
 
     @property
     def state(self):
-        """The run's one `RunState` (#1235 round 2), as the driver's summary hands it back."""
+        """The run's `RunState`, as the driver's summary hands it back."""
         return self.summary["run_state"]
 
     @property
     def breaker(self) -> dict:
-        """The run's breaker state, off the run's `RunState` (#1235), read post-run;
+        """The run's breaker state, off the run's `RunState`, read post-run;
         blank (`{"systems": {}, "total_failures": 0}`) when nothing was charged."""
         return self.state.breaker_snapshot()
 
@@ -129,9 +127,8 @@ class _Run:
 def run_gather(
     tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elastic", run_id: str = "q611",
 ) -> _Run:
-    """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
-    `turns` (the query calls under test) against the INJECTED verb registry. Everything
-    between the two fakes — dispatch, the query tool, its validator, the capture capability."""
+    """Drive a real run: main dispatches one gather lead whose nested agent replays `turns`
+    against the injected verb registry; everything between the two fakes is production code."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -146,7 +143,7 @@ def run_gather(
 
 
 def q(system: str, verb: str, params: dict, query_id: str | None = None) -> Turn:
-    """One scripted `query` tool call — the model-facing shape of the new tool."""
+    """One scripted `query` tool call, in its model-facing shape."""
     args: dict = {"system": system, "verb": verb, "params": params}
     if query_id is not None:
         args["query_id"] = query_id
@@ -168,9 +165,9 @@ def elastic_ok(rec: VerbRecorder) -> FakeVerbs:
 
 
 def raising(rec: VerbRecorder, exc: BaseException, systems: tuple[str, ...] = ("elastic",)) -> FakeVerbs:
-    """A registry whose verb RAISES `exc` — a fault injector, nothing more. It does not map
-    the fault to an exit code, does not touch the breaker, and does not write a row: every
-    one of those is the capture capability's job, and every assertion about them is therefore"""
+    """A registry whose verb raises `exc`: a fault injector, nothing more. Mapping the fault to an
+    exit code, charging the breaker and writing the row are the capture capability's job, so
+    assertions about them test production code."""
 
     def probe(ctx: VerbContext, *, native_query: str = "FROM logs") -> list[dict]:
         rec.record("probe", ctx, {"native_query": native_query})
@@ -197,8 +194,7 @@ def test_query_returns_wrapped_truncated_view_and_payload_note(tmp_path):
 
 
 def test_query_return_wrap_mints_its_own_salt(tmp_path):
-    """query_return_wrap_mints_its_own_salt — the wrap mints a FRESH token per return, never a
-    per-run one shared with the party being framed."""
+    """A fresh salt per return, never a per-run one shared with the party being framed."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
@@ -235,8 +231,7 @@ def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     ("missing-required", {"system": "elastic", "verb": "query", "params": {"limit": 5}}),
 ])
 def test_unknown_system_verb_param_rejected(tmp_path, label, args):
-    """unknown_system_verb_param_rejected — an unknown system / unknown verb / unknown param
-    key / missing required param is rejected at the boundary and NEVER reaches a transport."""
+    """Rejected at the boundary: the call never reaches the verb."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         Turn(tool_calls=[("query", args)]), DONE,
@@ -286,8 +281,8 @@ def test_a_recursive_args_body_does_not_take_the_rejection_row_with_it():
 
 
 def test_empty_verbs_declaration_fails_closed_at_the_tool(tmp_path):
-    """empty_verbs_declaration_fails_closed_at_the_tool — a system whose module declares NO
-    verbs is unreachable through query(): an empty declaration must not read as 'no filter'."""
+    """An empty VERBS declaration must not read as 'no filter': the system is unreachable
+    through `query()`."""
     rec = VerbRecorder()
     verbs = FakeVerbs({"ghost": {}})
     r = run_gather(tmp_path, verbs=verbs, system="ghost", turns=[
@@ -376,8 +371,7 @@ _PATH_EXCEPTION = ("host-state", "fim-checksum", "path")
 
 
 def test_query_id_fallback_chain(tmp_path):
-    """query_id_fallback_chain — model-supplied → {system}.{verb} → {system}.ad-hoc, and
-    deps.query_id (never assigned anywhere) is DELETED, not preserved."""
+    """Model-supplied → `{system}.{verb}` → `{system}.ad-hoc`; `GatherDeps` has no `query_id`."""
     rec = VerbRecorder()
 
     r1 = run_gather(tmp_path / "a", verbs=elastic_ok(rec), turns=[
@@ -415,8 +409,8 @@ def test_query_id_traversal_guard_survives(tmp_path, bad_qid):
 
 
 def test_failing_verb_still_writes_its_row(tmp_path):
-    """failing_verb_still_writes_its_row — a verb that RAISES still writes its queries row
-    (error status, the mapped exit code + error class) and still records the breaker outcome."""
+    """The row carries error status and the mapped exit code and error class; the breaker is
+    charged."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, TransportFault("connection refused")), turns=[
         q("elastic", "probe", {}), DONE,
@@ -719,8 +713,8 @@ def test_row_contract_frozen(tmp_path):
 
 
 def test_payload_lands_by_ref(tmp_path):
-    """payload_lands_by_ref — the verb's return value is serialized to
-    gather_raw/{lead_id}/{seq}.json and payload_path is the RUN-DIR-RELATIVE path to it."""
+    """The return value lands at `gather_raw/{lead_id}/{seq}.json`; `payload_path` is
+    run-dir-relative."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "x"}), DONE,
@@ -780,8 +774,8 @@ def test_adapters_unreachable_from_gather_bash(tmp_path, cmd):
 
 
 def test_gather_bash_keeps_local_computation(tmp_path):
-    """gather_bash_keeps_local_computation — `cat <gather_raw payload> | defender-sql '<SQL>'`
-    is still ALLOW for gather, so the split pipe (tool-then-bash) works."""
+    """`cat <gather_raw payload> | defender-sql '<SQL>'` stays allowed for gather, so the split
+    pipe (tool, then bash) works."""
     run_dir, gather, _ = _policies(tmp_path)
     payload = run_dir / "gather_raw" / LEAD / "0.json"
     assert _decide(f"cat {payload} | defender-sql 'SELECT count(*) FROM data'",

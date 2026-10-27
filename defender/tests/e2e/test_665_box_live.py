@@ -48,7 +48,7 @@ def _run_cycle_box(tmp_path):
     return run_dir, start_box_request(req, docker=box_mod._docker)
 
 
-# ro-mount / traversal containment (po63 / c13)
+# Read-only mounts and traversal containment
 def test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write(tmp_path):
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
@@ -60,8 +60,8 @@ def test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write(tmp
 
 
 def test_judge_granted_program_computes_an_output_path_that_resolves_inside_gather_raw(tmp_path):
-    """Any write whose path resolves inside the ro-mounted gather_raw is mechanically blocked
-    by the read-only mount itself, regardless of program convention (S1; po63)."""
+    """A write resolving inside the ro-mounted gather_raw is blocked by the mount itself,
+    whatever the program does."""
     run_dir, box = _run_cycle_box(tmp_path)
     try:
         res = _run(box, f"printf x > {run_dir / 'gather_raw' / 'out'}", cwd=run_dir)
@@ -70,15 +70,15 @@ def test_judge_granted_program_computes_an_output_path_that_resolves_inside_gath
         box_mod.stop_box(box)
 
 
-# nested / overlapping mounts + tmpfs (po19 / po46)
+# Nested mounts and tmpfs
 def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
-    """The deeper (more-specific) mount governs its subtree with its own flags — rw-inside-ro
-    works, the drain's shape (outer worktree ro + a triggered-corpus rw override) (po19)."""
+    """The deeper mount governs its subtree: rw inside ro works (the drain's shape, a read-only
+    worktree with a writable corpus)."""
     outer = tmp_path / "wt"
     inner = outer / "defender" / "lessons"
     inner.mkdir(parents=True)
-    # The outer worktree is the drain's `code` mount (#1108 D7 amended): it carries the
-    # product's committed check file at its legacy `<workdir>/defender`, as a checkout does.
+    # The outer worktree is a `code` mount, so it carries the committed check file at
+    # `<workdir>/defender`, as a checkout does.
     check = box_mod.CODE_CHECK_FILE
     shutil.copyfile(DEFENDER / check, outer / "defender" / check)
     req = BoxRequest(
@@ -96,8 +96,6 @@ def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
 
 
 def test_tmpfs_contents_persist_across_execs_within_one_box_lifetime(tmp_path):
-    """A file written to /tmp by one exec is readable (not executable) by a later exec in the
-    same box, across the batch's turns (po46)."""
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
@@ -110,19 +108,17 @@ def test_tmpfs_contents_persist_across_execs_within_one_box_lifetime(tmp_path):
 
 
 @pytest.mark.parametrize(("case", "cmd", "rc_why", "contains", "contains_why"), [
-    # the granted repertoire itself imports — a broken repertoire fails the box (c12)
+    # the granted repertoire itself imports: a broken one fails the box
     ("granted-repertoire-runs-clean",
      "python3 -c 'import defender.execution.bash_exec'",
      "the granted interpreter/repertoire did not run clean at startup", None, None),
 
-    # superseded by #1092: there is no `.venv` inside the box to resolve — `python3` IS the
-    # owned image's own /usr/local interpreter (c12: minor matched)
+    # no `.venv` in the box: `python3` is the owned image's own interpreter (#1092)
     ("venv-interpreter-matches-the-image",
      "python3 --version", "the interpreter probe exec failed",
      b"3.11", "the box interpreter did not match the image minor"),
 
-    # the probe also catches a broken NATIVE dependency inside the owned image — a non-clean
-    # exit of a granted program, not only an interpreter-minor mismatch (c12: duckdb imports)
+    # a broken native dependency in the image fails too, not only an interpreter mismatch
     ("native-dependency-inside-the-venv-imports",
      "python3 -c 'import duckdb'",
      "a native dependency the granted repertoire needs did not import", None, None),

@@ -1,5 +1,6 @@
-"""Shared fakes, the writer census, and the future-symbol shims for #771's executable spec
-— NOT a test module (the leading underscore keeps pytest from collecting it)."""
+"""Shared fakes, the writer census and production-seam wrappers for the #771 alias-ban tests.
+
+`cite=` tags (E1, X5, B8, ...) are claim ids in `docs/archive/spec-graphs/spec_graph_771.yaml`."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
@@ -34,45 +35,28 @@ from defender.records import SessionPaths
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[2]
-#: `run_tree`'s run folder. #1187 (declared change 1): a run id is a canonical UUID — the
-#: folder is fixture_uuid(<label>), the label `run-771` it always carried.
+#: `run_tree`'s run folder (run ids are canonical UUIDs, #1187).
 RUN_771 = fixture_uuid("run-771")
 CENSUS_TENANT = fixture_uuid("tenant:census-tenant")
 REPO_ROOT = DEFENDER.parent
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-#: The write lint's ratchet baseline. Named once and shared, because two demands read it and a
-#: second spelling of the same path is how one of them silently stops looking at anything.
+#: The write lint's ratchet baseline.
 LINT_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_unguarded_tree_write_baseline.json"
 LINT_MODULE_PATH = REPO_ROOT / "tooling" / "lint" / "lint_unguarded_tree_write.py"
-#: The generator that DERIVES the shipped profile from the vendored platform default, and the
-#: vendored default it derives from. Both are named here rather than inline because three
-#: demands read them (the profile's shape, the escape-surface non-regression, and the
-#: dependency sweep) and a second spelling of either path is how one demand ends up asserting
-#: about a file nothing produces.
+#: The generator that derives the shipped seccomp profile from the vendored platform default.
 SECCOMP_GEN_PATH = REPO_ROOT / "tooling" / "gen_seccomp_profile.py"
 
 
 def load_seccomp_generator():
-    """Import the profile generator as a module, by path.
+    """Import the profile generator by path (it lives in `tooling/`, outside every package).
 
-    Same reason as `load_write_lint`: it lives under `scripts/`, outside every importable
-    package. The demands that use it need `build()` — the pure function from vendored bytes to
-    shipped profile — so that "the shipped profile is the platform default minus the ban" is
-    asserted by RE-DERIVING it, not by re-listing its contents in a second place that can drift
-    from the first.
-
-    `register=False`: the generator is read for one pure function and nothing imports it by
-    name, so the `sys.modules` slot stays free for a caller that means it."""
+    Tests call its pure `build()` to re-derive the shipped profile rather than re-list it.
+    `register=False` leaves the `sys.modules` slot free."""
     return load_module(SECCOMP_GEN_PATH, register=False)
 
 
 def load_write_lint():
-    """Import the write lint as a module, by path.
-
-    It lives at the repo root, outside every importable package, so `import` cannot reach it —
-    and two demands need it (the wrapper-detection one and the hard-gate one). Loaded through
-    the shared loader rather than inline: a second copy of the loader is a second chance for one
-    demand to end up pointed at a file that no longer exists while still reporting green."""
+    """Import the write lint by path (it lives in `tooling/lint/`, outside every package)."""
     return load_lint_gate("lint_unguarded_tree_write")
 
 
@@ -87,43 +71,13 @@ def ban_dependency_files() -> dict[str, Path]:
     }
 
 
-# The real-box guard — and WHICH CI JOB SELECTS IT
-# The obvious idiom here is `@pytest.mark.live`, and it is the wrong one. The gate runs
-# `pytest tests/ -m "not live"`, so a `live`-marked test is DESELECTED in the `test` job; the
-# `box-dood` job collects one path only (`tests/e2e/test_540_box_boundary.py`) and never sees
-# this file at all. A mechanism confirmation carried on `live` is therefore selected by NO CI
-# job — the property would be specified and never exercised by the gate that actually runs.
-#
-# 48-reground settled the fact this turns on: CI DOES start real boxes, in both jobs. The
-# blanket docker-outside-of-Docker skip is retired posture; the `test` job runs pytest on the
-# runner (so the DooD predicate is false outright) and hard-fails its gVisor step unless the
-# daemon lists runsc. So the tests below run in the `test` job, under the same skipif
-# discipline `test_540_box_boundary.py` uses, and carry NO `live` marker.
-#
-# CALL THAT JOB WHAT IT IS. It is not a merge gate: `main` carries no branch protection and no
-# ruleset, no job declares a dependency on another, and there is no aggregating required check.
-# The `test` job is a signal a human chooses to respect, and everything below that says these
-# obligations are "verified in CI" means verified in a job whose red a human can merge past.
-# Turning on branch protection for it is what would make the stronger sentence true; until
-# someone does, the accurate claim is SELECTED, not ENFORCED.
-#
-# There is an order-of-operations rider on top of that. The boxes this job starts do not
-# enforce the ban until the workflow itself is edited to register the runtime with
-# `--oci-seccomp` — which is one of this suite's own demands. The chain closes, but the two
-# obligations the real-box confirmations alone pin are first verified for real only after that
-# edit lands, and only if someone reads a job that blocks nothing.
-#
-# The three predicates are 540's, restated rather than imported (importing a collected test
-# module to reuse a marker is how a collection error in one file takes out another):
-#   * no reachable daemon;
-#   * DooD with no shared mount covering the repo tree (bind sources unresolvable);
-#   * the levered runtime not registered with the daemon.
-# There is deliberately NO fourth predicate for "runsc is registered but WITHOUT
-# --oci-seccomp". That state is exactly what the ban fault exists to report, and skipping on
-# it would let the suite go green on a host where the ban is not in force.
+# The real-box guard
+# Not marked `live`: CI deselects `live` and `box-dood` collects only test_540, so these run in
+# the `test` job, which starts real gVisor boxes. Skip predicates mirror test_540's (restated,
+# not imported: importing a test module couples collection). Deliberately no skip for "runsc
+# registered without --oci-seccomp": that is the state the ban fault must report.
 def _runtime_registered() -> bool:
-    # The shared, once-per-process Runtimes probe: a daemon that answers non-zero registers
-    # nothing (False); one that cannot be asked raises, as this probe always has.
+    # Once-per-process probe: a daemon answering non-zero registers nothing; an unreachable one raises.
     return box_mod.BoxSpec.from_env(os.environ).runtime in docker_runtimes()
 
 
@@ -141,18 +95,11 @@ def _real_box_skip_reason() -> str | None:
 
 _REAL_BOX_SKIP = _real_box_skip_reason()
 
-#: Selected by CI's `test` job (`pytest tests/ -m "not live"`) — no `live` marker, so that job
-#: runs these against a real box under the shipped runtime. Selected, not enforced: nothing
-#: mechanically blocks a merge on that job's result (see the note above).
 requires_real_box = pytest.mark.skipif(_REAL_BOX_SKIP is not None, reason=str(_REAL_BOX_SKIP))
 
-#: A WEAKER guard than `requires_real_box`, and the difference is the point. The two demands
-#: that compare our profile against the daemon's OWN default do not start a box: they run the
-#: rootfs directly with the probe on stdin, so they need neither the levered runtime registered
-#: nor a bind source that resolves under docker-outside-of-Docker. Gating them on
-#: `requires_real_box` would skip them on every host where only the runtime is missing — which
-#: includes the ordinary developer machine, and which is exactly where a stale vendored default
-#: wants to be caught early.
+#: Weaker than `requires_real_box` on purpose: the platform-default comparison runs the rootfs
+#: directly (no box, no bind mount), so it also runs where only the levered runtime is missing,
+#: e.g. a developer machine, catching a stale vendored default early.
 requires_daemon = pytest.mark.skipif(
     not daemon_reachable(), reason="no reachable Docker daemon"
 )
@@ -169,24 +116,11 @@ def daemon_engine_version() -> tuple[int, ...]:
     return tuple(int(part) for part in raw.split(".") if part.isdigit())
 
 
-#: The witness set for the platform-default comparison, and every member is chosen for one
-#: reason: an unprivileged process on a stock kernel can reach it, so a denial is attributable
-#: to SECCOMP and to nothing else.
-#:
-#: THAT CONSTRAINT IS WHAT MAKES THE COMPARISON READABLE, and it is easy to get wrong. `mount`
-#: looks like the obvious escape witness and is useless as one — it is EPERM from the missing
-#: CAP_SYS_ADMIN whether seccomp denied it or not, so it reports the same value under every
-#: profile and discriminates nothing. `unshare(CLONE_NEWUSER)` and `keyctl` need no capability
-#: at all: executed against Docker 29.6.1, the first SUCCEEDS and the second returns ENOKEY —
-#: the errno of a syscall that reached the kernel — under an allow-all profile, while both are
-#: EPERM under the daemon's own default. They are the members that would turn red if the shipped
-#: profile ever stopped being a subtraction from that default.
-#:
-#: The comparison is a SAMPLE and cannot be anything else: there is no way to attempt every
-#: syscall, and most of the ones worth attempting destroy the container or need privilege. What
-#: it buys over a digest check is that it reads the daemon in front of it rather than the
-#: document we vendored, so a daemon upgrade that moves the default is visible here and nowhere
-#: else.
+#: Witnesses for the platform-default comparison. Each is reachable unprivileged, so a denial is
+#: seccomp's doing: `mount` would be useless (EPERM from the missing CAP_SYS_ADMIN under any
+#: profile), while `unshare(CLONE_NEWUSER)` and `keyctl` reach the kernel under allow-all and are
+#: EPERM under the daemon default. A sample, but it reads the live daemon rather than the vendored
+#: document, so a daemon upgrade that moves the default shows up here.
 PLATFORM_COMPARISON_PROBE = r"""
 import ctypes, ctypes.util, errno, json, os, socket, stat, sys, tempfile
 
@@ -291,28 +225,20 @@ def run_probe_under_profile(
         )
     return json.loads(probe.stdout)
 
-#: The six shapes `alias_profile.domain.distinguished` names. Each must be individually
-#: demonstrated denied — five denied and one admitted is exactly the partial enforcement O2
-#: refuses to grade (45-dispositions firm consensus #3).
+#: The six banned shapes; each must be shown denied individually (a partial ban is a fault).
 BANNED_SHAPES = ("symlink", "symlinkat", "link", "linkat", "mknod", "mknodat")
 
-#: DELIBERATELY NOT in the deny set. Under this exact profile `bind(2)` on AF_UNIX SUCCEEDS
-#: and leaves a socket the reap scan refuses — executed twice, independently (X2, G5). A probe
-#: set derived from the scan's refusal predicate would demand this fail and would fault every
-#: box at startup (C5-fix / F3). NO4's boundary, now load-bearing.
+#: Deliberately NOT banned: AF_UNIX `bind(2)` succeeds under the profile and leaves a socket the
+#: reap scan refuses (X2). A probe set derived from the scan's refusals would fault every box.
 SCAN_ONLY_SHAPES = ("af_unix_bind",)
 
-#: Every shape name the probe's argv may legitimately carry: the ban's six, plus the scan-only
-#: one it must NOT attempt.
+#: Shape names the argv reader recognizes: the ban's six plus the scan-only one a probe must not
+#: attempt.
 KNOWN_SHAPES: frozenset[str] = frozenset((*BANNED_SHAPES, *SCAN_ONLY_SHAPES))
 
-#: An identifier-shaped token. THE READER BELOW MATCHES WHOLE TOKENS, AND THAT IS THE REPAIR OF
-#: THIS SUITE'S SHARPEST DISCRIMINATION HOLE. Three of the six banned names are substrings of  # lint-stale-ref: ok — the English word, about this suite's discriminating power; unrelated to the retired AgentRole.DISCRIMINATION lens whose name it happens to spell
-#: others — `symlinkat` contains `symlink`, `linkat` and `link`; `mknodat` contains `mknod` —
-#: so a substring reader answers "all six attempted" for a probe whose argv names only
-#: `symlinkat` and `mknodat`. A probe narrowed to two read as full coverage, in the one demand
-#: that carries O2's per-member requirement: the oracle could not fail in the place the design's
-#: whole claim rests on, which is that enforcement is OBSERVED rather than trusted.
+#: Whole-token matching closes the suite's sharpest DISCRIMINATION hole: three banned names  # lint-stale-ref: ok — the English word, about this suite's discriminating power; unrelated to the retired AgentRole.DISCRIMINATION lens whose name it happens to spell
+#: contain others (`symlinkat` holds `symlink`, `linkat`, `link`; `mknodat` holds `mknod`), so a
+#: substring reader reads a probe naming only `symlinkat` and `mknodat` as all six attempted.
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -320,50 +246,27 @@ def shapes_named_in(argv_text: str) -> set[str]:
     """The shape names `argv_text` NAMES, matched as whole tokens and never as substrings."""
     return {t for t in _TOKEN.findall(argv_text) if t in KNOWN_SHAPES}
 
-#: The registration that carries the ban on the shipped default runtime. Settled by an
-#: EXECUTED probe against real runsc release-20260727.0 (48-reground-ci, claim Q2): `runsc
-#: install -- --oci-seccomp` writes `runtimeArgs: ["--oci-seccomp"]` into the named runtime's
-#: daemon.json entry. X19 is closed; nothing below is authored around a guessed spelling.
+#: The registration that makes runsc enforce the ban: `runsc install -- --oci-seccomp` writes
+#: `runtimeArgs: ["--oci-seccomp"]` into the runtime's daemon.json entry (observed, runsc
+#: release-20260727.0).
 OCI_SECCOMP_FLAG = "--oci-seccomp"
 RUNSC_INSTALL_CMD = "runsc install -- --oci-seccomp"
 DAEMON_RUNTIME_ARGS_KEY = "runtimeArgs"
 
-#: §7 D2's marker, SITED BY §7 D8. ONE artifact carries the scan's verdict, and a tree
-#: carrying NO verdict is unverified — that is the fail-closed half of the human's decision,
-#: and it is what makes the `tree of a box that never started` pin (§7 H10.2) fall under the
-#: same rule rather than needing one of its own.
-#:
-#: WHERE IT LIVES, AND WHY THAT IS MECHANISM (§7 D8). The marker is a SIBLING of the tree it
-#: judges — `<tree>.scrub-verdict.json`, keyed by the tree's own identity — exactly where D7
-#: put the alias-refusal record, and for the identical reason. In-tree it was a host-side
-#: write into an attacker-owned tree: no census counted it, no lint gated it, the project
-#: profile listed that module as a reader only, and the box could both REDIRECT it (plant an
-#: alias at the verdict's own name on the crash path, where the walk that would have caught
-#: the alias is precisely the walk that did not run) and FORGE it (the box is root on that
-#: mount, and the consumer rule fails closed on ABSENCE, never on PRESENCE). A verdict the
-#: adversary can author is a verdict that can say "clean".
-#:
-#: WHAT THE MARKER ASSERTS, AND WHAT IT DOES NOT (§7 D6). `ran: true` says THE WALK COMPLETED
-#: — it never says the tree's contents are intact. The scan permits any regular file, so an
-#: artifact a box emptied, rewrote or removed is indistinguishable from an untouched one and
-#: is detected by nothing in this change. A consumer that reads this marker as a
-#: contents-intact claim is reading it wrong, and that misreading is worse than no marker at
-#: all: it certifies a destroyed tree as verified.
+#: The scan-verdict marker, `<tree>.scrub-verdict.json`: a SIBLING of the tree it judges, because
+#: the box is root inside the tree and could redirect or forge an in-tree verdict. A tree with no
+#: verdict reads unverified. `ran: true` means the walk completed, NOT that the contents are
+#: intact: a file a box emptied or rewrote still passes the scan.
 SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
 
-#: The name an in-tree verdict would carry — the siting D8 rejected, and therefore the name a
-#: box forges at. Same string as the suffix, a different role: this one is a plant target, and
-#: `verdict_is_never_forgeable_from_inside_the_tree` is what keeps a consumer from reading it.
+#: The in-tree name a box would forge a verdict at (same string as the suffix; a plant target).
 FORGED_IN_TREE_VERDICT_NAME = ".scrub-verdict.json"
 
 
 # Real trees, and real aliases planted in them (tier 1)
 def run_tree(tmp_path: Path) -> Path:
-    """A LIVE run dir — the shape the host-side writers write into while a box is alive.
-
-    Distinct from `test_540_scrub_lifecycle._clean_run_dir`, which is a FROZEN post-run tree
-    for the scan to walk. This one carries only what a writer needs to exist beside."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid("run-771")
+    """A live run dir holding only what host-side writers need beside them while a box runs
+    (unlike test_540's frozen post-run `_clean_run_dir`)."""
     run = tmp_path / RUN_771
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir(parents=True)
@@ -375,12 +278,8 @@ def run_tree(tmp_path: Path) -> Path:
 
 
 def worktree_tree(at: Path) -> Path:
-    """The SECOND shared root's shape — a curator drain worktree, not a run dir.
-
-    Distinct from `run_tree` in the way that matters to anything walking it: a checked-out
-    repo leaf with a corpus directory and a per-mount sentinel, rather than a run dir's
-    gather/alert artifacts. A test that claims to cover "either shared root" while building
-    a run dir twice under two different names has driven one shape twice."""
+    """The second shared root's shape: a curator drain worktree with a lesson corpus and a mount
+    sentinel, so "either shared root" tests drive two distinct shapes."""
     at.mkdir(parents=True, exist_ok=True)
     (at / "defender" / "lessons").mkdir(parents=True)
     (at / "defender" / "lessons" / "lesson-a.md").write_text("# a lesson\n", encoding="utf-8")
@@ -389,22 +288,15 @@ def worktree_tree(at: Path) -> Path:
 
 
 def outside(tmp_path: Path, name: str = "secret.txt", text: str = "ORIGINAL OUTSIDE\n") -> Path:  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
-    """A file OUTSIDE every shared tree — the redirect target an alias aims a write at.
-
-    Sited as a sibling of the run dir rather than under it, because `run_dir.parent` is where
-    the accounting-failure sidecar already lives (X6) and because a target inside `tmp_path`
-    keeps the test hermetic."""
+    """A file outside every shared tree (beside the run dir, inside `tmp_path`): the target an
+    alias redirects a write at."""
     p = tmp_path / name
     p.write_text(text, encoding="utf-8")
     return p
 
 
 def plant_symlink(at: Path, target: Path) -> Path:
-    """Plant a real symlink at `at` pointing at `target`, and RE-PROBE the premise.
-
-    B1/B2/B3/B4 all observed a truncating/append/locked write following exactly this shape.
-    The link is created with the real `os.symlink`, so the claim is re-established on every
-    run rather than inherited from the ledger."""
+    """Plant a real symlink at `at` pointing at `target`, re-checking that the plant took."""
     at.parent.mkdir(parents=True, exist_ok=True)
     os.symlink(target, at)
     assert os.path.islink(at), f"the premise did not hold: {at} is not a symlink"
@@ -412,11 +304,8 @@ def plant_symlink(at: Path, target: Path) -> Path:
 
 
 def plant_dir_symlink(at: Path, target_dir: Path) -> Path:
-    """Plant a symlink-to-DIRECTORY at a path COMPONENT the writer will mkdir through.
-
-    B8: `O_NOFOLLOW` on the leaf does not protect a swapped component. B10:
-    `mkdir(parents=True, exist_ok=True)` over a symlink-to-directory succeeds SILENTLY. Both
-    are re-probed here by construction."""
+    """Plant a symlink-to-directory at a path component a writer will mkdir through: the leaf's
+    `O_NOFOLLOW` does not protect it, and `mkdir(exist_ok=True)` over it succeeds silently."""
     at.parent.mkdir(parents=True, exist_ok=True)
     target_dir.mkdir(parents=True, exist_ok=True)
     os.symlink(target_dir, at, target_is_directory=True)
@@ -426,14 +315,10 @@ def plant_dir_symlink(at: Path, target_dir: Path) -> Path:
 
 
 def plant_hardlink(at: Path, target: Path) -> Path:
-    """Plant a real hard link at `at` aliasing `target`'s inode, and re-probe nlink.
+    """Plant a hard link at `at` aliasing `target`'s inode, re-checking nlink.
 
-    This is the shape X17/G3 were REFUTED on: `Path.resolve()` does not dereference a hard
-    link, so the model's write gate resolves the operand to itself, matches the allowlist, and
-    `write_text` truncates the shared inode. B9 observed the same defeat of `O_NOFOLLOW`.
-
-    `os.link` refuses across a mount boundary with EXDEV (R6), so a test that needs this must
-    keep both paths on one filesystem — which `tmp_path` guarantees."""
+    Neither `Path.resolve()` nor `O_NOFOLLOW` sees a hard link, so a path-based gate passes it.
+    Both paths must share a filesystem (`os.link` fails EXDEV across mounts); `tmp_path` does."""
     at.parent.mkdir(parents=True, exist_ok=True)
     os.link(target, at)
     assert os.lstat(at).st_ino == os.lstat(target).st_ino, "the plant is not an alias"
@@ -442,13 +327,10 @@ def plant_hardlink(at: Path, target: Path) -> Path:
 
 
 def plant_component_for(writer: Writer, run: Path, outside_dir: Path) -> Path:
-    """Replace the directory COMPONENT `writer` will create or traverse with a
-    symlink-to-directory pointing outside the tree, and return the planted component.
+    """Swap the directory component `writer` mkdirs through for a symlink to `outside_dir`.
 
-    `run_tree` pre-creates the components a live run already has, so the plant has to displace
-    a real directory rather than appear beside one — which is also the honest shape: the box
-    swaps a component it can already see. Only rows whose write mkdirs a component are
-    plantable this way (`Writer.mkdirs_component`)."""
+    It displaces the real directory `run_tree` made, as a box swaps one it can see. Only
+    `Writer.mkdirs_component` rows qualify."""
     component = (run / writer.artifact).parent
     assert component != run, (
         f"{writer.id}'s artifact sits at the tree root — it has no component to plant at, so "
@@ -460,11 +342,10 @@ def plant_component_for(writer: Writer, run: Path, outside_dir: Path) -> Path:
 
 
 def snapshot_outside(root: Path) -> dict[str, tuple]:
-    """Every entry under `root`, WITHOUT dereferencing: relpath -> (type, inode, nlink, bytes).
+    """Every entry under `root`, not dereferenced: relpath -> (type, inode, nlink, bytes).
 
-    The oracle for "the write reached nothing out here". A bare `assert target.read_text() ==
-    original` is the vacuous shape this replaces: it is also green when the writer created a
-    NEW file beside the target."""
+    Unlike `target.read_text() == original`, comparing snapshots also catches a NEW file
+    written beside the target."""
     out: dict[str, tuple] = {}
     for dirpath, dirs, files in os.walk(root, followlinks=False):
         for name in (*dirs, *files):
@@ -480,34 +361,26 @@ def snapshot_outside(root: Path) -> dict[str, tuple]:
     return out
 
 
-# Future symbols — referenced LAZILY so HEAD still collects
+# Wrappers over the production seams
 def write_guarded(path: Path, text: str, *, mode: str = "replace", **kw: Any) -> None:
-    """`defender._io.write_guarded` — M3's alias-refusing write primitive, and the single seam
-    every shared-tree writer routes through. AttributeError at HEAD.
-
-    `mode` names the idiom the caller had: `replace` (the truncating/atomic lane),
-    `append` (the JSONL lane) and `update` (the locked read-modify-write lane) are the three
-    the census's five idioms collapse to."""
+    """`defender._io.write_guarded`, the alias-refusing write every shared-tree writer routes
+    through. `mode`: `replace` (atomic), `append` (JSONL) or `update` (locked read-modify-write)."""
     from defender import _io
 
     return _io.write_guarded(path, text, mode=mode, **kw)  # type: ignore[attr-defined]
 
 
 def guarded_mkdir(path: Path, *, base: Path) -> None:
-    """`defender._io.guarded_mkdir` — the parents-creating half of M3. Separate from
-    `write_guarded` because B8 shows the leaf's own `O_NOFOLLOW` cannot protect a component:
-    the rule is stated over the whole call and is DEPTH-AGNOSTIC (firm consensus #13)."""
+    """`defender._io.guarded_mkdir`: creates parents, refusing an aliased component at any depth
+    (a leaf's `O_NOFOLLOW` cannot protect a component)."""
     from defender import _io
 
     return _io.guarded_mkdir(path, base=base)  # type: ignore[attr-defined]
 
 
 def sweep_staged(tree: Path) -> list[Path]:
-    """`defender._io.sweep_staged` — §7 D1's accepted cost made mechanism.
-
-    An unpredictable staged name means an interrupted write leaves an orphan nothing will ever
-    replace by name, so the orphans need a sweep; the human's resolution states the sweep is
-    itself a write into the tree and inherits the same primitive."""
+    """`defender._io.sweep_staged`: removes orphaned staged files (their unpredictable names mean
+    nothing overwrites them), through the same guarded primitive."""
     from defender import _io
 
     return _io.sweep_staged(tree)  # type: ignore[attr-defined]
@@ -525,34 +398,26 @@ def allowed_syscalls(profile: dict) -> set[str]:
 
 
 def alias_profile_path() -> Path:
-    """`box.ALIAS_PROFILE_PATH` — resolved ONCE, so both argv builders carry the identical
-    value. Fork R16: a profile-path drift between the two ships one lane without the ban, and
-    C8-new made the second builder serve the drain lane AND the learning run-cycle."""
+    """`box.ALIAS_PROFILE_PATH`: both argv builders must carry this one value, or a lane ships
+    without the ban."""
     return box_mod.ALIAS_PROFILE_PATH  # type: ignore[attr-defined]
 
 
 def ban_not_in_force_error() -> type[BaseException]:
-    """`box.AliasBanNotInForce` — §7 D5: the ban fault carries its OWN exception type.
-
-    Taken by the orchestrator and FLAGGED FOR OVERRIDE. It is mechanical rather than a policy
-    choice: F4 makes this one startup fault not opt-out-able, and that is only enforceable if
-    the fault cannot be caught by the broad `BoxFault` handler every other startup fault
-    degrades through. Sharing the class leaves a security-critical caller constructible in
-    exactly the state F4 exists to close."""
+    """`box.AliasBanNotInForce`: its own type, not a `BoxFault`, so the broad handler that lets
+    other startup faults degrade (the unsandboxed opt-out) cannot catch it."""
     return box_mod.AliasBanNotInForce  # type: ignore[attr-defined]
 
 
 def tree_verified(tree: Path) -> bool:
-    """`scrub.tree_verified` — §7 D2's consumer-side rule. A tree whose verdict marker is
-    ABSENT reads as unverified, exactly like one marked `ran: false`."""
+    """`scrub.tree_verified`: a tree with no verdict reads unverified, like one marked `ran: false`."""
     from defender.box import _scrub as scrub_mod
 
     return scrub_mod.tree_verified(tree)  # type: ignore[attr-defined]
 
 
 def verdict_sidecar(tree: Path) -> Path:
-    """Where §7 D8 sites the scan's verdict: `<tree>.scrub-verdict.json`, a SIBLING of the
-    tree, keyed by the tree's own directory name."""
+    """The scan verdict's path: `<tree>.scrub-verdict.json`, beside the tree."""
     tree = Path(tree)
     return tree.parent / f"{tree.name}{SCRUB_VERDICT_SUFFIX}"
 
@@ -566,8 +431,7 @@ def read_verdict(tree: Path) -> dict:
 
 
 def write_verdict(tree: Path, doc: dict) -> Path:
-    """Hand-write a verdict where the scan would have written it — the test-side stand-in for
-    a scan that already ran, used only where the arm being driven is the CONSUMER's."""
+    """Hand-write a verdict where the scan would, for tests driving the consumer side."""
     p = verdict_sidecar(tree)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(doc), encoding="utf-8")
@@ -577,16 +441,11 @@ def write_verdict(tree: Path, doc: dict) -> Path:
 # The docker fault-injection fake (tier 2) — the probe's verdict as DATA
 @dataclass(frozen=True)
 class ProbeVerdict:
-    """One in-box alias-probe outcome, declaratively.
+    """One in-box alias-probe outcome, as data.
 
-    `allowed` names the banned shapes the box was still able to create — the partial or total
-    non-enforcement M2 exists to observe. `create_ok` is the ORDINARY-CREATE control: without
-    it a probe that never ran reads identically to a probe that was refused (O2's own
-    oracle-can-be-wrong answer, firm consensus #2), and R20 pins an interrupted or truncated
-    sequence as FAILED rather than as a pass.
-
-    `cite` is the ledger claim that observed this on a real daemon — never an author guess.
-    """
+    `allowed` names banned shapes the box could still create. `create_ok` is the ordinary-create
+    control: without it a probe that never ran reads like one that was refused. `cite` is the
+    ledger claim that observed this on a real daemon."""
 
     allowed: tuple[str, ...] = ()
     create_ok: bool = True
@@ -603,21 +462,17 @@ class ProbeVerdict:
         return _cp(0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
 
 
-#: The enforcing daemon, as observed: every banned shape EPERM, ordinary create/mkdir fine,
-#: AF_UNIX bind still succeeding (E1 + X2 + G4 + G6, all executed).
+#: An enforcing daemon: every banned shape EPERM; ordinary create, mkdir and AF_UNIX bind succeed.
 BAN_IN_FORCE = ProbeVerdict(cite="E1,X2,G4")
-#: The shipped default with no `--oci-seccomp` registration: every shape succeeds (C1-fix's
-#: two-arm probe on real runsc release-20260727.0, and G6 on the platform default).
+#: runsc without the `--oci-seccomp` registration: every banned shape succeeds.
 BAN_ABSENT = ProbeVerdict(allowed=BANNED_SHAPES, cite="E2,G6")
 
 
 class AliasProbeDocker(RecordingDocker):
     """`RecordingDocker` plus the alias probe's in-box verdict.
 
-    The probe's exec is told apart from the sentinel's by the shape names the probe's own
-    argv carries — which is also the observable `probe_set_matches_ban` asserts on, so the
-    attempted set is read off the argv rather than off an invented wire format. The fake
-    injects the verdict ONLY; it never decides whether a verdict is a fault."""
+    A probe exec is recognized by the shape names its argv carries, the same observable the
+    attempted-set tests read. The fake only injects the verdict; it never decides what is a fault."""
 
     def __init__(self, verdict: ProbeVerdict = BAN_IN_FORCE, **kw: Any):
         super().__init__(**kw)
@@ -628,12 +483,10 @@ class AliasProbeDocker(RecordingDocker):
         argv = list(argv)
         if (len(argv) > 1 and argv[1] == "exec"
                 and argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id")):
-            # A marker path may itself name a banned shape; only the base's bind-mapped
-            # command execution can answer this read without consuming an alias verdict.
+            # A marker path may itself name a banned shape; the base answers this read without
+            # consuming an alias verdict.
             return super().__call__(argv, **kw)
-        # WHOLE-TOKEN, not substring. Under the old substring test an unrelated `docker exec`
-        # whose argv merely contained the letters "link" was counted as a probe; the token
-        # reader requires the shape to be named as itself.
+        # Whole tokens: an unrelated exec whose argv merely contains "link" is not a probe.
         if (len(argv) > 1 and argv[1] == "exec"
                 and shapes_named_in(" ".join(argv)) & set(BANNED_SHAPES)):
             self.calls.append(argv)
@@ -645,15 +498,11 @@ class AliasProbeDocker(RecordingDocker):
         return len(self.probe_argvs)
 
     def shapes_attempted(self) -> set[str]:
-        """The shape set the probe's own argv named, across every probe exec — whole tokens.
-
-        `shapes_named_in` carries the reasoning; the short version is that a substring reader
-        cannot tell a six-shape probe from a two-shape one, because two of the six names
-        contain the other four between them."""
+        """The shape names (whole tokens, see `_TOKEN`) across every probe exec's argv."""
         return shapes_named_in(" ".join(" ".join(a) for a in self.probe_argvs))
 
 
-# The writer census (C1 as re-derived by C3-fix: >=14 writers, >=5 idioms)
+# The writer census
 @dataclass(frozen=True)
 class Writer:
     """One host-side writer into a shared tree while a box is alive."""
@@ -666,9 +515,8 @@ class Writer:
     module: str
     cite: str = ""
     mkdirs_component: bool = False
-    #: True only where landing an EMPTY artifact is the site's contract — the driver's
-    #: fault-exit trace write is literally `write_text("")`. The positive control's
-    #: anti-vacuity check exempts exactly these rows and no others.
+    #: True only where an EMPTY artifact is the contract (the fault-exit trace is
+    #: `write_text("")`); the positive control's non-empty check skips these rows.
     lands_empty: bool = False
 
 
@@ -684,8 +532,7 @@ def _invoke_write_trace(run_dir: Path) -> None:
 def _invoke_observe_logger(run_dir: Path) -> None:
     from defender.investigation import observe
 
-    # The run-backed logger eagerly initializes the handed wire record. The budget-refusal
-    # row makes the positive control observe real bytes as well as eager file creation.
+    # The logger creates its file eagerly; logging one row makes the positive control see bytes.
     logger = observe.RequestLogger.from_record(fixture_run(run_dir).observability.wire_log)
     try:
         logger.log_budget_refusal(tool_name="bash")
@@ -728,10 +575,8 @@ def _invoke_claim_lead(run_dir: Path) -> Any:
 
 
 def _invoke_lesson_load(run_dir: Path) -> None:
-    # Driven at the PRODUCTION site, not at the shared appender underneath it. The site wraps
-    # the append in `except Exception: pass` (best-effort observability), so driving
-    # `_io.append_jsonl` directly measures a raise the real call site never lets out — the
-    # altitude error F3 names, one row over.
+    # Driven at the production site, not the appender under it: the site swallows exceptions
+    # (best-effort), so the appender's raise is not what a caller sees.
     from defender.agents import MAIN_DEF
     from defender.investigation import tools as runtime_tools
     from defender.investigation.agent_definition import bind
@@ -740,9 +585,7 @@ def _invoke_lesson_load(run_dir: Path) -> None:
 
     from defender.tests.support.tenancy import _tenants1106
 
-    # #1108 P4 (O1, O4): a lesson is the run TENANT's (`<agent root>/lessons/`), never the
-    # checkout's — the role is bound with the fixture tenant's run record, and the lesson it
-    # loads lies in that tenant's agent half.
+    # A lesson belongs to the run's tenant (`<agent root>/lessons/`), never the checkout (#1108).
     run_tenant = _tenants1106.fixture_run_tenant()
     deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=fixture_run(run_dir),
                    tenant=run_tenant)
@@ -751,11 +594,8 @@ def _invoke_lesson_load(run_dir: Path) -> None:
 
 
 def _invoke_queries_table(run_dir: Path) -> Any:
-    """The query tool's SECOND artifact — the queries table — through its real capture path.
-
-    C1 counts `query_tool` once, and the census drove only its by-ref payload write. One
-    writer with two artifacts is one bound edge and two plant targets; the table is the one
-    an aliased append lands OUTSIDE the tree, verbatim, on the row it writes."""
+    """The query tool's second artifact, the queries table, through the real capture path (one
+    writer, two plant targets)."""
     import asyncio
     from dataclasses import replace
 
@@ -763,13 +603,10 @@ def _invoke_queries_table(run_dir: Path) -> Any:
     from defender.investigation.query_tool import QueryCapture
     from defender.tests.support.tenancy import _tenants1106
 
-    # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
-    # process-level one carried by `GATHER_DEF`.
+    # Gather is bound with a run's grant, never a process-level one (#1106).
     from defender.investigation.run_state import RunState
 
-    # #1235 round 2: the capture records into the run's `RunState` its deps carry
-    # (`driver.run_investigation` starts it); this writer is driven outside a run, so its deps
-    # carry the state a started run would.
+    # Driven outside a run, so deps carry the `RunState` a started run would record into.
     deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
                    lead_id="l-001", run=fixture_run(run_dir), run_state=RunState(run_dir, run_dir.name))
     return asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
@@ -779,13 +616,12 @@ def _invoke_queries_table(run_dir: Path) -> Any:
 
 
 def _invoke_sentinel_plant(run_dir: Path) -> None:
-    """The run-dir sentinel plant — and the plant helper IS where the conversion happens."""
+    """The run-dir sentinel plant; `_plant` itself turns a failed write into a `BoxFault`."""
     box_mod._plant(run_dir / ".box-sentinel", "token-771")
 
 
 def _invoke_fault_exit_trace(run_dir: Path) -> None:
-    """The DRIVER's fault-exit trace write — `write_text("")` onto the same fixed
-    `tool_trace.jsonl` name `observe.write_trace` owns."""
+    """The driver's fault-exit trace write: `write_text("")` onto `write_trace`'s `tool_trace.jsonl`."""
     drive_fault_exit_trace(run_dir)
 
 
@@ -794,35 +630,19 @@ def _invoke_write_guarded(run_dir: Path) -> None:
 
 
 def _invoke_tenant_row_writer(run_dir: Path) -> None:
-    """#1078 D1: the tenant ROW's writer, `create_tenant`. Its data root is a fresh subtree of
-    the run dir (`tenant-root/`, never touched by `run_tree`) rather than `run_dir.parent`,
-    because O10 refuses a data root holding anything beside the tenant it is creating — and
-    `run_tree`'s own sibling (`RUN_771`) sits directly in `run_dir.parent`. `Writer.artifact`
-    names it `tenant-root/<CENSUS_TENANT>/tenant.json`."""
+    """The tenant row's writer, `create_tenant`, under a fresh `tenant-root/` in the run dir:
+    it refuses a data root holding anything else, and `run_dir.parent` holds the run."""
     from defender.tenancy import _tenant
 
     _tenant.create_tenant(fixture_data_root(run_dir / "tenant-root"), CENSUS_TENANT)
 
 
-#: The census, one row per `no_write_through_planted_leaf` bind. It is a FLOOR, not a closed
-#: list: C1 counted twelve writers in three idioms and was refuted twice (C3-fix, X1/G15), and
-#: `writer_the_census_instrument_cannot_see` is the demand that a grep is not a census
-#: instrument (firm consensus #17).
-#:
-#: FIFTEEN ROWS, and the two additions are not bookkeeping. `run_investigation` is the
-#: driver's fault-exit trace write — the SECOND of the two sites the original issue reported,
-#: dropped by every hand-derived instrument in this change at once (census, lint gate list,
-#: shared-root writer list). `query_tool_queries_table` is the second artifact of a writer
-#: the census counted once: one bound edge, two plant targets, and the one an aliased append
-#: lands outside the tree verbatim.
+#: Host-side writers into a shared tree while a box is alive, one row per artifact. A floor, not a
+#: closed list: grep-derived censuses have missed writers (e.g. `run_investigation`'s fault-exit
+#: trace write).
 CENSUS: tuple[Writer, ...] = (
-    # MEASURED, and the label the census carried here was wrong. X5's swallow-continue site is
-    # `driver._account_executed_call` — the ACCOUNTING call site — not the trace writer, and at
-    # this row's own altitude `observe.write_trace` RAISES (IsADirectoryError over a squatted
-    # name; the driver is what swallows, one frame up). Re-deriving a ledger label from the
-    # nearest census row is how a measurement gets reattached to the wrong site, so this row is
-    # `unmeasured`. (X5's swallow-continue site itself retired with #1235: the accounting
-    # call no longer writes, so there is no failure for it to swallow.)
+    # `unmeasured`: at this altitude `write_trace` raises (IsADirectoryError over a squatted
+    # name); the driver one frame up is what swallows.
     Writer("write_trace", "tool_trace.jsonl", "write_text", "unmeasured",
            _invoke_write_trace, "investigation/observe.py", cite="C1,X10"),
     Writer("run_investigation", "tool_trace.jsonl", "write_text", "unmeasured",
@@ -831,15 +651,10 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_observe_logger, "investigation/observe.py", cite="C1", mkdirs_component=True),
     Writer("denial_logger", "policy_denials.jsonl", "append-open", "unmeasured",
            _invoke_denial_logger, "investigation/observe.py", cite="C1,G12"),
-    # #1235 F2: the run -> case pointer left the run dir for a host-only sidecar beside it,
-    # `<run_id>.session-pointer.json` in the runs base — named relative to the run dir the way
-    # the retired tenant record's row was (`run_tree`'s dir is `RUN_771`, #1187). Still a setup
-    # writer, still required to refuse a planted alias at its own name.
+    # The run -> case pointer is a host-only sidecar beside the run dir (#1235), named relative to it.
     Writer("write_case_pointer", f"../{RUN_771}.session-pointer.json", "write_text", "unmeasured",
            _invoke_case_pointer, "records/session_store/_write.py", cite="C1,R4"),
-    # #1235: the `budget_enforcer` and `circuit_breaker` rows retired with their artifacts.
-    # The budget counters and the breaker live in the run process's memory; nothing writes
-    # `budget.json` or `circuit_breaker.json`, so neither module is a writer into the tree.
+    # No budget or breaker rows: both live in the run process's memory and write nothing.
     Writer("query_tool", "gather_raw/l-001/0.json", "write_text", "return-none",
            _invoke_query_payload, "investigation/query_tool.py", cite="X5,G15",
            mkdirs_component=True),
@@ -848,61 +663,37 @@ CENSUS: tuple[Writer, ...] = (
     Writer("gather_dispatch", "gather_summaries/l-001.md", "write_text", "unmeasured",
            _invoke_gather_summary, "investigation/tools_gather.py", cite="B11,G15",
            mkdirs_component=True),
-    # X5's site, and the label is the site's — but the OBSERVABLE is fault-shaped: under X5's
-    # own fault (a plain file squatting the parent component) it returns 0, and under this
-    # row's fault (a directory squatting the artifact name) the exclusive create reports
-    # EEXIST and the site returns 2, i.e. reports a write failure as a DUPLICATE CLAIM. Both
-    # are today's behaviour; only the first is what X5 measured, which is why the anchor drives
-    # X5's fault rather than reusing this row's.
+    # The observable depends on the fault: a file squatting the parent component returns 0 (X5),
+    # but a directory squatting the artifact makes the exclusive create EEXIST and returns 2,
+    # reporting a write failure as a duplicate claim.
     Writer("claim_lead", "gather_raw/l-001.lead.json", "excl-create", "return-zero",
            _invoke_claim_lead, "hooks/record_lead.py", cite="X5,C1", mkdirs_component=True),
     Writer("record_lesson_load", "lessons_loaded.jsonl", "append_jsonl", "unmeasured",
            _invoke_lesson_load, "investigation/tools/", cite="G15"),
     Writer("start_box", ".box-sentinel", "write_text", "fault-startup",
            _invoke_sentinel_plant, "box/", cite="X5,G10"),
-    # (#1235 deleted `_io.write_atomic`, whose only writer, the budget record, retired with
-    # it — the budget is the run's in-memory state — so its row "write_atomic", B4/C3-fix, left.)
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
            _invoke_write_guarded, "_io.py", cite="F1"),
-    # (#1187 R1 retired the runs-base record `_tenant.json` and its writer
-    # `ensure_runs_base_record`, so §7 decision 16's `tenant_writer` row left with them;
-    # `_tenant.py` stays in the census-derived hard-gate set through the row's writer below.)
-    # #1078 D1: create_tenant's own row, the _tenant.py writer with its own artifact.
-    # Still the guarded idiom since #1137: `Held.write`'s create lane off the held `<T>`, which
-    # refuses an alias at the row as `write_guarded`'s did.
+    # Guarded idiom: `Held.write`'s create lane refuses an alias like `write_guarded` (#1137).
+    # This row also keeps `tenancy/_tenant.py` in the census-derived hard-gate set.
     Writer("tenant_row_writer", f"tenant-root/{CENSUS_TENANT}/tenant.json", "guarded", "unmeasured",
            _invoke_tenant_row_writer, "tenancy/_tenant.py", cite="#1078 D1"),
 )
 
-#: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture
-#: it has today" is testable at all, and the thing a collapse-to-one-posture implementation
-#: has to break. They are asserted as a SET the census exhibits, never as a per-row
-#: expectation: X5 named four sites, the census has thirteen rows (fifteen until #1235 deleted
-#: `write_atomic`, fourteen until #1187 retired `tenant_writer`), and assigning a label to the
-#: others would be an author's prior standing in
-#: for a measurement.
+#: The four failure-posture classes X5 measured. A record, not a per-row expectation: a row only
+#: carries a posture label where one was measured.
 POSTURES = ("swallow-continue", "return-none", "return-zero", "fault-startup")
 
 
-# X5's FOUR MEASURED POSTURES — the anchor, at the sites and under the faults the
-# ledger actually drove
-# F1's content is "every call site keeps the posture it has TODAY". Measuring "today" during
-# the test run makes the demand vacuous for any site that moves in BOTH lanes — a per-row
-# self-comparison is satisfied by an implementation that changed a site consistently. So the
-# four postures X5 measured are anchored here, against X5's own probe: its four sites, its
-# four faults, and the four observables its `observed:` field records verbatim.
-#
-# The faults are the ones X5 named — "a directory squatting the staging name, a plain file
-# squatting a parent component, an absent bind source" — rebuilt with the real filesystem in
-# the test, so the taxonomy assumption is re-probed on every run rather than pinned once. All
-# three are root-proof: nothing here simulates an unwritable target with a permission bit.
+# X5's measured postures: the anchor
+# A per-row "ordinary failure vs aliased" comparison passes even if a site changes in both
+# lanes, so X5's measured sites, faults and observables are pinned here. The faults use the
+# real filesystem, never permission bits, so they hold under root.
 @dataclass(frozen=True)
 class MeasuredSite:
-    """One of X5's four call sites, with the fault it was measured under and what it did.
+    """One of X5's call sites, the fault it was measured under, and what it did.
 
-    `site` is the production symbol X5 drove — NOT a census row id. Two of the four are not
-    census rows at all, and one (`write_trace`) sits one frame BELOW the site X5 measured,
-    which is exactly how its swallow-continue label ended up on the wrong writer."""
+    `site` is the production symbol X5 drove, not a census row id."""
 
     posture: str
     site: str
@@ -924,12 +715,8 @@ def _x5_query_payload_site(run_dir: Path) -> object:
 
 
 def _x5_claim_lead_site(run_dir: Path) -> object:
-    """`record_lead.claim_lead` — X5's return-zero site, under X5's OWN fault: a plain file
-    squatting the parent component, so the sidecar directory cannot be created.
-
-    Not the census row's fault. A directory squatting the artifact NAME makes the exclusive
-    create report `EEXIST`, which this site reads as a duplicate claim and answers 2 — a
-    different observable, and one that reports a write failure as an id reuse."""
+    """`record_lead.claim_lead`, X5's return-zero site, under X5's fault: a plain file squatting
+    the parent component (the census row's fault yields a different observable)."""
     from defender.hooks import record_lead
 
     component = run_dir / "gather_raw"
@@ -946,11 +733,7 @@ def _x5_sentinel_site(run_dir: Path) -> object:
     return box_mod._plant(run_dir / ".box-sentinel", "token-771")
 
 
-#: Three of X5's four sites. The fourth, X5's swallow-continue site (`driver.
-#: _account_executed_call` under a directory squatting `budget.json`), retired with #1235: the
-#: budget is counted in the run process's memory, so that call site has no write left to fail
-#: and no failure counter to advance. `POSTURES` still records the ledger's four classes — it
-#: is what X5 measured, and the census below still exhibits at least four distinct ones.
+#: Three of X5's four sites: the swallow-continue one no longer writes (the budget lives in memory).
 X5_MEASURED_SITES: tuple[MeasuredSite, ...] = (
     MeasuredSite("return-none", "query_tool._persist_payload",
                  "a directory squatting gather_raw/l-001/0.json", _x5_query_payload_site,
@@ -963,9 +746,8 @@ X5_MEASURED_SITES: tuple[MeasuredSite, ...] = (
                  observed="raised:BoxFault"),
 )
 
-#: The modules the lint must HARD-GATE (fork R25) — DERIVED from the census, plus the drain
-#: lane's own writers. Typing this list by hand is what dropped `investigation/driver.py` from the
-#: gate while the demand still bound its edge, so the derivation is the repair.
+#: Modules the write lint must hard-gate, derived from the census (plus the drain lane's
+#: writers) so a hand-typed list cannot silently drop one.
 CENSUS_MODULES: frozenset[str] = frozenset(w.module for w in CENSUS)
 DRAIN_MODULES: frozenset[str] = frozenset({"learning/author/drain.py"})
 LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
@@ -981,8 +763,7 @@ def posture_class(outcome: object) -> str:
 
 
 def drive_writer_at(site: MeasuredSite, run_dir: Path) -> object:
-    """Drive one of X5's measured sites and return its observable, same convention as
-    `drive_writer`: the raised exception, or the returned value."""
+    """Drive one of X5's measured sites; same observable convention as `drive_writer`."""
     try:
         return site.drive(run_dir)
     except BaseException as e:  # noqa: BLE001 — the exception IS the observable
@@ -990,11 +771,8 @@ def drive_writer_at(site: MeasuredSite, run_dir: Path) -> object:
 
 
 def drive_writer(writer: Writer, run_dir: Path) -> object:
-    """Drive one census writer and return its observable — the raised exception, or the value.
-
-    Catches `BaseException` deliberately: `start_box` converts its write failure into a box
-    startup fault, which is NOT an `OSError`, and a test that catches only `OSError` errors out
-    on exactly the row carrying X5's fatal posture class instead of asserting about it."""
+    """Drive one census writer; return the raised exception or the value. `BaseException`
+    because the sentinel row fails with a `BoxFault`, not an `OSError`."""
     try:
         return writer.invoke(run_dir)
     except BaseException as e:  # noqa: BLE001 — the exception IS the observable
@@ -1002,14 +780,9 @@ def drive_writer(writer: Writer, run_dir: Path) -> object:
 
 
 class _StaleVersionStore:
-    """A REAL session store whose recorded schema version is bumped past the reader's — so
-    every read through `hydrate` refuses, while the run's own writes proceed.
-
-    Not an author-imagined fault: this is the exact condition the store's own
-    `_refuse_stale_version` exists for (a file whose last writer used a different schema), and
-    it is the only condition under which the driver's fault-exit trace write runs — the branch
-    whose own comment says "a broken store must not swallow the artifact entirely". The real
-    store is used unchanged; only its recorded version is moved."""
+    """A real session store with its schema version bumped past the reader's, so reads refuse
+    (`_refuse_stale_version`) while the run's writes proceed: the only condition under which the
+    driver's fault-exit trace write runs."""
 
     def __init__(self, inner: Any, *, version: int = 99):
         self._inner = inner
@@ -1020,11 +793,8 @@ class _StaleVersionStore:
 
 
 def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = "0" * 16) -> Any:
-    """Drive the REAL `driver.run_investigation` through the committed replay harness with a
-    store whose reads refuse, so the FAULT-EXIT trace write runs.
-
-    This is the only production route to `interacts(run_investigation->run_dir)` — C1's row 2,
-    the second writer of the one fixed `tool_trace.jsonl` name."""
+    """Drive the real `driver.run_investigation` (replay harness) with a store whose reads
+    refuse, so the fault-exit trace write runs."""
     from defender.records import session_store as ss
 
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive
@@ -1040,13 +810,9 @@ def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = 
 
 def drive_normal_exit_trace(run_dir: Path, *, run_id: str = "r-771-happy",
                             salt: str = "0" * 16) -> Any:
-    """Drive the REAL `driver.run_investigation` through the committed replay harness with the
-    production store, so the NORMAL trace write runs and the fault-exit handler does not.
-
-    The sibling of `drive_fault_exit_trace`, and the reason it exists: both writers live in one
-    `try/except` inside the driver, so the only way to observe that the handler leaves a
-    completed trace alone is to run the whole thing with nothing broken. Calling
-    `observe.write_trace` directly instead exercises a tree the handler was never in."""
+    """Drive the real `driver.run_investigation` with the production store, so the normal trace
+    write runs and the fault-exit handler does not. Both sit in one `try/except` in the driver,
+    so only a whole unbroken run shows the handler leaves a completed trace alone."""
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive
 
     replay = ReplayFn([Turn(text="done.")])
@@ -1055,7 +821,7 @@ def drive_normal_exit_trace(run_dir: Path, *, run_id: str = "r-771-happy",
 
 
 def is_eexist(exc: BaseException) -> bool:
-    """`EEXIST` from an exclusive create — B6's observation, and §7 D1's refusal signal."""
+    """`EEXIST` from an exclusive create: the refusal signal for an occupied staged name."""
     return isinstance(exc, OSError) and exc.errno == errno.EEXIST
 
 

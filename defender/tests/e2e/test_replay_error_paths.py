@@ -1,5 +1,4 @@
-"""Error-path + edge-case e2e scripts — the driver's OWN error handling and the
-gate-as-feedback recovery loop."""
+"""The driver's own error handling and the gate-as-feedback recovery loop, end to end."""
 from __future__ import annotations
 
 import re
@@ -34,9 +33,8 @@ pytestmark = pytest.mark.e2e
 
 
 def _own_qlines(run_dir: Path) -> list[str]:
-    """The run's own queries-table lines, EXCLUDING lead-0's (#808) reserved rows —
-    lead-0 resolves against every alert this suite drives (`verbs` is always injected),
-    contributing rows of its own the scripted scenario never anticipated."""
+    """The run's own queries-table lines, without lead-0's reserved rows (#808): lead-0
+    resolves against every alert this suite drives."""
     lines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
     return [q for q in lines if json.loads(q).get("lead_id") not in RESERVED_LEAD_IDS]
 
@@ -62,7 +60,7 @@ def test_request_limit_writes_partial_trace(tmp_path):
     from defender.investigation import challenge_gate
 
     raised_limit = challenge_gate.raised_request_limit(challenge_gate.default_bounds())
-    assert model.calls == raised_limit  # #774/RS7: the ceiling is raised by the gate's cap
+    assert model.calls == raised_limit  # the gate's cap raises the ceiling (#774)
     assert result["output"] is None
     assert result["requests"] == raised_limit
     assert (run_dir / "tool_trace.jsonl").is_file()
@@ -190,7 +188,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     deps = bind(MAIN_DEF, run_dir,
                 defender_dir=Path(__file__).resolve().parents[2])
 
-    m_notes = model_path(notes, run_dir=run_dir)   # #1255 P1: the model's spelling
+    m_notes = model_path(notes, run_dir=run_dir)   # the model's spelling
     runtime_tools._tool_write_file(deps, m_notes, "alpha\nbeta\nalpha\n")
 
     reasons = []

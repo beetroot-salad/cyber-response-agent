@@ -1,5 +1,5 @@
-"""#922 — the surviving training spine, and the drain that must stop deriving itself from a
-table the cutover deletes."""
+"""#922 — the surviving training spine, and a drain that no longer derives its curators or
+mounts from the retired direction table."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -39,7 +39,7 @@ RETIRED_OBSERVATION_QUEUES = (
     "environment_observations.jsonl",
 )
 
-#: The retired sibling corpora, by directory name for the same reason.
+#: The retired sibling corpora, by directory name.
 RETIRED_CORPORA = ("lessons-actor", "lessons-environment")
 
 
@@ -68,9 +68,8 @@ class TriggerRecorder:
 
     def __call__(self, paths, state, channel, threshold_env, module_name, pending_label,
                  *, batch, box=None, **kw) -> None:
-        # #1108 P4 (OD16, class ii): the drain hands the tick's batch; the curator runs over
-        # that batch's draft lanes with `batch=` (as `_drain_support.CuratorTrigger` does),
-        # never over checkout trees built from `paths`.
+        # The curator runs over the tick's batch draft lanes (`batch=`, as
+        # `_drain_support.CuratorTrigger` does), never over checkout trees built from `paths`.
         assert batch is not None, "the drain handed the findings trigger no batch"
         self.calls.append({
             "pending_file": state.describe(channel), "threshold_env": threshold_env,
@@ -114,8 +113,8 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
 
 @pytest.fixture
 def tenant(tmp_path, data_root):
-    """The fixture tenant published for real, its forge bound (#1108 P4: the drain's batches
-    are branches of the tenant repo, delivered to its forge)."""
+    """The fixture tenant published for real, its forge bound: the drain's batches are branches
+    of the tenant repo."""
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
         yield t
@@ -129,9 +128,8 @@ def tenant_paths(t, tmp_path):
 
 
 def drive_tenant_author_drain(t, paths, trigger, *, rec=None):
-    """The REAL `author_drain` over the tenant path (#1108 P4 flow 4): the tenant forge fake's
-    client, an identity over its issuer fake, and the box seams (assumed seams, see
-    `tenant_1108_p4/_drain_support.py`)."""
+    """The real `author_drain` over the tenant path, with the forge fake's client, an identity
+    over its issuer fake, and the box seams."""
     rec = rec or B.BoxLifecycleRecorder()
     rc = drains.author_drain(
         paths, trigger_author=trigger, client=t.forge.client, identity=t.vault.identity(),
@@ -163,11 +161,9 @@ def stuff_retired_queues(paths, *, rows: int = 25) -> None:
 
 
 def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tenant, tmp_path):
-    """GUARD (#922; re-spelled onto the tenant path, #1108 P4): the graded episode's family rows
-    reach the findings curator, which authors one lesson attributing them, delivered as one
-    commit on a `lessons/` branch of the tenant repo; the rows stay queued (`hold_committed`)
-    until a later tick reads the attribution back from the merged corpus and retires them as
-    `consumed_idempotent` without authoring again or opening another branch."""
+    """GUARD: the family rows reach the findings curator, which commits one attributing lesson on
+    a `lessons/` branch; the rows stay queued until a later tick reads the attribution back from
+    the merged corpus and retires them as `consumed_idempotent`, authoring nothing new."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     _ep, record = graded_episode(tmp_path, paths)
@@ -225,8 +221,8 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tena
 
 
 def test_922_a_caught_family_is_consumed_without_authoring(tenant, tmp_path):
-    """GUARD (#922; tenant path, #1108 P4): a retired-word family row is held, never authored:
-    no curator call, no batch branch or PR on the tenant forge, nothing consumed."""
+    """GUARD: a retired-word family row is held, never authored: no curator call, no batch
+    branch or PR on the tenant forge, nothing consumed."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     channel = FINDINGS
@@ -256,8 +252,8 @@ def test_922_a_caught_family_is_consumed_without_authoring(tenant, tmp_path):
 
 
 def test_922_author_drain_triggers_exactly_the_findings_curator(tenant, tmp_path):
-    """#922 (tenant path, #1108 P4): the drain triggers its two named curators, never one per
-    retired observation queue, and hands the findings trigger the findings queue."""
+    """The drain triggers its two named curators, never one per retired observation queue, and
+    hands the findings trigger the findings queue."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     graded_episode(tmp_path, paths)
@@ -279,9 +275,9 @@ def test_922_author_drain_triggers_exactly_the_findings_curator(tenant, tmp_path
 
 
 def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tenant, tmp_path):
-    """#922 (tenant path, #1108 P4): the drain box's writable mounts are exactly the draft's two
-    lesson corpora, its read-only mounts the product code (`code`) and the draft root
-    (`staged`), never the tenant clone, and no retired corpus is bound."""
+    """The drain box's writable mounts are exactly the draft's two lesson corpora, its read-only
+    ones the product code (`code`) and the draft root (`staged`); never the tenant clone or a
+    retired corpus."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     graded_episode(tmp_path, paths)
@@ -310,8 +306,8 @@ def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tenant, tmp_
 
 
 def test_922_a_full_findings_queue_alone_wakes_the_drain(tenant, tmp_path):
-    """GUARD (#922; tenant path, #1108 P4): the findings queue alone wakes the drain, whose box
-    gets the draft's two lesson corpora writable."""
+    """GUARD: the findings queue alone wakes the drain, whose box gets the draft's two lesson
+    corpora writable."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     graded_episode(tmp_path, paths)

@@ -1,4 +1,4 @@
-"""#807 ask (1) — the executable spec for gather's REPEAT CIRCUIT BREAKER."""
+"""#807 — gather's repeat circuit breaker."""
 from __future__ import annotations
 
 import re
@@ -42,7 +42,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     raising,
 )
 
-# THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
+# The surface under test
 from defender.investigation.record_query import (
     REJECTION_BUDGET,
     REPEAT_ESCAPE,
@@ -64,8 +64,7 @@ SIBLING = "l-002"
 
 CORPUS = DEFENDER / "tests" / "fixtures" / "e2e" / "repeat-corpus-807"
 
-# The idiom `_run_gather`'s three shipped terminal branches already use, and the ONLY
-# vocabulary any prompt in the corpus teaches main (defender/SKILL.md:394 — G19).
+# The idiom `_run_gather`'s terminal branches use, and the only one any prompt teaches main.
 INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
 
 SUMMARY_TURN = Turn(text="Before the stop I ran what I could; the answers are above.")
@@ -116,8 +115,8 @@ class _Res:
 
     @property
     def breaker(self) -> dict:
-        """The run's infra-breaker state, off the run's own state (#1235: never a file in the
-        run dir; `_BLANK_BREAKER` when nothing failed)."""
+        """The run's infra-breaker state, off the run's own state (never a file in the run dir;
+        `_BLANK_BREAKER` when nothing failed)."""
         return self.state.breaker_snapshot()
 
     @property
@@ -140,9 +139,10 @@ def _run(
     root: Path, *, verbs, turns: list[Turn], run_id: str, system: str = "elastic",
     lead: str = LEAD, planted: list[dict] | None = None, tenant: Any = None,
 ) -> _Res:
-    """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
-    `turns` against the INJECTED verb registry. Everything between the two fakes — dispatch,
-    the query tool, the repeat guard, the capture capability, the infra breaker, the two"""
+    """Drive a real run: main dispatches one gather lead whose nested agent replays `turns`
+    against the injected verb registry; everything between the two fakes (dispatch, the query
+    tool, the repeat guard, capture, the infra breaker) is production code. `planted` rows are
+    seeded into the folder first."""
     run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     if planted:
         _seed(run_dir, planted)
@@ -162,13 +162,10 @@ def _run_inherited(
     root: Path, *, table: bytes, rows: list[dict], verbs, turns: list[Turn], run_id: str,
     system: str = "elastic", lead: str = LEAD,
 ) -> _Res:
-    """Drive a REAL branch sibling (`drive(..., resume=spec)`) whose source's queries table is
-    `table` — the shape a resumed lead's run starts from. The source is
-    `_branch_947.planted_source` (a store, a case link, the golden document; not the N4
-    fixture — the implementer's fixture-only snapshot planting may snapshot it), which carries no
-    claim for its leads, so the sibling's MAIN can dispatch `lead` again; seeding copies the
-    table's rows for the inherited leads, and each `rows` entry's sidecar, into the sibling and
-    records them on the sibling's state (#1235 round 2) before its first turn."""
+    """Drive a real branch sibling (`drive(..., resume=spec)`) whose source's queries table is
+    `table`. The source (`_branch_947.planted_source`) claims none of its leads, so the sibling's
+    MAIN can dispatch `lead` again; seeding copies the inherited rows and each `rows` sidecar into
+    the sibling and records them on its state before the first turn."""
     from defender.tests.support.learning.branch._branch_947 import (
         GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
     )
@@ -186,11 +183,10 @@ def _run_inherited(
         root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None,
         name=SOURCE_RUN)
     assert planted == source, (planted, source)
-    # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN the
-    # pre-#1255 shape branched at. The source is hand-planted (`planted_source`, not N4's).
+    # Branch at a tool-calling MAIN response after the document landed (#1255).
     spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
     store.close()
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # Run folders are named by canonical UUID run ids (#1187).
     sibling = root / "defender-runs" / fixture_uuid("run-sibling-807")
     RunPaths(sibling).gather_raw.mkdir(parents=True)
     from defender.tests.support.storage._alert_plant import plant_alert
@@ -229,9 +225,9 @@ def _run_two_leads(
 
 @pytest.fixture(scope="module")
 def three_identical_requests(tmp_path_factory, checkout_roster):
-    """ONE driven run of the canonical trip — one lead asking elastic the same query three
-    times, then `DONE` — shared by the demands that only READ it: its run dir and tables, the
-    verb recorder, and the two replay scripts. A demand that seeds, plants or needs a second"""
+    """One driven run of the canonical trip (one lead asking elastic the same query three times,
+    then `DONE`), shared by the tests that only read it; a test that seeds, plants or needs a
+    second run drives its own."""
     from defender.skills.invlang.validate import hold_capabilities, release_capabilities
 
     rec = VerbRecorder()
@@ -256,9 +252,9 @@ def _row(
     lead: str, seq: int, system: str, verb: str, params: dict, *,
     exit_code: int = 0, query_id: str | None = None, digest: str | None = None,
 ) -> dict:
-    """One queries-table row in the frozen key shape, with `error_class`, `payload_digest` and
-    `payload_sha256` computed by the PRODUCTION helpers rather than restated — a seeded fixture
-    that disagrees with `error_class_for_exit`, or one whose recorded hash does not belong to"""
+    """One queries-table row in the frozen key shape, its `error_class`, `payload_digest` and
+    `payload_sha256` computed by the production helpers rather than restated, so a seeded row
+    cannot disagree with what the writer records."""
     payload_text = "" if exit_code != 0 else _SEEDED_PAYLOAD
     return {
         "lead_id": lead,
@@ -282,9 +278,8 @@ def _row(
 
 
 def _seed(run_dir: Path, rows: list[dict]) -> None:
-    """Plant a queries table (and each row's sidecar) in a fresh run folder BEFORE the run
-    starts. No host recorded these rows for the run, and since #1235 round 2 no file is ever
-    read into a run's state: they are on disk and nowhere else."""
+    """Plant a queries table (and each row's sidecar) in a fresh run folder before the run
+    starts. No file is read into a run's state, so these rows exist on disk only."""
     for row in rows:
         rel = row.get("payload_path")
         if not rel:
@@ -300,9 +295,8 @@ def _corpus(run_name: str) -> list[dict]:
 
 
 def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tuple[str, int]]:
-    """O1's stated oracle, driving the PRODUCTION predicate: accumulate each lead's rows in
-    file order and STOP accumulating for a lead at its first trip, because M3's trip
-    terminates the lead ("must stop at seq 4 rather than 36" — the doc's own words). A replay"""
+    """The replay oracle over the production predicate: accumulate each lead's rows in file
+    order and stop at the lead's first trip, since a trip ends the lead."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int]] = []
@@ -326,9 +320,8 @@ def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tupl
 def _replay_rejections(
     rows: list[dict], *, threshold: int = REPEAT_THRESHOLD, budget: int = REJECTION_BUDGET,
 ) -> list[tuple[str, int, str]]:
-    """The same oracle for the COMPANION guard (#826 item 4), differing from `_replay` only in
-    the production predicate it drives — which is the claim under test: the two guards are one
-    counting rule over two disjoint domains, so one replay shape serves both."""
+    """The same oracle for the companion (rejection) guard: the two guards are one counting rule
+    over two disjoint domains, so one replay shape serves both."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int, str]] = []
@@ -404,9 +397,8 @@ def typed_params(rec: VerbRecorder) -> FakeVerbs:
 
 
 def parameterless(rec: VerbRecorder) -> FakeVerbs:
-    """The shape 8 of GATHER_DEF's 28 granted pairs really have (P-e, executed: all seven
-    `health-check` verbs plus `identity.list-roles`) — a verb declaring NO params at all, so
-    `{}` is the only call it can ever receive."""
+    """A verb declaring no params (the shape of every `health-check` verb), so `{}` is the only
+    call it can receive."""
 
     def health_check(ctx: VerbContext) -> dict:
         rec.record("health-check", ctx, {})
@@ -416,9 +408,9 @@ def parameterless(rec: VerbRecorder) -> FakeVerbs:
 
 
 class GrantScopedVerbs(VerbRegistry):
-    """A real registry over a real `VerbGrant` that DECLARES a verb it does not GRANT — the
-    only way to reach `decide`'s DENIED outcome (a withheld real verb) rather than its
-    UNDECLARED one. Dumb data: it injects no fault and makes no admission decision of its"""
+    """A real registry over a real `VerbGrant` that declares a verb it does not grant: the only
+    way to reach `decide`'s DENIED outcome rather than UNDECLARED. Dumb data: it injects no fault
+    and makes no admission decision of its own."""
 
     def __init__(self, table: dict[str, dict], grant: VerbGrant):
         super().__init__(grant)
@@ -487,9 +479,8 @@ def _after_start(relink: Relink, turns: list[Turn]) -> list:
 
 
 def _bad_args(params: dict) -> Turn:
-    """A tool call the pydantic ARG SCHEMA turns back, so the row is written by
-    `wrap_tool_validate` from the RAW pre-validation arguments. `bogus_extra_arg` is P-a's
-    executed `extra_argument` shape: the rejection row it leaves recovers a perfectly normal"""
+    """A tool call the pydantic arg schema turns back (an extra argument), so `wrap_tool_validate`
+    writes its row from the raw arguments: perfectly normal `params`, a genuine call's key."""
     return Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "query", "params": params, "bogus_extra_arg": "x",
     })])
@@ -820,7 +811,7 @@ def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
     torn = b'{"lead_id": "l-001", "seq": 4, "sys'
     damaged = [
         _row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"}),
-        {"seq": 1, "system": "elastic", "verb": "query", "params": {}},  # G17's 7-key judge row
+        {"seq": 1, "system": "elastic", "verb": "query", "params": {}},  # a 7-key judge-shaped row
         {**_row(LEAD, 2, "elastic", "query", {}), "params": "not-a-dict"},
         _row(LEAD, 3, "elastic", "query", {"native_query": "FROM logs"}),
     ]

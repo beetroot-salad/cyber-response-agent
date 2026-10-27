@@ -1,4 +1,4 @@
-"""#872 — M7 pre-validator: hostile payloads (bad keys, cycles, depth/node-budget bombs, NUL) are refused before the encoder runs (observed by a spy encoder call count); real-encoder cases run in a child interpreter."""
+"""#872 — the pre-validator: hostile payloads (bad keys, cycles, depth/node-budget bombs, NUL) are refused before the encoder runs (observed by a spy encoder call count); real-encoder cases run in a child interpreter."""
 from __future__ import annotations
 
 import collections
@@ -86,8 +86,7 @@ def _nest(depth: int) -> dict:
 
 
 def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_called() -> None:
-    """A mapping key that is not a `str`, and a `str` key that is not UTF-8 encodable, are
-    refused before the encoder is called — in EVERY structural position."""
+    """Refused in every structural position; a `str` subclass key is still admitted."""
     class StrKey(str):
         pass
 
@@ -128,8 +127,6 @@ def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_c
 
 
 def test_a_container_reachable_from_itself_is_refused_and_the_encoder_is_never_called() -> None:
-    """A container reachable from itself is refused before the encoder, in every dict/list
-    placement the hazard is reachable through."""
     placements = {}
     a: dict = {"self": None}
     a["self"] = a
@@ -164,8 +161,7 @@ def test_a_container_reachable_from_itself_is_refused_and_the_encoder_is_never_c
 
 
 def test_the_validators_container_set_equals_the_encoders() -> None:
-    """The walk recurses into exactly `dict` and `list`, SUBCLASSES INCLUDED, and enters nothing
-    else — the totality argument, made executable."""
+    """The walk enters exactly `dict` and `list` (subclasses included), as the encoder does."""
     Point = collections.namedtuple("Point", "k")
     hazard = {1: "not a str key"}
 
@@ -199,8 +195,6 @@ def test_the_validators_container_set_equals_the_encoders() -> None:
 
 
 def test_a_payload_one_level_over_the_configured_depth_cap_is_refused_and_one_under_it_is_admitted() -> None:
-    """One level over the configured depth cap is refused before the encoder; one level under it
-    is admitted."""
     for cap in (8, 16):
         env = {MAX_DEPTH_ENV: str(cap)}
         over = _nest(cap + 1)
@@ -217,8 +211,7 @@ def test_a_payload_one_level_over_the_configured_depth_cap_is_refused_and_one_un
 
 
 def test_a_shallow_acyclic_payload_whose_node_count_exceeds_the_budget_is_refused() -> None:
-    """A shallow, acyclic payload whose node count exceeds the configured budget is refused
-    before the encoder, and the WALK'S OWN COST is bounded by the same budget."""
+    """The walk's own cost is bounded by the same budget, so it ends early on an expansion bomb."""
     gated_child = f'''
 import json
 from defender.tests.e2e import _toon872 as T
@@ -304,8 +297,6 @@ def test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refus
 
 
 def test_one_leaf_object_referenced_three_times_encodes_round_trips_and_substitutes() -> None:
-    """One leaf dict referenced three times in a row list encodes, round-trips and SUBSTITUTES —
-    it is not refused."""
     leaf = {"x": 1, "y": 2}
     value = {"values": [leaf, leaf, leaf]}
     assert toons.loads(toons.dumps(value)) == value, (
@@ -319,8 +310,6 @@ def test_one_leaf_object_referenced_three_times_encodes_round_trips_and_substitu
 
 
 def test_the_guard_refuses_no_committed_fixture_and_changes_no_verdict() -> None:
-    """Across both arms of all 40 committed fixtures the guard refuses NOTHING, and the gate's
-    verdict with the guard installed is identical to the un-guarded bar's on 40 of 40."""
     fixtures = corpus()
     assert len(fixtures) == 40, "the vendored corpus is no longer the 40 committed fixtures"
     bar = 85
@@ -336,8 +325,6 @@ def test_the_guard_refuses_no_committed_fixture_and_changes_no_verdict() -> None
 
 
 def test_every_input_class_kills_or_survives_the_run_identically_with_and_without_the_gate() -> None:
-    """For every input class in the probed battery the PROCESS outcome — survives or dies, and
-    how — is identical with the gate installed and with it absent."""
     battery = {
         "brace in key, row position": 'value = {"rows": [{"}": i, "z": i} for i in range(20)]}',
         "benign dict rows": 'value = {"rows": [{"a": i, "b": "pad-%d" % i} for i in range(40)]}',
@@ -415,8 +402,7 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
 
 
 def test_a_payload_carrying_a_raw_nul_is_refused_and_the_encoder_is_never_called() -> None:
-    """A payload carrying a raw NUL in any string is refused before the encoder, and the model-
-    visible text is byte-identical to the un-gated run's."""
+    """The refusal leaves the model-visible text byte-identical to the un-gated run's."""
     nul = chr(0)
     value = {"rows": [{"a": "x" + nul + "y", "b": i} for i in range(20)]}
     assert nul in toons.dumps(value), (

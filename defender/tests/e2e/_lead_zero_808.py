@@ -1,4 +1,6 @@
-"""Scenario machinery for the #808 harness-executed lead-0 spec — NO test scripts."""
+"""Scenario machinery for the #808 harness-executed lead-0 tests.
+
+Tags (`d1`, `K3`, `F5`, …) name demands and claims in `docs/archive/spec-graphs/spec_graph_808.yaml`."""
 from __future__ import annotations
 
 import json
@@ -29,9 +31,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
 )
 
-# the names this spec mints on the production side
-# `schema.md`, "Coin ids from the code's name": a private synonym does not cost a config
-# entry, it costs the check. Spell these exactly in `defender/investigation/lead_zero.py`.
+# Production names, spelled exactly as `defender/investigation/lead_zero/` spells them.
 LEAD_ZERO_MODULE = "defender.investigation.lead_zero"
 L0 = "l-000"          # item 1's reserved id (F5)
 L3 = "l-00c"          # item 3's reserved id (F5)
@@ -40,20 +40,14 @@ HARNESS_PROVENANCE = "harness"     # K11's provenance field VALUE
 PROVENANCE_KEY = "provenance"      # K11's provenance field NAME
 LEAD_ZERO_HEADING = "## Alert ancestors"   # the ORIENT section `orientation()` appends
 
-#: A salt-SHAPED literal, no longer the run's own: since #875 `wrap_fresh` mints each frame's
-#: delimiter after its content is in hand, so nothing here can predict a real one. What is left
-#: is `test_808_orient_framing`'s FORGERY subject — the token an injected alert guesses with.
+#: A salt-shaped literal for forgery attempts; real salts are minted per frame (#875).
 SALT = "aabbccddeeff0011"
-# The three rendered notes, spelled in `orient.py`'s own shipped `_(unavailable: …)_` idiom
-# so the block reads like every other degraded ORIENT section rather than inventing a second
-# convention. `UNAVAILABLE` is the design's own word; the other two are this spec's, minted
-# because K3 and K17 demand a note and name none.
+# The three rendered notes, in `orient.py`'s `_(unavailable: …)_` idiom.
 UNAVAILABLE = "_(unavailable:"
 SHORTFALL = "_(incomplete:"     # K3 — `returned < len(ancestor_events)` or `truncated`
 ELIDED = "_(elided:"            # K17 — a per-document `message` over the rendering budget
 
-# Read off the tree, not restated: the playground tenant's `settings/systems/elastic/config.env`
-# (`knowledge/tenants/playground/`, #1106).
+# As in the playground tenant's `settings/systems/elastic/config.env` (#1106).
 EVENTS_INDEX = "logs-*"
 ALERTS_INDEX = ".internal.alerts-security.alerts-default-*"
 
@@ -64,21 +58,15 @@ FALCO_BACKING = ".ds-logs-falco.alerts-default-2026.04.30-000003"
 # the alert
 
 def ancestor(doc_id: str, index: str = AUTH_BACKING, **over: Any) -> dict:
-    """One `ancestor_events[]` entry, in the exact shape g7 found across all five checked-in
-    fixtures: every entry is `{id, type, index, depth}` with `type=event` and `depth=0`."""
+    """One `ancestor_events[]` entry, shaped like every checked-in fixture's:
+    `{id, type=event, index, depth=0}`."""
     return {"id": doc_id, "type": "event", "index": index, "depth": 0, **over}
 
 
 ALERT_ID = "94f777794d60c7c8f112d07b455ed79a41d4f0a0e932fccd94ce0d9914997606"
-# THE FIELD the shell fetch retrieves on. `alert_id` is a key of the run-dir `alert.json`, not
-# of an alert DOCUMENT, so the predicate has to name the document field it maps to. The only
-# mapping in this tree is `experiments/effort-tradeoff/project_alert.py:62`
-# (`"alert_id": s.get("kibana.alert.uuid")`) — and that file is the one brief R3 / g17
-# (executed) refuted as a producer, so the mapping is recorded as claim `a6` WITH that caveat
-# and the question of whether the alerts index answers on it is deferred beside c3. Pinned
-# here because `d60` asserting only "the id appears somewhere in the predicate" cannot tell
-# `kibana.alert.uuid:"…"` from `_id:"…"`, and an implementer who picks the other one ships
-# green while the primary path silently never runs in production.
+# The document field the shell fetch retrieves on (`alert_id` is a key of the run-dir
+# `alert.json`, not of an alert document). Pinned exactly: "the id appears in the predicate"
+# cannot tell `kibana.alert.uuid:"…"` from `_id:"…"`.
 ALERT_ID_FIELD = "kibana.alert.uuid"
 
 
@@ -92,11 +80,8 @@ def alert_doc(
     rule_query: str = 'sequence by host.name with maxspan=10m\n  [any where JOINME]',
     **over: Any,
 ) -> dict:
-    """The run-dir `alert.json` a scenario drives. Defaults reproduce the sshd golden.
-
-    It carries NO `kibana.alert.group.id`, and that is the fixture's whole point: no
-    checked-in alert carries one (c5/r5, executed) and no in-repo producer writes this file
-    (g17), so the group id has to come off the shell document item 1 fetches — `shell_doc`."""
+    """The run-dir `alert.json` a scenario drives; defaults reproduce the sshd golden. Like every
+    real one, it carries no `kibana.alert.group.id`: that comes off the shell (`shell_doc`)."""
     doc: dict[str, Any] = {
         "alert_timestamp": timestamp,
         "rule": {"id": rule_id, "name": "v2 sshd success after failures", "type": "eql",
@@ -116,11 +101,8 @@ def alert_doc(
 
 
 def shell_doc(*, group_id: str | None = None, **over: Any) -> dict:
-    """The alert's OWN shell document, as item 1's by-`alert_id` fetch returns it — the only
-    surface `kibana.alert.group.id` can honestly arrive on (F4 arm (b), resolved twice).
-
-    `_source` only, per P1c (executed): `_search` strips `_id`/`_index`/`_score`, so a shell
-    document a scenario hands back can carry nothing the adapter would not have carried."""
+    """The alert's own shell document as item 1's by-`alert_id` fetch returns it (`_source`
+    only): the only surface `kibana.alert.group.id` arrives on."""
     doc: dict[str, Any] = {
         "@timestamp": "2026-05-25T15:27:22.928Z",
         "kibana.alert.rule.name": "v2 sshd success after failures",
@@ -136,16 +118,15 @@ def hit(
     *, ts: str, message: str = "Accepted password for dev.dana", host: str = "office-ws-1",
     user: str = "dev.dana", ip: str = "172.18.0.15", **over: Any,
 ) -> dict:
-    """One `_source` document, per P1c (executed): `_search` keeps ONLY `_source` per hit —
-    `_id`/`_index`/`_score` are stripped and never reach a caller, so a hit a scenario hands
-    back can carry nothing the adapter would not have carried."""
+    """One `_source` document: `_search` strips `_id`/`_index`/`_score`, so a scripted hit
+    carries nothing the adapter would not."""
     return {"@timestamp": ts, "message": message, "host.name": host,
             "user.name": user, "source.ip": ip, **over}
 
 
 def building_block(*, ts: str, group_index: int, **over: Any) -> dict:
-    """A building-block alert document: shares the shell's `group.id` (c2) and carries the
-    building-block stamp c2 also names as the only discriminator between the two."""
+    """A building-block alert document: the shell's `group.id` plus the building-block stamp,
+    the only thing that tells the two apart."""
     return hit(ts=ts, **over) | {
         "kibana.alert.group.index": group_index,
         "kibana.alert.building_block_type": "default",
@@ -190,8 +171,7 @@ def answer_sequence(*results: Any) -> Answer:
 
 
 def answer_by_index(table: dict[str | None, Any], default: Any = None) -> Answer:
-    """Keyed on the `index=` param the call carried — the per-backing-index shape `d5`'s
-    "one call per distinct mapped backing index" produces."""
+    """Keyed on the call's `index=` param (one call per distinct mapped backing index)."""
     def _answer(verb: str, params: dict) -> Any:  # noqa: ARG001
         item = table.get(params.get("index"), default)
         if isinstance(item, BaseException):
@@ -213,15 +193,10 @@ SHELL_DEFAULT: Any = object()   # sentinel: "a shell alert that resolves, carryi
 
 
 def _shell_answer(shell: Any, index: str, answer: Answer) -> Answer:
-    """Compose the SHELL fetch onto a scenario's ancestor answer.
-
-    Keyed on the call's OWN predicate (`native_query` starting with `ALERT_ID_FIELD:`, the
-    shell fetch's unique signature — d60/c-lookup), not on call order: when K13 correctly
-    skips the shell fetch (no usable `alert_id`), item 1's first and only call is the
-    batched ancestor fetch, and a call-order interceptor would misroute it into this
-    scenario's shell answer instead of `answer`. `shell` is a document (or list) the fetch
-    returns, `[]`/`None` for "unresolvable by alert_id", or an exception instance the fetch
-    raises."""
+    """Compose the shell fetch onto a scenario's ancestor answer, keyed on the call's own
+    predicate (`ALERT_ID_FIELD:`), not call order: with no usable `alert_id` the shell fetch is
+    skipped and the first call is the ancestor fetch. `shell` is a document (or list), `[]`/`None`
+    for "unresolvable by alert_id", or an exception to raise."""
     if shell is SHELL_DEFAULT:
         shell = shell_doc()
 
@@ -238,13 +213,10 @@ def _shell_answer(shell: Any, index: str, answer: Answer) -> Answer:
 
 def elastic_backend(rec: VerbRecorder, answer: Answer, *, shell: Any = SHELL_DEFAULT,
                     signal_index: str = ALERTS_INDEX) -> FakeVerbs:
-    """The injected registry, declaring all three elastic verbs with the REAL adapter's
-    parameter signatures — so the real `validate_params` screen checks lead-0's outbound
-    params against the real contract, and `esql` is REACHABLE unless something narrows the
-    grant (F3/K7's whole question: `esql`'s FROM target is never `confine_index`'d — g6/r19,
-    and P2 executed a DENIED esql running to completion on the direct-registry path).
-
-    The SHELL fetch is answered here, so a scenario's `answer` serves calls 2..n."""
+    """The injected registry: all three elastic verbs with the real adapter's signatures, so the
+    real `validate_params` screen applies and `esql` stays reachable unless the grant narrows it
+    (its FROM target is never index-confined). The shell fetch is answered here; a scenario's
+    `answer` serves calls 2..n."""
     answer = _shell_answer(shell, signal_index, answer)
 
     def _search_verb(name: str):
@@ -284,16 +256,15 @@ class Res:
     # what MAIN was handed
     @property
     def message_zero(self) -> str:
-        """The flattened message history at MAIN's FIRST request — message 0, ORIENT text
-        included. `d1`'s whole observable is that lead-0's work is already in it."""
+        """The flattened history at MAIN's first request (message 0, ORIENT included), where
+        lead-0's work must already be."""
         assert self.main.seen, "main was never asked for a turn — the run died before ORIENT"
         return self.main.seen[0]
 
     @property
     def second_request(self) -> str:
-        """The flattened history at MAIN's SECOND request — where `d23` says item 3's summary
-        must have arrived. Written against the REQUEST boundary, never "before PLAN": r17
-        (executed) establishes ORIENT/PLAN are prompt phases with no runtime referent."""
+        """The flattened history at MAIN's second request, where item 3's summary must have
+        arrived (a request boundary: ORIENT/PLAN are prompt phases, not runtime events)."""
         assert len(self.main.seen) >= 2, "main never made a second request"
         return self.main.seen[1]
 
@@ -316,8 +287,8 @@ class Res:
     # item 1's two-stage call record
     @property
     def shell_call(self):
-        """Item 1's FIRST backend call — the by-`alert_id` fetch of the alert's own shell
-        document, which is where `kibana.alert.group.id` is read (F4 arm (b))."""
+        """Item 1's first backend call: the by-`alert_id` fetch of the alert's own shell
+        document, where `kibana.alert.group.id` is read."""
         assert self.rec.calls, "item 1 issued no backend call at all — not even the shell fetch"
         return self.rec.calls[0]
 
@@ -364,14 +335,13 @@ class Res:
 
     @property
     def state(self) -> Any:
-        """The run's one `RunState` (#1235), as `drive()` hands it back (the harness injects it):
-        the only place a driven run's budget and breaker are read."""
+        """The run's `RunState`, as `drive()` hands it back: where a driven run's budget and
+        breaker are read."""
         return self.summary_dict["run_state"]
 
     @property
     def budget(self) -> dict:
-        """The run's budget snapshot, off the run's state (#1235: nothing writes `budget.json`
-        any more, and no process-wide table keyed by the folder holds it)."""
+        """The run's budget snapshot, off the run's state (no `budget.json` is written)."""
         return self.state.budget_snapshot()
 
     @property
@@ -394,7 +364,7 @@ def materialize_alert(root: Path, doc: dict) -> Path:
     than copying a golden."""
     from defender.tests.support.storage import _alert_plant
 
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    # A run folder's name is its canonical UUID run id (#1187).
     run_dir = root / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     _alert_plant.plant_alert(run_dir, doc)
@@ -402,13 +372,9 @@ def materialize_alert(root: Path, doc: dict) -> Path:
 
 
 READ_ALERT = "read the alert"
-#: The scripted gather return for item 3. Tracks the contract's own dimensions — a SCOPED
-#: count, an UNSCOPED count, and the entities the lead judged discriminating — all across any
-#: rule. It no longer claims a benign-explained verdict: `kibana.alert.workflow_status` is
-#: `"open"` on every alert this environment emits, so that dimension was struck from
-#: `_correlation_contract` as unanswerable on this grant. It no longer says "on-host"/
-#: "fleet-wide" either: #867 retired that pair, and a double whose wording outlives the
-#: contract's is what makes a delivery marker read as covered while pinning a dead spelling.
+#: The scripted gather return for item 3, in the correlation contract's own dimensions (a scoped
+#: count, an unscoped count, across any rule). Keep its wording in step with the contract: a
+#: stale spelling would let a delivery check pass on a dead term.
 CORRELATION_SUMMARY = (
     "3 alerts scoped to user.name dev.dana, 11 unscoped, across any rule."
 )
@@ -432,8 +398,8 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     tenant: Any = None,
     agent: Path | None = None,
 ) -> Res:
-    """Drive a REAL `run_investigation` over a synthesized alert. `agent` runs it as a tenant
-    whose agent half is that tree (`drive(agent=...)`, #1108 P4: the catalog is the tenant's)."""
+    """Drive a real `run_investigation` over a synthesized alert; `agent` runs it as a tenant
+    whose agent half (and so catalog) is that tree."""
     doc = alert if alert is not None else alert_doc()
     run_dir = materialize_alert(root, doc)
     rec = VerbRecorder()

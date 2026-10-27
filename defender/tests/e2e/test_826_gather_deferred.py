@@ -61,10 +61,8 @@ class _Res:
 
     @property
     def own_rows(self) -> list[dict]:
-        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
-        the rows THIS test's own dispatched lead wrote, not lead-0's unconditional
-        pre-ORIENT resolution against `GOLDEN_AB3`'s alert (mirrors
-        `test_query_tool_611._Run.own_rows`)."""
+        """`.rows` without #808's harness-authored leads (`l-000`/`l-00c`), which run against
+        every alert."""
         from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
@@ -91,8 +89,7 @@ def _dispatch(lead: str, system: str = "elastic") -> tuple[str, dict]:
 
 def _run(root: Path, *, verbs, turns: list[Turn], run_id: str, tmp_path: Path,
          lead: str = LEAD) -> _Res:
-    """A real run WITH a session store — the seam item 1 is about. `store_factory` is the
-    production `run_investigation(store_factory=…)` injection point (#705)."""
+    """A real run with a session store, injected through `run_investigation(store_factory=…)`."""
     run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[_dispatch(lead)]), Turn(text="Investigation complete."),
@@ -104,11 +101,11 @@ def _run(root: Path, *, verbs, turns: list[Turn], run_id: str, tmp_path: Path,
     return _Res(run_dir, main, gather, stores)
 
 
-# ITEM 1 — no gather-side session terminator stamp.
+# Every gather terminator stamps its session's reason
 
 def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
-    """THE DEFECT (item 1): `_run_gather`'s terminal arms left the gather session ending on an
-    unanswered tool call with `truncated_by` UNSET."""
+    """Each terminal arm of `_run_gather` stamps its own `truncated_by`; a clean end stamps
+    nothing."""
     stamped: list[tuple[str, str]] = []
 
     def _deps(run_dir: Path):  # noqa: ANN202
@@ -222,9 +219,7 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
 
 
 class _UnstampableStore:
-    """A real store handle whose ONE broken operation is `set_truncated_by` — everything else
-    is the real object, so the run this drives is a real run against a real SQLite file that
-    happens to refuse the terminator write."""
+    """A real store handle whose one broken operation is `set_truncated_by`."""
 
     def __init__(self, real):
         self._real = real
@@ -299,7 +294,7 @@ def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
     assert session_store.TRUNCATED_BY_DEAD_END in stamped
 
 
-# ITEM 3 — the failing repeat, live.
+# A failing repeat
 
 def test_a_lead_repeating_a_failing_request_is_told_so_before_it_is_stopped(tmp_path):
     rec = VerbRecorder()
@@ -319,20 +314,17 @@ def test_a_lead_repeating_a_failing_request_is_told_so_before_it_is_stopped(tmp_
     assert "parse_exception" in second, "the notice displaced the error it was prepended to"
 
 
-# ITEM 4 — the argument-schema repeat class, live.
+# Repeats the argument schema turns back
 
 def _bad_args(params: dict) -> Turn:
-    """A tool call the pydantic ARG SCHEMA turns back, so the row is written by
-    `wrap_tool_validate` from the RAW pre-validation arguments (P-a's `extra_argument`
-    shape)."""
+    """A tool call the pydantic arg schema turns back (an extra argument), so the row is written
+    by `wrap_tool_validate` from the raw pre-validation arguments."""
     return Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "query", "params": params, "bogus_extra_arg": "x",
     })])
 
 
 def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_path):
-    """THE DEFECT (item 4): a repeat loop the argument schema turned back reached no guard at
-    all."""
     rec = VerbRecorder()
     res = _run(
         tmp_path / "run", tmp_path=tmp_path, run_id="d826-schema",
@@ -361,8 +353,7 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     assert PARAMS["native_query"] not in header, \
         "model-authored params crossed into main's context on a refusal path"
 
-    # The session terminator (item 1) covers this new stop too — a fourth terminator with the
-    # same gap is exactly what item 1 warned the next one would be.
+    # The session terminator covers this stop too.
     assert dict(sql(res.stores[-1], "SELECT agent_id, truncated_by FROM session"))[
         f"gather:{LEAD}"] == session_store.TRUNCATED_BY_DEAD_END
 

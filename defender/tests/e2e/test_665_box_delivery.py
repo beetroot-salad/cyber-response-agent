@@ -15,9 +15,8 @@ SALT = "s665"
 
 
 def _curator_for_run(tmp_path, *, box):
-    """Build a curator's deps through the REAL production wrapper CuratorDeps.for_run with
-    the future required `box=`. TypeError at HEAD. Sets up a real worktree defender tree so
-    the wrapped bind() actually resolves (the future green path)."""
+    """Curator deps through the real `CuratorDeps.for_run`, over a real worktree defender tree
+    so the wrapped `bind()` resolves."""
     from defender.learning.author.curator_engine import (
         SHIPPED_LESSON_CORPORA,
         CuratorDeps,

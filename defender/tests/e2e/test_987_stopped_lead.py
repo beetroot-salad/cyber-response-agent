@@ -154,9 +154,9 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     root: Path, responses: list[ModelResponse], *, ceiling: int = 6,
     extra=(), session_id: str | None = None, stamps: list | None = None, verbs=None,
 ) -> _Lead:
-    """Drive the REAL `_run_gather` over an agent the PRODUCTION factory built. Only the
-    provider is replaced: `build_gather_agent`'s own `make_model` seam hands back a
-    `FunctionModel`; the tools, capabilities, instructions and retry policy are the shipped"""
+    """Drive the real `_run_gather` over an agent the production factory built. Only the
+    provider is replaced (`build_gather_agent`'s `make_model` seam hands back a `FunctionModel`);
+    the tools, capabilities, instructions and retry policy are the shipped ones."""
     run_dir = materialize(root, GOLDEN_AB3)
     from defender.investigation.run_state import RunState
 

@@ -1,5 +1,4 @@
-"""Shared fakes for the #665 box-delivery spec — NOT a test module (leading underscore
-keeps pytest from collecting it). Imported by the `test_665_*` files."""
+"""Shared docker fakes and box-geography helpers for the box tests (#665 and later)."""
 from __future__ import annotations
 
 import subprocess
@@ -18,11 +17,8 @@ DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
 
 
-# Live-daemon skip convention (mirrors test_540_box_boundary.py): the `[live]`
-# mechanism-confirmation tests carry the marker to write-code-from-spec's first
-# live box run; `-m "not live"` (the gate) never runs them, and under
-# docker-outside-of-Docker they skip because bind SOURCES resolve on the daemon
-# host, invisible to this process.
+# Live-box skip, mirroring test_540: no daemon, or docker-outside-of-Docker (bind sources resolve
+# on the daemon host, invisible here). `live`-marked users are deselected in CI (`-m "not live"`).
 _NO_DAEMON = not daemon_reachable()
 _DOOD = (not _NO_DAEMON) and is_dood()
 
@@ -33,18 +29,16 @@ requires_live_box = pytest.mark.skipif(
 )
 
 
-# The declarative docker fault-injection fake — the tier-2 seam of the
-# fault-injection hierarchy (the daemon is too expensive/nondeterministic to
-# drive host-side, so its faults are data whose content cites the ledger claim
-# that observed them on a real box). box.py's REAL argv build + framing run
-# unchanged, so a geography demand asserts on `create_argv`.
+# The declarative docker fake: daemon faults are data citing the ledger claim that observed
+# them on a real box. box.py's real argv build and framing run unchanged, so geography tests
+# assert on `create_argv`.
 def _cp(rc: int, out: str = "", err: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=["docker"], returncode=rc, stdout=out, stderr=err)
 
 
 def framed(rc: int, out: bytes = b"", err: bytes = b"") -> box_mod.RawExec:
-    """A RawExec whose stdout is a WELL-FORMED response frame (the in-box entrypoint ran and
-    reported the program's own rc/out/err) — the REAL framing codec still decodes it."""
+    """A RawExec carrying a well-formed response frame, as if the in-box entrypoint ran; the
+    real framing codec decodes it."""
     return box_mod.RawExec(
         rc=rc, stdout=box_mod.encode_response(box_mod.BoxResult(rc=rc, out=out, err=err)),
         stderr=b"",
@@ -94,21 +88,14 @@ class RecordingDocker:
         exec_replies: list | None = None, existing_token: str | None = None,
         status: str | None = None,
     ):
-        # What `docker inspect -f {{.State.Status}}` answers — docker's own word, or `None`
-        # for a name holding NOTHING (rc 1, as a real daemon answers). One knob, because there
-        # is one fact: a `running: bool` beside it could not spell `created`, which is the
-        # state that matters (#955 F-49) — where a concurrent lane's box sits for the whole
-        # window two lanes can collide on one name, indistinguishable from our own box between
-        # create and start — and two knobs for one fact means a test can state both and only
-        # one of them is read.
+        # What `docker inspect -f {{.State.Status}}` answers: docker's own word, or None for a
+        # free name (rc 1, as a real daemon answers). A word, not a bool, so it can say `created`.
         self.status = status
-        # What a `docker inspect` of the START-TOKEN LABEL finds under this name (#884 F-29's
-        # ownership check). Three states, and the middle one is the whole point:
-        #   None     no such container — the healthy path, and every create that left nothing
-        #   "self"   the container THIS start asked for, carrying the token it stamped: the
-        #            create-then-start leak, the only case a fault arm may reap
-        #   <other>  another lane's box holding the same name: a create that lost a NAME
-        #            RACE, which must survive whatever state it is in
+        # The start-token label `docker inspect` finds under this name (the ownership check):
+        #   None     no such container
+        #   "self"   the container THIS start created (create-then-start leak): the only one a
+        #            fault arm may reap
+        #   <other>  another lane's box that won a name race: it must survive
         self.existing_token = existing_token
         self.create = create            # DockerFault on `docker run` (create)
         self.sentinel = sentinel        # DockerFault on the sentinel exec readback
@@ -118,15 +105,12 @@ class RecordingDocker:
         self.create_argv: list[str] | None = None
 
     def _inspect(self, argv: list[str]) -> subprocess.CompletedProcess:
-        """`docker inspect`, which box.py asks THREE different questions through: the
-        container's STATE (`_container_status`, `-f {{.State.Status}}`), its start-token LABEL
-        (`_start_token`, `-f {{index .Config.Labels …}}`), and this process's own MOUNT TABLE
-        (`_own_container_mounts`, `--format {{range .Mounts}}…`). The format string is what
-        separates them, exactly as it does on a real daemon — and the third asks with
-        `--format`, not `-f`, so a reply keyed on `-f` alone answered it with a state word."""
+        """`docker inspect` answers three questions, told apart by the format string as on a
+        real daemon: the container's state (`-f {{.State.Status}}`), its start-token label
+        (`-f {{index .Config.Labels …}}`) and this process's mount table (`--format …`)."""
         if "-f" not in argv:
-            # `--format`: the DooD mount table. Empty rather than a state word — this double
-            # models a container NAME, not this process's own bind mounts.
+            # `--format`: the DooD mount table, empty: this double models a container name, not
+            # this process's own bind mounts.
             return _cp(0, "")
         fmt = argv[argv.index("-f") + 1]
         if "Config.Labels" not in fmt:
@@ -137,11 +121,8 @@ class RecordingDocker:
             return _cp(1, "", "No such object\n")
         token = self.existing_token
         if token == "self":
-            # Echo back what THIS start stamped, which is what a real daemon would report for
-            # a container `docker run` created before its task failed. Read off the captured
-            # argv rather than stored, so a token box.py never actually sent cannot make the
-            # ownership check look right. `<no value>` is docker's own text for a missing
-            # label — the fake must not invent a friendlier one.
+            # Echo the token THIS start stamped, read off the captured argv so a token box.py
+            # never sent cannot pass the ownership check. `<no value>` is docker's own text.
             token = self.create_label(box_mod.START_TOKEN_LABEL) or "<no value>"
         return _cp(0, f"{token}\n")
 
@@ -160,11 +141,9 @@ class RecordingDocker:
         return run_box_python_command(command)
 
     def _through_binds(self, inside: Path) -> Path:
-        """Where an in-box path lives on the host: through the captured bind table (nested
-        mounts winning), as a real daemon resolves it; unchanged when no bind covers it (or
-        before any create). A double modelling a bind mount, not a policy: since #1255 the box
-        mounts each tree at a fixed model path (`/runs/current`, …), so an in-box path is no
-        longer the host path it reads."""
+        """Where an in-box path lives on the host, through the captured bind table (nested
+        mounts winning); unchanged when no bind covers it. The box mounts each tree at a fixed
+        model path (`/runs/current`, …), so an in-box path is not the host path."""
         if self.create_argv is None:
             return inside
         covering = [m for m in self.mounts()
@@ -178,14 +157,8 @@ class RecordingDocker:
         if argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id"):
             return self._read_marker(argv)
         if "python3" in argv and "-c" in argv:
-            # #771 M2's alias-ban probe (`docker exec -w <cwd> <name> python3 -c <script>`).
-            # A caller that cares about the probe's own verdict uses `AliasProbeDocker`
-            # (`_spec771.py`), which intercepts this shape before it ever reaches here — so
-            # a bare `RecordingDocker` (the pre-#771 fake every test_540/665/747/box_dood
-            # case is built on) has no reason to see this branch except the probe M2 added
-            # to EVERY box start. Defaulting to the healthy verdict keeps those cases
-            # observing what they always observed (mount/env/argv geography) without
-            # needing to know the probe exists.
+            # The #771 alias-ban probe runs at every box start. Tests that care about its
+            # verdict use `_spec771.AliasProbeDocker`; everyone else gets the healthy verdict.
             if self._exec_replies:
                 return self._exec_replies.pop(0)
             return _cp(0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
@@ -260,11 +233,8 @@ class RecordingDocker:
         return flag in self._argv()
 
     def create_label(self, key: str) -> str | None:
-        """The value `docker run --label <key>=…` carried on the captured create argv.
-
-        Read straight off the argv rather than stored, so the fake cannot answer an ownership
-        `inspect` with a token box.py never actually stamped — which is the one way this fake
-        could make the #884 F-29 reap look correct while the label was going astray."""
+        """The value `docker run --label <key>=…` carried on the captured create argv (read off
+        the argv, never stored, so the ownership check sees only what box.py stamped)."""
         for i, tok in enumerate(self._argv()):
             if tok == "--label" and i + 1 < len(self._argv()):
                 k, _, v = self._argv()[i + 1].partition("=")
@@ -277,8 +247,7 @@ class RecordingDocker:
 
 
 def reaped_after_create(calls) -> bool:
-    """Whether the container CREATE ASKED FOR was reaped AFTER create — the only form of this
-    assertion that says anything."""
+    """Whether the container the create asked for was reaped after the create."""
     create = next(
         (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
     )
@@ -288,12 +257,10 @@ def reaped_after_create(calls) -> bool:
     return ["docker", "rm", "-f", name] in calls[create + 1:]
 
 
-# The future box.py geography seam (O8/M2: callers own the geography, box.py
-# renders + validates the boundary). Referenced lazily so HEAD still collects.
+# The box.py geography seam: callers compose the geography, box.py renders and validates it.
 def Mount(source: Path, target: Path, writable: bool = False, kind: str | None = None):
-    """box.Mount(source, target, writable[, kind]) — future symbol; AttributeError at HEAD.
-    `kind` (#1108 D7 amended: `code`, `agent` or `data`) is what a read-only mount declares;
-    it is passed only when given, so a writable mount names none."""
+    """`box.Mount`. `kind` (`code`, `agent` or `data`: what a read-only mount holds) is passed
+    only when given, so a writable mount names none."""
     kw: dict[str, Any] = dict(source=source, target=target, writable=writable)
     if kind is not None:
         kw["kind"] = kind
@@ -301,9 +268,8 @@ def Mount(source: Path, target: Path, writable: bool = False, kind: str | None =
 
 
 def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None, defender_dir=None):
-    """box.BoxRequest(name, mounts, workdir, env, spec[, defender_dir]) — future symbol; the
-    caller-owned geography box.py renders. AttributeError/TypeError at HEAD (the boundary is
-    unbuilt). `defender_dir` (#1108 P3) is the explicit code root, passed only when given."""
+    """`box.BoxRequest`, the caller-owned geography box.py renders. `spec` and `defender_dir`
+    (the explicit code root) are passed only when given."""
     kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env))
     if spec is not None:
         kw["spec"] = spec
@@ -313,32 +279,27 @@ def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None, defender_dir
 
 
 def start_box_request(request, *, docker):
-    """Drive the future box.py render/create over a caller-composed BoxRequest.
-    box.start_box(request, docker=…) — signature change (M2); TypeError at HEAD."""
+    """`box.start_box(request, docker=…)` over a caller-composed `BoxRequest`."""
     return box_mod.start_box(request, docker=docker)  # type: ignore[call-arg]
 
 
-# Composition-frame seams: the run cycle and `_run_worktree_batch` gain injectable
-# `start_box`/`stop_box` (matching box.py's own names) so a test observes the
-# box's creation geography, its delivery to the roles, and its teardown order
-# WITHOUT a live daemon. These are part of the contract (the design gives box
-# creation no observation seam — pin it). TypeError at HEAD (no such kwarg).
+# Lifecycle seams: callers take injectable `start_box`/`stop_box` (box.py's own names), so a
+# test observes creation geography, delivery to the roles and teardown order without a daemon.
 @dataclass
 class FakeBox:
     """A stand-in BoxExecutor a creation seam produced — identity is what tests assert."""
 
     name: str = "box-665"
     request: Any = None
-    #: `False`: no real container stands behind it, so the drain's handle on it (#1195
-    #: `BoxRuns`) is the opt-out's: its post-create stop and each run's start and stop ask no
-    #: daemon about it. `True` would make that handle a `BoxFault`: it carries no docker.
+    #: False: no container stands behind it, so the drain's `BoxRuns` handle treats it as the
+    #: opt-out and asks no daemon (True would fault: it carries no docker).
     sandboxed: bool = False
 
 
 class BoxLifecycleRecorder:
     """Injectable `start_box`/`stop_box` pair. `start_box(request)` records the composed
     geography and returns a FakeBox; `stop_box(box)` records teardown order (and can fault
-    to model a failed teardown — F13/dec8). Records nothing about policy."""
+    to model a failed teardown). Records nothing about policy."""
 
     def __init__(self, *, stop_fault: Exception | None = None, events: list | None = None):
         self.requests: list = []
@@ -362,10 +323,8 @@ class BoxLifecycleRecorder:
             raise self._stop_fault
 
     def scrub(self, path, *_a, **_kw) -> None:
-        """Injectable `scrub=` seam (the S7 tree scan) — records its ORDER in the shared
-        event log relative to stop_box (rw bind released) and finish_batch (commit+push).
-        Records only order; the scan's own tainting-entry behavior is pinned separately by
-        box_mod.scrub over a real tree. TypeError at HEAD (no such kwarg on _run_worktree_batch)."""
+        """Injectable `scrub=` seam: records only the scan's order in the shared event log (the
+        scan itself is pinned over a real tree)."""
         self.events.append(f"scrub:{path}")
         self.scrubbed.append(path)
 
@@ -379,11 +338,9 @@ class BoxLifecycleRecorder:
 # run_dir / learning setup for driving the run cycle.
 def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
                  gather_raw: bool = True) -> Path:
-    """A finished defender run dir the run cycle accepted: alert.json + report.md (its
-    disposition drives which direction legs dispatch) + investigation.md + gather_raw/.
-    `gather_raw=False` omits the evidence dir (the legitimately-absent conditional-mount
-    case, decision 9). Present evidence holds one made-up result for read-only read-back;
-    the explicit present-empty test removes it."""
+    """A finished run dir: alert, report.md (its disposition picks which legs dispatch),
+    investigation.md and gather_raw/ holding one result for read-back. `gather_raw=False`
+    omits the evidence dir (a legitimately absent conditional mount)."""
     run_dir = tmp_path / "inv-665"
     run_dir.mkdir(parents=True)
     if gather_raw:

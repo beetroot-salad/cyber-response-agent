@@ -46,8 +46,7 @@ FENCES = 7
 
 
 def branch_mod():
-    """`defender.investigation.branch` — PR 1's new module, imported per test so a missing target is
-    one failure per test rather than a collection error for the file."""
+    """`defender.investigation.branch`, imported per call."""
     return importlib.import_module("defender.investigation.branch")
 
 
@@ -75,7 +74,7 @@ def _source_run(tmp_path, sink, *, docs):
 
 def _spec(source, store):
     """A `BranchSpec` fixed at the source run's last tool-calling MAIN response — its final
-    `append_block` CALL (D1: the tip itself is a text-only response, not a branch point).
+    `append_block` CALL (the tip itself is a text-only response, not a branch point).
     Returns the spec and the main path through that response (the arm's inherited prefix)."""
     ss = store_mod()
     path_ids = ss.path_row_ids(store, ss.main_session_id(store))
@@ -110,7 +109,7 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
     spec, prefix_ids = _spec(source, store)
 
     sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
-    # Pathless (slice B moves the model's view of paths; this file is not about it).
+    # Pathless: this file is not about the model's view of paths.
     sibling = ReplayFn([S.echo("resumed"), Turn(text="Resumed and stopping.")])
 
     summary = _resume(spec, sibling_dir, main=sibling)
@@ -138,8 +137,8 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
 
 
 def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
-    # provenance: `_opening_prompt`'s own docstring names the problem it cannot solve alone;
-    # `ForkSnapshot.restore_files` is the other half.
+    # `_opening_prompt` cannot re-land the document alone; `ForkSnapshot.restore_files` does
+    # the rest.
     sink: list = []
     source = _source_run(tmp_path, sink, docs=NO_DOCS)
     spec, _prefix_ids = _spec(source, sink[0])
@@ -219,7 +218,7 @@ def test_a_resumed_run_does_not_orient_again(tmp_path):
         "resumed run must not put a second one in front of the history that holds the first")
 
 
-# --- #1108 P4 OD21 (owner ruling 2026-10-23): a resume never hands the box the source's page --
+# --- A resume never hands the box the source's run page ---
 
 
 def _bash_answers(recorder) -> list[str]:
@@ -245,20 +244,10 @@ def _files_holding(root, text: str) -> list[str]:
 
 
 def test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason(tmp_path):
-    """#1108 P4 OD21/U12 consequence (owner ruling 2026-10-23): the source run's saved
-    `runtime.html` is an operator page written after its box stopped and may show the raw
-    knowledge reason. A sibling resumed over that source re-binds the source run dir (its
-    folder is restored from it), and its box must see neither that page nor the reason in
-    anything mounted to it.
-
-    Two channels, each with its positive control:
-    - INSIDE the sibling's box, MAIN's own `bash` (`cat` is the one opener MAIN's lane allows):
-      `/runs/current/runtime.html` does not answer with the page, while
-      `/runs/current/investigation.md` answers with the document inherited from the source.
-    - Host-side, the box's run-folder bind source (the sibling's run dir, its alert input
-      directory included) holds the reason in no file, while the same walk over the source run
-      dir finds it in the planted page (so the page was there to be carried).
-    The agent half the box mounts is the tenant's export, not derived from the source run."""
+    """The source's saved `runtime.html` (an operator page that may show the raw knowledge
+    reason) never reaches a resumed sibling's box: MAIN's in-box `cat` of it does not answer with
+    the page (while the inherited `investigation.md` reads back), and no file in the sibling's
+    run folder holds the reason (while the source's does)."""
     import uuid
 
     sink: list = []

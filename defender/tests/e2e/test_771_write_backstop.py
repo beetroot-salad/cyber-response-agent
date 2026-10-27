@@ -46,7 +46,7 @@ from defender.records import SessionPaths  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-# demand #0 and its leave-in-place doctrine
+# A refused write leaves the target intact and the alias in place
 def test_refused_write_raises_oserror_and_leaves_the_outside_target_intact(tmp_path):
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
@@ -69,8 +69,6 @@ def test_refused_write_raises_oserror_and_leaves_the_outside_target_intact(tmp_p
 
 
 def test_a_refused_write_leaves_the_planted_alias_in_place(tmp_path):
-    """refused_write_leaves_the_planted_entry — a refused write does NOT remove the entry it
-    refused: the symlink is still a symlink, still pointing where it pointed, after the raise."""
     run = run_tree(tmp_path)
     target = outside(tmp_path)
     planted = plant_symlink(run / "report.md", target)
@@ -82,7 +80,7 @@ def test_a_refused_write_leaves_the_planted_alias_in_place(tmp_path):
     assert Path(os.readlink(planted)) == target, "the refusal rewrote the alias"
 
 
-# O1's census-keyed negative and its positive control
+# The census-keyed negative and its positive control
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, tmp_path):
     run = run_tree(tmp_path)
@@ -93,9 +91,7 @@ def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, t
     before = snapshot_outside(elsewhere)
 
     plant_symlink(run / writer.artifact, target)
-    outcome = drive_writer(writer, run)   # a raising posture is one of the four F1 preserved;
-    # the sentinel row's raise is a BoxFault rather than an OSError, so the swallow is by
-    # BaseException — a narrower catch errors out on exactly the fatal-posture row.
+    outcome = drive_writer(writer, run)   # raising is a preserved posture, not a failure
 
     assert posture_class(outcome) != "raised:AttributeError", (
         f"{writer.id}'s arm measured a MISSING SYMBOL rather than a refused write — nothing "
@@ -109,8 +105,7 @@ def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, t
 
 
 def test_each_writer_lands_its_artifact_when_nothing_is_planted(tmp_path):
-    """writer_lands_artifact_unlinked — with NOTHING planted, every census writer still lands
-    real bytes at its own artifact path inside the tree."""
+    """Positive control: unplanted, every census writer lands real bytes at its artifact."""
     landed: dict[str, int] = {}
     for writer in CENSUS:
         d = tmp_path / writer.id
@@ -151,7 +146,7 @@ def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
     )
 
 
-# the directory-component half (B8/B10, five sites not two)
+# The directory-component half
 def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
@@ -180,17 +175,12 @@ def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
         "the primitive created through the planted component and landed outside the tree"
     )
 
-    # #1108 P4 (OD12 class i): the fifth site here was the drain lane's fault-path corpus
-    # restore into a checkout worktree (`drain._restore_corpus`), a mechanism P4 removes — a
-    # curator now writes a git-free batch draft and a failed claim is reset by `Batch.reset`.
-    # Its planted-COMPONENT case moved with it:
-    # `tests/tenancy/tenant_1108_delivery/test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`
-    # (a lane folder replaced by a directory symlink, nothing written through it).
+    # The drain lane's planted-component case (a failed claim's reset) is pinned in
+    # `tests/tenancy/tenant_1108_delivery/test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`.
 
 
 def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
-    """dir_component_write_lands_when_unplanted — with no component planted, the same writers
-    create their nested directories inside the tree and land their payloads there."""
+    """Positive control for the component negative: unplanted, the same writers land in the tree."""
     run = run_tree(tmp_path)
     guarded_mkdir(run / "gather_raw" / "l-003" / "deep", base=run)
     assert (run / "gather_raw" / "l-003" / "deep").is_dir()
@@ -244,10 +234,8 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
 
-# #1279 A5 — retired in rev 5: the run folder's exclusive create is `_io.hold_new(..., exclusive=True)`,
-# which takes one name; `make_run_dir`'s refusals are pinned in test_1105_run_setup.py (O8)
+# The run folder's exclusive create (`make_run_dir`) is pinned in test_1105_run_setup.py.
 def test_the_default_mkdir_still_accepts_an_existing_final_name(tmp_path):
-    """default_mkdir_is_idempotent — an existing final directory is accepted."""
     run = run_tree(tmp_path)
     (run / "gather_raw" / "l-023").mkdir()
     (run / "gather_raw" / "l-023" / "kept.txt").write_text("kept\n", encoding="utf-8")
@@ -257,10 +245,9 @@ def test_the_default_mkdir_still_accepts_an_existing_final_name(tmp_path):
     assert (run / "gather_raw" / "l-023" / "kept.txt").read_text(encoding="utf-8") == "kept\n"
 
 
-# §7 D1 — the staged name, and the collision class it dissolves
+# The staged name
 def test_a_replacing_write_stages_under_an_unpredictable_name(tmp_path):
-    """staged_name_is_unpredictable — the replacing write stages its payload under a name that is
-    never `<artifact>.tmp` and never repeats between two writes to the SAME artifact."""
+    """The staged name is never `<artifact>.tmp` and never repeats across writes to one artifact."""
     artifact = run_tree(tmp_path) / "budget.json"
     names = {str(_io.stage_name(artifact)) for _ in range(32)}  # type: ignore[attr-defined]
 
@@ -310,7 +297,7 @@ def test_orphaned_staged_files_are_swept_through_the_same_primitive(tmp_path):
     assert RunPaths(run).alert.is_file(), "the sweep removed a real artifact"
 
 
-# the four postures F1 preserved, and §7 D3's exemption
+# Each call site keeps its failure posture
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(writer, tmp_path):
     ordinary_dir = tmp_path / f"{writer.id}-ordinary"
@@ -345,7 +332,7 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
     assert len(POSTURES) == 4, "the X5 posture record moved; re-read the ledger before editing"
 
 
-# the locked idiom, the seam, the lint, and the callers outside every box
+# The locked idiom and the primitive's modes
 def test_locked_json_open_fails_before_the_lock_is_acquired(tmp_path):
     run = run_tree(tmp_path)
     target = outside(tmp_path)
@@ -461,12 +448,8 @@ def test_the_drain_worktree_writers_meet_a_planted_alias_the_same_way(tmp_path):
     target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
     before = snapshot_outside(elsewhere)
 
-    # 1. #1108 P4 (OD12 class i): the lane's own fault-path corpus restore
-    # (`drain._restore_corpus`) is a mechanism P4 removes; its successor, the claim reset, is
-    # pinned never to write through a planted leaf alias by
-    # `tests/tenancy/tenant_1108_delivery/test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`.
-
-    # 2. the primitive itself, on this root's paths
+    # The lane's own claim reset is pinned against a planted leaf alias in
+    # `tests/tenancy/tenant_1108_delivery/test_changes.py`; here, the primitive on this root's paths.
     plant_symlink(corpus / "lesson-b.md", target)
     with pytest.raises(OSError):  # noqa: PT011 — the idiom decides ELOOP vs EEXIST
         write_guarded(corpus / "lesson-b.md", "# authored\n")
@@ -532,8 +515,7 @@ def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, dr
     ids=[f"{t}-{n}" for t, n, _s, _d in LANDING_ARMS],
 )
 def test_the_gated_model_write_lands_when_nothing_is_planted(tool, name, seed, drive, tmp_path):
-    """gated_model_write_lands_when_nothing_is_planted — with no alias planted, each gated write
-    tool still writes each allowlisted artifact and reports it."""
+    """Positive control: unplanted, each gated tool writes its allowlisted artifact and reports it."""
     run = run_tree(tmp_path)
     deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     artifact = run / name

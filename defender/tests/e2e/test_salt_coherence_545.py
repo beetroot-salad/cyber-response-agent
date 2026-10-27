@@ -1,4 +1,4 @@
-"""#545 e2e canary, INVERTED BY #875 — the run's untrusted frames must NOT share one salt."""
+"""#545 canary, inverted by #875: a run's untrusted frames must not share one salt."""
 from __future__ import annotations
 
 import re

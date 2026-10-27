@@ -160,9 +160,8 @@ DONE = Turn(text="Summary: measured the lead.")
 
 def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elastic",
                run_id: str = "q620") -> _Run:
-    """Drive a REAL run: main dispatches one gather lead; the nested gather agent replays the
-    query calls under test against the INJECTED registry. Everything between the two fakes is
-    production code — dispatch, the query tool, its validator, the capture capability, the row."""
+    """Drive a real run: main dispatches one gather lead whose nested agent replays `turns`
+    against the injected registry; everything between the two fakes is production code."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -534,10 +533,9 @@ def _git(cwd: Path, *args: str) -> None:
 
 
 def _seed_lane_no_execution_md(tmp_path: Path):
-    """#1108 P4 (O7, OD12 class ii): the lead lane's batch draft of a tenant whose host-state
-    system has a SKILL.md but NO execution.md — the 4-of-7 'no execution.md' dead-end member —
-    over a product checkout holding the host-state adapter (adapters stay in the product,
-    #1172)."""
+    """The lead lane's batch draft of a tenant whose host-state system has a SKILL.md but no
+    execution.md, over a product checkout holding the host-state adapter (adapters stay in the
+    product, #1172)."""
     from defender.tests.support.learning.curation import _curator1134 as C
     from defender.tests.support.runtime.engine._declared869 import seed_product
 
@@ -548,8 +546,8 @@ def _seed_lane_no_execution_md(tmp_path: Path):
 
 
 def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, monkeypatch):
-    """The lane runs over the batch draft (ASSUMED SEAM S-H `run_pitfalls(..., batch=)`); the
-    curator is handed the draft root; what landed is read from the batch branch."""
+    """`run_pitfalls(..., batch=)` runs over the batch draft and hands the curator the draft
+    root; what landed is read from the batch branch."""
     from defender.tests.support.learning.curation import _curator1134 as C
 
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
@@ -609,15 +607,11 @@ _ALL_SEVEN = ["elastic", "cmdb", "identity", "ticket", "change-mgmt", "host-stat
 _SPELLING_SPLIT = ["change-mgmt", "host-state", "threat-intel"]
 
 
-#: #1108 P4 flow 6: connect stages the tenant half (system skill, seed queries) in a host
-#: directory, and `validate_scaffold` checks THAT staged half — the product tree holds no
-#: system skill and no catalog (O1); only the adapter stays in the product (#1172).
-#: ASSUMED SEAM (owner ruling 2026-10-23, one spelling with `tenant_1108_p4/test_connect_propose.py`):
-#: `validate_scaffold.py <system> --tenant <T> --staged <dir>`, the staged directory laid out as a
-#: tenant `agent/` is (`skills/<system>/{SKILL.md,execution.md}`,
-#: `skills/gather/queries/<system>/*.md`). A scaffold's staged half sits beside its code tree;
-#: the adapter checks still read the code tree `DEFENDER_DIR` names. `<T>` is a set-up tenant
-#: under a data root of the scaffold's own (its config check is advisory, as before).
+#: `validate_scaffold.py <system> --tenant <T> --staged <dir>` checks the tenant half connect
+#: stages, laid out like a tenant `agent/` (`skills/<system>/{SKILL.md,execution.md}`,
+#: `skills/gather/queries/<system>/*.md`); its adapter checks read the code tree `DEFENDER_DIR`
+#: names (only adapters stay in the product, #1172). A scaffold's staged half sits beside its
+#: code tree; `<T>` is set up under a data root of its own (the config check is advisory).
 def _staged_agent(defender_dir: Path) -> Path:
     return defender_dir.with_name(defender_dir.name + "-agent")
 
@@ -645,8 +639,8 @@ def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER,
 
 
 def _staged_skill(agent: Path, system: str) -> None:
-    """A made-up system skill for `system` in a staged tenant half (decision 4: no lab
-    content): a `SKILL.md` named `defender-<system>` and an `execution.md`."""
+    """A made-up system skill (no lab content) for `system` in a staged tenant half: a
+    `SKILL.md` named `defender-<system>` and an `execution.md`."""
     d = agent / "skills" / system
     d.mkdir(parents=True, exist_ok=True)
     (d / "SKILL.md").write_text(
@@ -658,8 +652,7 @@ def _staged_skill(agent: Path, system: str) -> None:
 
 def test_validate_scaffold_normalizes_the_spelling_split(tmp_path):
     """The hyphen/underscore split (`change-mgmt` vs `change_mgmt_adapter.py`) never sinks a
-    system: the checkout's real adapters, each system's skill read from the STAGED tenant half
-    (#1108 P4 flow 6, O1) — the product tree holds none of these skills after P4."""
+    system: the checkout's real adapters, each skill read from the staged tenant half."""
     staged = tmp_path / "staged-agent"
     for system in _SPELLING_SPLIT:
         _staged_skill(staged, system)
@@ -673,8 +666,8 @@ def _scaffold_cmdb_tree(root: Path, template_body: str, *, verb: str = "get-host
                         params: tuple[str, ...] = ("host",)) -> Path:
     """A minimal defender tree that otherwise passes the registry probe: the REAL cmdb adapter +
     shared modules; and beside it its staged tenant half (`_staged_agent(root)`): the FIXTURE
-    tenant's cmdb skill + execution.md (#1108 P4, decision 4) plus one crafted cmdb query
-    template. Returns the defender tree."""
+    tenant's cmdb skill + execution.md plus one crafted cmdb query template. Returns the
+    defender tree."""
     (root / "integrations").mkdir(parents=True)
     for f in ("cmdb_adapter.py", "_stub_transport.py"):
         src = DEFENDER / "integrations" / f
@@ -732,7 +725,7 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
     )
 
 
-#: The adapter's settings check, by the name each adapter declares it under (K1).
+#: The adapter's settings check, by the name each adapter declares it under.
 _CHECK = "check_settings"
 _STUB_CHECK = f"\n\ndef {_CHECK}(tenant):\n    return None\n"
 
@@ -826,8 +819,9 @@ def _rename_check(source: str, new: str) -> str:
 
 
 def _with_settings_check(source: str, arm: str) -> str:
-    """The copied cmdb adapter as each arm needs it — so an arm that removes the check removes it
-    for a reader that imports the module and for one that reads its AST alike:"""
+    """The copied cmdb adapter as `arm` needs it. Removal strips every top-level binding (read
+    from the AST), so the check is gone both for a reader that imports the module and for one
+    that reads its AST."""
     declared = source if _binds_check(source) else source + _STUB_CHECK
     if arm == "declared":
         return declared
@@ -855,7 +849,9 @@ def _settings_check_tree(tmp_path: Path, name: str, arm: str) -> Path:
 
 @pytest.mark.parametrize("arm", ["none", "not-callable", "rebound"])
 def test_validate_scaffold_fails_an_adapter_without_a_callable_settings_check(tmp_path, arm):
-    """#1256 r4 "one maker for a down cause": the one function that judges an adapter is the start check's, the call-time escape's and the connect scaffold validator's, so the validator FAILS an adapter that declares no `check_settings` (K1: each adapter declares one) — and one whose `check_settings` is not callable, including one that declares a `def check_settings` and then rebinds the name to a string (`rebound`: run start, which judges what the module holds, finds no callable check) — with a row naming `check_settings`. Discriminating control: the SAME tree whose adapter declares a callable check passes, so the FAIL is the check's absence, not an incidental scaffold defect. Red at base, whose validator never looks for the check."""
+    """The validator judges an adapter with the one function run start uses (#1256), so it fails
+    one with no callable `check_settings` (including a `def` later rebound to a string) with a
+    row naming it; the same tree with a callable check is the passing control."""
     def tree(name: str, which: str) -> Path:
         return _settings_check_tree(tmp_path, name, which)
 
@@ -875,7 +871,9 @@ def test_validate_scaffold_fails_an_adapter_without_a_callable_settings_check(tm
 @pytest.mark.parametrize("arm", ["assigned", "imported"])
 def test_validate_scaffold_passes_an_adapter_whose_callable_settings_check_is_not_a_def(
         tmp_path, arm):
-    """#1256 r4 "one maker", the converse: the validator judges an adapter as run start does — by the callable the module holds under `check_settings`, not by how its source spells it — so it PASSES an adapter that binds a callable check by assignment (`assigned`: its own check renamed, then `check_settings = <it>`) or by import (`imported`: the shipped cmdb adapter's own check, K1). A validator with its own rule (a top-level `def check_settings`) FAILs both while run start would find each usable. Discriminating control: the same scaffold with the check removed FAILs naming `check_settings`, so the PASS is the validator reading the check, not ignoring it. Red at base (the control: its validator never looks; and `imported`'s premise: no shipped adapter declares a check yet)."""
+    """The converse: like run start, the validator judges the callable the module holds, not how
+    the source spells it, so a check bound by assignment or by import passes (#1256); the same
+    scaffold with the check removed is the failing control."""
     if arm == "imported":
         shipped = importlib.import_module(_CHECKOUT_CMDB)
         assert callable(getattr(shipped, _CHECK, None)), (
