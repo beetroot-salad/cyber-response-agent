@@ -60,8 +60,7 @@ def test_hazard_values_forge_no_row_and_no_field_boundary() -> None:
     for declared, emitted in declared_and_emitted(control_view):
         assert declared == emitted
     assert len(declared_and_emitted(control_view)) == len(blocks), (
-        "the hazard-free control produced a different block structure, so the two runs are "
-        "not the same shape and the comparison is not about the hazards"
+        "the hazard-free control produced a different block structure"
     )
 
 
@@ -164,7 +163,7 @@ def test_a_foreign_result_is_framed_once_however_many_times_the_gate_is_installe
 def test_a_payload_that_is_both_hazardous_and_clears_the_byte_bar_meets_the_identical_guard() -> None:
     value = toon_rows(corpus()["fx-33"])
     assert delivered_percent(value) <= 85, (
-        "fx-33 no longer clears the DELIVERED-bytes bar (`d3`); this test would pass vacuously"
+        "fx-33 no longer clears the delivered-bytes bar"
     )
     raw = repr(value)
     assert any(h in raw for h in (":", ",", '"', "\\n")), "fx-33 no longer carries an r11 hazard"
@@ -205,9 +204,7 @@ def test_a_substituted_view_and_a_gather_summary_in_one_run_are_each_independent
     )
     assert frame_count(summary) >= 1, "the gather summary carries no frame at all"
     assert _delimiter(view) != _delimiter(summary), (
-        "the substituted view and the gather summary share one frame identity — exactly the "
-        "shared-salt shape #875 retired, because a foreign result closing that shared frame "
-        "could plant a tag the gather subagent later echoes back into MAIN's trusted region"
+        "the substituted view and the gather summary share one frame identity"
     )
 
 

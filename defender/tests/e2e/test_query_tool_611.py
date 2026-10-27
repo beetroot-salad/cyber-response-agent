@@ -276,8 +276,7 @@ def test_a_recursive_args_body_does_not_take_the_rejection_row_with_it():
     with pytest.raises(RecursionError):
         json.loads(body)
     assert query_tool._raw_args(body) == {}, \
-        "a recursive arguments body no longer coarsens to `{}` — if it raises here instead, " \
-        "the rejection handler writes no row and the companion guard stops counting"
+        "a recursive arguments body no longer coarsens to `{}`"
 
 
 def test_empty_verbs_declaration_fails_closed_at_the_tool(tmp_path):
@@ -364,10 +363,6 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     assert fn_a(ctx_a) == {"tree": str(a)}
     assert fn_b(ctx_b) == {"tree": str(b)}, \
         "tree B's verb ran tree A's module — the roster/registry froze the first tree it saw"
-
-
-_PROGRAM_ISH = {"program", "command", "cmd", "argv", "exec", "shell", "script", "binary", "path"}
-_PATH_EXCEPTION = ("host-state", "fim-checksum", "path")
 
 
 def test_query_id_fallback_chain(tmp_path):
@@ -595,9 +590,9 @@ def test_missing_config_is_infra_not_agent_fixable(tmp_path, caplog):
     assert rec.verbs == ["probe"], \
         f"after a call-time ConfigFault elastic must be down: the retry ran the verb: {rec.verbs}"
     assert r.state.breaker_failures("elastic") == 0, \
-        f"a call-time ConfigFault was charged to elastic (#1256 O-5b): {r.breaker}"
+        f"a call-time ConfigFault was charged to elastic: {r.breaker}"
     assert r.state.breaker_snapshot()["total_failures"] == 0, \
-        f"a call-time ConfigFault was charged to the run (#1256 O-5b): {r.breaker}"
+        f"a call-time ConfigFault was charged to the run: {r.breaker}"
     assert len(r.gather.seen) >= 3, f"precondition: the retry was answered ({len(r.gather.seen)} requests)"
     assert r.gather.seen[2].startswith(r.gather.seen[1]), \
         "precondition: a gather request's text extends the one before it (harness shape)"

@@ -404,10 +404,10 @@ def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path)
                                           ("synthetic", "resolved", "r"))),
     )
     assert _resolved_hints(_unresolved_verb) == {}, (
-        "the synthetic verb's annotations resolve after all — the O3 case is not being driven"
+        "the synthetic verb's annotations resolve after all"
     )
     assert validate_params(_unresolved_verb, {"host": 123, "window": 5}) is None, (
-        "the enforcer type-checks the synthetic verb — #900 B2's fail-open premise is gone"
+        "the enforcer now type-checks the synthetic verb, so the fail-open case is gone"
     )
 
     calls = _parse(_ask(registry, "synthetic", tmp_path))

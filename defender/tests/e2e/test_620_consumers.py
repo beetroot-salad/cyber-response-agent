@@ -207,13 +207,13 @@ def _row(*, lead_id: str = LEAD, seq: int = 0, system: str = "elastic", verb: st
     return r
 
 
-def _write_run(run_dir: Path, rows: list[dict], *, goal: str = "measure it") -> Path:
+def _write_run(run_dir: Path, rows: list[dict]) -> Path:
     """Materialize a minimal run dir on disk: the leads sidecar, the queries table, and a
     payload file per row that carries one — so lead_repository.joined / extract read it."""
     gather_raw = run_dir / "gather_raw"
     gather_raw.mkdir(parents=True, exist_ok=True)
     (gather_raw / f"{LEAD}.lead.json").write_text(
-        json.dumps({"goal": goal, "what_to_summarize": []}), encoding="utf-8")
+        json.dumps({"goal": "measure it", "what_to_summarize": []}), encoding="utf-8")
     lines = []
     for r in rows:
         lines.append(json.dumps(r))
@@ -662,8 +662,7 @@ def test_validate_scaffold_normalizes_the_spelling_split(tmp_path):
             f"the hyphen/underscore split still sinks {system}: rc={res.returncode}\n{res.stdout}\n{res.stderr}"
 
 
-def _scaffold_cmdb_tree(root: Path, template_body: str, *, verb: str = "get-host",
-                        params: tuple[str, ...] = ("host",)) -> Path:
+def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
     """A minimal defender tree that otherwise passes the registry probe: the REAL cmdb adapter +
     shared modules; and beside it its staged tenant half (`_staged_agent(root)`): the FIXTURE
     tenant's cmdb skill + execution.md plus one crafted cmdb query template. Returns the
@@ -680,7 +679,7 @@ def _scaffold_cmdb_tree(root: Path, template_body: str, *, verb: str = "get-host
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes((FIXTURE_AGENT / rel).read_bytes())
     _catalog_template(agent / "skills" / "gather" / "queries", "cmdb", "cmdb.tmpl",
-                      "query", template_body, verb=verb, params=params)
+                      "query", template_body, verb="get-host", params=("host",))
     return root
 
 
@@ -711,13 +710,11 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
 
     good = _run_validate_scaffold("cmdb", defender_dir=tree(f"ok-{label}", None))
     assert good.returncode == 0, (
-        "the control tree (get_host dispatchable) did not pass — the FAIL below cannot be "
-        f"attributed to the signature check\nstdout:\n{good.stdout}"
+        f"the control tree (get_host dispatchable) did not pass\nstdout:\n{good.stdout}"
     )
     bad = _run_validate_scaffold("cmdb", defender_dir=tree(label, signature))
     assert bad.returncode != 0, (
-        f"validate_scaffold passed an adapter whose get-host is `{signature}` — the tool "
-        f"cannot dispatch it as fn(ctx, **params)\nstdout:\n{bad.stdout}"
+        f"validate_scaffold passed an undispatchable get-host `{signature}`\nstdout:\n{bad.stdout}"
     )
     assert expected in bad.stdout, (
         f"validate_scaffold FAILED for some other reason than the {label} signature "
@@ -857,12 +854,10 @@ def test_validate_scaffold_fails_an_adapter_without_a_callable_settings_check(tm
 
     good = _run_validate_scaffold("cmdb", defender_dir=tree(f"declared-{arm}", "declared"))
     assert good.returncode == 0, (
-        "the control tree (its adapter declares a callable check_settings) did not pass — the "
-        f"FAIL below cannot be attributed to the check\nstdout:\n{good.stdout}\n{good.stderr}")
+        f"the control tree (a callable check_settings) did not pass\nstdout:\n{good.stdout}\n{good.stderr}")
     bad = _run_validate_scaffold("cmdb", defender_dir=tree(arm, arm))
     assert bad.returncode != 0, (
-        f"validate_scaffold passed an adapter whose check_settings is {arm!r} (#1256 r4: the "
-        f"validator judges an adapter as run start does)\nstdout:\n{bad.stdout}")
+        f"validate_scaffold passed an adapter whose check_settings is {arm!r}\nstdout:\n{bad.stdout}")
     assert "check_settings" in bad.stdout, (
         f"validate_scaffold FAILED for some other reason than the missing check (expected a row "
         f"naming check_settings)\nstdout:\n{bad.stdout}")
@@ -877,19 +872,17 @@ def test_validate_scaffold_passes_an_adapter_whose_callable_settings_check_is_no
     if arm == "imported":
         shipped = importlib.import_module(_CHECKOUT_CMDB)
         assert callable(getattr(shipped, _CHECK, None)), (
-            f"premise (K1): the shipped cmdb adapter declares a callable {_CHECK} for the "
-            f"`imported` arm to bind")
+            f"the shipped cmdb adapter no longer declares a callable {_CHECK}")
     ok = _run_validate_scaffold("cmdb", defender_dir=_settings_check_tree(tmp_path, arm, arm))
     assert ok.returncode == 0, (
-        f"validate_scaffold FAILED an adapter whose check_settings is a callable bound by "
-        f"{'assignment' if arm == 'assigned' else 'import'} — run start, which judges the "
-        f"callable the module holds, finds it usable (#1256 r4: one maker)\nstdout:\n{ok.stdout}"
-        f"\n{ok.stderr}")
+        f"validate_scaffold failed a check_settings bound by "
+        f"{'assignment' if arm == 'assigned' else 'import'}, which run start accepts"
+        f"\nstdout:\n{ok.stdout}\n{ok.stderr}")
     removed = _run_validate_scaffold("cmdb",
                                      defender_dir=_settings_check_tree(tmp_path, "none", "none"))
     assert removed.returncode != 0, (
-        f"control: validate_scaffold passed the same scaffold with no check_settings — the PASS "
-        f"above does not show the validator reads the check\nstdout:\n{removed.stdout}")
+        f"control: validate_scaffold passed the same scaffold with no check_settings"
+        f"\nstdout:\n{removed.stdout}")
     assert _CHECK in removed.stdout, (
         f"control: the scaffold with no check FAILED for another reason\nstdout:\n{removed.stdout}")
 
@@ -898,13 +891,12 @@ def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
     good = _run_validate_scaffold(
         "cmdb", defender_dir=_scaffold_cmdb_tree(tmp_path / "good", "get-host host=${host}"))
     assert good.returncode == 0, (
-        "the control tree (only the declared ${host}) did not pass the registry probe — the "
-        f"FAIL below cannot be attributed to the placeholder check\nstdout:\n{good.stdout}"
+        f"the control tree (only the declared ${{host}}) did not pass the registry probe"
+        f"\nstdout:\n{good.stdout}"
     )
     bad = _run_validate_scaffold(
         "cmdb", defender_dir=_scaffold_cmdb_tree(
             tmp_path / "bad", "get-host host=${host} extra=${not_a_param}"))
     assert bad.returncode != 0, (
-        "validate_scaffold did not FAIL a template whose ${placeholder} (${not_a_param}) is "
-        f"neither a declared param of get-host nor a marked body substitution\nstdout:\n{bad.stdout}"
+        f"validate_scaffold passed the undeclared placeholder ${{not_a_param}}\nstdout:\n{bad.stdout}"
     )

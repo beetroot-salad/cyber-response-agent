@@ -15,6 +15,7 @@ from _box665 import (  # noqa: E402
     Mount,
     make_run_dir,
     requires_live_box,
+    run_cycle_mounts,
     start_box_request,
 )
 
@@ -38,12 +39,7 @@ def _run_cycle_box(tmp_path):
     (run_dir / "gather_raw").mkdir(exist_ok=True)
     req = BoxRequest(
         name="defender-runcycle-live", workdir=REPO_ROOT, env={},
-        mounts=(
-            Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
-            Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
-            Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False,
-                  kind="data"),
-        ),
+        mounts=run_cycle_mounts(run_dir),
     )
     return run_dir, start_box_request(req, docker=box_mod._docker)
 

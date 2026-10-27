@@ -339,17 +339,14 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     assert len(rows) == REPEAT_THRESHOLD, "the rejection rows stopped being written"
     assert [row["exit_code"] for row in rows] == [64] * REPEAT_THRESHOLD
     assert res.gather.calls == REPEAT_THRESHOLD + 1, (
-        "the loop ran past the threshold — it is still bounded only by the retry count "
-        f"(> {REPEAT_THRESHOLD + 1}) — or the lead stopped at the threshold and #987's "
-        f"summary turn did not follow it ({REPEAT_THRESHOLD}). The `+ 1` is that turn: the "
-        "third rejection is answered as a failed tool result that closes the lead's door, "
-        "and the model's next turn is the summary main receives under this stop's own notice."
+        f"the lead did not end at the threshold with one summary turn "
+        f"(> {REPEAT_THRESHOLD + 1}: the loop ran on; {REPEAT_THRESHOLD}: no summary turn)"
     )
     assert rec.calls == [], "a rejected call reached the backend"
 
     trip_row = rows[-1]
     assert "turned back at seq 0" in trip_row["payload_digest"], \
-        "the trip row is byte-shaped like an ordinary schema rejection — no O4 diagnosis"
+        "the trip row reads like an ordinary schema rejection"
     summary = res.summary()
     assert "repeats the one already turned back at seq 0" in summary
     assert "Treat this lead as incomplete" in summary, "the shipped idiom was dropped"

@@ -160,7 +160,6 @@ SOURCE_RUN = fixture_uuid("run-source-001")
 
 def _run_inherited(
     root: Path, *, table: bytes, rows: list[dict], verbs, turns: list[Turn], run_id: str,
-    system: str = "elastic", lead: str = LEAD,
 ) -> _Res:
     """Drive a real branch sibling (`drive(..., resume=spec)`) whose source's queries table is
     `table`. The source (`_branch_947.planted_source`) claims none of its leads, so the sibling's
@@ -191,7 +190,7 @@ def _run_inherited(
     RunPaths(sibling).gather_raw.mkdir(parents=True)
     from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(sibling, RunPaths(source).alert.read_bytes())
-    main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
+    main = ReplayFn([Turn(tool_calls=[_dispatch(LEAD, "elastic")]),
                      Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
     summary = drive(sibling, run_id=run_id, main=main, gather=gather, verbs=verbs, resume=spec)
@@ -318,7 +317,7 @@ def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tupl
 
 
 def _replay_rejections(
-    rows: list[dict], *, threshold: int = REPEAT_THRESHOLD, budget: int = REJECTION_BUDGET,
+    rows: list[dict],
 ) -> list[tuple[str, int, str]]:
     """The same oracle for the companion (rejection) guard: the two guards are one counting rule
     over two disjoint domains, so one replay shape serves both."""
@@ -335,11 +334,11 @@ def _replay_rejections(
         if guarded:
             if rejection_trip(
                 prior, lead, system=row.get("system"), verb=row.get("verb"),
-                params=row.get("params"), threshold=threshold,
+                params=row.get("params"), threshold=REPEAT_THRESHOLD,
                 system_key=row.get("system_key"),
             ) is not None:
                 kind = "repeat"
-            elif rejection_budget_trip(prior, lead, budget=budget) is not None:
+            elif rejection_budget_trip(prior, lead, budget=REJECTION_BUDGET) is not None:
                 kind = "budget"
         prior.append(row)
         if kind is not None:
@@ -348,15 +347,15 @@ def _replay_rejections(
     return trips
 
 
-def named_verbs(rec: VerbRecorder, *, system: str = "elastic", verb: str = "sshd-auth-window") -> FakeVerbs:
+def named_verbs(rec: VerbRecorder) -> FakeVerbs:
     """The happy-path registry under a DISTINCTIVE (system, verb) pair, so an assertion that
     the dead-end message names the repeated request cannot pass on a generic word."""
 
     def probe(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
-        rec.record(verb, ctx, {"native_query": native_query, "limit": limit})
+        rec.record("sshd-auth-window", ctx, {"native_query": native_query, "limit": limit})
         return PAYLOAD
 
-    return FakeVerbs({system: {verb: probe}})
+    return FakeVerbs({"elastic": {"sshd-auth-window": probe}})
 
 
 def two_systems(rec: VerbRecorder) -> FakeVerbs:
@@ -487,7 +486,7 @@ def _bad_args(params: dict) -> Turn:
 
 
 def test_repeat_trip_predicate_seam(tmp_path):
-    assert REPEAT_THRESHOLD == 3, "C11's fitted floor did not ship as the module constant"
+    assert REPEAT_THRESHOLD == 3, "REPEAT_THRESHOLD is not the fitted floor of 3"
 
     key = {"system": "elastic", "verb": "query", "params": {"native_query": "FROM logs"}}
     rows = [_row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"})]
@@ -595,7 +594,7 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
     assert [row["query_id"] for row in denied.own_rows] == [_query_rules.DENIED_QUERY_ID] * 3, \
         "a DENIED call wrote an evidence row, or not its sentinel"
     assert len(denied.denials) == 3, "the denial record is the DENIED path's audit artifact"
-    assert denied.gather.calls == 4, "a denied repeat tripped the guard — it is answered above M2"
+    assert denied.gather.calls == 4, "a denied repeat tripped the repeat guard"
     assert INCOMPLETE_IDIOM not in denied.summary()
 
     down_rec = VerbRecorder()
@@ -626,7 +625,7 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identica
     assert r.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert r.breaker == _BLANK_BREAKER, "the repeat trip recorded infra-breaker state"
     assert not (r.run_dir / "circuit_breaker.json").exists(), \
-        "a breaker file was written into the run dir (#1235: the breaker is in memory only)"
+        "a breaker file was written into the run dir"
     assert circuit_breaker.is_tripped(r.state, "elastic") is False
 
     prior_rec = VerbRecorder()
@@ -838,9 +837,7 @@ def test_tripping_call_carries_no_repeat_note(three_identical_requests):
     assert seen.count("[record_query] REPEAT") == 1, \
         "the second occurrence's REPEAT notice is the control; the tripping call must add none"
     assert r.gather.calls == 4, (
-        "the tripping call was answered like an ordinary query and the lead went on (5+), or "
-        "the summary turn #987 gives a stopped lead did not run (3). Neither adds a REPEAT "
-        "annotation, which is what the count above this line is for."
+        "the trip did not end the lead with one summary turn (5+: the lead went on; 3: no summary turn)"
     )
     assert INCOMPLETE_IDIOM not in seen, "the dead end was handed to the GATHER model"
     assert INCOMPLETE_IDIOM in r.summary()
@@ -872,7 +869,7 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     assert r.gather.calls == 4, "a GatherDeadEnd ended the lead where the infra breaker owns it"
     assert INCOMPLETE_IDIOM not in r.summary()
     assert _replay(rows, threshold=2) == [], \
-        "replay tripped on rows `_grant_check` wrote above M2 — live and replay disagree"
+        "replay tripped on `_grant_check` rows, unlike the live guard"
 
 
 def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path):
@@ -947,13 +944,13 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert [row["exit_code"] for row in grant_rows] == [64, 64, 64]
     assert [row["verb"] for row in grant_rows] == ["nosuch-verb"] * 3
     assert all(set(row) == ROW_KEYS for row in grant_rows), \
-        "the above-M2 sentinel identity was added as a key of its own"
+        "the grant-check rows gained a key of their own"
     assert grant_rec.calls == [], "an unresolvable verb reached the backend"
     assert _replay(grant_rows) == [], \
-        "M2's oracle trips on a repeat M2 can never refuse — live and replay disagree"
+        "the replay oracle trips on a repeat the live guard never refuses"
     assert unresolvable.gather.calls == 4, (
-        "the third identical rejection did not end the lead — the companion guard is silent "
-        "(5+), or the lead ended but #987's summary turn did not follow (3)"
+        "the third identical rejection did not end the lead with one summary turn "
+        "(5+: the guard is silent; 3: no summary turn)"
     )
     assert INCOMPLETE_IDIOM in unresolvable.summary()
     assert _replay_rejections(grant_rows) == [(LEAD, 2, "repeat")], \
@@ -973,7 +970,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
 def test_repeat_key_normalizes_the_live_call_to_its_stored_form(tmp_path):
     live = {"native_query": "FROM logs", "threshold": float("nan")}
     stored = _json_safe_params(dict(live))
-    assert stored != live, "the transform this demand is about did nothing — the fixture is inert"
+    assert stored != live, "the JSON-safe transform left the fixture unchanged"
 
     rows = [_row(LEAD, s, "elastic", "probe", stored) for s in (0, 1)]
     hit = repeat_trip(rows, LEAD, system="elastic", verb="probe", params=live)
@@ -1013,8 +1010,8 @@ def test_screen_refused_repeats_count_toward_the_trip(tmp_path):
     assert r.gather_saw.count("unknown param(s)") == 2, \
         "the screen must still teach on the first two; only the third is a dead end"
     assert r.gather.calls == 4, (
-        "the third refusal was a ModelRetry, not a dead end (5+) — or the dead end fired and "
-        "#987's summary turn did not follow it (3)"
+        "the third refusal did not end the lead with one summary turn "
+        "(5+: a ModelRetry; 3: no summary turn)"
     )
     rows = r.own_rows
     assert len(rows) == 3
@@ -1039,10 +1036,8 @@ def test_concurrent_identical_siblings_still_stop_the_lead(tmp_path):
     ])
     assert len(rec.calls) == 2, "a sibling of the tripping call still reached the backend"
     assert r.gather.calls == 4, (
-        "the concurrent trip did not end the lead (5+), or it ended and the summary turn did "
-        "not follow (3) — which on THIS script needs BOTH siblings answered, each by its own "
-        "execution: the first to trip closes the door, the other is either its own trip or "
-        "`QUERY_NOT_RUN`"
+        "the concurrent trip did not end the lead with one summary turn "
+        "(5+: the lead went on; 3: no summary turn)"
     )
     assert INCOMPLETE_IDIOM in r.summary()
     assert any(row["exit_code"] == 64 for row in r.own_rows), "no trip row was written at all"

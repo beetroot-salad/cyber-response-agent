@@ -82,6 +82,8 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
                                stamp_terminator=None, *, catalog=None):
         return f"[replayed gather summary: lead={request.lead_id} system={request.system}]"
 
+    # Boundary fake: the golden's gather subagent is not replayed, so `_run_gather` answers each
+    # dispatch with a placeholder summary and only MAIN's loop runs for real.
     monkeypatch.setattr(  # lint-monkeypatch: ok — boundary fake (see comment above)
         runtime_tools, "_run_gather", _fake_run_gather,
     )
@@ -131,8 +133,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # provider, this is where the evidence would land.
     wire_log = RunPaths(run_dir).wire_log
     assert wire_log.is_file(), (
-        "the wire log is not where this belt is looking — a missing file reads as zero live "
-        "records, so the assertion below would pass without measuring anything"
+        "the wire log is missing, so the check below would measure nothing"
     )
     live = [
         r for r in read_jsonl_rows(wire_log)

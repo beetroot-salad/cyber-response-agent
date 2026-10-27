@@ -1,6 +1,4 @@
-"""Scenario machinery for the #808 harness-executed lead-0 tests.
-
-Tags (`d1`, `K3`, `F5`, …) name demands and claims in `docs/archive/spec-graphs/spec_graph_808.yaml`."""
+"""Scenario machinery for the #808 harness-executed lead-0 tests."""
 from __future__ import annotations
 
 import json
@@ -23,7 +21,6 @@ from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.integrations.elastic_adapter import search_envelope  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import breaker_doc  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
-    DEFENDER,
     FakeVerbs,
     ReplayFn,
     Turn,
@@ -32,35 +29,24 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 )
 
 # Production names, spelled exactly as `defender/investigation/lead_zero/` spells them.
-LEAD_ZERO_MODULE = "defender.investigation.lead_zero"
-L0 = "l-000"          # item 1's reserved id (F5)
-L3 = "l-00c"          # item 3's reserved id (F5)
-CORRELATION_REQUEST_LIMIT = 8      # F6 — `d21`'s "strictly below 40" was vacuous at 39
-HARNESS_PROVENANCE = "harness"     # K11's provenance field VALUE
-PROVENANCE_KEY = "provenance"      # K11's provenance field NAME
+L3 = "l-00c"          # item 3's reserved id
 LEAD_ZERO_HEADING = "## Alert ancestors"   # the ORIENT section `orientation()` appends
-
-#: A salt-shaped literal for forgery attempts; real salts are minted per frame (#875).
-SALT = "aabbccddeeff0011"
-# The three rendered notes, in `orient.py`'s `_(unavailable: …)_` idiom.
+#: The rendered note in `orient.py`'s `_(unavailable: …)_` idiom.
 UNAVAILABLE = "_(unavailable:"
-SHORTFALL = "_(incomplete:"     # K3 — `returned < len(ancestor_events)` or `truncated`
-ELIDED = "_(elided:"            # K17 — a per-document `message` over the rendering budget
 
 # As in the playground tenant's `settings/systems/elastic/config.env` (#1106).
 EVENTS_INDEX = "logs-*"
 ALERTS_INDEX = ".internal.alerts-security.alerts-default-*"
 
 AUTH_BACKING = ".ds-logs-system.auth-default-2026.05.24-000002"
-FALCO_BACKING = ".ds-logs-falco.alerts-default-2026.04.30-000003"
 
 
 # the alert
 
-def ancestor(doc_id: str, index: str = AUTH_BACKING, **over: Any) -> dict:
+def ancestor(doc_id: str, **over: Any) -> dict:
     """One `ancestor_events[]` entry, shaped like every checked-in fixture's:
     `{id, type=event, index, depth=0}`."""
-    return {"id": doc_id, "type": "event", "index": index, "depth": 0, **over}
+    return {"id": doc_id, "type": "event", "index": AUTH_BACKING, "depth": 0, **over}
 
 
 ALERT_ID = "94f777794d60c7c8f112d07b455ed79a41d4f0a0e932fccd94ce0d9914997606"
@@ -70,48 +56,35 @@ ALERT_ID = "94f777794d60c7c8f112d07b455ed79a41d4f0a0e932fccd94ce0d9914997606"
 ALERT_ID_FIELD = "kibana.alert.uuid"
 
 
-def alert_doc(
-    *,
-    ancestors: list[dict] | None = None,
-    alert_id: str | None = ALERT_ID,
-    signal_index: str | None = ALERTS_INDEX,
-    timestamp: str = "2026-05-25T15:27:22.928Z",
-    rule_id: str = "v2-sshd-success-after-failures",
-    rule_query: str = 'sequence by host.name with maxspan=10m\n  [any where JOINME]',
-    **over: Any,
-) -> dict:
+def alert_doc(*, ancestors: list[dict] | None = None, **over: Any) -> dict:
     """The run-dir `alert.json` a scenario drives; defaults reproduce the sshd golden. Like every
     real one, it carries no `kibana.alert.group.id`: that comes off the shell (`shell_doc`)."""
     doc: dict[str, Any] = {
-        "alert_timestamp": timestamp,
-        "rule": {"id": rule_id, "name": "v2 sshd success after failures", "type": "eql",
-                 "severity": "high", "language": "eql", "query": rule_query},
+        "alert_timestamp": "2026-05-25T15:27:22.928Z",
+        "rule": {"id": "v2-sshd-success-after-failures", "name": "v2 sshd success after failures",
+                 "type": "eql", "severity": "high", "language": "eql",
+                 "query": "sequence by host.name with maxspan=10m\n  [any where JOINME]"},
         "reason": "authentication event with process sshd, by dev.dana created high alert.",
         "host": {"name": "office-ws-1"},
         "user": {"name": "dev.dana"},
         "ancestor_events": [ancestor("anc-1"), ancestor("anc-2")]
         if ancestors is None else ancestors,
+        "alert_id": ALERT_ID,
+        "signal_index": ALERTS_INDEX,
     }
-    if alert_id is not None:
-        doc["alert_id"] = alert_id
-    if signal_index is not None:
-        doc["signal_index"] = signal_index
     doc.update(over)
     return doc
 
 
-def shell_doc(*, group_id: str | None = None, **over: Any) -> dict:
+def shell_doc(**over: Any) -> dict:
     """The alert's own shell document as item 1's by-`alert_id` fetch returns it (`_source`
     only): the only surface `kibana.alert.group.id` arrives on."""
-    doc: dict[str, Any] = {
+    return {
         "@timestamp": "2026-05-25T15:27:22.928Z",
         "kibana.alert.rule.name": "v2 sshd success after failures",
         "kibana.alert.uuid": ALERT_ID,
         **over,
     }
-    if group_id is not None:
-        doc["kibana.alert.group.id"] = group_id
-    return doc
 
 
 def hit(
@@ -122,15 +95,6 @@ def hit(
     carries nothing the adapter would not."""
     return {"@timestamp": ts, "message": message, "host.name": host,
             "user.name": user, "source.ip": ip, **over}
-
-
-def building_block(*, ts: str, group_index: int, **over: Any) -> dict:
-    """A building-block alert document: the shell's `group.id` plus the building-block stamp,
-    the only thing that tells the two apart."""
-    return hit(ts=ts, **over) | {
-        "kibana.alert.group.index": group_index,
-        "kibana.alert.building_block_type": "default",
-    }
 
 
 # the injected backend
@@ -152,40 +116,6 @@ def answer_hits(docs: list[dict], **kw: Any) -> Answer:
     """The commonest `answer`: every verb returns the same envelope."""
     def _answer(verb: str, params: dict) -> Any:  # noqa: ARG001
         return envelope(docs, **kw)
-    return _answer
-
-
-def answer_sequence(*results: Any) -> Answer:
-    """Successive calls get successive results; an exception instance is RAISED rather than
-    returned. Past the script the last result repeats, so a scenario about the FIRST two
-    calls never fails on a third it did not intend to script."""
-    seen: list[int] = [0]
-
-    def _answer(verb: str, params: dict) -> Any:  # noqa: ARG001
-        item = results[min(seen[0], len(results) - 1)]
-        seen[0] += 1
-        if isinstance(item, BaseException):
-            raise item
-        return item
-    return _answer
-
-
-def answer_by_index(table: dict[str | None, Any], default: Any = None) -> Answer:
-    """Keyed on the call's `index=` param (one call per distinct mapped backing index)."""
-    def _answer(verb: str, params: dict) -> Any:  # noqa: ARG001
-        item = table.get(params.get("index"), default)
-        if isinstance(item, BaseException):
-            raise item
-        assert item is not None, f"scenario scripted no answer for index={params.get('index')!r}"
-        return item
-    return _answer
-
-
-def answer_raising(exc: BaseException) -> Answer:
-    """A fault injector. `exc` must be one the ADAPTER itself raises — the fake maps nothing
-    to an exit code, touches no breaker and writes no row; all three are production's."""
-    def _answer(verb: str, params: dict) -> Any:  # noqa: ARG001
-        raise exc
     return _answer
 
 
@@ -300,9 +230,8 @@ class Res:
         assert self.rec.calls, "item 1 issued no backend call at all"
         first = self.rec.calls[0]
         assert self.alert_id is None or self.alert_id in first.params.get("native_query", ""), (
-            f"call 0 was not the by-alert_id shell fetch — it carried "
-            f"{first.params.get('native_query')!r}, so every assertion below about 'the "
-            "ancestor calls' is really about whatever this implementation did first"
+            f"call 0 was not the by-alert_id shell fetch: it carried "
+            f"{first.params.get('native_query')!r}"
         )
         return self.rec.calls[1:]
 
@@ -371,7 +300,6 @@ def materialize_alert(root: Path, doc: dict) -> Path:
     return run_dir
 
 
-READ_ALERT = "read the alert"
 #: The scripted gather return for item 3, in the correlation contract's own dimensions (a scoped
 #: count, an unscoped count, across any rule). Keep its wording in step with the contract: a
 #: stale spelling would let a delivery check pass on a dead term.
@@ -433,7 +361,3 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         kw["agent"] = agent
     out = drive(run_dir, run_id=run_id, main=main, gather=gather, **kw)
     return Res(run_dir, main, gather, rec, out or {}, sink, doc.get("alert_id"))
-
-
-def defender_dir() -> Path:
-    return DEFENDER

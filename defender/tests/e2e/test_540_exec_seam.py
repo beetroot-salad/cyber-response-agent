@@ -75,17 +75,17 @@ class RecordingTransport:
         assert len(self.calls) == 1, f"expected exactly 1 box exec, got {len(self.calls)}"
         return self.calls[0]
 
-    def argvs(self, i: int = 0) -> list[list[str]]:
-        """Every stage argv in the i-th recorded request, read back through the REAL decoder."""
-        return [list(st.argv) for pl in box.decode_request(self.calls[i].frame) for st in pl.stages]
+    def argvs(self) -> list[list[str]]:
+        """Every stage argv in the first recorded request, read back through the REAL decoder."""
+        return [list(st.argv) for pl in box.decode_request(self.calls[0].frame) for st in pl.stages]
 
 
-def framed(rc: int, out: bytes, err: bytes, *, exec_rc: int | None = None) -> box.RawExec:
+def framed(rc: int, out: bytes, err: bytes) -> box.RawExec:
     """A `RawExec` whose stdout is a WELL-FORMED response frame — the in-box entrypoint
-    completed and reported the program's own result. `exec_rc` defaults to `rc`, which is
-    what a real `docker exec` returns when the in-box process exits with it."""
+    completed and reported the program's own result. The exec's own rc is `rc`, as a real
+    `docker exec` returns when the in-box process exits with it."""
     return box.RawExec(
-        rc=rc if exec_rc is None else exec_rc,
+        rc=rc,
         stdout=box.encode_response(box.BoxResult(rc=rc, out=out, err=err)),
         stderr=b"",
     )
@@ -196,7 +196,7 @@ def test_program_output_bytes_cross_the_frame_untranscoded(tmp_path):
 
     assert result.out == payload, "program stdout bytes were transformed on the wire"
     assert result.err == errbytes
-    assert b"\xef\xbf\xbd" not in result.out, "C36a's U+FFFD transcode reappeared on the wire"
+    assert b"\xef\xbf\xbd" not in result.out, "a U+FFFD transcode reappeared on the wire"
     assert b"\xef\xbf\xbd" not in result.err
     assert result.rc == 3
 

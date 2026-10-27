@@ -1,6 +1,4 @@
-"""Shared fakes, the writer census and production-seam wrappers for the #771 alias-ban tests.
-
-`cite=` tags (E1, X5, B8, ...) are claim ids in `docs/archive/spec-graphs/spec_graph_771.yaml`."""
+"""Shared fakes, the writer census and real-box probes for the #771 alias-ban tests."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
@@ -23,12 +21,11 @@ import pytest
 
 from defender import box as box_mod
 
-from defender.tests.support.shared.contracts._by_path import load_lint_gate, load_module
+from defender.tests.support.shared.contracts._by_path import load_module
 from defender.tests.e2e._box665 import (  # noqa: F401
     DockerFault,
     RecordingDocker,
     _cp,
-    requires_live_box,
 )
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, is_dood
 from defender.records import SessionPaths
@@ -41,10 +38,6 @@ DEFENDER = Path(__file__).resolve().parents[2]
 RUN_771 = fixture_uuid("run-771")
 CENSUS_TENANT = fixture_uuid("tenant:census-tenant")
 REPO_ROOT = DEFENDER.parent
-CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-#: The write lint's ratchet baseline.
-LINT_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_unguarded_tree_write_baseline.json"
-LINT_MODULE_PATH = REPO_ROOT / "tooling" / "lint" / "lint_unguarded_tree_write.py"
 #: The generator that derives the shipped seccomp profile from the vendored platform default.
 SECCOMP_GEN_PATH = REPO_ROOT / "tooling" / "gen_seccomp_profile.py"
 
@@ -55,22 +48,6 @@ def load_seccomp_generator():
     Tests call its pure `build()` to re-derive the shipped profile rather than re-list it.
     `register=False` leaves the `sys.modules` slot free."""
     return load_module(SECCOMP_GEN_PATH, register=False)
-
-
-def load_write_lint():
-    """Import the write lint by path (it lives in `tooling/lint/`, outside every package)."""
-    return load_lint_gate("lint_unguarded_tree_write")
-
-
-def ban_dependency_files() -> dict[str, Path]:
-    """Every file in this repository the alias ban's correctness depends on."""
-    return {
-        "the seccomp profile the ban is": alias_profile_path(),
-        "the vendored platform default it derives from": load_seccomp_generator().MOBY_DEFAULT_PATH,
-        "the generator that derives it": SECCOMP_GEN_PATH,
-        "the write lint's ratchet baseline": LINT_BASELINE,
-        "the CI workflow that registers the runtime": CI_WORKFLOW,
-    }
 
 
 # The real-box guard
@@ -106,16 +83,6 @@ requires_daemon = pytest.mark.skipif(
     not daemon_reachable(), reason="no reachable Docker daemon"
 )
 
-
-def daemon_engine_version() -> tuple[int, ...]:
-    """The version of the daemon actually serving this host, as a comparable tuple."""
-    probe = subprocess.run(
-        ["docker", "version", "--format", "{{.Server.Version}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    assert probe.returncode == 0, f"could not read the daemon version: {probe.stderr.strip()}"
-    raw = probe.stdout.strip().split("-")[0].split("+")[0]
-    return tuple(int(part) for part in raw.split(".") if part.isdigit())
 
 
 #: Witnesses for the platform-default comparison. Each is reachable unprivileged, so a denial is
@@ -248,13 +215,6 @@ def shapes_named_in(argv_text: str) -> set[str]:
     """The shape names `argv_text` NAMES, matched as whole tokens and never as substrings."""
     return {t for t in _TOKEN.findall(argv_text) if t in KNOWN_SHAPES}
 
-#: The registration that makes runsc enforce the ban: `runsc install -- --oci-seccomp` writes
-#: `runtimeArgs: ["--oci-seccomp"]` into the runtime's daemon.json entry (observed, runsc
-#: release-20260727.0).
-OCI_SECCOMP_FLAG = "--oci-seccomp"
-RUNSC_INSTALL_CMD = "runsc install -- --oci-seccomp"
-DAEMON_RUNTIME_ARGS_KEY = "runtimeArgs"
-
 #: The scan-verdict marker, `<tree>.scrub-verdict.json`: a SIBLING of the tree it judges, because
 #: the box is root inside the tree and could redirect or forge an in-tree verdict. A tree with no
 #: verdict reads unverified. `ran: true` means the walk completed, NOT that the contents are
@@ -363,31 +323,6 @@ def snapshot_outside(root: Path) -> dict[str, tuple]:
     return out
 
 
-# Wrappers over the production seams
-def write_guarded(path: Path, text: str, *, mode: str = "replace", **kw: Any) -> None:
-    """`defender._io.write_guarded`, the alias-refusing write every shared-tree writer routes
-    through. `mode`: `replace` (atomic), `append` (JSONL) or `update` (locked read-modify-write)."""
-    from defender import _io
-
-    return _io.write_guarded(path, text, mode=mode, **kw)  # type: ignore[attr-defined]
-
-
-def guarded_mkdir(path: Path, *, base: Path) -> None:
-    """`defender._io.guarded_mkdir`: creates parents, refusing an aliased component at any depth
-    (a leaf's `O_NOFOLLOW` cannot protect a component)."""
-    from defender import _io
-
-    return _io.guarded_mkdir(path, base=base)  # type: ignore[attr-defined]
-
-
-def sweep_staged(tree: Path) -> list[Path]:
-    """`defender._io.sweep_staged`: removes orphaned staged files (their unpredictable names mean
-    nothing overwrites them), through the same guarded primitive."""
-    from defender import _io
-
-    return _io.sweep_staged(tree)  # type: ignore[attr-defined]
-
-
 def allowed_syscalls(profile: dict) -> set[str]:
     """Every syscall name the profile can let through — the names under an `SCMP_ACT_ALLOW`
     rule, whatever that rule's conditions are."""
@@ -397,25 +332,6 @@ def allowed_syscalls(profile: dict) -> set[str]:
         if rule.get("action") == "SCMP_ACT_ALLOW"
         for name in rule.get("names", [])
     }
-
-
-def alias_profile_path() -> Path:
-    """`box.ALIAS_PROFILE_PATH`: both argv builders must carry this one value, or a lane ships
-    without the ban."""
-    return box_mod.ALIAS_PROFILE_PATH  # type: ignore[attr-defined]
-
-
-def ban_not_in_force_error() -> type[BaseException]:
-    """`box.AliasBanNotInForce`: its own type, not a `BoxFault`, so the broad handler that lets
-    other startup faults degrade (the unsandboxed opt-out) cannot catch it."""
-    return box_mod.AliasBanNotInForce  # type: ignore[attr-defined]
-
-
-def tree_verified(tree: Path) -> bool:
-    """`scrub.tree_verified`: a tree with no verdict reads unverified, like one marked `ran: false`."""
-    from defender.box import _scrub as scrub_mod
-
-    return scrub_mod.tree_verified(tree)  # type: ignore[attr-defined]
 
 
 def verdict_sidecar(tree: Path) -> Path:
@@ -446,13 +362,11 @@ class ProbeVerdict:
     """One in-box alias-probe outcome, as data.
 
     `allowed` names banned shapes the box could still create. `create_ok` is the ordinary-create
-    control: without it a probe that never ran reads like one that was refused. `cite` is the
-    ledger claim that observed this on a real daemon."""
+    control: without it a probe that never ran reads like one that was refused."""
 
     allowed: tuple[str, ...] = ()
     create_ok: bool = True
     exec_rc: int | None = None
-    cite: str = ""
 
     def as_completed(self) -> subprocess.CompletedProcess:
         if self.exec_rc is not None:                       # the exec itself never reported
@@ -465,9 +379,9 @@ class ProbeVerdict:
 
 
 #: An enforcing daemon: every banned shape EPERM; ordinary create, mkdir and AF_UNIX bind succeed.
-BAN_IN_FORCE = ProbeVerdict(cite="E1,X2,G4")
+BAN_IN_FORCE = ProbeVerdict()
 #: runsc without the `--oci-seccomp` registration: every banned shape succeeds.
-BAN_ABSENT = ProbeVerdict(allowed=BANNED_SHAPES, cite="E2,G6")
+BAN_ABSENT = ProbeVerdict(allowed=BANNED_SHAPES)
 
 
 class AliasProbeDocker(RecordingDocker):
@@ -515,7 +429,6 @@ class Writer:
     posture: str
     invoke: Callable[[Path], Any]
     module: str
-    cite: str = ""
     mkdirs_component: bool = False
     #: True only where an EMPTY artifact is the contract (the fault-exit trace is
     #: `write_text("")`); the positive control's non-empty check skips these rows.
@@ -629,6 +542,8 @@ def _invoke_fault_exit_trace(run_dir: Path) -> None:
 
 
 def _invoke_write_guarded(run_dir: Path) -> None:
+    from defender._io import write_guarded
+
     write_guarded(run_dir / "report.md", "guarded body\n")
 
 
@@ -647,106 +562,38 @@ CENSUS: tuple[Writer, ...] = (
     # `unmeasured`: at this altitude `write_trace` raises (IsADirectoryError over a squatted
     # name); the driver one frame up is what swallows.
     Writer("write_trace", "tool_trace.jsonl", "write_text", "unmeasured",
-           _invoke_write_trace, "investigation/observe.py", cite="C1,X10"),
+           _invoke_write_trace, "investigation/observe.py"),
     Writer("run_investigation", "tool_trace.jsonl", "write_text", "unmeasured",
-           _invoke_fault_exit_trace, "investigation/driver/", cite="C1,X10", lands_empty=True),
+           _invoke_fault_exit_trace, "investigation/driver/", lands_empty=True),
     Writer("observe_logger", "wire_logs/llm_requests.jsonl", "append-open", "unmeasured",
-           _invoke_observe_logger, "investigation/observe.py", cite="C1", mkdirs_component=True),
+           _invoke_observe_logger, "investigation/observe.py", mkdirs_component=True),
     Writer("denial_logger", "policy_denials.jsonl", "append-open", "unmeasured",
-           _invoke_denial_logger, "investigation/observe.py", cite="C1,G12"),
+           _invoke_denial_logger, "investigation/observe.py"),
     # The run -> case pointer is a host-only sidecar beside the run dir (#1235), named relative to it.
     Writer("write_case_pointer", f"../{RUN_771}.session-pointer.json", "write_text", "unmeasured",
-           _invoke_case_pointer, "records/session_store/_write.py", cite="C1,R4"),
+           _invoke_case_pointer, "records/session_store/_write.py"),
     # No budget or breaker rows: both live in the run process's memory and write nothing.
     Writer("query_tool", "gather_raw/l-001/0.json", "write_text", "return-none",
-           _invoke_query_payload, "investigation/query_tool.py", cite="X5,G15",
-           mkdirs_component=True),
+           _invoke_query_payload, "investigation/query_tool.py", mkdirs_component=True),
     Writer("query_tool_queries_table", "executed_queries.jsonl", "append_jsonl", "unmeasured",
-           _invoke_queries_table, "investigation/query_tool.py", cite="C1,G1"),
+           _invoke_queries_table, "investigation/query_tool.py"),
     Writer("gather_dispatch", "gather_summaries/l-001.md", "write_text", "unmeasured",
-           _invoke_gather_summary, "investigation/tools_gather.py", cite="B11,G15",
-           mkdirs_component=True),
-    # The observable depends on the fault: a file squatting the parent component returns 0 (X5),
+           _invoke_gather_summary, "investigation/tools_gather.py", mkdirs_component=True),
+    # The observable depends on the fault: a file squatting the parent component returns 0,
     # but a directory squatting the artifact makes the exclusive create EEXIST and returns 2,
     # reporting a write failure as a duplicate claim.
     Writer("claim_lead", "gather_raw/l-001.lead.json", "excl-create", "return-zero",
-           _invoke_claim_lead, "hooks/record_lead.py", cite="X5,C1", mkdirs_component=True),
+           _invoke_claim_lead, "hooks/record_lead.py", mkdirs_component=True),
     Writer("record_lesson_load", "lessons_loaded.jsonl", "append_jsonl", "unmeasured",
-           _invoke_lesson_load, "investigation/tools/", cite="G15"),
+           _invoke_lesson_load, "investigation/tools/"),
     Writer("start_box", ".box-sentinel", "write_text", "fault-startup",
-           _invoke_sentinel_plant, "box/", cite="X5,G10"),
+           _invoke_sentinel_plant, "box/"),
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
-           _invoke_write_guarded, "_io.py", cite="F1"),
+           _invoke_write_guarded, "_io.py"),
     # Guarded idiom: `Held.write`'s create lane refuses an alias like `write_guarded` (#1137).
     # This row also keeps `tenancy/_tenant.py` in the census-derived hard-gate set.
     Writer("tenant_row_writer", f"tenant-root/{CENSUS_TENANT}/tenant.json", "guarded", "unmeasured",
-           _invoke_tenant_row_writer, "tenancy/_tenant.py", cite="#1078 D1"),
-)
-
-#: The four failure-posture classes X5 measured. A record, not a per-row expectation: a row only
-#: carries a posture label where one was measured.
-POSTURES = ("swallow-continue", "return-none", "return-zero", "fault-startup")
-
-
-# X5's measured postures: the anchor
-# A per-row "ordinary failure vs aliased" comparison passes even if a site changes in both
-# lanes, so X5's measured sites, faults and observables are pinned here. The faults use the
-# real filesystem, never permission bits, so they hold under root.
-@dataclass(frozen=True)
-class MeasuredSite:
-    """One of X5's call sites, the fault it was measured under, and what it did.
-
-    `site` is the production symbol X5 drove, not a census row id."""
-
-    posture: str
-    site: str
-    fault: str
-    drive: Callable[[Path], object]
-    #: What X5 recorded, checked against `posture_class`.
-    observed: str
-
-
-def _x5_query_payload_site(run_dir: Path) -> object:
-    """`query_tool._persist_payload` — X5's return-none site, under a directory squatting the
-    by-ref payload name."""
-    from defender.investigation import query_tool
-
-    target = run_dir / "gather_raw" / "l-001" / "0.json"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.mkdir()
-    return query_tool._persist_payload(fixture_run(run_dir), "l-001", 0, '[{"a": 1}]')
-
-
-def _x5_claim_lead_site(run_dir: Path) -> object:
-    """`record_lead.claim_lead`, X5's return-zero site, under X5's fault: a plain file squatting
-    the parent component (the census row's fault yields a different observable)."""
-    from defender.hooks import record_lead
-
-    component = run_dir / "gather_raw"
-    if component.is_dir():
-        shutil.rmtree(component)          # a live run dir already has it; the fault displaces it
-    component.write_text("not a directory\n", encoding="utf-8")
-    return record_lead.claim_lead(
-        {"run_dir": str(run_dir), "lead_id": "l-001", "goal": "g", "what_to_summarize": []}, run=fixture_run(run_dir))
-
-
-def _x5_sentinel_site(run_dir: Path) -> object:
-    """`box._plant` — X5's fault-startup site, under a directory squatting the sentinel name."""
-    (run_dir / ".box-sentinel").mkdir()
-    return box_mod._plant(run_dir / ".box-sentinel", "token-771")
-
-
-#: Three of X5's four sites: the swallow-continue one no longer writes (the budget lives in memory).
-X5_MEASURED_SITES: tuple[MeasuredSite, ...] = (
-    MeasuredSite("return-none", "query_tool._persist_payload",
-                 "a directory squatting gather_raw/l-001/0.json", _x5_query_payload_site,
-                 observed="returned:None"),
-    MeasuredSite("return-zero", "record_lead.claim_lead",
-                 "a plain file squatting the gather_raw component", _x5_claim_lead_site,
-                 observed="returned:0"),
-    MeasuredSite("fault-startup", "box._plant",
-                 "a directory squatting .box-sentinel", _x5_sentinel_site,
-                 observed="raised:BoxFault"),
+           _invoke_tenant_row_writer, "tenancy/_tenant.py"),
 )
 
 #: Modules the write lint must hard-gate, derived from the census (plus the drain lane's
@@ -763,14 +610,6 @@ def posture_class(outcome: object) -> str:
     if isinstance(outcome, BaseException):
         return f"raised:{type(outcome).__name__}"
     return f"returned:{outcome!r}"
-
-
-def drive_writer_at(site: MeasuredSite, run_dir: Path) -> object:
-    """Drive one of X5's measured sites; same observable convention as `drive_writer`."""
-    try:
-        return site.drive(run_dir)
-    except BaseException as e:  # noqa: BLE001 — the exception IS the observable
-        return e
 
 
 def drive_writer(writer: Writer, run_dir: Path) -> object:
@@ -795,7 +634,7 @@ class _StaleVersionStore:
         return getattr(self._inner, name)
 
 
-def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = "0" * 16) -> Any:
+def drive_fault_exit_trace(run_dir: Path) -> Any:
     """Drive the real `driver.run_investigation` (replay harness) with a store whose reads
     refuse, so the fault-exit trace write runs."""
     from defender.records import session_store as ss
@@ -809,19 +648,18 @@ def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = 
             yield _StaleVersionStore(real)
 
     replay = ReplayFn([Turn(text="done.")])
-    drive(run_dir, run_id=run_id, main=replay, store_factory=factory)
+    drive(run_dir, run_id="r-771", main=replay, store_factory=factory)
     return replay
 
 
-def drive_normal_exit_trace(run_dir: Path, *, run_id: str = "r-771-happy",
-                            salt: str = "0" * 16) -> Any:
+def drive_normal_exit_trace(run_dir: Path) -> Any:
     """Drive the real `driver.run_investigation` with the production store, so the normal trace
     write runs and the fault-exit handler does not. Both sit in one `try/except` in the driver,
     so only a whole unbroken run shows the handler leaves a completed trace alone."""
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive
 
     replay = ReplayFn([Turn(text="done.")])
-    drive(run_dir, run_id=run_id, main=replay)
+    drive(run_dir, run_id="r-771-happy", main=replay)
     return replay
 
 

@@ -47,9 +47,9 @@ def _desalt(text: str) -> str:
     return re.sub(r"run-[0-9a-f]{16}-", "run-<salt>-", text)
 
 
-def _gather_turn(lead: str = "l-001") -> Turn:
+def _gather_turn() -> Turn:
     return Turn(tool_calls=[("gather", {
-        "lead_id": lead, "system": "elastic", "goal": "measure this lead",
+        "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
         "what_to_summarize": ["auth events"],
     })])
 
@@ -124,8 +124,7 @@ def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() 
     )
     assert owned.encoder.dumps_calls == 0, "an owned-labelled toolset reached the encoder"
     assert owned.dispatched.text("fetch_rows") == wire_text(value), (
-        "the OWNED `fetch_rows` — same name, same payload — was gated too, so the verdict is a "
-        "function of the tool's name and a same-named foreign tool would walk through a name list"
+        "the owned `fetch_rows` was gated too, so the verdict depends on the tool's name"
     )
 
     # THE ONE-RUN ARM, at the two names one agent can carry.
@@ -144,7 +143,7 @@ def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() 
         "the foreign result was not gated"
     )
     assert owned_text == wire_text(value), (
-        "an owned tool's model-visible text was changed by the gate — exactly what O2 forbids"
+        "the gate changed an owned tool's model-visible text"
     )
 
 

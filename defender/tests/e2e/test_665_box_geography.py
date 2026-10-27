@@ -16,6 +16,7 @@ from _box665 import (  # noqa: E402
     RecordingDocker,
     make_run_dir,
     reaped_after_create,
+    run_cycle_mounts,
     start_box_request,
 )
 
@@ -33,17 +34,6 @@ SALT = "s665geo"
 NAME_1279 = r"defender-run"
 
 
-def _run_cycle_mounts(run_dir: Path):
-    """A minimal caller-composed run-cycle geography: the run dir, the defender code tree and
-    the gather_raw evidence, each read-only and declaring its `kind`."""
-    return (
-        Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
-        Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
-        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False,
-              kind="data"),
-    )
-
-
 def _populate_mount_sources(mounts, tmp_path: Path) -> None:
     """Give each test-owned mount source a file to read back, since startup may not plant one
     in a read-only mount. The checkout's DEFENDER already has one and is left alone."""
@@ -59,7 +49,7 @@ def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=No
              spec=None, defender_dir=None):
     return BoxRequest(
         name=name,
-        mounts=mounts if mounts is not None else _run_cycle_mounts(run_dir),
+        mounts=mounts if mounts is not None else run_cycle_mounts(run_dir),
         workdir=workdir if workdir is not None else REPO_ROOT,
         env=env if env is not None else {},
         spec=spec,
@@ -73,7 +63,7 @@ def test_box_request_renders_mounts_and_no_tier_discriminator(tmp_path):
     rec = RecordingDocker()
     start_box_request(_request(run_dir), docker=rec)
     rendered = {(m["source"], m["readonly"]) for m in rec.mounts()}
-    for m in _run_cycle_mounts(run_dir):
+    for m in run_cycle_mounts(run_dir):
         assert (str(m.source), not m.writable) in rendered, f"mount {m.source} not rendered"
     assert box_mod.container_name.__name__  # box.py owns the grammar, not a tier discriminator
 
@@ -119,7 +109,7 @@ def test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key(
         _request(run_dir, env={"PATH": "/attacker/bin", "TZ": "Europe/Paris"}), docker=rec,
     )
     assert rec.env()["PATH"].startswith(str(DEFENDER / "bin")), \
-        "a caller-supplied PATH won over the infra helper (S8 hole)"
+        "a caller-supplied PATH won over the infra helper"
     assert "/attacker/bin" not in rec.env()["PATH"], "the caller's PATH override survived"
     assert rec.env().get("TZ") == "Europe/Paris", "a non-infra allowlisted key was dropped"
 
@@ -169,7 +159,7 @@ def test_mount_source_directory_absent_at_box_creation(tmp_path):
 
 def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="mount 2 read-back failed", cite="po48"))
     with pytest.raises(box_mod.BoxFault):
         start_box_request(_request(run_dir), docker=rec)
@@ -197,7 +187,7 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_la
 
 def test_create_fault_that_leaves_a_created_container_is_reaped_request_lane(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault):
         start_box_request(_request(run_dir), docker=rec)
@@ -219,7 +209,7 @@ def _dies_after_create(rec, *subcommands):
 def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane):
     """The create-fault arm's reap must not remove another lane's container (#884)."""
     run_dir = make_run_dir(tmp_path)
-    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(
         create=DockerFault(
             rc=125,
@@ -248,7 +238,7 @@ def test_the_pre_create_check_refuses_a_finished_container_too_and_removes_nothi
     """Every box name is fresh, so an existing container is never legitimate, finished or not:
     the start refuses, removes nothing and creates nothing (#955, #1279)."""
     run_dir = make_run_dir(tmp_path)
-    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status=state)
     start = (
         (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec))
@@ -264,12 +254,12 @@ def test_the_pre_create_check_refuses_a_finished_container_too_and_removes_nothi
 
 def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="running")
     with pytest.raises(box_mod.BoxStartConflict):
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
     assert box_mod.verdict_path(run_dir).is_file(), \
-        "the pre-create refusal left no §7 D2 verdict — the tree reads as unjudged"
+        "the pre-create refusal left no scan verdict"
     verdict = json.loads(box_mod.verdict_path(run_dir).read_text(encoding="utf-8"))
     assert verdict["ran"] is False, \
         "a refusal that never started a box recorded the tree as SCANNED"
@@ -281,7 +271,7 @@ def test_a_daemon_answer_the_start_cannot_read_is_still_a_container_holding_the_
     """An unparseable status fails closed: the name is held, so the start refuses and removes
     nothing (#1279)."""
     run_dir = make_run_dir(tmp_path)
-    _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
+    _populate_mount_sources(run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="")
     with pytest.raises(box_mod.BoxStartConflict):
         box_mod.start_box(run_dir, DEFENDER, docker=rec)
@@ -316,7 +306,7 @@ def test_a_reap_that_cannot_reach_the_daemon_still_leaves_the_did_not_run_marker
     with pytest.raises(box_mod.BoxFault):
         box_mod.start_box(run_dir, DEFENDER, docker=_dies_after_create(rec, "rm"))
     assert box_mod.verdict_path(run_dir).is_file(), \
-        "a reap that could not reach the daemon took the §7 D2 verdict down with it"
+        "a reap that could not reach the daemon left no scan verdict"
 
 
 def test_container_exits_between_create_and_sentinel(tmp_path):

@@ -95,7 +95,7 @@ class TriggerRecorder:
         return [c["module_name"] for c in self.calls]
 
 
-def graded_episode(tmp_path: Path, paths, *, reply=None):
+def graded_episode(tmp_path: Path, paths):
     """One accepted episode graded by the REAL family judge, its rows on the REAL queue."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
@@ -105,7 +105,7 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
     with LearningState.open(paths) as state:
         J.grade_at(
             ep, judge=J.FakeJudge(
-                default=reply or J.as_reply_text(J.reply_doc()),
+                default=J.as_reply_text(J.reply_doc()),
                 family_default=J.as_reply_text(J.family_reply())),
             draws=1, state=state)
     return ep, J.judge_record(ep)
@@ -147,16 +147,12 @@ def writable_sources(request) -> set[Path]:
     return {Path(m.source) for m in request.mounts if m.writable}
 
 
-def readonly_sources(request) -> set[Path]:
-    return {Path(m.source) for m in request.mounts if not m.writable}
-
-
-def stuff_retired_queues(paths, *, rows: int = 25) -> None:
+def stuff_retired_queues(paths) -> None:
     """Put every retired observation queue far over any threshold the drain could read."""
     (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
     for name in RETIRED_OBSERVATION_QUEUES:
         ((location_path(paths.state_root) / FINDINGS.queue).parent / name).write_text(
-            "".join(json.dumps(D.obs_row(f"{name}-{i}")) + "\n" for i in range(rows)),
+            "".join(json.dumps(D.obs_row(f"{name}-{i}")) + "\n" for i in range(25)),
             encoding="utf-8")
 
 
@@ -174,8 +170,7 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tena
     assert record["enqueued_rows"] == len(queued) == 2, (
         f"the graded episode did not put its rows on the shared queue: {queued}")
     assert {r["direction"] for r in D.pending(paths, channel)} == {"family"}, (
-        "the spine's producer is the family judge; a non-family row here means the drive is "
-        "not exercising the partition this demand is about")
+        "a non-family row: the drive is not exercising the family partition")
 
     main = t.origin_main()
     agent = D.recording(D.committing("family-lesson"))
@@ -265,8 +260,7 @@ def test_922_author_drain_triggers_exactly_the_findings_curator(tenant, tmp_path
     assert rc == 0
     assert trigger.completed == ["author"], "the findings curator was taken out of the tick"
     assert sorted(trigger.modules) == ["author", "questioner_curator"], (
-        f"author_drain triggered {trigger.modules} — it is still discovering its curators by "
-        "iterating the direction table, so the retired observation channels are still drained")
+        f"author_drain triggered {trigger.modules}, so retired observation channels are still drained")
     call = next(c for c in trigger.calls if c["module_name"] == "author")
     assert call["pending_file"] == str(location_path(paths.state_root) / FINDINGS.queue), (
         f"the findings trigger names {call['pending_file']}, not the findings queue")
@@ -293,9 +287,7 @@ def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tenant, tmp_
     draft = draft_root(request)
     assert writable_sources(request) == {draft / "agent" / "lessons",
                                          draft / "agent" / "lessons-questioner"}, (
-        f"the drain box's writable mounts are {sorted(map(str, writable_sources(request)))} — "
-        "the mount set is still derived from the direction table, so a retired corpus is "
-        "still handed to the batch as a writable bind")
+        f"the drain box's writable mounts are {sorted(map(str, writable_sources(request)))}")
     assert sorted(m.kind for m in request.mounts if not m.writable) == ["code", "staged"], (
         request.mounts)
     assert not [m for m in request.mounts

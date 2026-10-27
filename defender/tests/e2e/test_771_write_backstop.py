@@ -16,18 +16,17 @@ pytest.importorskip("pydantic_ai")
 
 from defender.records import RunPaths
 from defender import _io  # noqa: E402
+from defender._io import guarded_mkdir, sweep_staged, write_guarded  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks import record_lead  # noqa: E402
 from defender.investigation import tools as runtime_tools  # noqa: E402
 from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.tests.e2e._spec771 import (  # noqa: E402
     CENSUS,
-    POSTURES,
     Writer,
     drive_fault_exit_trace,
     drive_normal_exit_trace,
     drive_writer,
-    guarded_mkdir,
     is_eexist,
     outside,
     plant_component_for,
@@ -37,9 +36,7 @@ from defender.tests.e2e._spec771 import (  # noqa: E402
     posture_class,
     run_tree,
     snapshot_outside,
-    sweep_staged,
     worktree_tree,
-    write_guarded,
 )
 from defender.records import SessionPaths  # noqa: E402
 
@@ -62,8 +59,7 @@ def test_refused_write_raises_oserror_and_leaves_the_outside_target_intact(tmp_p
         f"errno={e.value.errno}"
     )
     assert snapshot_outside(elsewhere) == before, (
-        "the refused write reached the tree outside the run dir — either through the alias, or "
-        "beside it under a name of its own"
+        "the refused write reached the tree outside the run dir"
     )
     assert os.lstat(target).st_nlink == 1, "the refusal left a second name for the target"
 
@@ -94,13 +90,10 @@ def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, t
     outcome = drive_writer(writer, run)   # raising is a preserved posture, not a failure
 
     assert posture_class(outcome) != "raised:AttributeError", (
-        f"{writer.id}'s arm measured a MISSING SYMBOL rather than a refused write — nothing "
-        f"ran, so the outside tree is unchanged for a reason that has nothing to do with this "
-        f"demand. The same guard the parity demand carries, for the same reason: a row whose "
-        f"target does not exist yet must be red, never counted as coverage."
+        f"{writer.id} hit a missing symbol, not a refused write, so the check below is vacuous"
     )
     assert snapshot_outside(elsewhere) == before, (
-        f"{writer.id} ({writer.idiom}, cites {writer.cite}) wrote through the planted alias"
+        f"{writer.id} ({writer.idiom}) wrote through the planted alias"
     )
 
 
@@ -132,8 +125,7 @@ def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
     assert trace.is_file(), "the fault exit left no trace artifact at all"
     body = trace.read_text(encoding="utf-8")
     assert body == "", (
-        "the fault-exit path did not run, so this demand is vacuous — the store must refuse "
-        f"its READS while the run's own writes proceed. Got: {body[:120]!r}"
+        f"the fault-exit path did not run; the trace holds {body[:120]!r}"
     )
 
     happy = run_tree(tmp_path / "happy")
@@ -141,8 +133,7 @@ def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
     drive_normal_exit_trace(happy)
     good = (happy / "tool_trace.jsonl").read_text(encoding="utf-8")
     assert good.strip(), (
-        "after a run whose store reads fine, the trace is empty — either the normal write never "
-        "happened, or the fault handler ran anyway and blanked what it wrote"
+        "a clean run left an empty trace: the normal write never ran, or the fault handler blanked it"
     )
 
 
@@ -161,8 +152,7 @@ def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
         plant_component_for(writer, fresh, outside_dir)
         drive_writer(writer, fresh)
         assert snapshot_outside(elsewhere) == before, (
-            f"{writer.id} created through the planted component and landed outside the tree — "
-            f"B10's silent success at a bound edge nothing was driving"
+            f"{writer.id} created through the planted component and landed outside the tree"
         )
 
     component = run / "gather_raw" / "l-002"
@@ -226,8 +216,7 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     with pytest.raises(OSError):  # noqa: PT011 — the component check's errno is the idiom's
         guarded_mkdir(component / "deep", base=run)
     assert snapshot_outside(tmp_path / "elsewhere") == before, (
-        "under a symlinked ancestor the guard stopped judging components INSIDE the tree — "
-        "the anchor moved above the box's reach rather than to it"
+        "under a symlinked ancestor the guard stopped refusing an aliased component in the tree"
     )
 
 
@@ -268,7 +257,7 @@ def test_atomic_write_refuses_a_planted_temp_name(tmp_path):
         write_guarded(run / "budget.json", '{"tool_calls": 1}', stage_name=lambda _p: staged)
 
     assert is_eexist(e.value), f"the occupied staged name was not refused with EEXIST: {e.value}"
-    assert target.read_bytes() == original, "the payload landed on the outside target (B4's shape)"
+    assert target.read_bytes() == original, "the payload landed on the outside target"
     assert not (run / "budget.json").exists(), "the rename ran despite the refused staging"
 
 
@@ -305,9 +294,7 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
     squat.mkdir()
     today = posture_class(drive_writer(writer, ordinary_run))
     assert today != "raised:AttributeError", (
-        f"{writer.id}'s ordinary-failure arm measured a MISSING SYMBOL rather than a write "
-        f"failure, so both arms of this row would agree vacuously — the shape that makes a "
-        f"parity assertion green against a target that does nothing at all"
+        f"{writer.id}'s ordinary-failure arm hit a missing symbol, not a write failure"
     )
 
     aliased_dir = tmp_path / f"{writer.id}-aliased"
@@ -320,13 +307,9 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
 
     assert target.read_bytes() == original, f"{writer.id} redirected the write"
     assert refused == today, (
-        f"{writer.id}'s posture under an alias refusal ({refused}) is not the posture it "
-        f"produces today under an ordinary write failure ({today}). F1 preserved every call "
-        f"site's posture, so a changed one is a spec violation and not an implementation "
-        f"detail — and this row's posture is MEASURED in this test, so a drift here is a real "
-        f"divergence and not a stale table."
+        f"{writer.id}'s posture under an alias refusal ({refused}) differs from its posture "
+        f"under an ordinary write failure ({today})"
     )
-    assert len(POSTURES) == 4, "the X5 posture record moved; re-read the ledger before editing"
 
 
 # The locked idiom and the primitive's modes
@@ -340,8 +323,8 @@ def test_locked_json_open_fails_before_the_lock_is_acquired(tmp_path):
         with pytest.raises(OSError) as e:  # noqa: PT011 — asserted on errno immediately below
             write_guarded(run / artifact, "{}", mode="update")
         assert e.value.errno == errno.ELOOP, (
-            f"{artifact}: the refusal did not come from O_NOFOLLOW at the open (B7), so the "
-            f"lock may already have been taken on the outside target: errno={e.value.errno}"
+            f"{artifact}: the refusal did not come from O_NOFOLLOW at the open: "
+            f"errno={e.value.errno}"
         )
         (run / artifact).unlink()
 
@@ -429,9 +412,7 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
 
     divergent = {c for c in cases if claim_rejects(c) != seam_rejects(c)}
     assert not divergent, (
-        f"the two independently authored lead_id gates disagree on {sorted(divergent)} — the "
-        f"census's no-traversal argument for the model-named gather_raw component rests on "
-        f"them staying equal (G16)"
+        f"the two lead_id gates disagree on {sorted(divergent)}"
     )
 
 
@@ -501,8 +482,7 @@ def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, dr
         refused = True
 
     assert snapshot_outside(elsewhere) == before, (
-        f"{tool} truncated the outside file through the hard link at {name} — X17's executed "
-        f"finding, and the reason these two rows are back in the O1 negatives"
+        f"{tool} truncated the outside file through the hard link at {name}"
     )
     assert refused, f"{tool} reported success on an aliased {name} operand"
 

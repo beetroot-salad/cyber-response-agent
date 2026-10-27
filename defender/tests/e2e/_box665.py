@@ -267,6 +267,17 @@ def Mount(source: Path, target: Path, writable: bool = False, kind: str | None =
     return box_mod.Mount(**kw)  # type: ignore[attr-defined]
 
 
+def run_cycle_mounts(run_dir: Path) -> tuple:
+    """A minimal caller-composed run-cycle geography: the run dir, the defender code tree and
+    the gather_raw evidence, each read-only and declaring its `kind`."""
+    return (
+        Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+        Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False,
+              kind="data"),
+    )
+
+
 def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None, defender_dir=None):
     """`box.BoxRequest`, the caller-owned geography box.py renders. `spec` and `defender_dir`
     (the explicit code root) are passed only when given."""
@@ -336,31 +347,19 @@ class BoxLifecycleRecorder:
 
 
 # run_dir / learning setup for driving the run cycle.
-def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
-                 gather_raw: bool = True) -> Path:
+def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive") -> Path:
     """A finished run dir: alert, report.md (its disposition picks which legs dispatch),
-    investigation.md and gather_raw/ holding one result for read-back. `gather_raw=False`
-    omits the evidence dir (a legitimately absent conditional mount)."""
+    investigation.md and gather_raw/ holding one result for read-back."""
     run_dir = tmp_path / "inv-665"
     run_dir.mkdir(parents=True)
-    if gather_raw:
-        (run_dir / "gather_raw").mkdir()
-        (run_dir / "gather_raw" / "fixture.json").write_text("{}\n", encoding="utf-8")
+    (run_dir / "gather_raw").mkdir()
+    (run_dir / "gather_raw" / "fixture.json").write_text("{}\n", encoding="utf-8")
     plant_alert(run_dir, {"rule": {"key": "spec.rule"}})
     (run_dir / "report.md").write_text(
         f"---\ndisposition: {disposition}\n---\n\nspec run\n", encoding="utf-8"
     )
     (run_dir / "investigation.md").write_text("+ spec investigation\n", encoding="utf-8")
     return run_dir
-
-
-def loop_paths(tmp_path: Path):
-    from defender.learning.core.config import LoopPaths
-
-    repo = tmp_path / "repo"
-    (repo / "defender").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "state").mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
 
 
 def _path_matches(value, needle: str) -> bool:

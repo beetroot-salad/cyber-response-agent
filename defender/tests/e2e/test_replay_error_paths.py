@@ -50,6 +50,11 @@ def _q(system: str) -> Turn:
     return Turn(tool_calls=[("query", {"system": system, "verb": "probe", "params": {}})])
 
 
+def _gather(lead_id: str) -> Turn:
+    return Turn(tool_calls=[("gather", {"lead_id": lead_id, "system": "elastic",
+                                        "goal": "g", "what_to_summarize": ["x"]})])
+
+
 def test_request_limit_writes_partial_trace(tmp_path):
     run_id = "limit"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
@@ -126,10 +131,8 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     main = ReplayFn([
-        Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "l-002", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
+        _gather("l-001"),
+        _gather("l-002"),
         Turn(text="done"),
     ])
     gather = ReplayFn([
@@ -148,8 +151,7 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
     assert not (run_dir / "gather_raw" / "l-002.lead.json").exists(), (
-        "the dispatch to the tripped system claimed l-002 before its down gate refused it "
-        "(#1256 r4: the down gate comes before the lead claim)")
+        "the dispatch to the tripped system claimed l-002 before its down gate refused it")
     assert "DOWN for this run" in main.seen[-1]
 
 
@@ -158,14 +160,10 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     main = ReplayFn([
-        Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "not a lead", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "l-002", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
+        _gather("l-001"),
+        _gather("l-001"),
+        _gather("not a lead"),
+        _gather("l-002"),
         Turn(text="done"),
     ])
     gather = ReplayFn([Turn(text="summary l-001"), Turn(text="summary l-002")])

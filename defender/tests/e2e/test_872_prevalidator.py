@@ -35,9 +35,9 @@ def _sealed() -> SpyEncoder:
     return SpyEncoder(EncoderFault(dumps_returns="<the encoder must not have been called>"))
 
 
-def _refused_and_unchanged(label: str, value, *, encoder: SpyEncoder | None = None) -> SpyEncoder:
+def _refused_and_unchanged(label: str, value) -> SpyEncoder:
     """Drive a refusal and assert BOTH observables — the count AND what the model got."""
-    spy = encoder if encoder is not None else _sealed()
+    spy = _sealed()
     gated = agent_run(toolset=foreign_toolset(value), encoder=spy)
     assert spy.dumps_calls == 0, f"{label} reached the encoder"
     assert spy.loads_calls == 0, f"{label} was decoded"
@@ -114,9 +114,8 @@ def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_c
             assert framed_content(out.dispatched.text()) == baseline
         else:
             assert out.error is not None, (
-                f"{label}: the un-gated run cannot serialize this payload "
-                f"({type(baseline_error).__name__}), so a gated run that DELIVERS it is the "
-                "gate doing better than the baseline, which d47 forbids"
+                f"{label}: the gated run delivered a payload the un-gated run cannot serialize "
+                f"({type(baseline_error).__name__})"
             )
 
     admitted = {"rows": [{StrKey("a"): i, "b": f"pad-{i}"} for i in range(40)]}
@@ -174,7 +173,7 @@ def test_the_validators_container_set_equals_the_encoders() -> None:
     }
     for label, value in not_entered.items():
         assert isinstance(toons.dumps(value), str), (
-            f"the encoder now ENTERS a {label}; M7's traversal set has moved under this demand"
+            f"the encoder now enters a {label}"
         )
         out = agent_run(toolset=foreign_toolset(value))
         assert out.encoder.dumps_calls == 1, (
@@ -237,8 +236,7 @@ T.agent_run(toolset=T.foreign_toolset(value), capabilities=True)
 '''
     gated_bomb = run_isolated(gated_child, timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
     assert not gated_bomb.timed_out, (
-        "the walk did not terminate on the expansion bomb — a validator with no node budget "
-        "visits 2**16 nodes before it decides anything, and 2**28 at the k=28 arm"
+        "the walk did not terminate on the expansion bomb"
     )
     first = [ln for ln in gated_bomb.stdout.splitlines() if ln.startswith("{")]
     assert first, f"the k=16 probe never reported: {gated_bomb.stderr[-800:]}"
@@ -257,8 +255,7 @@ T.agent_run(toolset=T.foreign_toolset(value), capabilities=True)
     plain_bomb = run_isolated(plain_child, timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
     assert not plain_bomb.timed_out, "the un-gated arm hung, so the comparison below is unsound"
     assert (gated_bomb.returncode == 0) == (plain_bomb.returncode == 0), (
-        "the gate changed whether a 2**28-node payload takes the process down; it is "
-        "undeliverable either way, and the gate may not be worse OR better than the baseline"
+        "the gate changed whether a 2**28-node payload takes the process down"
     )
 
 
@@ -280,8 +277,8 @@ def test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refus
         spy = _sealed()
         out = agent_run(toolset=foreign_toolset(over), encoder=spy, env=env)
         assert spy.dumps_calls == 0, (
-            f"a payload holding 63 containers and {32 * over_width} scalar values reached the "
-            f"encoder at a budget of {budget} — the budget is counting containers, not values"
+            f"63 containers and {32 * over_width} values reached the encoder at budget {budget}: "
+            f"the budget counts containers, not values"
         )
         assert framed_content(out.dispatched.text()) == wire_text(over), (
             "the over-budget payload was refused, but the model did not get the tool's own "
@@ -388,8 +385,7 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     assert brace in p_res, "a `}`-in-key payload stopped delivering without the gate"
 
     assert ("panicked at" in gated_out.stderr) == ("panicked at" in plain_out.stderr), (
-        "a Rust panic line became gate-attributable — it is ambient to this harness today, so "
-        "an asymmetry here is a real change in what the gate does to the process"
+        "a Rust panic line appears in one arm only"
     )
     # The gate ALWAYS frames, so raw stdout differs by construction (and by run id). What must
     # match is the framed CONTENT against the un-gated text — the bytes the model reads.
@@ -406,8 +402,7 @@ def test_a_payload_carrying_a_raw_nul_is_refused_and_the_encoder_is_never_called
     nul = chr(0)
     value = {"rows": [{"a": "x" + nul + "y", "b": i} for i in range(20)]}
     assert nul in toons.dumps(value), (
-        "the encoder no longer emits the NUL raw and unquoted, so the model-visible "
-        "divergence this refusal exists for has changed shape"
+        "the encoder no longer emits the NUL raw and unquoted"
     )
     assert delivered_percent(value) <= 85, (
         "the NUL payload no longer clears the shipped bar, so it would pass through anyway "

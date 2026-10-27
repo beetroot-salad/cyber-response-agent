@@ -66,5 +66,4 @@ def test_the_two_column_wrapper_never_ships_without_the_sidebar_that_fills_it(tm
             "lands in the 240px track the sidebar was supposed to occupy")
 
     assert checked, (
-        "positive control: neither page uses the two-column shell any more, so this guard "
-        "witnesses nothing — retire it or re-point it at whatever replaced the shell")
+        "positive control: neither page uses the two-column shell any more")

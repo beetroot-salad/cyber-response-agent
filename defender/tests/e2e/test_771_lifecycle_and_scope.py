@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from defender import box as box_mod
+from defender._io import write_guarded
 from defender.box import _scrub as scrub_mod
 from defender.tests.e2e._box665 import reaped_after_create
 from defender.tests.e2e._spec771 import (
@@ -20,14 +21,12 @@ from defender.tests.e2e._spec771 import (
     FORGED_IN_TREE_VERDICT_NAME,
     AliasProbeDocker,
     DockerFault,
-    ban_not_in_force_error,
     drive_writer,
     outside,
     plant_hardlink,
     plant_symlink,
     read_verdict,
     run_tree,
-    tree_verified,
     verdict_sidecar,
     worktree_tree,
     write_verdict,
@@ -67,8 +66,7 @@ def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
                                scrub_tree=rec.scrub_tree, in_flight=in_flight)
 
     assert "scrub" not in rec.events, (
-        "the walk ran after a teardown fault — the premise this demand exists for moved, and "
-        "the marker is now testing nothing"
+        "the walk ran after a teardown fault"
     )
     verdict = read_verdict(tree)
     assert verdict, f"the skipped scan left no verdict at {verdict_sidecar(tree)}"
@@ -76,26 +74,24 @@ def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
     assert verdict.get("reason"), "the verdict names no reason, so an operator cannot act on it"
     new_in_tree = {str(p.relative_to(tree)) for p in tree.rglob("*")} - before_tree
     assert not new_in_tree, (
-        f"recording the skipped scan created entries INSIDE the tree it judges "
-        f"({sorted(new_in_tree)}) — the box owns that tree, so a verdict written there is one "
-        f"it can plant an alias at or author outright"
+        f"recording the skipped scan created entries inside the tree it judges: "
+        f"{sorted(new_in_tree)}"
     )
 
 
 def test_consumers_treat_an_unmarked_tree_as_unverified(tmp_path):
     never_started = run_tree(tmp_path / "never-started")
-    assert not tree_verified(never_started), (
-        "a tree whose box never started read as verified — the crash path most likely to hold "
-        "what a box planted is the one that must not"
+    assert not scrub_mod.tree_verified(never_started), (
+        "a tree whose box never started read as verified"
     )
 
     skipped = run_tree(tmp_path / "skipped")
     write_verdict(skipped, {"ran": False, "reason": "teardown faulted"})
-    assert not tree_verified(skipped)
+    assert not scrub_mod.tree_verified(skipped)
 
     scanned = run_tree(tmp_path / "scanned")
     scrub_mod.scrub(scanned)
-    assert tree_verified(scanned), (
+    assert scrub_mod.tree_verified(scanned), (
         "a tree the scan walked clean still reads as unverified, so every consumer is stranded"
     )
 
@@ -109,17 +105,15 @@ def test_the_scan_verdict_lands_outside_the_tree_it_judges(tmp_path):
 
         marker = verdict_sidecar(tree)
         assert marker.is_file(), (
-            f"the completed walk over {tree.name} left no verdict at {marker} — a tree with no "
-            f"verdict is unverified, so every clean run of this lane is stranded"
+            f"the completed walk over {tree.name} left no verdict at {marker}"
         )
         assert not marker.is_relative_to(tree), (
-            "the verdict landed inside the tree it judges, which is the siting D8 rejected"
+            "the verdict landed inside the tree it judges"
         )
         assert {str(p.relative_to(tree)) for p in tree.rglob("*")} == before, (
-            f"the scan wrote into {tree.name} while judging it — the walk is a reader, and a "
-            f"reader that writes is a writer no census counted"
+            f"the scan wrote into {tree.name} while judging it"
         )
-        assert tree_verified(tree), "a tree the scan walked clean still reads as unverified"
+        assert scrub_mod.tree_verified(tree), "a tree the scan walked clean still reads as unverified"
 
 
 def test_a_verdict_planted_inside_the_tree_is_never_read_as_one(tmp_path):
@@ -127,15 +121,13 @@ def test_a_verdict_planted_inside_the_tree_is_never_read_as_one(tmp_path):
     forged = tree / FORGED_IN_TREE_VERDICT_NAME
     forged.write_text(json.dumps({"ran": True, "reason": "clean"}), encoding="utf-8")
 
-    assert not tree_verified(tree), (
-        "a verdict written INSIDE the tree was read as authoritative — the box is root on that "
-        "mount, so this is the attacker certifying their own tree"
+    assert not scrub_mod.tree_verified(tree), (
+        "a verdict written inside the tree was read as authoritative"
     )
 
     write_verdict(tree, {"ran": True, "reason": "walk completed"})
-    assert tree_verified(tree), (
-        "the real out-of-tree verdict does not make the tree read verified either, so the "
-        "negative above passes by the consumer refusing everything"
+    assert scrub_mod.tree_verified(tree), (
+        "the real out-of-tree verdict does not make the tree read verified either"
     )
     assert forged.is_file(), "the consumer removed the planted entry — reading must not sanitize"
 
@@ -194,17 +186,13 @@ def test_the_pre_first_turn_setup_writers_are_individually_guarded_in_any_order(
             refused = isinstance(drive_writer(writer, run), BaseException)
             assert target.read_bytes() == original, (
                 f"{label}: {writer.id} redirected its setup write after "
-                f"{[w.id for w in order[:order.index(writer)]]} ran ahead of it, so the order "
-                f"IS load-bearing and the pin is wrong"
+                f"{[w.id for w in order[:order.index(writer)]]} ran ahead of it"
             )
             assert refused, (
-                f"{label}: {writer.id} left the outside file alone but did not refuse either — "
-                f"a guarded write that silently no-ops on every call (not only the aliased one) "
-                f"passes the identity check above vacuously"
+                f"{label}: {writer.id} left the outside file alone but did not refuse either"
             )
             assert os.path.islink(run / writer.artifact), (
-                f"{label}: {writer.id} removed the planted alias, so the writers that follow it "
-                f"in this order meet a clean tree and the sequence proves nothing"
+                f"{label}: {writer.id} removed the planted alias"
             )
 
 
@@ -250,8 +238,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
         (first / "report.md").write_text("SECOND RUN\n", encoding="utf-8")
 
         assert (first / "report.md").read_text(encoding="utf-8") == "SECOND RUN\n", (
-            "the recreated tree holds nothing, so the three checks below would pass by having "
-            "nothing to find — the vacuous shape this arm fails into"
+            "the recreated tree holds nothing"
         )
         assert os.listdir(pinned) == [], (
             f"the reference followed the path to the recreated directory and now lists the "
@@ -273,16 +260,12 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     specs = [tok for prev, tok in zip(argv, argv[1:], strict=False) if prev == "--mount"]
     assert specs, "the lane rendered no mount at all, so the two checks below look at nothing"
     assert all(s.startswith("type=bind,") for s in specs), (
-        f"a box mount is no longer a bind: {specs} — a mount type that resolves its host path "
-        f"lazily follows a directory recreated at that path, and the isolation this premise "
-        f"rests on is gone without any code #771 touches having changed"
+        f"a box mount is no longer a bind: {specs}"
     )
     writable = [m for m in rec.mounts() if not m["readonly"]]
     assert len(writable) == 1, f"the writable bind set moved: {writable}"
     assert Path(writable[0]["source"]).resolve() == run.resolve(), (
-        f"the writable bind is sourced at {writable[0]['source']!r} rather than at the run dir "
-        f"itself — an ancestor source pins a directory the run dir's deletion never removes, so "
-        f"a container from an earlier run walks straight into the later run's tree"
+        f"the writable bind is sourced at {writable[0]['source']!r}, not at the run dir itself"
     )
 
 
@@ -293,29 +276,20 @@ def test_a_planted_hard_link_still_refuses_the_guarded_write(tmp_path):
     planted = plant_hardlink(run / "report.md", target)
 
     with pytest.raises(OSError) as e:  # noqa: PT011 — the errno is asserted immediately below
-        write_guarded_hardlink_arm(planted)
+        write_guarded(planted, "REDIRECTED\n")
 
     assert e.value.errno in (errno.EEXIST, errno.EMLINK), (
-        f"the refusal did not come from the link-count check: errno={e.value.errno} — under a "
-        f"hard-link plant `O_NOFOLLOW` does not fire at all (B9), so an ELOOP here would mean "
-        f"the primitive refused for a reason this plant cannot produce"
+        f"the refusal did not come from the link-count check: errno={e.value.errno}"
     )
     assert target.read_bytes() == original, "the guarded write truncated through the hard link"
     assert os.lstat(target).st_nlink == 2, "the refusal unlinked the plant (sanitizing)"
-
-
-def write_guarded_hardlink_arm(path: Path) -> None:
-    """Drive the guarded primitive at `path`."""
-    from defender.tests.e2e._spec771 import write_guarded
-
-    write_guarded(path, "REDIRECTED\n")
 
 
 def test_the_box_start_fault_removes_the_container_it_created(tmp_path):
     """A missing ban faults box start, and the faulted start removes its container rather than
     leave it holding the shared tree open."""
     rec = AliasProbeDocker(BAN_ABSENT)
-    with pytest.raises(ban_not_in_force_error()):
+    with pytest.raises(box_mod.AliasBanNotInForce):
         box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec)
 
     assert reaped_after_create(rec.calls), "the faulted start left its container running"
@@ -337,9 +311,7 @@ def test_a_teardown_fault_under_an_in_flight_failure_still_reports_both(tmp_path
         escaped = e
 
     assert escaped is in_flight_failure, (
-        f"the run's own failure did not reach the caller: {escaped!r} — the work's own error "
-        f"is the more informative signal, and a teardown BoxFault raised on top of it replaces "
-        f"the reason the run was already dying with a complaint about the box"
+        f"the run's own failure did not reach the caller: {escaped!r}"
     )
     assert "stop" in rec.events, "the teardown never ran, so nothing could have faulted"
     verdict = read_verdict(tree)
@@ -361,15 +333,12 @@ def test_a_faulted_box_create_leaves_a_verdict_on_the_tree_it_touched(tmp_path):
 
     verdict = read_verdict(run)
     assert verdict, (
-        f"a faulted create left no verdict at {verdict_sidecar(run)} for the tree the host had "
-        f"already written into — this demand would then discharge to the absence rule its "
-        f"sibling already pins, and the provisional pin reads as confirmed untested"
+        f"a faulted create left no verdict at {verdict_sidecar(run)}"
     )
     assert verdict.get("ran") is False, f"the verdict does not record the skip: {verdict}"
     assert verdict.get("reason"), (
-        "the verdict names no reason, so an operator meeting this tree cannot tell a faulted "
-        "create from any other unscanned tree"
+        "the verdict names no reason for the skipped scan"
     )
-    assert not tree_verified(run), (
-        "a tree whose box never started reads as verified — the fail-closed default D2 sets"
+    assert not scrub_mod.tree_verified(run), (
+        "a tree whose box never started reads as verified"
     )

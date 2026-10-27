@@ -51,11 +51,6 @@ CHILD_MEM_LIMIT_MB = 2048
 #: space; both arms of a parity test get the same ceiling.
 DOOMED_CHILD_MEM_LIMIT_MB = 768
 
-#: The six printable characters of a JSON-escaped U+0000, written as an escape of an escape so
-#: no file here carries the raw byte.
-NUL_ESCAPE = "\\u0000"
-NUL = "\x00"
-
 
 # The vendored evidence corpus
 
@@ -97,12 +92,6 @@ def toon_bytes(value: Any) -> int:
     return len(toons.dumps(value).encode("utf-8"))
 
 
-def percent(value: Any) -> float:
-    """The ENCODER-bytes ratio, NOT the gate's ruler: some arms clear it and fail once the frame
-    is counted, so pick fixtures by bar side with `delivered_percent`."""
-    return 100.0 * toon_bytes(value) / wire_bytes(value)
-
-
 def delivered_percent(value: Any) -> float:
     """The gate's ruler: the bytes the model receives on each arm, frame included."""
     overhead = frame_overhead()
@@ -121,35 +110,23 @@ def frame_overhead() -> int:
     return len(_untrusted.wrap_fresh("", "untrusted").encode("utf-8"))
 
 
-_FRAME_RE_CACHE: dict[str, re.Pattern] = {}
+#: A frame's shape with the salt unpinned; a backreference ties the open and close salts, so the
+#: span is one frame, not two stray tags.
+_FRAME_RE = re.compile(r"<run-([0-9a-f]+)-untrusted>\n(.*)\n</run-\1-untrusted>", re.DOTALL)
 
 
-def _frame_re(tag: str) -> re.Pattern:
-    """A frame's shape with the salt unpinned; a backreference ties the open and close salts,
-    so the span is one frame, not two stray tags."""
-    pat = _FRAME_RE_CACHE.get(tag)
-    if pat is None:
-        tag_re = re.escape(tag)
-        pat = re.compile(rf"<run-([0-9a-f]+)-{tag_re}>\n(.*)\n</run-\1-{tag_re}>", re.DOTALL)
-        _FRAME_RE_CACHE[tag] = pat
-    return pat
-
-
-def framed_content(text: str, *, tag: str = "untrusted") -> str:
+def framed_content(text: str) -> str:
     """The bytes between the frame's delimiters."""
     if not isinstance(text, str):
-        raise AssertionError(
-            f"a {type(text).__name__} reached the frame unstringified — under f2 = B every "
-            f"foreign exit is a `str` before it is framed: {text!r:.120}"
-        )
-    m = _frame_re(tag).fullmatch(text)
+        raise AssertionError(f"a {type(text).__name__} reached the frame unstringified: {text!r:.120}")
+    m = _FRAME_RE.fullmatch(text)
     if not m:
-        raise AssertionError(f"not framed (tag={tag!r}): {text[:120]!r}")
+        raise AssertionError(f"not framed: {text[:120]!r}")
     return m.group(2)
 
 
-def frame_count(text: str, *, tag: str = "untrusted") -> int:
-    return len(re.findall(rf"<run-[0-9a-f]+-{re.escape(tag)}>", text))
+def frame_count(text: str) -> int:
+    return len(re.findall(r"<run-[0-9a-f]+-untrusted>", text))
 
 
 # The declarative fault-injection fake for the encoder seam
@@ -160,17 +137,13 @@ def _panic_class() -> type[BaseException]:
         toons.dumps({1: "not a str key"})
     except BaseException as exc:  # noqa: BLE001 — capturing the class IS the probe
         return type(exc)
-    raise AssertionError(
-        "toons.dumps({1: 'x'}) no longer raises — S1's fault taxonomy has moved under this "
-        "suite and every fake citing it is now asserting a fault the encoder does not produce"
-    )
+    raise AssertionError("toons.dumps({1: 'x'}) no longer raises, so there is no panic class to fake")
 
 
 PANIC: type[BaseException] = _panic_class()
 
 assert not issubclass(PANIC, Exception), (
-    "S5's load-bearing fact has changed: the encoder's panic is now an Exception subclass, "
-    "so `except Exception` would catch it and d55's breadth demand no longer discriminates"
+    "the encoder's panic is now an Exception subclass, so `except Exception` would catch it"
 )
 
 
@@ -227,31 +200,10 @@ def foreign_toolset(returns: Any, *, name: str = "fetch_rows") -> FunctionToolse
     return ts
 
 
-def foreign_sequence(values: list[Any], *, name: str = "fetch_rows") -> FunctionToolset:
-    """A foreign tool whose successive calls return successive values."""
-    ts = FunctionToolset()
-    box = {"i": 0}
-
-    def fn() -> Any:
-        v = values[min(box["i"], len(values) - 1)]
-        box["i"] += 1
-        return v
-
-    fn.__name__ = name
-    ts.tool_plain(fn)
-    return ts
-
-
 def _returner(value: Any):
     def fn() -> Any:
         return value
     return fn
-
-
-def gate_metadata_key() -> str:
-    """`toon_gate.GATE_METADATA_KEY`, the reserved metadata key carrying the original JSON."""
-    from defender.investigation.toon_gate import GATE_METADATA_KEY
-    return GATE_METADATA_KEY
 
 
 def owned_toolset(returns: Any, *, name: str = "fetch_rows") -> Any:
@@ -291,9 +243,6 @@ class Dispatched:
     def texts(self, tool_name: str = "fetch_rows") -> list[str]:
         return [p.model_response_str() for p in self.parts if p.tool_name == tool_name]
 
-    def metadata(self, tool_name: str = "fetch_rows") -> Any:
-        return self.part(tool_name).metadata
-
 
 class _Recorder:
     """A `FunctionModel` callable that keeps the raw request messages
@@ -301,16 +250,15 @@ class _Recorder:
 
     __name__ = "ToonRecorder"
 
-    def __init__(self, calls: list[tuple[str, dict]], turns: int = 1) -> None:
+    def __init__(self, calls: list[tuple[str, dict]]) -> None:
         self._calls = calls
-        self._turns = turns
         self.requests: list[list[Any]] = []
         self.n = 0
 
     def __call__(self, messages, info) -> ModelResponse:
         self.requests.append(list(messages))
         self.n += 1
-        if self.n <= self._turns:
+        if self.n == 1:
             return ModelResponse(parts=[
                 ToolCallPart(tool_name=name, args=args) for name, args in self._calls
             ])
@@ -354,8 +302,7 @@ def installed_gate_capability(build: GateBuild) -> Any:
     build.agent.root_capability.apply(caps.append)
     mine = [c for c in caps if type(c).__module__.split(".", 1)[0] == "defender"]
     assert len(mine) == 1, (
-        "expected exactly ONE capability defined in defender's own code on an agent built "
-        "through the composition root — the gate — and found "
+        f"expected one defender capability (the gate), found "
         f"{[type(c).__module__ + '.' + type(c).__name__ for c in mine]} among "
         f"{[type(c).__name__ for c in caps]}"
     )
@@ -369,25 +316,23 @@ def agent_run(  # noqa: PLR0913 — one parameter per seam this drive threads
     calls: list[tuple[str, dict]] | None = None,
     own_tool: Any = None,
     env: dict[str, str] | None = None,
-    turns: int = 1,
     capabilities: bool = True,
-    defn: Any = None,
     extra: tuple = (),
 ) -> GateBuild:
     """Build an agent at `build_agent_core` and drive one turn against a `FunctionModel`."""
     # A fresh spy per call: a shared default would carry one test's call counts into the next.
     encoder = encoder if encoder is not None else SpyEncoder()  # lint-default: ok — per-call spy
     calls = calls if calls is not None else [("fetch_rows", {})]
-    model = _Recorder(calls, turns=turns)
+    model = _Recorder(calls)
     logger = _NullLogger()
-    deps = _deps(defn)
+    deps = _deps()
     old = {k: os.environ.get(k) for k in (env or {})}
     for k, v in (env or {}).items():
         os.environ[k] = v
     try:
         agent = _build(toolset=toolset, encoder=encoder, own_tool=own_tool,
                        model=model, capabilities=capabilities, logger=logger,
-                       deps=deps, defn=defn, extra=extra)
+                       deps=deps, extra=extra)
         error: BaseException | None = None
         with override_allow_model_requests(False):
             import asyncio
@@ -410,23 +355,21 @@ def agent_run(  # noqa: PLR0913 — one parameter per seam this drive threads
     )
 
 
-def _deps(defn: Any = None, run_dir: Path | None = None):
+def _deps():
     """A real `AgentDeps`, bound the way the composition root binds one."""
     import tempfile
 
     from defender.investigation.agent_definition import RunScope, bind
-    resolved = _defn(defn)
-    if run_dir is None:
-        run_dir = Path(tempfile.mkdtemp(prefix="toon872-"))
-        (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
+    resolved = _defn()
+    run_dir = Path(tempfile.mkdtemp(prefix="toon872-"))
+    (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     scope = RunScope(read_confine=(run_dir,)) if resolved.requires_confine else RunScope()
     return bind(resolved, run_dir, scope=scope, defender_dir=DEFENDER)
 
 
 def _build(  # noqa: PLR0913 — one parameter per seam this build threads, plus the two the
            # composition root already takes; every one is load-bearing per-build
-        *, toolset, encoder, own_tool, model, capabilities, logger, deps,
-           defn=None, extra=()) -> Agent:
+        *, toolset, encoder, own_tool, model, capabilities, logger, deps, extra=()) -> Agent:
     """The real `build_agent_core` with the gate's two build-time seams: `toolset=` (foreign
     tools) and `toon_encoder=` (call counts observable without monkeypatching).
 
@@ -439,7 +382,7 @@ def _build(  # noqa: PLR0913 — one parameter per seam this build threads, plus
         )
     else:
         agent = driver.build_agent_core(
-            _defn(defn),
+            _defn(),
             deps_type=type(deps),
             instructions="spec-872",
             logger=logger,
@@ -454,17 +397,16 @@ def _build(  # noqa: PLR0913 — one parameter per seam this build threads, plus
     return agent
 
 
-def _defn(defn: Any = None) -> AgentDefinition:
-    """A definition with no defender tools and no query capability, so a foreign result is the
-    only thing crossing the gate; `defn=` strips another role's definition the same way."""
+def _defn() -> AgentDefinition:
+    """The main definition with no defender tools and no query capability, so a foreign result
+    is the only thing crossing the gate."""
     from dataclasses import replace
 
     from defender.investigation.agent_definition import DENY_ALL, ToolSet
     from defender.investigation.driver import MAIN_DEF
-    base = defn if defn is not None else MAIN_DEF
     # Stripping the tools strips their scope too: `agent_definition` refuses shapes or a
     # `verb_grant` no granted tool uses, so `bind` would raise before the gate is reached.
-    return replace(base, tools=ToolSet(), write_shapes=(), bash_shapes=(),
+    return replace(MAIN_DEF, tools=ToolSet(), write_shapes=(), bash_shapes=(),
                    budget_enforced=False, verb_grant=DENY_ALL, corpus_dirs=(),
                    requires_corpus=False)
 
@@ -486,24 +428,6 @@ class _NullLogger:
 def _built(model):
     from defender.providers import BuiltModel
     return BuiltModel(FunctionModel(model), None)
-
-
-# Driving an agent one of the five build functions produced
-
-def probe_model(calls: list[tuple[str, dict]] | None = None, turns: int = 1):
-    """`(make_model, recorder)`: every build function takes `make_model`, so this drives a real
-    build path without a provider."""
-    rec = _Recorder(calls if calls is not None else [("fetch_rows", {})], turns=turns)
-    return (lambda name, effort: _built(rec)), rec
-
-
-def run_with_foreign_toolset(agent: Agent, deps: Any, recorder: _Recorder, value: Any,
-                             *, name: str = "fetch_rows") -> Dispatched:
-    """Run an ALREADY-BUILT agent one turn with a foreign toolset supplied at RUN time."""
-    import asyncio
-    with override_allow_model_requests(False):
-        asyncio.run(agent.run("go", deps=deps, toolsets=[foreign_toolset(value, name=name)]))
-    return Dispatched(recorder.requests, [])
 
 
 # Child-process isolation — hazard containment, not tidiness
@@ -564,28 +488,6 @@ def run_isolated(
         returncode=proc.returncode, signalled=proc.returncode < 0,
         timed_out=False, stdout=proc.stdout, stderr=proc.stderr,
     )
-
-
-#: Shared child preamble: drive one turn gated or un-gated, so both arms of a parity test are
-#: one program apart from that flag.
-CHILD_PRELUDE = '''
-import asyncio, json, sys
-from defender.tests.e2e import _toon872 as T
-
-def drive(value, *, gated):
-    try:
-        out = T.agent_run(toolset=T.foreign_toolset(value), capabilities=gated,
-                          encoder=None)
-    except BaseException as exc:
-        print(json.dumps({"outcome": "raised", "type": type(exc).__name__}))
-        return
-    err = out.error
-    print(json.dumps({
-        "outcome": "raised" if err is not None else "returned",
-        "type": type(err).__name__ if err is not None else None,
-        "text": out.dispatched.texts()[0] if (err is None and out.dispatched.parts) else None,
-    }))
-'''
 
 
 # Hazard corpora (probe-derived values)

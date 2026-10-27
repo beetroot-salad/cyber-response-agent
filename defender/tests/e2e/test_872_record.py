@@ -14,6 +14,7 @@ toons = pytest.importorskip("toons")  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql, store_factory  # noqa: E402
+from defender.investigation.toon_gate import GATE_METADATA_KEY  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     ReplayFn,
@@ -23,7 +24,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 from defender.tests.e2e._toon872 import (  # noqa: E402
-    gate_metadata_key,
     RUN_ID,
     PartRecorder,
     corpus,
@@ -43,9 +43,9 @@ def _payload() -> dict:
 
 
 def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = None,
-                      gather: bool = False, summaries: list | None = None):
+                      gather: bool = False):
     """One driven run in which a foreign result is substituted: this module's shared setup and
-    its negatives' positive control. `summaries` receives what `drive()` returned."""
+    its negatives' positive control."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     calls = [Turn(tool_calls=[("fetch_rows", {})]) for _ in range(turns)]
     if gather:
@@ -61,9 +61,7 @@ def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = N
         seams["verbs"] = elastic_ok(rec)
     if stores is not None:
         seams["store_factory"] = store_factory(tmp_path / "store", sink=stores)
-    summary = drive(run_dir, run_id=RUN_ID, main=main, **seams)
-    if summaries is not None:
-        summaries.append(summary)
+    drive(run_dir, run_id=RUN_ID, main=main, **seams)
     return run_dir, main
 
 
@@ -85,9 +83,9 @@ def test_both_encodings_are_recoverable_from_the_wire_log_joined_by_agent_seq_an
             )
         for part in _tool_return_parts(rec):
             meta = part.get("metadata") or {}
-            if gate_metadata_key() in meta:
+            if GATE_METADATA_KEY in meta:
                 found.append((rec.get("agent_id"), rec.get("seq"), part.get("tool_call_id"),
-                              part.get("content"), meta[gate_metadata_key()]))
+                              part.get("content"), meta[GATE_METADATA_KEY]))
 
     assert found, "no substituted call is recoverable from the wire log"
     agent_id, seq, tool_call_id, view, original = found[-1]
@@ -146,8 +144,7 @@ def test_a_substituted_return_survives_the_history_the_run_rebuilds_before_sendi
 
     views = main.dispatched.texts("fetch_rows")
     assert len(views) >= 2, (
-        "the final dispatched history carries fewer foreign returns than the run made, so the "
-        "rebuild dropped one and this assertion would be about the survivors only"
+        "the final dispatched history carries fewer foreign returns than the run made"
     )
     for i, view in enumerate(views):
         assert framed_content(view) == toons.dumps(value), (
@@ -170,8 +167,7 @@ def test_a_substituted_calls_metadata_survives_persist_and_hydrate_through_the_s
     assert payloads, "the store holds no message payloads"
     carriers = [p for p in payloads if _is_json(p) and _carries_view(json.loads(p), view)]
     assert carriers, (
-        "no persisted message payload carries the substituted TOON view at all, so nothing "
-        "here distinguishes this run from one in which the gate never fired"
+        "no persisted message payload carries the substituted TOON view"
     )
     assert any(
         _carries_original(json.loads(p), value) for p in carriers
@@ -263,8 +259,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     assert idle_rows, "the idle run wrote no queries row"
     lanes = {r.get("lead_id") for r in gated_rows}
     assert "l-001" in lanes, (
-        f"the dispatched lead put no row in the table ({sorted(lanes)}), so the differential "
-        "below is at the table's altitude and not per-writer"
+        f"the dispatched lead put no row in the table: {sorted(lanes)}"
     )
     assert gated_rows == idle_rows, (
         "an executed-queries row differs between a run where the gate substituted and one "

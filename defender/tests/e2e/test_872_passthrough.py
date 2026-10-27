@@ -67,15 +67,13 @@ def test_a_pydantic_serialization_error_on_the_baseline_emits_json() -> None:
 
     value = {"rows": [{"a": Arbitrary(), "b": 1}]}
     assert isinstance(toons.dumps(value), str), (
-        "the encoder now raises on this fixture, so the ordering assertion below is about a "
-        "different arm than the one this demand names"
+        "the encoder now raises on this fixture"
     )
     gated = agent_run(toolset=foreign_toolset(value))
     ungated = agent_run(toolset=foreign_toolset(value), capabilities=False)
 
     assert gated.encoder.dumps_calls == 1, (
-        "the gate never reached the encoder, so both differentials below are satisfied by a "
-        "gate that does nothing — the key flow puts `dumps` before the baseline serialization"
+        "the gate never reached the encoder"
     )
     assert gated.encoder.loads_calls == 0, "the gate decoded a view whose baseline never serialized"
     assert type(gated.error).__name__ == type(ungated.error).__name__, (
@@ -211,8 +209,7 @@ def test_a_view_the_encoder_produced_that_the_decoder_cannot_read_passes_through
     with pytest.raises(BaseException) as caught:  # noqa: B017, PT011 — the class IS the probe
         toons.loads(view)
     assert not isinstance(caught.value, Exception), (
-        "the decoder's fault is now an Exception subclass; the guard's breadth demand (d55) "
-        "and this arm no longer describe the same encoder"
+        "the decoder's fault is now an Exception subclass"
     )
 
     out = agent_run(toolset=foreign_toolset(value))
@@ -227,8 +224,7 @@ def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_
     for f in (float("nan"), float("inf"), float("-inf")):
         for value in ({"x": f}, {"rows": [{"a": f, "b": i} for i in range(40)]}):
             assert wire_roundtrip_equal(value), (
-                f"M3's oracle no longer blesses {f!r} under the wire serializer, so the arm "
-                "this demand asserts is decided by the fidelity check rather than by the bar"
+                f"the round-trip oracle no longer accepts {f!r} under the wire serializer"
             )
             out = agent_run(toolset=foreign_toolset(value))
             assert out.error is None
@@ -250,6 +246,5 @@ def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_
             )
 
     assert substituted_at_least_once, (
-        "no non-finite payload substituted, so every assertion above is the passthrough arm "
-        "and the oracle correction this demand pins is untested"
+        "no non-finite payload substituted, so only the passthrough arm ran"
     )

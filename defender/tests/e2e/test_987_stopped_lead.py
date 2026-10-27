@@ -249,7 +249,7 @@ def test_the_tripping_call_is_answered_with_the_guards_reason_and_the_summary_fo
     assert "repeats the one already issued at seq 0" in str(closing.content)
     assert str(closing.content).endswith(QUERY_DOOR_CLOSED)
     assert INCOMPLETE_IDIOM not in flat(lead.model.last_inbound), \
-        "main's idiom reached the gather model (#807 G19)"
+        "main's idiom reached the gather model"
     assert lead.persisted == lead.out
 
 
