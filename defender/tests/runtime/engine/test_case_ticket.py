@@ -1,4 +1,4 @@
-"""Unit tests for the case-history mapper (the anti-corruption layer, #317, gated for approval by #767)."""
+"""Unit tests for the case-history mapper (the anti-corruption layer, #317): pure, no transport."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -114,16 +114,11 @@ def test_alert_to_open_payload_handles_missing_rule():
     payload = case_ticket.alert_to_open_payload(NO_FACTS, "case-2", mapping=SHIPPED)
     assert payload["labels"] == ["sig:unknown"]
     assert payload["status"] == "open"
-
-
-def test_alert_to_open_payload_falls_back_on_empty_strings():
-    payload = case_ticket.alert_to_open_payload(NO_FACTS, "case-3", mapping=SHIPPED)
-    assert payload["labels"] == ["sig:unknown"]
     assert payload["summary"] == "(no rule description)"
 
 
 def test_mapping_is_file_driven(tmp_path: Path):
-    """Load a custom mapping.yaml from a settings folder, hand the mapper the result, and confirm the open..."""
+    """A custom mapping.yaml in a settings folder drives the open payload's labels."""
     settings = tmp_path / "settings"
     mapping_dir = settings / "systems" / "case-history"
     mapping_dir.mkdir(parents=True)
@@ -140,7 +135,8 @@ def test_mapping_is_file_driven(tmp_path: Path):
 
 
 def test_an_indented_planted_fence_is_stripped_from_the_narrative(tmp_path, monkeypatch):
-    """A standalone `---` line indented by leading whitespace is still a planted frontmatter fence and must not..."""
+    """A `---` line indented by whitespace is still a planted frontmatter fence and does not survive
+    into the rendered comment."""
     from defender.tests.support.runtime.engine._spec767 import current_mapping, use_mapping
 
     use_mapping(monkeypatch, tmp_path / "dfn")
@@ -155,7 +151,7 @@ def test_an_indented_planted_fence_is_stripped_from_the_narrative(tmp_path, monk
 
 
 def test_a_planted_fence_in_the_cause_field_is_also_stripped(tmp_path, monkeypatch):
-    """The fence guard is a property of the RENDERED SLOT, not an assumption about who may populate it: `cause`..."""
+    """The fence guard covers every rendered slot, `cause` included, not only the narrative."""
     from defender.tests.support.runtime.engine._spec767 import current_mapping, use_mapping
 
     use_mapping(monkeypatch, tmp_path / "dfn")

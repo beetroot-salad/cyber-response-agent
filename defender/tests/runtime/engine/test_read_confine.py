@@ -1,4 +1,7 @@
-"""Per-agent read confinement across both read surfaces (decide_read and decide_bash)."""
+"""Per-agent read confinement across both read surfaces (decide_read and decide_bash).
+
+Pure gate tests: a non-empty `read_confine` replaces the defender_dir read base, while the run dir
+stays a root."""
 from __future__ import annotations
 
 import os
@@ -21,12 +24,10 @@ _DEFENDER = config.REPO_ROOT / "defender"
 
 _CONFINE_A = _DEFENDER / "lessons"
 _CONFINE_B = _DEFENDER / "skills"
-#: A real file OUTSIDE both, for the refusal side. It was the deleted judge's rubric; any file
-#: the confine does not cover carries the same demand, and this one ships.
+#: A real file outside both confine dirs, for the refusal side.
 _OUTSIDE = _DEFENDER / "SKILL.md"
 
-#: A two-directory confine and a one-directory confine. The two shapes are what the gate has to
-#: tell apart; which legs happened to bind them is not what these tests are about.
+#: A two-directory and a one-directory confine: the two shapes the gate has to tell apart.
 _MALICIOUS_CONFINE = (_CONFINE_A, _CONFINE_B)
 _BENIGN_CONFINE = (_CONFINE_B,)
 
@@ -47,17 +48,16 @@ def test_malicious_reads_within_confine_allowed(tmp_path, path):
 
 @pytest.mark.parametrize("path", [
     _OUTSIDE,
-    _DEFENDER / "SKILL.md",
     _DEFENDER / "learning" / "pipeline" / "judge" / "benign.md",
 ])
 def test_malicious_reads_outside_confine_denied(tmp_path, path):
-    """read under defender_dir but OUTSIDE the confine (rubric, SKILL.md) -> deny. The regression #510 dropped."""
+    """A read under defender_dir but outside the confine is denied (the regression #510 dropped)."""
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     assert not permission.decide_read(path, run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow, path
 
 
 def test_benign_confined_to_environment(tmp_path):
-    """one-directory confine: its directory allowed; the other directory AND a file outside both denied — the gray-box split."""
+    """A one-directory confine admits its directory and denies the other one and anything outside both."""
     pol = _policy(read_confine=_BENIGN_CONFINE)
     assert permission.decide_read(_CONFINE_B / "x.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
     assert not permission.decide_read(_CONFINE_A / "x.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
@@ -102,7 +102,8 @@ def test_denylist_still_fires_inside_confine(tmp_path, name):
 
 
 def test_confined_actor_cannot_reach_gather_raw(tmp_path):
-    """the actor cannot read a gather_raw payload — pinned as CONTAINMENT, not as the deleted"""
+    """A confined agent cannot read a gather_raw payload: it lies under neither its confine nor its
+    own run dir, so the roots gate denies it; its own run-dir artifact stays readable."""
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     investigation_raw = tmp_path / "investigation-run" / "gather_raw" / "l-001" / "0.json"
     assert not permission.decide_read(
@@ -157,7 +158,8 @@ def test_actor_all_generic_readers_denied(cmd):
 
 
 def test_reduction_is_per_policy_not_global(tmp_path):
-    """the reader reduction is per-policy, NOT a global removal: an actor policy with empty"""
+    """The reader reduction lives in the policy, not the gate: an empty `bash_allow` denies the
+    in-scope `cat` that main's grants admit, with a stdin-only viewer behind it."""
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
@@ -177,7 +179,8 @@ def test_reduction_is_per_policy_not_global(tmp_path):
     'cat {r} | defender-sql "SELECT 1\nFROM data"',
 ])
 def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
-    """`bash_exec.parse` lexes each PHYSICAL LINE on its own (an unquoted newline is a"""
+    """`bash_exec.parse` lexes each physical line on its own, so a continued or multi-line command
+    fails closed, and the deny says why instead of reading as "this program is forbidden"."""
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
     run = tmp_path / "run"
     dfn = tmp_path / "tree" / "defender"
@@ -191,7 +194,8 @@ def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
 
 
 def test_main_cat_scope_is_the_read_surface(tmp_path):
-    """MAIN keeps a viewer lane, and its `cat` grant's SCOPE is the run dir + corpus over the RESOLVED"""
+    """MAIN's `cat` grant is scoped to the run dir and corpus (an out-of-scope `cat` is denied), and
+    `read_allow` is that same scope object."""
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
@@ -205,7 +209,9 @@ def test_main_cat_scope_is_the_read_surface(tmp_path):
 
 
 def test_gather_stream_plumbing_anchored(tmp_path):
-    """GATHER's compute lane still works over IN-SCOPE payloads — cat {run}/… | defender-sql,"""
+    """Gather's compute lane works over in-scope payloads (`cat` into `defender-sql` or `wc`) but
+    denies an out-of-scope operand, a payload off the `gather_raw/l-<n>/<seq>.json` shape, and
+    the standalone adapter (now the `query` tool's job)."""
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()

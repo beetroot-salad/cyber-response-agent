@@ -1,4 +1,6 @@
-"""Single-source agent construction: `build_agent_core` threads the AgentDefinition's model/effort/cache key, registers tools from its ToolSet, and the MAIN/GATHER builders delegate to it."""
+"""Single-source agent construction: `build_agent_core` threads the AgentDefinition's model/effort/cache key, registers tools from its ToolSet, and the MAIN/GATHER builders delegate to it.
+
+Per-ToolSet registration itself is pinned in `test_agent_definition.py`."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
@@ -23,7 +25,6 @@ from defender.investigation import challenge_gate, driver, observe  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
 from defender.investigation.agent_definition import (  # noqa: E402
     AgentDefinition,
-    ToolSet,
 )
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
@@ -66,7 +67,8 @@ def logger(tmp_path):
 
 
 def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
-    """build_agent_core resolves the model via make_model(defn.model(), defn.effort) — the (name, effort) seam, calling the def's model THUNK — and pairs the returned model + settings onto the Agent (observable via agent.model / agent.model_settings)."""
+    """`build_agent_core` calls `make_model(defn.model(), defn.effort)` (the def's thunk) and puts
+    the returned model and settings on the Agent."""
     sentinel = {"SENTINEL": "s"}
     fake, calls = _capture_make_model(settings=sentinel)
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
@@ -81,7 +83,9 @@ def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
 
 
 def test_build_agent_core_keys_the_cache_on_the_conversation_when_there_is_one(logger):
-    """WITH a session the affinity key is that conversation's, so every turn of one growing prefix asks for the replica already holding the previous turn;"""
+    """With a session the cache-affinity key is the conversation's (each turn finds the replica
+    holding the previous one); without, it is the bare agent id, which single-call roles reuse
+    across runs."""
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
     with override_allow_model_requests(False):
         in_session = driver.build_agent_core(
@@ -97,7 +101,8 @@ def test_build_agent_core_keys_the_cache_on_the_conversation_when_there_is_one(l
 
 
 def test_835_an_explicit_cache_key_overrides_both_derived_arms(logger):
-    """The third arm (#835)."""
+    """An explicit `cache_key` beats even the session-derived key: gather has a session, yet sibling
+    leads must share one replica for their common prefix (#835)."""
     defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.3", effort="low")
     with override_allow_model_requests(False):
         keyed = driver.build_agent_core(
@@ -109,7 +114,9 @@ def test_835_an_explicit_cache_key_overrides_both_derived_arms(logger):
 
 
 def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_lead(logger, tmp_path):
-    """The two names are now distinct, and each is load-bearing for something different:"""
+    """Gather's cache lane is the system's (the shared prefix belongs to it) while its `agent_id`
+    stays `gather:{lead_id}` (the wire log, session store and terminator stamp key on it):
+    `_run_gather` hands the factory the system, and `build_gather_agent` applies the `cache_key`."""
     import asyncio
 
     from defender.investigation import tools_gather
@@ -133,8 +140,8 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
-    # MAIN's deps carry the run's one `RunState` (#1235 round 2) and the run tenant (#1108 P4),
-    # as the driver hands them: the dispatch's breaker screen and knowledge read them.
+    # MAIN's deps carry the run's `RunState` and tenant, as the driver hands them: the dispatch's
+    # breaker screen and knowledge read them.
     deps = replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_fixture_run_1165(run_dir)),
                    run_state=RunState(run_dir, "r-harness-b"), tenant=_tenants1106.fixture_run_tenant())
     asyncio.run(tools_gather._run_gather(
@@ -155,34 +162,6 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     assert agent.model_settings["openai_prompt_cache_key"] == "gather:identity"
 
 
-def test_build_agent_core_registers_read_only_pair(logger):
-    """A read + bash ToolSet → build_agent_core registers ONLY the read-only pair; no file
-    writers reach a read-only agent (the security-relevant default)."""
-    fake, _ = _capture_make_model()
-    defn = AgentDefinition(role=AgentRole.GATHER, model=lambda: "glm-5.3", effort=None,
-                           tools=ToolSet(read=True, bash=True))
-    with override_allow_model_requests(False):
-        agent = driver.build_agent_core(
-            defn, deps_type=AgentDeps, instructions="x", logger=logger,
-            agent_id="a", make_model=fake,
-        )
-    assert list(agent._function_toolset.tools) == ["bash", "read_file"]
-
-
-def test_build_agent_core_registers_write_tools(logger):
-    """A read + bash + write ToolSet → the full four tools incl. write_file/edit_file (MAIN's
-    authoring surface). The writers bit is the one build-time permission the def carries."""
-    fake, _ = _capture_make_model()
-    defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low",
-                           tools=ToolSet(read=True, bash=True, write=True))
-    with override_allow_model_requests(False):
-        agent = driver.build_agent_core(
-            defn, deps_type=AgentDeps, instructions="x", logger=logger,
-            agent_id="main", make_model=fake,
-        )
-    assert list(agent._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
-
-
 def test_build_agent_core_propagates_make_model_error(logger):
     def boom(model, effort):
         raise RuntimeError("no key")
@@ -195,7 +174,8 @@ def test_build_agent_core_propagates_make_model_error(logger):
 
 
 def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, logger):
-    """build_gather_agent (re-pointed at build_agent_core via the GATHER spec) yields the read-only surface ONLY — no writers, and NO 'gather' dispatch tool (the gather subagent must not dispatch itself)."""
+    """`build_gather_agent` yields the read-only surface only: no writers and no `gather` dispatch
+    tool (a subagent must not dispatch itself)."""
     monkeypatch.delenv("DEFENDER_GATHER_MODEL", raising=False)
     monkeypatch.delenv("DEFENDER_GATHER_REASONING_EFFORT", raising=False)
     fake, _ = _capture_make_model()
@@ -212,7 +192,8 @@ def test_build_gather_agent_is_read_only_and_cannot_self_dispatch(monkeypatch, l
 
 
 def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
-    """MAIN routed through build_agent_core still ends up with BOTH the authoring tools (writers=True) AND the layered 'gather' dispatch tool (register_gather_tool is applied after construction, at MAIN's call site only)."""
+    """MAIN gets its authoring tool (`append_block`, no general writers) and the `gather` dispatch
+    tool, which only MAIN's call site layers on after construction."""
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)
     monkeypatch.delenv("DEFENDER_MODEL", raising=False)
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
@@ -230,7 +211,8 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
 
 
 def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
-    """SEAM CONTRACT, overturned by #705 (O20, R2/M8 — not preserved):"""
+    """MAIN's extra capabilities are exactly one `ProcessHistory` whatever `DEFENDER_COMPACTION`
+    says: the flag only gates whether a fold runs inside it."""
     from defender.records import session_store
 
     store = session_store.open_store(case_id="case-harness", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs")))
