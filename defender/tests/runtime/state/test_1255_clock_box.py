@@ -30,7 +30,6 @@ _PRELOAD_KEY = re.compile(r"PRELOAD|FAKETIME|CLOCK", re.IGNORECASE)
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)
 
 

@@ -40,9 +40,8 @@ def test_p4_a_manifest_without_a_continuation_prompt_loads():
 
 @pytest.fixture
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both configured roots inside `tmp_path` (as `test_947_triplet_sibling`)."""
+    """The configured runs base inside `tmp_path` (as `test_947_triplet_sibling`)."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
 
 
 class _Lifecycle:

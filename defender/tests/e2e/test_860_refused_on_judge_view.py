@@ -72,10 +72,9 @@ NEVER_RENDERED = (
 
 @pytest.fixture
 def judge_roots(tmp_path, monkeypatch):
-    """Mirrors `test_1017_query_row_surface.judge_roots`: the runs base, episodes root and
-    learning state dir point inside `tmp_path`, so nothing here touches the checkout's."""
+    """Mirrors `test_1017_query_row_surface.judge_roots`: the runs base and learning state dir
+    point inside `tmp_path`, so nothing here touches the checkout's."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 

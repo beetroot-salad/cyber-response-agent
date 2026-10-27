@@ -24,7 +24,6 @@ LIMITS = C.caps(wall_clock_timeout=600, grace_seconds=600, max_tool_calls=50)
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate configured roots and enable the real unboxed executor."""
-    monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv(S.KNOB_RATE, "1e6")
     monkeypatch.setenv(C.FLAG, "true")

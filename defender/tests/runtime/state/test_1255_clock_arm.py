@@ -26,7 +26,6 @@ R = C.BRANCH_READING
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate configured roots and enable the real unboxed executor."""
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
 

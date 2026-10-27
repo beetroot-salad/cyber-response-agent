@@ -47,7 +47,6 @@ RETIRED_CORPORA = ("lessons-actor", "lessons-environment")
 def _isolated_roots(tmp_path, monkeypatch):
     """Every shared root this spine touches, pointed inside `tmp_path`."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     # Stated rather than inherited: the drive below queues two family rows, and the shipped
     # default of 5 would make every assertion below vacuous on a drain that never woke.

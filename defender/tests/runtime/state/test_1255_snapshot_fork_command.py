@@ -10,9 +10,8 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Isolate configured episode and learning roots under tmp_path."""
+    """Isolate the configured runs and learning roots under tmp_path."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)
 
 
