@@ -10,7 +10,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
 from defender.runtime.tools import _tool_edit_file, _tool_write_file  # noqa: E402
-from defender.learning.author.lesson_read import _tool_lesson_read  # noqa: E402
+from defender.runtime.tools.lesson_read import _tool_lesson_read  # noqa: E402
 
 # curator_engine EXISTS today (bindable=False); these imports are not the red.
 from defender.learning.author.curator_engine import (  # noqa: E402

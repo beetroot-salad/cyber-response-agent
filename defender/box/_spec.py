@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -111,6 +111,8 @@ class BoxRequest:
     require_sandbox: bool = False
     #: Host geography remains authoritative; only container-facing paths use this view.
     view: ModelView | None = None
+    #: Which words of a command are paths; required with `view` when the host fallback runs.
+    path_operands: Callable[[list[str]], Iterable[str]] | None = None
 
     @property
     def model_workdir(self) -> Path:
@@ -275,20 +277,21 @@ class _HostTransport:
 
     env: dict[str, str]
     view: ModelView | None = None
+    #: Which words of a command are paths; the caller's permission grammar decides.
+    path_operands: Callable[[list[str]], Iterable[str]] | None = None
 
     def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
         pipelines = decode_request(frame)
         if self.view is not None:
-            from defender.runtime.permission.grant import PROGRAMS, rm_target_files
-
+            if self.path_operands is None:
+                raise TypeError("a host transport with a model view needs path_operands")
             # The permission grammar owns which arguments are paths. A grep pattern or
             # Python string that resembles a workspace path must keep its literal bytes.
             translated = []
             for pipeline in pipelines:
                 stages = []
                 for stage in pipeline.stages:
-                    extract = rm_target_files if stage.argv[0] == "rm" else PROGRAMS[stage.argv[0]]
-                    operands = extract(stage.argv) or ()
+                    operands = self.path_operands(stage.argv)
                     argv = [
                         str(host) if word in operands and Path(word).is_absolute()
                         and (host := self.view.to_host(word)) is not None else word
