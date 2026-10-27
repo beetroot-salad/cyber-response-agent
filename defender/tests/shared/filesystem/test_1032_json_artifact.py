@@ -18,10 +18,10 @@ from defender._io import (
     read_jsonl_rows_report,
 )
 
-#: Stack frames left for the call under test once `from_a_deep_stack` has used the rest. Small
+#: Stack frames left for the call under test once `from_a_deep_stack` has used the rest.
 _HEADROOM = 150
-#: Nested past the headroom and short of Python's default budget from the top: the depth the
-#: OLD predicate decoded from the top and could not from the deep stack.
+#: Nested past the headroom but within Python's default budget from the top: a depth a
+#: recursive decoder handles from the top and not from the deep stack.
 _DEEP = 500
 
 
@@ -50,8 +50,8 @@ def test_the_depth_scan_is_exact_on_valid_json_and_blind_to_brackets_inside_stri
 
 
 def test_the_depth_scan_is_linear_on_an_unclosed_run_of_escaped_quotes():
-    """#1127 review: the scan reads model text (a tool call's raw arguments) and every box-written
-    row, so its cost must not depend on what the text holds."""
+    """The scan reads model text (a tool call's raw arguments) and every box-written row, so its
+    cost must not depend on what the text holds."""
     text = '{"query": "' + '\\"' * 20_000
 
     start = time.monotonic()

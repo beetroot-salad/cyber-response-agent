@@ -89,8 +89,8 @@ def mixed_chain(depth: int) -> Any:
 
 
 def params_of_depth(depth: int, chain: Callable[[int], Any] = dict_chain) -> dict:
-    """A params map whose nesting is `depth` WITH THE MAP ITSELF COUNTED — the unit C1 and the
-    design use. `{"filt": "leaf"}` is depth 1."""
+    """A params map whose nesting is `depth` WITH THE MAP ITSELF COUNTED: `{"filt": "leaf"}` is
+    depth 1."""
     assert depth >= 1
     return {"filt": chain(depth - 1)}
 
@@ -100,11 +100,9 @@ def params_of_depth(depth: int, chain: Callable[[int], Any] = dict_chain) -> dic
 
 def _started(parent: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at module top)
     """A run the writer can be driven on: a run folder under `parent` and the run's state,
-    started as a run start starts it (#1235), since the writer takes each row's seq from the
-    state."""
+    started as a run start starts it, since the writer takes each row's seq from the state."""
     from defender.investigation.run_state import RunState
 
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     root = parent / fixture_uuid("r1127-nesting")
     RunPaths(root).gather_raw.mkdir(parents=True, exist_ok=True)
     return RunState(root, "r1127-nesting")
@@ -164,7 +162,7 @@ def raised(fn: Callable[[], Any]) -> Exception | None:
 
 
 def assert_refused_as_too_deep(err: Exception | None, what: str) -> None:
-    """B's refusal, exactly: raised, not a stack overflow, not an internal error, and the typed
+    """The refusal, exactly: raised, not a stack overflow, not an internal error, and the typed
     `ParamsTooDeep`. (`RecursionError` IS a `RuntimeError`, so it is named first.)"""
     assert err is not None, f"{what} was accepted — nothing refused it"
     assert not isinstance(err, RecursionError), \
@@ -202,7 +200,7 @@ def _cleaner_refuses(params: Any) -> bool:
     return True
 
 
-# ── A: one owner for the limit ─────────────────────────────────────────────────────────────
+# ── One owner for the limit ────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("chain", [
@@ -246,9 +244,9 @@ def _params_holding_a_list_that_holds_itself() -> dict:
 
 
 def _yaml_anchor_cycle() -> Any:
-    """C10's shape: an anchor whose body aliases itself. Built with PyYAML's own safe loader,
-    which still honours aliases — the repo's manifest loader refuses them (C), but a cyclic
-    VALUE can still reach the predicate from any other producer."""
+    """An anchor whose body aliases itself, built with PyYAML's own safe loader, which still
+    honours aliases: the repo's loader refuses them, but a cyclic VALUE can still reach the
+    predicate from any other producer."""
     return yaml.safe_load("p: &a {k: [*a]}")["p"]
 
 
@@ -308,13 +306,13 @@ def _is_cyclic(value: Any) -> bool:
     return False
 
 
-# ── C1 / B: the writer refuses exactly what is past the limit ──────────────────────────────
+# ── The writer refuses exactly what is past the limit ──────────────────────────────────────
 
 
 @pytest.mark.parametrize("depth", [LIMIT - 1, LIMIT])
 def test_a_row_at_or_under_the_limit_is_written_verbatim_and_read_back(tmp_path, depth):
-    """C1's readable side, and #1117's promise that data writers never cut: the params map is
-    written WHOLE — equal to the input, not a repr of a cut — and the reader returns it."""
+    """Data writers never cut (#1117): the params map is written WHOLE, equal to the input, not
+    a repr of a cut, and the reader returns it."""
     run = _started(tmp_path)
     params = params_of_depth(depth)
 
@@ -407,7 +405,7 @@ def test_the_predicate_the_cleaner_and_the_written_line_agree_at_every_depth(tmp
             f"{min(refused_at, default=None)}; expected exactly {LIMIT + 1}..{DEPTHS}")
 
 
-# ── C13: a refusal never costs the next row its seq or its sidecar ─────────────────────────
+# ── A refusal never costs the next row its seq or its sidecar ──────────────────────────────
 
 
 def test_the_row_after_a_refused_one_takes_the_next_seq_and_overwrites_nothing(tmp_path):

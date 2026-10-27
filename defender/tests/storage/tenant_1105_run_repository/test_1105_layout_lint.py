@@ -19,13 +19,11 @@ if TYPE_CHECKING:  # the import heuristic's view of the target; loaded by `_lint
 
 LINT_DIR = H.WORKTREE / "tooling" / "lint"
 
-#: The eight layout names that are not gated (D7: rev 3's five plus the predicates and shape
-#: constants in use outside the owners at bc4ce944, R4-26).
+#: The eight layout names that are not gated.
 HELPERS = frozenset({"artifact_file", "artifact_dir", "plain_file", "contained_payload",
                      "LEAD_ID_RE", "gather_summaries_shape", "is_case_answer_key",
                      "GATHER_RAW_SHAPE"})
-#: Layout names D7 names as gated.
-#: (#1105 PR 2, F-13: `resolve_run_bundle` lost its last caller with J3's union and is deleted.)
+#: Layout names the lint must gate.
 NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE_METADATA_KEY",
                "RunLayout", "WireLogNames")
 
@@ -33,8 +31,8 @@ _CLI = "learning/branch/cli.py"
 
 
 def _lint() -> ModuleType:
-    """The lint program, imported as CI runs it (its own directory on `sys.path`). Its absence
-    — the state at base — is this test's failure, never a crash."""
+    """The lint program, imported as CI runs it (its own directory on `sys.path`); its absence
+    fails the test rather than erroring it."""
     if str(LINT_DIR) not in sys.path:
         sys.path.insert(0, str(LINT_DIR))
     missing = None
@@ -75,7 +73,7 @@ def _plant(root: Path, rel: str, text: str) -> Path:
 
 
 def _production_files(defender: Path) -> list[Path]:
-    """Every `.py` under `defender/` in D7's sweep (minus tests/, evals/, caches, hidden
+    """Every `.py` under `defender/` in the lint's sweep (minus tests/, evals/, caches, hidden
     directories and venvs) — used to copy the sweep and to census it, never as an expected
     value. Directories are pruned before descent (a venv is never walked)."""
     out: list[Path] = []
@@ -162,8 +160,7 @@ def test_1105_layout_lint_fails_a_stale_allow_list_entry(tmp_path, capsys):
                    f"stale: {_displays(found)}")
     code, out = _main(lint_run_layout_imports, root, capsys)
     assert code == 0, f"without the entry the copy is not clean under the empty list:\n{out}"
-    # A module whose row gates RunPaths (archive.py, PR 1's sample, is a path-taking reader
-    # since F-09; the launcher is helpers-only).
+    # One gated use planted in the launcher, which otherwise imports helpers only.
     planted = _planted(tmp_path / "count")
     _plant(planted, caller,
            "from defender.records import RunPaths  # noqa: F401\n")

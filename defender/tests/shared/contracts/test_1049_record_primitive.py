@@ -23,7 +23,7 @@ def root(tmp_path: Path) -> Path:
     R.restore_tree(r)
 
 
-# d-00 — the bind contract
+# The bind contract
 
 
 def test_1049_a_bound_reader_answers_exactly_one_of_present_absent_or_refused(root):
@@ -79,7 +79,7 @@ def test_1049_a_bound_reader_answers_exactly_one_of_present_absent_or_refused(ro
     assert R.state(bound.read(later)) == "absent"
 
 
-# d-01 — absent is ENOENT, at whichever step
+# Absent is ENOENT, at whichever step
 
 
 def test_1049_nothing_at_the_name_is_absent_and_nothing_else_is(root, tmp_path):
@@ -104,7 +104,7 @@ def test_1049_nothing_at_the_name_is_absent_and_nothing_else_is(root, tmp_path):
     assert read.absent is False
 
 
-# d-02 — the shape table: present-but-not-the-record
+# The shape table: present but not the record
 
 
 def test_1049_every_present_but_not_the_record_shape_is_refused_with_the_relative_name(root, tmp_path):
@@ -135,7 +135,7 @@ def test_1049_every_present_but_not_the_record_shape_is_refused_with_the_relativ
     assert bound.read(R.plant_shape(root, "plain")).text == "plain text\n"
 
 
-# d-03 — permission faults are refused, never absent (NOT_ROOT)
+# Permission faults are refused, never absent (non-root only)
 
 
 @NOT_ROOT
@@ -162,10 +162,7 @@ def test_1049_a_mode_000_file_or_parent_is_refused_never_absent(root, tmp_path):
     assert sentences == [f"{n}: {denied}" for n in names], sentences
 
 
-# d-04 — the open decides; nothing is asked of the name ahead of it
-
-
-# d-05 — no refusal names the root
+# No refusal names the root
 
 
 def test_1049_no_refusal_the_primitive_formats_contains_the_root(root, tmp_path):
@@ -190,10 +187,7 @@ def test_1049_no_refusal_the_primitive_formats_contains_the_root(root, tmp_path)
     assert len(said) == 2 * (len(R.REFUSED_SHAPES) + 2)
 
 
-# d-06 — errors=
-
-
-# d-07 — the JSONL twin
+# The JSONL twin
 
 
 def test_1049_read_jsonl_answers_rows_malformed_and_the_same_record_read(root):
@@ -232,7 +226,7 @@ def test_1049_read_jsonl_answers_rows_malformed_and_the_same_record_read(root):
     assert R.state(bound.read(name)) == "refused", "positive control: strict refuses the same bytes"
 
 
-# D-J1 — the component grammar
+# The component grammar
 
 
 NOT_A_NAME = ("", ".", "..", "/etc/hostname", "worlds/../x", "a//b", "./family.yaml", "a\x00b",
@@ -266,7 +260,7 @@ def test_1049_a_name_that_is_not_a_sequence_of_plain_components_cannot_be_constr
     assert R.state(bound.under("gather_summaries").read("a/b.md")) == "present"
 
 
-# D-V3 — the per-component walk
+# The per-component walk
 
 
 def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_the_handle_is_classified_by_fstat(root):
@@ -289,7 +283,7 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
     assert steps[2][2] == fds[1], [(o[0], o[2], o[3]) for o in steps]
     root_opens = [o for o in rec.opens if o[2] is None]
     if root_opens:
-        # The root's handle, or the private copy of it the read takes (#1133), which is closed.
+        # The root's handle, or the private copy of it the read takes, which is closed.
         root_fd = root_opens[-1][3]
         copies = [copy for fd, copy in rec.dups if fd == root_fd]
         assert steps[0][2] in (root_fd, *copies), "the first component was not opened from the root's handle"
@@ -343,7 +337,7 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
     assert R.io()._ROOT_FLAGS & os.O_PATH, "the root handle is no longer O_PATH"
 
 
-# s-22 — a hard link refuses BOTH names
+# A hard link refuses BOTH names
 
 
 def test_a_hard_link_makes_a_second_unrelated_record_refuse_too(root):

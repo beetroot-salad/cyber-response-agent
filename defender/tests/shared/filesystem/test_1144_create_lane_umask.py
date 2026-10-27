@@ -20,7 +20,7 @@ from defender.tests.support.shared.filesystem._umask import umask
 from defender.tests.shared.filesystem.test_1111_rooted_io import PassThroughOs
 
 #: (the record each case creates, the same-process control it replaces beside it), by depth. The
-#: nested pair sits in `served/`, beside the episode record O1 names.
+#: nested pair sits in `served/`, as an episode's ledger does.
 NAMES = {
     "top": (PurePosixPath("created.json"), PurePosixPath("replaced.json")),
     "nested": (PurePosixPath("served/base.jsonl"), PurePosixPath("served/replaced.jsonl")),
@@ -314,8 +314,8 @@ def _locked(cm: Any) -> None:
 
 
 def _locked_fd(cm: Any) -> None:
-    """A locked rewrite opener yields the record's descriptor and its `fstat` (#1174
-    amendment 2), never a file object."""
+    """A locked rewrite opener yields the record's descriptor and its `fstat`, never a file
+    object."""
     with cm as (fd, _st):
         os.write(fd, BODY.encode())
 
@@ -339,7 +339,6 @@ OTHER_LANES: dict[str, Callable[[Path, str], None]] = {
     "rooted-append": lambda root, name: _io.rooted_write(root, name, BODY, mode="append"),
     "rooted-append-durable": lambda root, name: _io.rooted_write(
         root, name, BODY, mode="append", durable=True),
-    # (Its rooted twin's arm left with #1235, which deleted `_io.rooted_locked_for_rewrite`.)
     "held-replace": lambda root, name: _held_write(root, name, mode="replace"),
     "held-append": lambda root, name: _held_write(root, name, mode="append"),
     "held-append-durable": lambda root, name: _held_write(
@@ -358,6 +357,3 @@ def test_every_other_lane_that_makes_a_file_lands_0644_masked_by_the_umask(
         OTHER_LANES[lane](root, name)
     assert_single_plain(root / name, want, body=BODY, why=(
         f"under umask {mask:03o} the {lane} lane overrode the umask"))
-
-
-# -- the one mode `_io` sets itself, and the umask it never sets -------------------------------

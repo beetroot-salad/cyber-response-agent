@@ -2,10 +2,9 @@
 
 `write_guarded(mode="create")`, `rooted_write(mode="create")` and `Held.write(mode="create")`
 write the record to an unnamed (`O_TMPFILE`) file and link it to its name, or fall back to one
-named `O_CREAT|O_EXCL` open where the filesystem cannot make an unnamed file (#1078 J16/J63).
-The #1078, #1111 and #1144 suites each need the same three things around that lane: the seam
-that forces the fallback, the judge of what a create left at the name, and the probe for
-whether this filesystem can make an unnamed file at all.
+named `O_CREAT|O_EXCL` open where the filesystem cannot make an unnamed file. The suites
+around that lane share three things: the seam that forces the fallback, the judge of what a
+create left at the name, and the probe for whether this filesystem can make an unnamed file.
 """
 from __future__ import annotations
 
@@ -33,8 +32,8 @@ def assert_single_plain(path: Path, mode: int, *, body: str | None = None,
                         why: str = "") -> None:
     """`path` is a plain regular file with one name, owned by this process, of exactly `mode`,
     and, given `body`, holding exactly that. `mode` is the mode under the umask the caller pinned
-    around the write (`tests/support/shared/filesystem/_umask.py`): every lane honours the umask (#1144), so a mode means
-    nothing without one. `why` is added to a wrong mode's message."""
+    around the write (`tests/support/shared/filesystem/_umask.py`): every lane honours the
+    umask, so a mode means nothing without one. `why` is added to a wrong mode's message."""
     st = os.lstat(path)
     assert stat.S_ISREG(st.st_mode), f"{path} is not a regular file"
     assert st.st_nlink == 1, f"{path} has {st.st_nlink} names, not one"

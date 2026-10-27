@@ -183,7 +183,7 @@ def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch
     assert worlds
     from defender.learning.judge.layout import FOCUS_VIEW_TITLES
 
-    # #1234 M3/A10: the focus world's report view is titled, in host text, by its world label.
+    # The focus world's report view is titled, in host text, by its world label.
     labels = {P.T.world_id(ep, label): label for label in P.T.WORLDS}
     assert all(f"world {labels[agent.split(':')[1]]} — {FOCUS_VIEW_TITLES['report']}" in bare[agent]
                for agent in worlds)
@@ -267,8 +267,8 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
     assert str(letter.get("failed", "")).startswith("unreadable"), letter
     assert not P.still_queued(paths, case_id)
 
-    # The next tick: it raises nothing and serves the next row. (This lane double never
-    # consumes what it is handed, so the tick may hand it `good` again; that is the harness's.)
+    # The next tick raises nothing and serves the next row (this lane double never consumes
+    # what it is handed, so it may be handed `good` again).
     P.queue_row(paths, "next", {"case_id": "next", "tenant_id": H.T_ID, "run_id": _F6_R2})
     again = P.Lane()
     assert H.raised(P.drain, paths, again) is None, "the next tick raised: the drain is wedged"
@@ -320,8 +320,7 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
 
 def _done_run(tenant_id: str) -> Path:
     """A run of `tenant_id` the lead author has already served (its `done` sentinel written
-    through the real writer), so serving it again is the clean no-op exit 0. #1187 declared
-    changes 1 and 6: UUID-named, in a container holding no `_tenant.json`."""
+    through the real writer), so serving it again is the clean no-op exit 0."""
     import uuid
 
     from defender.learning.leads import lead_author

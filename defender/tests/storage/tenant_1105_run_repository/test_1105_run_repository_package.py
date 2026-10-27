@@ -15,16 +15,16 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._import_blocker import run_blocked
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
-#: The layout's 10 public IMPORTED names, which the door does not serve (D1.3, R4-42).
+#: The layout's 10 public IMPORTED names, which the door does not serve.
 LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations", "dataclasses",
                    "errno", "is_plain_entry", "re", "refuse_bad_case_id", "stat")
-#: The private layout helpers `records/_episode_paths.py` imports from the submodule (R4-27).
+#: The private layout helpers `records/_episode_paths.py` imports from the submodule.
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 
 
 def _child_env() -> dict[str, str]:
-    """The child's environment: this worktree first on PYTHONPATH (RG-09-a), then whatever
-    the parent already carries."""
+    """The child's environment: this worktree first on PYTHONPATH, then whatever the parent
+    already carries."""
     inherited = os.environ.get("PYTHONPATH", "")
     return {**os.environ,
             "PYTHONPATH": os.pathsep.join(p for p in (str(H.WORKTREE), inherited) if p)}
@@ -140,7 +140,6 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
     assert seen["alert"] == str(RUN_LAYOUT.alert) == "alert_input/alert.json", (
         f"the child's RUN_LAYOUT is not the door's: {seen}")
     assert seen["paths"] == RunPaths.__name__ == "RunPaths", f"the child's RunPaths: {seen}"
-    # #1187 declared change 1: `RunId` admits only canonical lowercase uuid4 text.
     rid = fixture_uuid("package-pydantic-free")
     proc = _child("from defender.records import RunId, RunRefused\n"
                   f"print(RunId.parse({rid!r}), RunRefused.__name__)\n", block=("pydantic*",))
@@ -150,7 +149,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6; +1 for #1279's `sidecar_names`).
+    # 71: the size of the door's `__all__`.
     assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
@@ -215,8 +214,6 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
 def test_1105_a_handles_address_is_frozen_after_init(tmp_path):
     from defender.records import Run
 
-    # #1187: a uuid run id (declared change 1) in a container with no record (R1); the
-    # record-reading `Run.for_tenant` goes (R1), `Run.under` is its replacement.
     runs = tmp_path / H.T_ID / "runs"
     rid = fixture_uuid("package-frozen")
     run_dir = H.make_run(runs, rid)

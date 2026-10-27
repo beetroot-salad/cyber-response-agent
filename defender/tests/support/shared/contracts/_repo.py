@@ -10,28 +10,17 @@ from pathlib import Path
 from defender import _git
 
 
-#: Directory names a real filesystem and a real git accept, and a naive reader gets wrong.
-#: NOT decoration — each entry is a CLASS that has silently un-declared a system in this repo
-#: (#869/#908), and the tuple is the corpus a probe that enumerates directory names runs over:
+#: Directory names a real filesystem and git accept and a naive reader gets wrong; each is a
+#: class that has silently un-declared a system in this repo (#869):
 #:
-#:   "café"      non-ASCII. C-QUOTED by `git ls-tree --name-only`: the entry arrives as
-#:               `"defender/skills/caf\303\251/execution.md"`, quotes included, so it no
-#:               longer ends in `/execution.md` and every suffix test on it answers no.
-#:   "my sys"    a space. NOT quoted — a `.split()` of the listing TEARS it into
-#:               `defender/skills/my` and `sys/execution.md`, and the second half is a
-#:               well-formed path that a suffix test happily accepts at the wrong depth.
-#:   'say"what'  a double quote. C-quoted like the non-ASCII case, and the classic breaker of
-#:               any reader that re-enters a shell or builds a pathspec by concatenation.
+#:   "café"      non-ASCII: C-QUOTED by `git ls-tree --name-only` (quotes included), so a
+#:               suffix test such as "ends in `/execution.md`" answers no.
+#:   "my sys"    a space: NOT quoted, so a `.split()` of the listing TEARS it into two paths,
+#:               the second well-formed at the wrong depth.
+#:   'say"what'  a double quote: C-quoted too, and breaks any shell or pathspec concatenation.
 #:
-#: The two mechanisms are INDEPENDENT, which is why the corpus carries both: `-z` alone fixes
-#: the quoting and not the tearing, a NUL split alone fixes the tearing and not the quoting.
-#: Only `-z` READ as NUL-delimited answers for all three. Measured on git 2.47.3 with the
-#: default `core.quotePath=true`; re-measure with `git ls-files` on a hostile name if it is in doubt. Deliberately NOT in the corpus: `it's` (a single quote is not
-#: quoted and contains no whitespace, so it breaks neither reader and only pads the fixture).
-#:
-#: A tree reader that answers correctly over these three answers correctly over the names
-#: models and humans actually choose. One that is only ever handed `elastic` has not been
-#: probed — it has been agreed with.
+#: Quoting and tearing are independent: only `-z` READ as NUL-delimited handles all three
+#: (git 2.47.3, default `core.quotePath=true`). `it's` is left out: it breaks neither reader.
 HOSTILE_NAMES: tuple[str, ...] = ("café", "my sys", 'say"what')
 
 _TEMPLATES: dict[str, Path] = {}
@@ -40,10 +29,10 @@ _TEMPLATES: dict[str, Path] = {}
 def build_once_copy(key: str, build: Callable[[Path], object], dest: Path) -> Path:
     """`build(dest)`'s tree at `dest`, built for real once per process and copied after.
 
-    A seeded git repo costs six git children; most of the rows built on one assert on what they do
-    to it afterwards, never on how it was made, so each gets its own byte-for-byte copy (links kept
-    as links, `.git` included: a repo made by `git init` holds no path of its own) of a template
-    built the first time `key` is asked for. `build` must put the same tree at any `dest`.
+    A seeded git repo costs six git children and most callers assert only on what they do to
+    it, so each gets a byte-for-byte copy (links kept, `.git` included: a `git init` repo holds
+    no path of its own) of the template built the first time `key` is asked for. `build` must
+    put the same tree at any `dest`.
     """
     template = _TEMPLATES.get(key)
     if template is None:
@@ -64,11 +53,9 @@ def plant_named_dirs(
 ) -> tuple[str, ...]:
     """Create `parent/<name>/<filename>` for each name; return the names, for the assertion.
 
-    Returning the input is the point, not a convenience: the caller asserts against the names
-    it PLANTED, never against a second reading of the tree. An oracle that re-derives the
-    expected set with the same listing the code under test runs cannot disagree with it —
-    which is how #869's three misreads passed 57 tests — and `tooling/lint/lint_shared_oracle.py`
-    now refuses the shape at the gate.
+    Returning the input is the point: the caller asserts against the names it PLANTED, never a
+    second reading of the tree with the listing under test, an oracle that cannot disagree
+    (#869; `tooling/lint/lint_shared_oracle.py` refuses that shape).
     """
     for name in names:
         d = parent / name
@@ -87,14 +74,12 @@ def seed_repo(
 ) -> Path:
     """`repo` becomes a git repo on `main` with one commit. Returns it, for chaining.
 
-    Call it AFTER building whatever tree the test needs — every caller does, because what
-    is in that first commit is the thing under test. `add="README"` writes and commits a
-    one-line README instead of the tree, for suites whose subject is an
-    uncommitted-corpus starting state.
+    Call it AFTER building the tree the test needs: that first commit is the thing under test.
+    `add="README"` commits a one-line README instead of the tree, for suites whose subject is
+    an uncommitted-corpus starting state.
 
-    The identity is set per-repo rather than inherited: a contributor's global
-    `user.email` would otherwise land in fixture commits, and two of these suites assert
-    on commit trailers.
+    The identity is set per-repo rather than inherited: a contributor's global `user.email`
+    would otherwise land in fixture commits, and two suites assert on commit trailers.
     """
     repo.mkdir(parents=True, exist_ok=True)
     _git.git(["init", "-q", "-b", "main"], cwd=repo)
@@ -107,12 +92,9 @@ def seed_repo(
     return repo
 
 
-#: The stub adapter the seeded tree ships, so the fixture's `wazuh` is a system that really
-#: DECLARES verbs. Since #901 the loop's commit gate resolves a promoted template's verb — and
-#: the per-system `SKILL.md` identity rule — against the ADAPTERS of the tree it is committing,
-#: so a seed with a catalog and no adapter is not a cheaper fixture — it is a tree the real gate
-#: would refuse, and every test built on it would be asserting about a repo the loop cannot
-#: produce.
+#: The stub adapter the seeded tree ships, so the fixture's `wazuh` really DECLARES verbs: the
+#: commit gate resolves a promoted template's verb (and the `SKILL.md` identity rule) against
+#: the tree's ADAPTERS, so a catalog with no adapter is a tree the real gate would refuse.
 _WAZUH_ADAPTER = '''\
 from __future__ import annotations
 
@@ -151,11 +133,9 @@ def query_template(
 ) -> str:
     """A well-formed query template for the seeded `wazuh` system.
 
-    A writer, never an oracle: tests that stage a promotion need a file the content gate
-    accepts, and hand-spelling that shape at each site is how a fixture drifts from the schema
-    it is standing in for. Pass `body` to stage a MALFORMED one on purpose, and `covers` to
-    stage a file that accounts for coined `query_id`s (what the mint writes, and what a promote
-    or a widen has to carry).
+    A writer, never an oracle: one place spells the shape the content gate accepts. Pass
+    `body` to stage a MALFORMED one on purpose, and `covers` for a file that accounts for
+    coined `query_id`s.
     """
     query = body or "```query\nverb: search\nparams:\n  index: ${index}\n```"
     covers_line = f"covers: [{', '.join(covers)}]\n" if covers else ""
@@ -173,19 +153,15 @@ def seed_skills_repo(repo: Path) -> Path:
 def _seed_skills_repo(repo: Path) -> Path:
     """A committed skills tree standing in for a fresh ``lead-author/<id>`` worktree.
 
-    Both the lead-author and the pitfalls-curator suites need exactly this starting
-    state — an established template, a draft template, a skill with a surface
-    declaration, and a pending draft under it — because both subjects run no git and are
-    asserted on by making *working-tree* edits over a clean HEAD and driving the loop's
-    gate. The two fixtures that built it were byte-identical apart from their docstrings,
-    which is the one part that should differ: each names its own subject. Those stay with
-    their fixtures.
+    An established template, a draft template, a skill with a surface declaration and a
+    pending draft under it: the lead-author and pitfalls-curator suites both make working-tree
+    edits over this clean HEAD and drive the loop's gate.
     """
     adapters = repo / "defender" / "integrations"
     adapters.mkdir(parents=True)
-    # wazuh gets the real adapter shape (#901): it owns every seeded catalog template, so the
-    # content gate resolves its verbs. elastic owns no template here and only has to EXIST, so
-    # that `declared_systems` counts it among the declared systems (#869).
+    # wazuh gets the real adapter shape: it owns every seeded catalog template, so the content
+    # gate resolves its verbs. elastic owns no template and only has to EXIST, so that
+    # `declared_systems` counts it.
     (adapters / "wazuh_adapter.py").write_text(_WAZUH_ADAPTER)
     (adapters / "elastic_adapter.py").write_text("VERBS = {}\n")
     catalog = repo / "defender" / "skills" / "gather" / "queries"
@@ -208,7 +184,7 @@ def _seed_skills_repo(repo: Path) -> Path:
 
 
 def head_files(repo: Path) -> list[str]:
-    """Paths touched by HEAD — the `show --name-only` five suites spell by hand."""
+    """Paths touched by HEAD (`git show --name-only`)."""
     return _git.git(
         ["show", "--name-only", "--pretty=format:", "HEAD"], cwd=repo
     ).split()

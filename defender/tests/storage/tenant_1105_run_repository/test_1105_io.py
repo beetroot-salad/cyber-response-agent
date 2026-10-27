@@ -15,8 +15,8 @@ _LINK_REFUSAL = "refusing to create through a symlinked path component"
 
 
 def _require_keyword(fn: Any, *args: Any, keyword: str, **kwargs: Any) -> Any:
-    """`fn(*args, **kwargs)`, where `kwargs` carries the new `keyword`; a `TypeError` naming
-    that keyword (the keyword does not exist yet) fails the test instead of crashing it."""
+    """`fn(*args, **kwargs)`; a `TypeError` naming `keyword` (one `fn` does not take) fails the
+    test instead of erroring it."""
     try:
         return fn(*args, **kwargs)
     except TypeError as exc:
@@ -26,9 +26,9 @@ def _require_keyword(fn: Any, *args: Any, keyword: str, **kwargs: Any) -> Any:
 
 
 class _CountingOS:
-    """`os`, delegated call for call, counting the bytes every read hands back off a file —
-    `os.read`, `os.pread`, and the reads of each file object `fdopen` returns. It changes no
-    answer and injects no fault: `_io`'s own `os_=` seam, used as an observation channel."""
+    """`os`, delegated call for call, counting the bytes every read hands back off a file
+    (`os.read`, `os.pread`, and reads of each file object `fdopen` returns). It changes no
+    answer: `_io`'s own `os_=` seam, used as an observation channel."""
 
     def __init__(self) -> None:
         self.delivered = 0

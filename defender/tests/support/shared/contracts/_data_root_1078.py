@@ -1,4 +1,4 @@
-"""D9's tenant fixture helper (#1078 pass A) — the ONE place a test gets a data root and a tenant."""
+"""The tenant fixture helper: the ONE place a test gets a data root and a tenant."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
@@ -11,15 +11,14 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-#: The data-root knob #1078 adds (D2). Spelled here rather than imported from `_tenant`: the
-#: design deliberately exports no public string constant from the owner module (J05 — a public
-#: `str` there is an import-refused "record name" under `lint_run_records`' import arm).
+#: The data-root knob. Spelled here rather than imported from `_tenant`, which exports no public
+#: string constant (`lint_run_records` refuses importing one as a "record name").
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 
-#: The one tenant D9's helper creates (no test uses two tenants — D9, N12).
+#: The tenant this helper sets up by default.
 D9_TENANT_ID = fixture_uuid("tenant:playground")
 
-#: The committed fixture tenant (#1120 H2) — the knowledge every test tenant is set up from.
+#: The committed fixture tenant — the knowledge every test tenant is set up from.
 FIXTURE = Path(__file__).resolve().parents[5] / "knowledge" / "tenant-fixture"
 DEFENDER = Path(__file__).resolve().parents[4]
 
@@ -53,10 +52,10 @@ _PUBLISHED_HOME: list[Any] = []
 
 def _published_copy(tenant_id: str) -> Path:
     """`<process scratch>/<n>/root/<tenant_id>`: the committed fixture tenant set up as
-    `tenant_id` and published for real ONCE per process through S0's one helper
-    (`tenant_1108_p4._support.published_tenant`: a git clone, a real export, `exports/current`),
-    its origin server closed after — reading or materialising a published tenant needs no
-    network. Callers copy the folder in; nothing in it names its root."""
+    `tenant_id` and published for real ONCE per process through
+    `tenant_1108_p4._support.published_tenant` (a git clone, a real export, `exports/current`),
+    its origin server closed after: reading a published tenant needs no network. Callers copy
+    the folder in; nothing in it names its root."""
     if tenant_id in _PUBLISHED:
         return _PUBLISHED[tenant_id]
     import tempfile
@@ -73,18 +72,16 @@ def _published_copy(tenant_id: str) -> Path:
 
 
 def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool = False) -> Any:
-    """`tenant_id` set up under the data root `root` the way an operator does (#1120 DC2) and
-    accepted: the committed fixture tenant (`knowledge/tenant-fixture/`) copied to
-    `<root>/<id>/knowledge` with its `agent/.tenant-id`, then the row minted by the REAL
-    `create_tenant` (D10: "evals and fixtures call `create_tenant` directly, each against a
-    fresh tmp root"). Each step is skipped when already done, so a second call is the first
-    one's tenant. Returns the `Tenant` the real `accept_tenant` hands back.
+    """`tenant_id` set up under the data root `root` the way an operator does and accepted: the
+    committed fixture tenant copied to `<root>/<id>/knowledge` with its `agent/.tenant-id`, then
+    the row minted by the REAL `create_tenant`. Each step is skipped when already done, so a
+    second call is the first one's tenant. Returns the `Tenant` the real `accept_tenant` hands
+    back.
 
-    `published=True` (#1108 P4, opt-in for branch-launch scenes): the tenant is instead the
-    same fixture content as a REAL published tenant — clone, export, `exports/current` — so a
-    source stamped through `_triplet_947.provenance_record` names a commit its clone holds and
-    flow 7 can materialise and pin it. Asking for it over a tenant already set up unpublished
-    is a fixture bug, refused."""
+    `published=True` (opt-in for branch-launch scenes): the same content as a REAL published
+    tenant (clone, export, `exports/current`), so a source stamped through
+    `_triplet_947.provenance_record` names a commit its clone holds and can be materialised and
+    pinned. Asking for it over a tenant already set up unpublished is a fixture bug, refused."""
     owner = _tenant_owner()
     root = Path(location_path(root))
     if published:

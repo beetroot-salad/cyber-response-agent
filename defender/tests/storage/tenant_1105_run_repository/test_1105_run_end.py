@@ -41,7 +41,7 @@ class _Order(logging.Handler):
 
 class _Tail(SpecTail):
     """`_spec791`'s tail fake, noting each step into the shared order; `fail` names the one
-    seam that raises, with the fault the ledger observed on the real `run.main` (RG-08-b..d)."""
+    seam that raises, with the fault that seam really raises."""
 
     def __init__(self, paths: Any, order: list[str], *, fail: str | None = None) -> None:
         super().__init__(paths)
@@ -63,7 +63,7 @@ class _Tail(SpecTail):
             raise run_common.VisualizeFailed("spec 1105: the page was not saved (RG-08-d)")
 
     def enqueue(self, run: Any, alert: Any, **kw: Any) -> bool:
-        # `run.main` hands its enqueue seam the run's `Run` (#1105 PR 2), passed on unchanged.
+        # `run.main` hands its enqueue seam the run's `Run`, passed on unchanged.
         self.order.append(ENQUEUE)
         if self.fail == ENQUEUE:
             raise OSError(errno.ENOSPC, "spec 1105: the queue is full (RG-08-c)")
@@ -91,11 +91,10 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     logger = logging.getLogger(run_common.__name__)
     logger.addHandler(handler)
     try:
-        # The alert's folder names the minted run id's label: one id per arm.
         alert = plant_alert(arm / f"alert-{arm.name}")
         argv = [str(alert), "--tenant", str(tenant.id), "--update-ticket"]
         try:
-            # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+            # Plus the in-process launch-time publish.
             outcome: Any = run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize,
                                        ticket_writer=tail, enqueue=tail.enqueue,
                                        publish=in_process_publish())

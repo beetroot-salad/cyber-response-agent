@@ -46,20 +46,13 @@ def _pitfall_at_threshold(paths: Any, monkeypatch: Any) -> None:
 
 @pytest.fixture
 def published(tmp_path, data_root):
-    """`test_1105_pr2_review_fixes.published`: the fixture tenant published for real, its forge
-    bound — #1108 P4's lead-author drain is tenant-selected, so its ticks run over it."""
+    """As `test_1105_pr2_review_fixes.published`: the fixture tenant published for real, its
+    forge bound, for the tenant-selected lead-author ticks."""
     from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
         yield t
-
-
-# #1105 PR 2 finding 1's first case — a tick with rows and no configured data root is the
-# stage's configuration refusal — is retired by #1108 P4 (OD12 class i): every drain is
-# tenant-selected and rehydrates its rows under the SELECTED tenant's own root, so the scratch
-# path it pinned cannot arise. Covered by
-# `test_1105_pr2_review_fixes.py::test_c_a_tenant_tick_serves_its_rows_from_its_own_root_without_the_env`.
 
 
 class _EnqueueingBox(R1._Box):
@@ -78,7 +71,7 @@ class _EnqueueingBox(R1._Box):
 @pytest.mark.parametrize("root_set", [True, False], ids=["root-set", "root-unset"])
 def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(published, tmp_path, monkeypatch,
                                                          root_set):
-    """#1108 P4: over the published tenant's drain paths, the REAL tenant-selected tick."""
+    """Through the REAL tenant-selected tick over the published tenant's drain paths."""
     t = published
     H.make_run(H.runs_folder(t.tenant), R1.RID_R1)
     root = os.environ[P.DATA_ROOT_ENV]
@@ -128,7 +121,7 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     from defender.tests.support.learning.core._state1135 import curation_run_dir
 
     run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
-    run_id = run_dir.name  # #1187: the run's id is the uuid4 its label names (`fixture_uuid`)
+    run_id = run_dir.name  # the uuid4 its label names (`fixture_uuid`)
     opened = open_command_line_run(d9_tenant, run_id)
     assert not isinstance(opened, str), opened
     tenant, run = opened
@@ -154,8 +147,8 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
 
 
 def test_4_a_quarantined_curation_row_shows_its_address(published, tmp_path):
-    """#1108 P4: the row is quarantined by the REAL tenant-selected tick over the published
-    tenant's drain paths."""
+    """The row is quarantined by the REAL tenant-selected tick over the published tenant's
+    drain paths."""
     from defender.learning.frontend import serialize_queues
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.learning.core._state1135 import state_for_paths
@@ -163,7 +156,7 @@ def test_4_a_quarantined_curation_row_shows_its_address(published, tmp_path):
     t = published
     H.runs_folder(t.tenant)
     paths = R1._tenant_paths(t, tmp_path)
-    gone_run = fixture_uuid("nope")  # #1187: a well-formed run id (a uuid4) naming no run
+    gone_run = fixture_uuid("nope")  # a well-formed run id naming no run
     P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": t.tenant_id, "run_id": gone_run})
     assert R1._tick(t, paths, lane=P.Lane(), pitfalls=[], box=R1._Box()) == 0
     assert P.dead_letter(paths, "gone") is not None, "control: the row was not quarantined"

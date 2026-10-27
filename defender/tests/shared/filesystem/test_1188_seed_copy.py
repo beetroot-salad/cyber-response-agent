@@ -15,7 +15,6 @@ MiB = 1024 * 1024
 
 
 def _copy_records(tmp_path):
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     source = fixture_run(tmp_path / fixture_uuid("source")).tables.payloads("l-001", 0)
     target = fixture_run(tmp_path / fixture_uuid("target")).tables.payloads("l-001", 0)
     source.path.parent.mkdir(parents=True)

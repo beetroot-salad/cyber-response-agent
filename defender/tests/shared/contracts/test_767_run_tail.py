@@ -34,7 +34,7 @@ OPEN_STEP = "open_case_ticket"
 
 
 class Tail(SpecTail):
-    """`_spec791`'s investigation-tail fake, carrying D2's renamed writer method."""
+    """`_spec791`'s investigation-tail fake, with the `record_case_ticket` writer method."""
 
     def record_case_ticket(self, run, *, tenant, defender_dir, env, **kw) -> None:
         self.ticket_tenants.append(tenant)
@@ -44,7 +44,7 @@ class Tail(SpecTail):
 @pytest.fixture
 def state(tmp_path, monkeypatch):
     """A learning state root and a runs base under tmp, and a key per provider so the
-    entrypoint's startup preflight cannot fail ahead of the tail these demands are about."""
+    entrypoint's startup preflight cannot fail ahead of the tail under test."""
     from defender.learning.core.config import LoopPaths
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
@@ -57,8 +57,8 @@ def state(tmp_path, monkeypatch):
 
 
 def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch):
-    """o4_run_under_flag_always_comments — a run under `--update-ticket` whose store is
-    reachable and whose lifecycle COMPLETES ends with an agent comment on its ticket."""
+    """Under `--update-ticket`, a run whose lifecycle COMPLETES records into its ticket after the
+    lifecycle, one that dies does not, and a failed open does not suppress the record."""
     tail = Tail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "flagged"), tail, "--update-ticket") == 0
     assert RECORD_STEP in tail.names, (
@@ -88,7 +88,7 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
         "record-on-crash, so reaching the store here would be mechanism no D-row names"
     )
 
-    # §7 R6 — a failed open does not suppress the record attempt (FK32/FK33).
+    # A failed open does not suppress the record attempt.
     use_mapping(monkeypatch, tmp_path / "dfn")
     for arm, (why, store) in enumerate((
         ("a 409 on the create (FK33: the key already exists, c8)",
@@ -121,7 +121,8 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
 
 
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
-    """n7_writes_only_under_the_flag — `--update-ticket` remains the whole switch."""
+    """`--update-ticket` is the whole switch: without it nothing reaches the ticket store, and
+    the resume path refuses the flag."""
     assert run_py.parse_args(["/tmp/alert.json", "--tenant", TENANT_ID]).update_ticket is False, (
         "the ticket flag is no longer opt-in"
     )
@@ -137,8 +138,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
             f"a run without --update-ticket reached the estate anyway (ran {tail.names})"
         )
 
-    # #1105 PR 2 (declared change 6): a sibling names its episode by id under the configured
-    # episodes base, whose container the launcher made for its tenant before any sibling.
+    # A sibling resume names its episode by id; its container exists before any sibling runs.
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
     episode_id = fixture_uuid("767-run-tail-resume")
@@ -157,8 +157,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
 
 
 def test_767_record_runs_before_the_curation_marker(tmp_path, state):
-    """n1_record_precedes_curation_marker — the #791/#947 ordering keeps its position across
-    D2's rename."""
+    """The record step runs before the curation marker is queued, and before the render."""
     tail = Tail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail, "--update-ticket") == 0
 

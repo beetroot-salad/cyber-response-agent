@@ -21,13 +21,13 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def _parse(text: str) -> str:
-    """M1's one function, imported at CALL time — a missing name is a red test, not a red
-    collection."""
+    """`validate.reply_document_text`, resolved at call time so a missing name fails one test,
+    not collection."""
     return J.sym("learning.core.validate", "reply_document_text")(text)
 
 
 def _malformed() -> type[BaseException]:
-    """`MalformedReply`, evaluated BEFORE the `raises` block opens, so an unbuilt name fails the
+    """`MalformedReply`, evaluated BEFORE the `raises` block opens, so a missing name fails the
     test at the call rather than satisfying `pytest.raises(...)` with an `AttributeError`."""
     return J.sym("learning.core.validate", "MalformedReply")
 
@@ -74,8 +74,8 @@ DRAFT = DOCUMENT.replace("episode_outcome: caught", "episode_outcome: survived")
 PROSE_BEFORE = "Here is my grading of world b, following the three passes you asked for.\n\n"
 PROSE_AFTER = "\n\nLet me know if you want the derivation table expanded.\n"
 
-#: A reasoning prelude with NO opening tag — the recorded live shape
-#: (`tests/learning/test_loop.py`, the two prelude tests) has none.
+#: A reasoning prelude with NO opening tag, as the recorded live shape has none
+#: (`tests/learning/test_loop.py`'s prelude tests).
 PRELUDE = (
     "Let me work through the joined views first.\n"
     "The holding system was queried once before the branch and never after, so the lead was "
@@ -88,7 +88,7 @@ def fenced(body: str, tag: str = "yaml", *, closer: str = "```") -> str:
     return f"```{tag}\n{body}\n{closer}"
 
 
-# The thirteen shapes, numbered as the issue numbers them.
+# The issue's thirteen shapes, by its numbering.
 SHAPE_1_PLAIN = DOCUMENT + "\n"
 SHAPE_2_WHOLE_FENCE = fenced(DOCUMENT) + "\n"
 SHAPE_3_PROSE_THEN_FENCE = PROSE_BEFORE + fenced(DOCUMENT) + "\n"
@@ -114,8 +114,8 @@ SHAPE_13A_PRELUDE_THEN_PLAIN = PRELUDE + SHAPE_1_PLAIN
 SHAPE_13B_PRELUDE_THEN_FENCE = PRELUDE + SHAPE_2_WHOLE_FENCE
 SHAPE_13C_PRELUDE_THEN_FENCE_PROSE = PRELUDE + SHAPE_4_FENCE_THEN_PROSE
 
-#: E1 — a valid document whose block scalar quotes `</think>` (indented). The old unanchored
-#: regex truncated this to "and then went on" (C12).
+#: E1 — a valid document whose block scalar quotes `</think>` (indented); an unanchored regex
+#: would truncate it to "and then went on".
 E1_QUOTED_THINK = (
     "episode_outcome: caught\n"
     "noise_floor_note: |\n"
@@ -213,8 +213,8 @@ def test_1018_shape_1_plain_yaml_is_returned_as_is():
 
 
 def test_1018_shape_2_whole_string_fence_is_unwrapped():
-    """Shape 2 (whole-string fence): ACCEPT — the one deliberate leniency, "unambiguous, and it
-    costs nothing in correctness". Both with and without a trailing newline after."""
+    """The one deliberate leniency (unambiguous, and it costs nothing in correctness), with or
+    without a trailing newline."""
     _accepts(SHAPE_2_WHOLE_FENCE)
     _accepts(fenced(DOCUMENT))
 
@@ -224,14 +224,13 @@ def test_1018_shape_3_prose_then_fence_is_refused_as_a_fence_inside_the_reply():
 
 
 def test_1018_shape_4_fence_then_prose_is_refused_as_text_after_the_closer():
-    """Shape 4 (fence, then prose) — THE DEFECT: REFUSE, "text after the closing fence". Paired with
-    shape 2 on the same body as the positive control, so the refusal cannot."""
+    """THE DEFECT shape. Paired with shape 2 on the same body as the positive control, so the
+    refusal cannot be the body's fault."""
     _accepts(SHAPE_2_WHOLE_FENCE)
     _refuses(SHAPE_4_FENCE_THEN_PROSE, "after")
 
 
 def test_1018_shape_6_draft_then_corrected_verdict_is_refused_as_a_second_fence():
-    """Shape 6 (fence, then a second fence holding a corrected verdict)."""
     _refuses(SHAPE_6_DRAFT_THEN_FINAL, "second")
 
 
@@ -244,15 +243,14 @@ def test_1018_shape_12_closer_with_trailing_text_is_refused():
 
 
 def test_1018_shape_13_a_thinking_prelude_is_dropped_before_the_shape_rule():
-    """Shape 13 (a thinking-tag prelude before any of the above)."""
     _accepts(SHAPE_13A_PRELUDE_THEN_PLAIN)
     _accepts(SHAPE_13B_PRELUDE_THEN_FENCE)
     _refuses(SHAPE_13C_PRELUDE_THEN_FENCE_PROSE, "after")
 
 
 def test_1018_e1_a_close_tag_quoted_inside_a_block_scalar_stays_in_the_document():
-    """E1: a valid document that quotes `</think>` INSIDE a block scalar (indented, not column 0)
-    comes back WHOLE and loads with the tag in the note. This is O5's second."""
+    """A valid document quoting `</think>` inside a block scalar (indented, not column 0), or
+    inline mid-line, comes back WHOLE and loads with the tag in its value."""
     expected = dict(VERDICT, noise_floor_note=E1_NOTE, correlations=[], scope_checks=[],
                     derivations=[], findings=[])
     _accepts(E1_QUOTED_THINK, expected_text=E1_QUOTED_THINK.strip(), expected_doc=expected)
@@ -274,8 +272,8 @@ def test_1018_e2_an_indented_fence_inside_a_block_scalar_survives_and_loads():
 
 
 def test_1018_a_column_zero_close_tag_quoted_in_a_double_quoted_scalar_cannot_flip_the_verdict():
-    """The security-adjacent point driven from the attacker's side, through the one shape that DOES
-    load with a column-0 tag."""
+    """From the attacker's side: a column-0 `</think>` inside a double-quoted scalar is the one
+    shape that loads with a column-0 tag, and it stays document, prelude or not."""
     expected = dict(VERDICT, noise_floor_note=QUOTED_COLUMN_ZERO_THINK_NOTE, correlations=[],
                     scope_checks=[], derivations=[], findings=[])
     _accepts(QUOTED_COLUMN_ZERO_THINK, expected_text=QUOTED_COLUMN_ZERO_THINK.strip(),
@@ -289,7 +287,8 @@ def test_1018_a_column_zero_close_tag_quoted_in_a_double_quoted_scalar_cannot_fl
 
 
 def test_1018_an_indented_quoted_close_tag_cannot_end_a_prelude_on_an_unloadable_reply():
-    """The prelude rule only runs on a bare reply that does NOT load ."""
+    """An unloadable bare reply whose only close tag is indented (inside a block scalar) is
+    returned whole: only a column-0 tag ends a prelude."""
     unloadable = E1_QUOTED_THINK.replace(
         "episode_outcome: caught\n", "episode_outcome: caught\nnote: one trial: no replicate\n")
     with pytest.raises(yaml.YAMLError):
@@ -303,7 +302,6 @@ def test_1018_a_close_tag_with_nothing_after_it_is_named_not_called_empty():
 
 @pytest.mark.parametrize("opener", ["``` yaml", "```yaml # the verdict", "````yaml", "```yaml:"])
 def test_1018_an_opening_fence_carrying_more_than_a_tag_is_refused_and_named(opener):
-    """A fenced reply whose OPENER line carries more than a tag is refused naming the opener ."""
     _refuses(f"{opener}\n{DOCUMENT}\n```\n", "opening")
 
 
@@ -342,19 +340,18 @@ def test_empty_plain_or_fenced_reply_is_refused_and_named(text):
 
 def test_1018_a_fence_with_no_closer_is_refused():
     """A reply that opens a fence and never closes it (a truncated completion) is refused,
-    naming the missing closer. Failing: the opener line is dropped and the rest returned."""
+    naming the missing closer, rather than returned minus its opener line."""
     _refuses("```yaml\n" + DOCUMENT + "\n", "no closing")
 
 
 @pytest.mark.parametrize("lead", ["\n\n", "  ", " \t\n"])
 def test_1018_whitespace_before_the_opener_is_stripped_before_the_fence_rule(lead):
-    """M1 step 3 runs BEFORE step 4: surrounding whitespace is stripped, and only then is "does it
-    start with a fence" decided. A parser that reads the first character before."""
+    """Surrounding whitespace is stripped BEFORE "does it start with a fence" is decided."""
     _accepts(lead + SHAPE_2_WHOLE_FENCE)
 
 
 def test_1018_the_prelude_ends_at_the_first_column_zero_close_tag_not_the_last():
-    """M1 step 2 drops everything through the FIRST column-0 closing think tag."""
+    """Everything through the FIRST column-0 closing think tag is dropped, and no more."""
     text = PRELUDE + DRAFT + "\n</think>\n" + DOCUMENT + "\n"
     out = _parse(text)
     assert out == (DRAFT + "\n</think>\n" + DOCUMENT), f"the parser returned:\n{out!r}"
@@ -364,8 +361,8 @@ def test_1018_the_prelude_ends_at_the_first_column_zero_close_tag_not_the_last()
 
 @pytest.mark.parametrize("tag", ["</think>", "</thinking>", "</system_thinking>"])
 def test_1018_e8_every_closing_think_spelling_is_a_prelude_boundary(tag):
-    """E8: `</think>`, `</thinking>` and `</system_thinking>` on their own column-0 line each end a
-    prelude — including the recorded no-opening-tag shape, with the prelude."""
+    """`</think>`, `</thinking>` and `</system_thinking>` on their own column-0 line each end a
+    prelude, including in the recorded no-opening-tag shape."""
     _accepts(PRELUDE.replace("</think>", tag) + SHAPE_1_PLAIN)
     recorded = "outcome: caught\n(reasoning trace…)\n" + tag + "\noutcome: survived\nconfidence: high\n"
     _accepts(recorded, expected_text="outcome: survived\nconfidence: high",
@@ -373,16 +370,16 @@ def test_1018_e8_every_closing_think_spelling_is_a_prelude_boundary(tag):
 
 
 def test_1018_e8_an_explicit_opening_tag_and_a_fenced_draft_inside_the_prelude_are_dropped():
-    """The prelude rule is "drop everything through the FIRST such line" and runs BEFORE the fence
-    rules ."""
+    """The prelude rule runs BEFORE the fence rules, so a fenced draft inside the prelude never
+    counts as a second fence."""
     reasoning = ("<think>\nA first draft:\n" + fenced(DRAFT)
                  + "\nNo — the lead was set and left, so caught.\n</think>\n")
     _accepts(reasoning + SHAPE_2_WHOLE_FENCE)
 
 
 def test_1018_a_dangling_closer_after_a_plain_document_is_refused():
-    """M4 / "no dangling-closer trim": a plain document followed by a lone column-0 ``` is "a
-    fence inside the reply". Failing: the closer is trimmed and the document recovered."""
+    """A plain document followed by a lone column-0 ``` is "a fence inside the reply", not a
+    closer to trim."""
     _refuses(DOCUMENT + "\n```\n", "inside")
 
 
@@ -392,8 +389,7 @@ def _episode(tmp_path, **kw):
 
 
 def _grade(tmp_path, ep, judge, **kw):
-    """The real pass. Returns the grade so the caller can assert the pass RETURNED — O2's
-    "never the pass"."""
+    """The real pass; returns the grade so the caller can assert the pass RETURNED."""
     return J.grade_at(
         ep, judge=judge, state=_state1135.env_state(), **kw)
 
@@ -418,8 +414,9 @@ ASKS_PER_DRAW = 3
 
 
 def test_1018_judge_fence_then_prose_reply_costs_one_draw_and_the_reply_is_on_disk(tmp_path):
-    """M2 at the judge, shape 4: a fence-then-prose reply carrying an otherwise VALID verdict is one
-    malformed draw — `completed_draws` 0, `malformed_replies` 1, no."""
+    """A fence-then-prose reply carrying an otherwise VALID verdict is malformed on every ask:
+    no draw completes or is written, the pass still returns, and the reply's bytes are on the
+    wire log."""
     ep = _episode(tmp_path)
     shape_4 = _fence_then_prose(_bare_verdict())
     judge = J.scripted_judge(replies=[shape_4] * ASKS_PER_DRAW, default=_bare_verdict())
@@ -449,21 +446,21 @@ def test_1018_judge_a_bare_second_draw_completes_beside_a_malformed_first(tmp_pa
     assert rows["b"]["completed_draws"] == 1
     assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
     assert not (ep / "worlds" / T.world_id(ep, "b") / "judge" / "0.yaml").exists()
-    # #1234: the reply carries no `episode_outcome` (retired, A17); the completed draw's own
-    # answer is its world bucket.
+    # The completed draw's answer is its world bucket (replies carry no `episode_outcome`).
     assert J.draw_doc(ep, "b", 1)["bucket"] == "lead-set"
 
 
 def test_1018_validate_reply_wraps_the_parser_refusal_in_judge_refused(tmp_path):
-    """M2 at the unit: `validate_reply` on shape 4 raises `JudgeRefused` — the class NAMED, not
-    `J.refusals()`, whose tuple includes `ValueError` and would be satisfied by a."""
+    """`validate_reply` on shape 4 raises `JudgeRefused` at world and family scope: the class
+    NAMED, not `J.refusals()`, whose tuple includes `ValueError` and would pass on a bare parser
+    error."""
     run_mod = J.mod("learning.judge.run")
     JudgeRefused = J.sym("learning.judge", "JudgeRefused")
     assert run_mod.validate_reply(_bare_verdict()).bucket == "lead-set"
     with pytest.raises(JudgeRefused):
         run_mod.validate_reply(_fence_then_prose(_bare_verdict()))
     family_bare = _family_verdict()
-    # #1234 M6: a family reply carries family-scope world findings only, no bucket.
+    # A family reply carries family-scope world findings only, no bucket.
     family_parsed = run_mod.validate_reply(family_bare, scope="family")
     assert family_parsed.bucket is None
     assert family_parsed.world_findings == []
@@ -472,15 +469,14 @@ def test_1018_validate_reply_wraps_the_parser_refusal_in_judge_refused(tmp_path)
 
 
 def _family_verdict() -> str:
-    """A verdict valid at FAMILY scope: no findings (#1234 M6 retired the family's
-    `verdict_word`), so nothing names a world or the defender."""
+    """A verdict valid at FAMILY scope: no findings, so nothing names a world or the defender."""
     return J.as_reply_text(J.family_reply())
 
 
 def test_1018_judge_family_scope_fence_then_prose_costs_one_family_draw_not_the_family_call(
         tmp_path):
-    """O2 at the family lane: a fence-then-prose reply on `judge:family:0` (draws=2) is ONE
-    malformed family ASK — the family row's `malformed_replies` 1 and no."""
+    """A fence-then-prose reply on `judge:family:0` (draws=2) is ONE malformed family ask,
+    re-asked: both family draws still complete and the refused reply is on the wire log."""
     ep = _episode(tmp_path)
     # Call order is world b's draws, world c's draws, then the family's: 2 + 2 + 2.
     judge = J.FakeJudge(replies=[_bare_verdict()] * 4 + [_fence_then_prose(_family_verdict())],
@@ -521,7 +517,6 @@ def _author(tmp_path, agent):
 
 def test_1018_questioner_call_1_fence_then_prose_aborts_naming_call_1_before_any_seat_is_paid(
         tmp_path):
-    """M2 at the questioner, shape 4 on call 1."""
     agent = T.FakeAgent(_fenced_doc(T.declaration(T.family_doc())) + PROSE_AFTER,
                         _fenced_doc(T.declaration(T.world_doc("b"))), _fenced_doc(T.declaration(T.world_doc("c"))))
     with pytest.raises(_branch_error()) as err:
@@ -531,7 +526,6 @@ def test_1018_questioner_call_1_fence_then_prose_aborts_naming_call_1_before_any
 
 
 def test_1018_questioner_seat_call_fence_then_prose_aborts_naming_the_seat(tmp_path):
-    """Shape 4 on a SEAT call (call 2)."""
     agent = T.FakeAgent(_fenced_doc(T.declaration(T.family_doc())),
                         _fenced_doc(T.declaration(T.world_doc("b"))) + PROSE_AFTER,
                         _fenced_doc(T.declaration(T.world_doc("c"))))
@@ -545,7 +539,7 @@ SHAPE_PHRASE = "not inside a code fence, with nothing before or after it"
 #: Words that would turn the sentence into permission for a shape the parser refuses. None
 #: may appear in the sentence that carries the phrase.
 PERMISSIVE_WORDS = ("wrap", "you may", "commentary", "treated as", "before and after")
-#: M3's label on the two questioner examples, which still SHOW the document inside a fence.
+#: The label on the two questioner examples, which still SHOW the document inside a fence.
 ILLUSTRATION_LABEL = "illustration, not part of the reply"
 
 

@@ -20,9 +20,9 @@ def _roots(tmp_path, monkeypatch):
 
 
 def _episode_names() -> set[str]:
-    """Every entry under any tenant's `<data root>/<T>/episodes/` — #1187 Layout A, where every
-    launch claims its episode (O9: no configured episodes root). Each refusal's control shows
-    the census sees the episode a launch makes, so "no episode made" is not vacuous."""
+    """Every entry under any tenant's `<data root>/<T>/episodes/`, where every launch claims its
+    episode. Each refusal's control shows the census sees a launch's episode, so "no episode
+    made" is not vacuous."""
     root = location_path(P.data_root)()
     return {str(p.relative_to(root)) for p in root.glob("*/episodes/*")}
 
@@ -32,14 +32,13 @@ def _no_episode_made(before: set[str]) -> bool:
 
 
 # ==========================================================================================
-# The launcher (G1, G15, G16): refused before anything is spent; the control launches.
+# The launcher: refused before anything is spent; the control launches.
 # ==========================================================================================
 
 def test_g15_a_source_id_that_leaves_no_room_for_a_sibling_is_refused_before_anything_is_spent(
         tmp_path, monkeypatch):
-    """G15(ii), at the entry point: a source id the launcher cannot branch from is refused
-    before the questioner, with no episode folder. The positive control is a source under a
-    fresh data root: it launches."""
+    """Old name: a 201-byte non-UUID source id is refused before the questioner, with no episode
+    made (and not by the retired room-for-a-label rule); a UUID source launches."""
     import uuid
 
     long_id = ("2026" + "x" * 199)[:201]
@@ -67,10 +66,8 @@ def test_g15_a_source_id_that_leaves_no_room_for_a_sibling_is_refused_before_any
 
 
 def test_g15_a_link_at_the_derived_episode_name_is_passed_over_and_left_untouched(tmp_path):
-    """G15(iii), at the entry point. The launcher's exclusive claim adopts nothing: a link
-    planted among the tenant's episodes (pointing at a real folder outside the data root) is
-    passed over, the launch claims an episode of its own and runs there, and the link and its
-    target are untouched."""
+    """The launcher's exclusive claim adopts nothing: a link planted among the tenant's episodes
+    is passed over, untouched, and the launch claims and runs in an episode of its own."""
     import uuid
 
     from defender.tests.storage.ids_1187 import _spec1187 as S
@@ -107,7 +104,7 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
 
     est, src = P.launch_source(tmp_path)
     beta = P.second_tenant(location_path(P.data_root)(), H.U_ID)
-    # #1235: the case pointer is the host-only sidecar beside the run folder.
+    # The case pointer is the host-only sidecar beside the run folder.
     pointer = RunPaths(src).session_pointer()
     honest = pointer.read_text(encoding="utf-8")
     doc = json.loads(honest)
@@ -132,18 +129,14 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
 
 
 # ==========================================================================================
-# The sibling (G4, G19): refused before the spend; the control runs its arm.
+# The sibling: refused before the spend; the control runs its arm.
 # ==========================================================================================
 
 def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its_target(
         tmp_path):
-    """G4, the sibling's screen (`run.py:460-475`), pinned today only through `--resume`. The
-    source run's `alert.json` is a link to a file outside it: the sibling refuses before any
-    lifecycle, and no arm's alert carries the target's bytes. The positive control restores a
-    plain alert: the sibling reaches its lifecycle, its arm's alert being the source's.
-
-    #1187 declared change 2: the arm's folder no longer spells `<episode>-<label>`, so the
-    no-copy check reads every arm folder in the container, not one composed name. (Name kept.)"""
+    """The episode's copy of the source alert is a link to a file outside: the sibling refuses
+    before any lifecycle and no arm's alert carries the target's bytes; restored, the arm's
+    alert is the source's."""
     src, ep = P.sibling_scene(tmp_path)
     secret = tmp_path / "secret.json"
     secret.write_text('{"secret": "outside the source run"}\n', encoding="utf-8")
@@ -159,8 +152,7 @@ def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its
     assert rc is None, f"the sibling ran over a linked alert ({rc})"
     assert "alert" in P.refusal_text(refused), P.refusal_text(refused)
     assert "lifecycle" not in rec.order
-    # #1187 declared change 2: an arm's folder is its roster id, not `<episode>-b`; every
-    # folder in the container is checked, so the check holds wherever the arm would be made.
+    # Every folder in the container is checked, so the check holds wherever the arm is made.
     arms = [d for d in (ep / "runs").iterdir() if d.is_dir()] if (ep / "runs").is_dir() else []
     for arm in arms:
         copied = arm / "alert_input" / "alert.json"
@@ -178,11 +170,9 @@ def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its
 
 
 def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(tmp_path):
-    """G19. A hand resume naming another real tenant (`acme`) over T's episode is refused before the preflight (no model key spent), before the lifecycle,
-    and BEFORE ANY WRITE: the episodes root and the data root are census-identical after it.
-    Today `_sibling_tenant_agrees` refuses after the manifest read; PR 2 refuses earlier, at
-    `runs.episode(ep)`. The existing pins assert no spend but take no write census. The positive
-    control is the same episode resumed by T: it runs."""
+    """A sibling naming another real tenant over this tenant's episode is refused before the
+    preflight (no model key spent) and BEFORE ANY WRITE (both roots census-identical), naming
+    nothing of the episode's tenant."""
     src, ep = P.sibling_scene(tmp_path)
     P.second_tenant(location_path(P.data_root)(), H.T_ID)
     episodes_before, data_before = P.tree(location_path(P.episodes)(P.SIBLING_TENANT)), P.tree(location_path(P.data_root)())
@@ -207,9 +197,8 @@ def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(t
 
 
 def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
-    """`_episode_1025`'s sample episode at `<data root>/<tenant_id>/episodes/<uuid>/` (#1187
-    Layout A), as RUNS leaves it: the arm roster naming every world, each arm at its roster id.
-    No container record (R1)."""
+    """`_episode_1025`'s sample episode at `<data root>/<tenant_id>/episodes/<uuid>/`, as RUNS
+    leaves it: the arm roster naming every world, each arm at its roster id."""
     return E.sample_episode(tmp_path, root=location_path(P.episodes)(tenant_id))
 
 
@@ -235,13 +224,8 @@ def test_g9_a_linked_episode_container_reads_as_absent_on_the_page(tmp_path, d9_
 
 
 def test_g11_the_run_page_refuses_an_absent_run_and_a_file_at_the_runs_name(tmp_path):
-    """G11, at the CLI (today's pin calls `Run.at`, which leaves the run page). For a run id
-    with nothing at it, and for one whose name is a regular file in T's runs folder, the run
-    page exits non-zero and writes nothing: the absent name stays absent, the file is
-    byte-for-byte unchanged. The positive control renders T's real run.
-
-    #1187 declared change 1: the two names are UUIDs — an old-shaped id would now be refused as
-    a bad id before any lookup, which is not the guard this row pins. (Name kept.)"""
+    """The run page exits non-zero and writes nothing for an absent run or a regular file at the
+    run's name; both names are UUIDs so the lookup, not the id rule, refuses."""
     import uuid
 
     src, _ep = P.sibling_scene(tmp_path)
@@ -266,14 +250,8 @@ def test_g11_the_run_page_refuses_an_absent_run_and_a_file_at_the_runs_name(tmp_
 
 def test_g23_the_page_refuses_a_file_at_the_episodes_name_and_leaves_it_untouched(
         tmp_path, d9_tenant):
-    """G23 (#1133 O4.8.2), the file case at the page — pinned today only through the CLI's bare
-    path. A regular file at the episode's name is refused: non-zero exit, the file unchanged,
-    nothing made beside it. The positive control is a real episode at the same name: its page
-    renders.
-
-    #1187 declared changes 1 and 5 (O9): the episode's name is `<T>/episodes/<uuid>` — the
-    file squats there, under the tenant, not under `DEFENDER_EPISODES_BASE` — and the real
-    episode is that folder with its manifest naming the uuid and its arm roster. (Name kept.)"""
+    """A regular file at `<T>/episodes/<uuid>` is refused with nothing made or changed; a real
+    episode at the same name renders."""
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
