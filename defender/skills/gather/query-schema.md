@@ -88,7 +88,7 @@ Two kinds of `${name}` placeholder, and the frontmatter classifies each so
 per-verb, so a file naming no verb is undecidable rather than exempt, and `params:` must name
 only params the verb really declares (checked against the adapter's live signature, not against
 this file's own claims). A draft auto-minted from an executed query arrives carrying both.
-The rule lives in `defender/knowledge/_scaffold_rules.py` and runs in three places: `validate_scaffold`
+The rule lives in `defender/systems/_scaffold_rules.py` and runs in three places: `validate_scaffold`
 at scaffold time, the lead-author loop's commit gate on every promotion, and CI over the whole
 corpus. One rule, three callers — not three copies (#901).
 

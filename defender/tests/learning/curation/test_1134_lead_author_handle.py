@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from defender import _git
-from defender.knowledge import _scaffold_rules
+from defender.systems import _scaffold_rules
 from defender.configuration._env import FatalConfigError
 from defender.learning.core import drains
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, LoopPaths

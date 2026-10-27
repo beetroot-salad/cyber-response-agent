@@ -4,8 +4,6 @@
     "imports-adapters:cli/tacit_cli.py:defender.integrations.tacit_knowledge_adapter": "#1172: the tacit CLI reaches into the tacit adapter's private helpers",
     "imports-adapters:investigation/ticket_writer.py:defender.integrations._stub_transport": "#1172: the ticket writer posts through the adapters' shared transport",
     "imports-adapters:skills/connect/examples/example_adapter.py:defender.integrations._stub_transport": "#1172: the connect skill's example adapter uses the shared transport",
-    "knowledge/_scaffold_rules.py:defender.systems.verb_grant": "#1309 (d): Python in model-facing folders",
-    "knowledge/_scaffold_rules.py:defender.systems.verbs": "#1309 (d): Python in model-facing folders",
     "records/_artifact_schema.py:defender.skills.invlang.validate": "#1309 (d): Python in model-facing folders"
   }
 }
