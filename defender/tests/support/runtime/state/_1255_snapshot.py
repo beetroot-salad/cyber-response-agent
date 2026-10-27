@@ -43,6 +43,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     messages_text,
 )
+from defender.tests.support.storage._store_owner import reread
 
 CORRELATION_LEAD = "l-00c"
 
@@ -200,7 +201,7 @@ def drive_source(  # noqa: PLR0913 — one keyword per seam a source scenario va
             kw[name] = value
     result = drive(run_dir, run_id=run_id, main=model, gather=gather, **kw)
     assert sink, "the source run opened no store — nothing below is about branching"
-    return Driven(run_dir, model, gather, rec, result, store=sink[0])
+    return Driven(run_dir, model, gather, rec, result, store=reread(sink[0]))
 
 
 def main_rows(store: Any, session_id: str | None = None) -> list[tuple[int, Any]]:

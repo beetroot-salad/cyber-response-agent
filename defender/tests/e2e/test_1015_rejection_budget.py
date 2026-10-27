@@ -48,14 +48,11 @@ LOUD_PARAM = "Zq7-CANARY-PARAM"
 
 def _terminator(r: _Res) -> str | None:
     """How this lead's gather session ENDED, read out of the real session store the run wrote — the one place the..."""
-    store = session_store.open_store_for_read(session_store.resolve_store_path(_run_handle_1165(r.run_dir)))
-    try:
+    with session_store.open_store_for_read(session_store.resolve_store_path(_run_handle_1165(r.run_dir))) as store:
         rows = sql(
             store, "SELECT truncated_by FROM session WHERE agent_id = ?",
             (f"{GATHER_AGENT_ID_PREFIX}{LEAD}",),
         )
-    finally:
-        store.close()
     assert rows, "this lead opened no gather session — the run never dispatched"
     return rows[0][0]
 

@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.knowledge import _scaffold_rules
-from defender.systems.verb_resolver import VerbResolver
+from defender.systems import _scaffold_rules
 from defender.knowledge._corpus import iter_query_templates, read_query_template
 
 _DEFENDER = Path(__file__).resolve().parents[2]
@@ -18,8 +17,8 @@ _ALL_SEVEN = (
 
 
 @pytest.fixture(scope="module")
-def resolver() -> VerbResolver:
-    return VerbResolver(_DEFENDER)
+def resolver() -> _scaffold_rules.VerbResolver:
+    return _scaffold_rules.VerbResolver(_DEFENDER)
 
 
 def _codes(text: str, system: str, tmp_path: Path, resolver) -> list[str]:
@@ -222,17 +221,17 @@ def test_the_resolver_answers_about_the_tree_it_was_handed(tmp_path):
         "def only_here(ctx: VerbContext, *, x: str = '') -> dict:\n    return {}\n"
         "VERBS = {'only-here': only_here}\n"
     )
-    other = VerbResolver(tmp_path)
+    other = _scaffold_rules.VerbResolver(tmp_path)
     assert sorted(other.verbs("cmdb")) == ["only-here"]
-    assert "get-host" in VerbResolver(_DEFENDER).verbs("cmdb")
+    assert "get-host" in _scaffold_rules.VerbResolver(_DEFENDER).verbs("cmdb")
 
 
 def test_an_unresolvable_system_raises_rather_than_reporting_a_clean_template(tmp_path):
     """`ScaffoldRuleError`, not an empty verb mapping."""
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
-        VerbResolver(tmp_path)
+        _scaffold_rules.VerbResolver(tmp_path)
 
     (tmp_path / "integrations").mkdir(parents=True)
-    resolver = VerbResolver(tmp_path)
+    resolver = _scaffold_rules.VerbResolver(tmp_path)
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
         resolver.verbs("nosuchsystem")

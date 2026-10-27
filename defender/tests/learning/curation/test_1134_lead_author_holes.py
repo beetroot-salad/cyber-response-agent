@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from defender._io import ALIAS_READ_REFUSAL
-from defender.knowledge._scaffold_rules import check_system_skill
+from defender.systems._scaffold_rules import check_system_skill
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender._tree_listing import list_tree
 from defender.learning.core.lane_trees import DrainTrees, read_at
@@ -76,17 +76,17 @@ LEAD = LEAD_AUTHOR_DRAIN_LABEL
 # checkout), and the reducer surface is the tenant's pitfalls add-on (`_declared870.REDUCER_REL`, the
 # test's own oracle — not the production constant, which still names the product page). These
 # shadow the handle file's product spellings (S-D's file, imported above, not edited here).
-from defender.systems.verb_resolver import VerbResolver  # noqa: E402
+from defender.systems import _scaffold_rules  # noqa: E402
 from defender import _git  # noqa: E402
 from defender.tests.support.learning.core._declared870 import REDUCER_REL as ADDON_REL  # noqa: E402
 
 REDUCER_NAME = ADDON_REL.removeprefix("agent/skills/")  # noqa: F811
 
 
-def resolver(s: Scene) -> VerbResolver:  # noqa: F811
+def resolver(s: Scene) -> _scaffold_rules.VerbResolver:  # noqa: F811
     """The adapters' verbs, read from the product checkout (#1172), never the tenant root."""
     product = getattr(s, "product", None)
-    return VerbResolver((product if product is not None else s.repo) / "defender")
+    return _scaffold_rules.VerbResolver((product if product is not None else s.repo) / "defender")
 
 
 def _commit_reducer(s: Scene) -> None:  # noqa: F811

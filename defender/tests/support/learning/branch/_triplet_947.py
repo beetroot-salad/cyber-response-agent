@@ -672,8 +672,7 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
 
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
     case_id = source_case_id(src)
-    store = ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(base)))
-    try:
+    with ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(base))) as store:
         ss.write_case_pointer(_source_handle(src), case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
@@ -691,8 +690,6 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
             from defender.tests.support.runtime.state._fork_snapshot_plant import plant_fork_snapshots
 
             plant_fork_snapshots(store, session_id, src)
-    finally:
-        store.close()
 
 
 def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",

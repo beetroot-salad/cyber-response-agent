@@ -42,6 +42,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -116,7 +117,9 @@ def _fold_run(tmp_path: Path, monkeypatch, *, tree: tuple[Path, Path],
     defender_dir, agent = tree
     result = drive(rd, run_id="fold-936", main=replay, defender_dir=defender_dir, agent=agent,
                    store_factory=store_factory(tmp_path, sink=opened, fault=fault))
-    return rd, replay, opened[0], result
+    # The run closed its store: rows are read back through a fresh connection. A faulted run
+    # hands back its fault wrapper instead — its record of appends, over a file it broke.
+    return rd, replay, reread(opened[0]) if fault is None else opened[0], result
 
 
 def _expected_hits(doc: str, corpus: Path) -> list[str]:

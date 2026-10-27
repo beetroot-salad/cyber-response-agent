@@ -568,11 +568,8 @@ def seed_session_store(run_dir: Path) -> None:
     """A real, empty session store behind the run dir's pointer — `render_and_mirror`'s
     precondition (the page is refused for a run whose record cannot be found)."""
     ss = mod("records.session_store")
-    store = ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", sessions=SessionPaths(fixture_runs_base(Path(run_dir).parent)))
-    try:
+    with ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", sessions=SessionPaths(fixture_runs_base(Path(run_dir).parent))) as store:
         ss.write_case_pointer(_run_handle_1165(Path(run_dir)), case_id=store.case_id, store_path=store.path)
-    finally:
-        store.close()
 
 
 def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | None, Any]:

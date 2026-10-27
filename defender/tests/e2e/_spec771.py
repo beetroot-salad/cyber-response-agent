@@ -32,6 +32,8 @@ from defender.tests.e2e._box665 import (  # noqa: F401
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, is_dood
 from defender.records import SessionPaths
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+import contextlib
+from collections.abc import Iterator
 
 DEFENDER = Path(__file__).resolve().parents[2]
 #: `run_tree`'s run folder. #1187 (declared change 1): a run id is a canonical UUID — the
@@ -676,9 +678,10 @@ def _invoke_write_trace(run_dir: Path) -> None:
     from defender.investigation import observe
     from defender.records import session_store
 
-    store = session_store.open_store(case_id="c-771", sessions=SessionPaths(fixture_runs_base(run_dir.parent / "stores")))
-    sid = store.new_session("main")
-    observe.write_trace(run_dir, store=store, session_id=sid, wall_ms=1.0)
+    with session_store.open_store(case_id="c-771", sessions=SessionPaths(
+            fixture_runs_base(run_dir.parent / "stores"))) as store:
+        sid = store.new_session("main")
+        observe.write_trace(run_dir, store=store, session_id=sid, wall_ms=1.0)
 
 
 def _invoke_observe_logger(run_dir: Path) -> None:
@@ -1029,9 +1032,11 @@ def drive_fault_exit_trace(run_dir: Path, *, run_id: str = "r-771", salt: str = 
 
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, drive
 
-    def factory(case_id: str, target: Path) -> Any:
-        return _StaleVersionStore(
-            ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(Path(target).parent))))
+    @contextlib.contextmanager
+    def factory(case_id: str, target: Path) -> Iterator[Any]:
+        with ss.open_store(case_id=case_id,
+                           sessions=SessionPaths(fixture_runs_base(Path(target).parent))) as real:
+            yield _StaleVersionStore(real)
 
     replay = ReplayFn([Turn(text="done.")])
     drive(run_dir, run_id=run_id, main=replay, store_factory=factory)

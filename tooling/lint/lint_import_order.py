@@ -47,7 +47,7 @@ LABEL = "lint_import_order"
 #: first needs the other direction.
 ORDER = (
     "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records",
-    "tenancy", "knowledge", "box", "integrations", "systems", "hooks", "skills",
+    "tenancy", "identity", "knowledge", "box", "integrations", "systems", "hooks", "skills",
     "investigation", "learning", "presentation", "run_common", "agents", "run", "cli", "api",
 )
 _RANK = {node: rank for rank, node in enumerate(ORDER)}

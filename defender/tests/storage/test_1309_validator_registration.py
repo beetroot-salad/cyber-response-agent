@@ -1,0 +1,77 @@
+"""The records write gate gets the invlang validator handed in (#1309 d): it refuses, rather
+than passes text unvalidated, until the validator has registered, and loading any module that
+writes or closes an investigation registers it."""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from defender.records import RUN_LAYOUT
+from defender.records import _artifact_schema as schema
+
+# The child is a fresh interpreter: it finds `defender` only through this checkout's root.
+WORKTREE = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture
+def unregistered():
+    held = schema._diagnose, schema._warn_diagnostics
+    schema._diagnose = schema._warn_diagnostics = None
+    try:
+        yield
+    finally:
+        schema._diagnose, schema._warn_diagnostics = held
+
+
+def test_investigation_write_gate_refuses_until_the_validator_registers(unregistered):
+    reason = schema.validate_investigation("anything", None)
+    assert reason is not None
+    assert "not loaded" in reason
+
+
+def test_writers_outside_the_permission_gate_get_a_refusal_not_a_raise(unregistered):
+    # Lead-zero and the record handles reach the gate through `validate_artifact`.
+    reason = schema.validate_artifact(RUN_LAYOUT.investigation.name, "anything", None)
+    assert reason is not None
+    assert "not loaded" in reason
+
+
+def test_an_oversize_write_without_the_validator_names_the_missing_validator(unregistered):
+    oversize = "x" * (schema.INVESTIGATION_FILE_MAX + 1)
+    reason = schema.validate_investigation(oversize, "committed")
+    assert reason is not None
+    assert "not loaded" in reason
+
+
+def test_close_gate_does_not_fail_open_without_the_validator(unregistered):
+    with pytest.raises(schema.ValidatorNotRegistered):
+        schema.committed_investigation_reason("anything")
+
+
+def test_report_gate_needs_no_validator(unregistered):
+    assert schema.validate_report("not frontmatter") is not None
+
+
+@pytest.mark.parametrize("module", [
+    "defender.investigation.permission",    # the model's writes
+    "defender.investigation.tools",         # the document tools
+    "defender.investigation.close_tool",    # the close
+    "defender.investigation.lead_zero",     # the harness's lead-zero row
+    "defender.investigation.branch",        # a branch arm's restored document
+])
+def test_every_investigation_writer_registers_the_validator_on_import(module):
+    probe = (
+        f"import {module}\n"
+        "from defender.records import _artifact_schema as s\n"
+        "raise SystemExit(0 if s._diagnose is not None else 1)\n"
+    )
+    inherited = os.environ.get("PYTHONPATH", "")
+    env = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(p for p in (str(WORKTREE), inherited) if p)}
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                          cwd=WORKTREE, env=env, timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]

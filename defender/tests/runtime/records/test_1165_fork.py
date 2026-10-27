@@ -139,11 +139,9 @@ def test_recognized_source_payload_refusal_still_fails_fork(tmp_path, kind):
 def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_its_fault(tmp_path):
     """O1: the driver store factory reads the source session pointer through source Run."""
     store, spec, source, _target, _state, source_io, _target_io = source_and_sibling(tmp_path)
-    store.close()
     factory = branch.store_factory_for(spec, source_run=source)
-    opened = factory("ignored", tmp_path / "ignored")
-    assert opened.path == store.path
-    opened.close()
+    with factory("ignored", tmp_path / "ignored") as opened:
+        assert opened.path == store.path
     pointer = source.observability.session_pointer.path
     relative = str(pointer.relative_to(location_path(source.runs_base)))
     assert any(name == relative for _op, _root, name, _mode in source_io.calls)
@@ -168,7 +166,7 @@ def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup
     driven = S.drive_source(tmp_path, (S.append(S.chunks(3)[0]), S.echo("x"), S.done()))
     spec = S.spec_for(driven, S.tool_calling_responses(driven.store)[1])
     store_path = driven.store.path
-    driven.store.close()
+    driven.store.connection.close()
     source_io, target_io = RecordIO(), RecordIO()
     source = run_handle(driven.run_dir, source_io)
     target = run_handle(tmp_path / "sibling" / fixture_uuid("run-sibling"), target_io)

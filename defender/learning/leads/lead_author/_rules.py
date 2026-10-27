@@ -18,8 +18,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.knowledge import _corpus
-from defender.knowledge import _scaffold_rules
-from defender.systems.verb_resolver import VerbResolver
+from defender.systems import _scaffold_rules
 from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
 from defender.learning.core.lane_trees import KIND_ABSENT, TreeFor, kind_at, read_at, view_at
 from defender.learning.leads import lead_neighbors
@@ -113,7 +112,7 @@ def _refuse(path: str, findings: list[_scaffold_rules.Finding]) -> None:
 
 
 def _check_promoted_template(
-    repo_root: Path, resolver: VerbResolver | _ResolverOf, path: str, *, tree_for: TreeFor,
+    repo_root: Path, resolver: _scaffold_rules.VerbResolver | _ResolverOf, path: str, *, tree_for: TreeFor,
 ) -> None:
     """The content half of the promotion gate: `connect`'s invariants (e.g. every
     `${placeholder}` is a param its verb declares), which `validate_scaffold` doesn't reach
@@ -148,7 +147,7 @@ def _still_there(repo_root: Path, tree_for: TreeFor, path: str) -> bool:
 
 
 def _skills_content_rule(
-    repo_root: Path, resolver: VerbResolver | _ResolverOf, xy: str, path: str,
+    repo_root: Path, resolver: _scaffold_rules.VerbResolver | _ResolverOf, xy: str, path: str,
     *, tree_for: TreeFor,
 ) -> None:
     """The content half of the gate: is what the agent wrote well-formed? Runs only on paths
@@ -225,7 +224,7 @@ def _skills_path_rule(
 
 def _skills_rule(
     repo_root: Path,
-    resolver: VerbResolver | _ResolverOf,
+    resolver: _scaffold_rules.VerbResolver | _ResolverOf,
     xy: str,
     path: str,
     *,
@@ -486,14 +485,14 @@ class _ResolverOf:
 
     def __init__(self, defender_dir: Path, *, eager: bool = False) -> None:
         self._defender_dir = defender_dir
-        self._resolver: VerbResolver | None = None
+        self._resolver: _scaffold_rules.VerbResolver | None = None
         if eager:
-            self._resolver = VerbResolver(defender_dir)
+            self._resolver = _scaffold_rules.VerbResolver(defender_dir)
 
     def verbs(self, system: str):  # noqa: ANN201 — `VerbResolver.verbs`' own return
         with _no_bytecode():
             if self._resolver is None:
-                self._resolver = VerbResolver(self._defender_dir)
+                self._resolver = _scaffold_rules.VerbResolver(self._defender_dir)
             return self._resolver.verbs(system)
 
 

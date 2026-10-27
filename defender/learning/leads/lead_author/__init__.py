@@ -27,7 +27,7 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 
 from defender.knowledge import _corpus
 from defender import _git
-from defender.knowledge import _scaffold_rules
+from defender.systems import _scaffold_rules
 from defender._io import Held
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config

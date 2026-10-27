@@ -1548,8 +1548,7 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
 
     from defender.records import SessionPaths
 
-    store = ss.open_store(case_id=T.source_case_id(src), sessions=SessionPaths(fixture_runs_base(base)))
-    try:
+    with ss.open_store(case_id=T.source_case_id(src), sessions=SessionPaths(fixture_runs_base(base))) as store:
         session_id = session_for_run(store, src, source_run=_run_handle_1165(src))
         call_id = f"gather-{lead}-after-branch"
         store.append(session_id, [
@@ -1558,8 +1557,6 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
                 "what_to_summarize": ["what idp says"]}, tool_call_id=call_id),
             SS.tool_return_request("gather", f"lead {lead} returned", tool_call_id=call_id),
         ], agent_id="main")
-    finally:
-        store.close()
 
 
 def questioner_for(doc: dict | None = None) -> FakeAgent:
