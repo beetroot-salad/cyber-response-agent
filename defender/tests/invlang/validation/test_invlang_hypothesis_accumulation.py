@@ -28,7 +28,7 @@ def _loop_one() -> str:
 
 
 def test_a_second_hypothesize_block_adds_rather_than_replaces():
-    """The whole bug in one assertion: loop 2 forks h-003, and h-001 must survive."""
+    """Loop 2 forks h-003, and h-001 must survive."""
     body, warnings = parse_dense_companion(_doc(
         _loop_one() + "\n"
         + _HYP_HEADER + "\n" + _hyp_row("h-003", "packaged-daemon")
@@ -51,7 +51,6 @@ def test_a_later_block_cannot_un_declare_an_earlier_hypothesis_prediction():
 
 
 def test_a_benign_disposition_still_sees_an_earlier_loops_authz_contract():
-    """The safety consequence, and the reason this is a parser bug worth its own change."""
     doc = _doc(
         _loop_one()
         + ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
@@ -66,8 +65,7 @@ def test_a_benign_disposition_still_sees_an_earlier_loops_authz_contract():
 
 
 def test_a_lead_born_hypothesis_can_declare_a_prediction():
-    """`:H l-NNN.new_hypotheses` + `:H h-NNN.preds` is the documented way to fork
-    mid-run. The sub-block used to be rejected outright."""
+    """`:H l-NNN.new_hypotheses` + `:H h-NNN.preds` is the documented way to fork mid-run."""
     body, warnings = parse_dense_companion(_doc(
         _EDGE + "\n"
         + _LEAD_HEADER + "\n"
@@ -110,7 +108,8 @@ def test_a_second_authz_block_cannot_drop_an_earlier_contract():
 
 
 def test_declaring_one_id_at_both_sites_is_rejected_and_the_table_still_outranks():
-    """Two sites declaring one id is not recoverable, so it is warned — and the warning blocks the write, since `validate_companion` turns any parse warning into an error."""
+    """Two sites declaring one id is not recoverable, so it is warned, and the warning blocks
+    the write (`validate_companion` turns any parse warning into an error)."""
     doc = _doc(
         _EDGE + "\n"
         + _LEAD_HEADER + "\n"

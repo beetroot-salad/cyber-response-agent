@@ -1,4 +1,4 @@
-"""#923 — the ENTRY PRICE on `inconclusive` (O1, M1, M4), and its hardenings."""
+"""#923 — the ENTRY PRICE on `inconclusive`, at the close and the write gate, and its hardenings."""
 from __future__ import annotations
 
 import pytest

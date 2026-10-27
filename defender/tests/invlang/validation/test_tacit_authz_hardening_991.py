@@ -1,4 +1,6 @@
-"""Hardening of #983's first cut, one test per review finding: delimiter injection through baselines, size caps, forced close, citation by omission, near-spelling grounding, basis scoping, future-dated and YAML-timestamp entries, duplicate registry ids, bracket scope, exhausted-contract frontier."""
+"""#983 hardening, one test per review finding: delimiter injection through baselines, size caps,
+forced close, citation by omission, near-spelling grounding, basis scoping, future-dated and
+YAML-timestamp entries, duplicate registry ids, bracket scope, exhausted-contract frontier."""
 from __future__ import annotations
 
 import datetime as dt
@@ -82,8 +84,8 @@ def test_the_accumulated_baseline_body_is_bounded_under_the_report_file_cap() ->
     over = [e for e in _errors(verbose) if "bytes of `report.md` body" in e]
     assert over, "twelve verbose baselines were accepted, and they render a refused report"
 
-    # The document really would have produced a report over the cap — the bound is not merely
-    # smaller than the render, it is the thing standing between the two.
+    # The document really would render a report over the cap: the bound is what stands between
+    # the two.
     receipts = _receipts(scene.document(rows=scene.consult_block(*[
         scene.consultation_row(anchor_id=f"tk-baseline-{i}", result="occurrence detail " * 60)
         for i in range(12)
@@ -211,7 +213,7 @@ def test_a_near_spelling_of_the_forbidden_grounding_is_refused_too(spelling: str
 
 def test_basis_is_refused_outside_the_verdict_it_qualifies() -> None:
     """`basis` answers "is this UNSETTLED contract worth another retrieval loop", so it is
-    defined on `verdict: indeterminate` and nothing read the verdict."""
+    defined only on `verdict: indeterminate`."""
     from defender.skills.invlang.validate import exhausted_contract_ids
 
     for verdict in ("authorized", "unauthorized"):
@@ -311,8 +313,8 @@ def test_a_yaml_resolved_timestamp_keeps_the_entry_it_was_meant_to_keep() -> Non
 
 
 def test_a_repeated_registry_id_is_refused_at_load() -> None:
-    """An id names ONE sanction, and the file's own header says so: "Never re-use one for a
-    different sanction; an edit to `pattern` under a kept `id` is a silent re-identification. """
+    """An id names ONE sanction (the registry header: never re-use one for a different
+    sanction), so a repeated id keeps the first entry, the one citations already mean."""
     both = _entries(
         scene.registry_entry(justification="the sanction citations already mean"),
         scene.registry_entry(pattern="rm -rf /etc/ssl", justification="a different sanction"),

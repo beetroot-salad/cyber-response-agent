@@ -51,9 +51,6 @@ def _doc(*parts: str) -> str:
     return "".join(parts)
 
 
-# the keyword exists
-
-
 # the six ways the exit could be faked
 
 _FAILED_LEAD = (
@@ -201,7 +198,7 @@ _BYPASS = (
 
 
 def test_the_close_cannot_be_reached_around_the_write_gate(tmp_path):
-    """THE bypass."""
+    """Closing `false-positive` over a document that concluded otherwise still owes its price."""
     from pydantic_ai.exceptions import ModelRetry
 
     with pytest.raises(ModelRetry) as e:
@@ -268,8 +265,7 @@ def test_a_companion_that_paid_benigns_price_closes(tmp_path):
     )
     from defender.skills.invlang.parser import parse_dense_companion
 
-    # The control on the control: assert the authz half actually had a live contract to clear,
-    # so this cannot quietly decay into the no-hypothesis document it replaced.
+    # The control on the control: the authz half must have a live contract to clear.
     companion, _ = parse_dense_companion(_PAID_BENIGN)
     assert companion["hypothesize"]["hypotheses"][0]["authorization_contract"]
     assert _check_benign_authz(companion) == []
@@ -288,7 +284,8 @@ def test_a_companion_that_paid_benigns_price_closes(tmp_path):
     ("The class is ??/??/?? but no `:V` block was ever written.\n", "unresolved slots in PROSE"),
 ])
 def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, shape):
-    """#879's second half."""
+    """A companion with no `:V prologue.vertices` cannot close benign, however it got that way
+    (#879)."""
     from pydantic_ai.exceptions import ModelRetry
 
     import asyncio
@@ -318,7 +315,7 @@ def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, sh
 
 
 def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_path):
-    """A gate that cannot look must not report clean (#618/#621/#652)."""
+    """A gate that cannot look must not report clean."""
     import asyncio
 
     from defender._io import ALIAS_READ_REFUSAL

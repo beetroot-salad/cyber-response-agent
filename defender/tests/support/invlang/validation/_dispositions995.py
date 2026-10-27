@@ -1,4 +1,4 @@
-"""Fixtures and the pre-implementation import shim for #995's verb-disposition table."""
+"""Fixtures and the independent census for #995's verb-disposition table."""
 from __future__ import annotations
 
 import json
@@ -22,13 +22,10 @@ try:
 except ImportError:  # pragma: no cover — the pre-implementation path
 
     class DispositionError(Exception):  # type: ignore[no-redef]
-        """Placeholder so `pytest.raises(DispositionError)` is expressible before the real
-        exception exists. Nothing raises it, so every such test fails rather than passing
-        vacuously on a stub that happens to raise."""
+        """Placeholder nothing raises, so a test using it fails rather than passing vacuously."""
 
     class DispositionWarning(UserWarning):  # type: ignore[no-redef]
-        """Placeholder, for the same reason: `pytest.warns(DispositionWarning)` must be
-        expressible, and nothing emits it, so the test fails rather than passing vacuously."""
+        """Placeholder nothing emits, for the same reason."""
 
     def _not_yet_written(symbol: str):
         def _stub(*_a: Any, **_k: Any):
@@ -66,20 +63,11 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------------------
-# The census, written INDEPENDENTLY of the shipped table.
-#
-# These tuples are transcribed from the grants as they stood BEFORE the move out of code
-# (`driver/_build.py:GATHER_PAIRS` plus its per-system health-check and the judge's inline
-# `JUDGE_TICKET_PAIRS` tuple for #995, both since retired; `lead_zero/_spec.py`'s
-# `VerbGrant` literal for #999), so the suite can assert that moving each of them into the
-# table changed WHO MAY CALL WHAT not at all. Held as literals for
-# the same reason `_verb_authorization_632.py` holds its copy: an expected value re-derived
-# from the file under test cannot disagree with it.
-#
-# `health-check` is enumerated per system here rather than granted uniformly in code. That is
-# a real change and it is deliberate — a table that is total over the walked census cannot
-# have a verb class that lives outside it, and the uniform grant was the one pair the old
-# code decided for itself.
+# The census, written INDEPENDENTLY of the shipped table: the grants as they stood in code
+# before #995/#999 moved them into it, so the suite can assert the move changed WHO MAY CALL
+# WHAT not at all. Literals, because an expected value re-derived from the file under test
+# cannot disagree with it. `health-check` is listed per system: a table total over the census
+# has no verb class outside it.
 # ---------------------------------------------------------------------------------------
 
 _GATHER_READ: tuple[tuple[str, str], ...] = (
@@ -104,28 +92,18 @@ GATHER_CENSUS: frozenset[tuple[str, str]] = frozenset(
     (*_GATHER_READ, *((s, "health-check") for s in _GATHER_SYSTEMS))
 )
 
-#: EMPTY SINCE #922 — the judge held these three and the role is gone. Kept as a named empty
-#: rather than deleted: what it enumerates is "the verbs one role holds alone", and the next
-#: role to hold a private surface should find the shape here rather than invent it.
+#: Empty since the judge role was retired (#922): the verbs one role holds alone.
 JUDGE_CENSUS: frozenset[tuple[str, str]] = frozenset()
 
-#: The turn-zero correlation lead's grant, transcribed from the `VerbGrant` literal
-#: `lead_zero/_spec.py` held before #999 moved it into the table. Two pairs on one system is
-#: the whole safety case for a lead the harness dispatches on its own, and the move must
-#: change it by nothing.
+#: The turn-zero correlation lead's grant as `lead_zero/_spec.py` held it before #999: two
+#: pairs on one system, the whole safety case for a lead the harness dispatches on its own.
 CORRELATION_CENSUS: frozenset[tuple[str, str]] = frozenset((
     ("elastic", "alerts"), ("elastic", "health-check"),
 ))
 
-#: Declared by an adapter and granted to NOBODY. Each needs a written reason in the table;
-#: `ticket.case-opened-at` is the one the old code never named at all — it was ungranted by
-#: omission, which is precisely the state #995 makes unrepresentable.
-#:
-#: `get-ticket` and `key-pattern` JOINED THEM IN #922. They were the judge's closed-ticket
-#: surface and it was their only grantee; the role went with the old pipeline. Their rows stay
-#: in the table carrying `roles: []` and a reason rather than being deleted — which is this
-#: file's whole point: a verb granted to nobody is a recorded decision, and deleting the row
-#: would return them to ungranted-by-omission, the state #995 exists to make unrepresentable.
+#: Declared by an adapter and granted to NOBODY; each needs a written reason in the table.
+#: `get-ticket` and `key-pattern` were the retired judge's (#922): their rows stay with
+#: `roles: []`, a recorded decision rather than ungranted by omission.
 WITHHELD_CENSUS: frozenset[tuple[str, str]] = frozenset((
     ("cmdb", "list-roles"),
     ("identity", "list-authorized-hosts"),
@@ -161,14 +139,9 @@ VERBS = {{"{name}": {body}, "health-check": health_check}}
 
 
 def plant_system(defender_dir: Path, system: str, verb_name: str = "lookup") -> tuple[str, str]:
-    """Declare `system` in `defender_dir` by BOTH halves the resolver reads — an adapter
-    module and a committed `execution.md` marker — and return the `(system, verb)` pair the
-    caller will assert on.
-
-    Both halves, not one: the resolver unions them, so a fixture that plants only an adapter
-    would still exercise the gate but would not resemble what `/connect` actually produces,
-    and a fixture that plants only a marker declares nothing until it is committed.
-    """
+    """Declare `system` in `defender_dir` by BOTH halves the resolver unions — an adapter
+    module and an `execution.md` marker, as `/connect` produces them — and return the
+    `(system, verb)` pair the caller will assert on."""
     adapters = adapters_under(defender_dir)
     adapters.mkdir(parents=True, exist_ok=True)
     (adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
@@ -184,10 +157,8 @@ def plant_system(defender_dir: Path, system: str, verb_name: str = "lookup") -> 
 def write_table(path: Path, rows: dict[tuple[str, str], dict[str, Any]]) -> Path:
     """Write a disposition table holding exactly `rows`, keyed `(system, verb)`.
 
-    Values are the row body verbatim (`{"roles": [...], "reason": ...}`), so a test can build
-    a malformed row — a missing `roles`, an unknown role, a reasonless withholding — without
-    the helper quietly repairing it. A helper that normalized its input could not express the
-    inputs half this suite is about.
+    Row bodies are written verbatim, so a test can build a malformed row (a missing `roles`,
+    an unknown role, a reasonless withholding) without the helper repairing it.
     """
     by_system: dict[str, dict[str, dict[str, Any]]] = {}
     for (system, verb_name), body in rows.items():
@@ -206,9 +177,8 @@ def write_table(path: Path, rows: dict[tuple[str, str], dict[str, Any]]) -> Path
                 )
                 parts.append(f"roles: {rendered}")
             if "reason" in body:
-                # Rendered through a JSON dump, which is a valid YAML double-quoted scalar:
-                # a reason holding a `"` or a `\\` must reach the loader as the test wrote it,
-                # not as whatever the raw interpolation happened to make parseable.
+                # A JSON string is a valid YAML double-quoted scalar, so a reason holding `"`
+                # or `\\` reaches the loader as the test wrote it.
                 parts.append(f"reason: {json.dumps(body['reason'])}")
             lines.append(f"    {verb_name}: {{{', '.join(parts)}}}")
     path.parent.mkdir(parents=True, exist_ok=True)

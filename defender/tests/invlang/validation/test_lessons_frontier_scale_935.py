@@ -19,9 +19,8 @@ from defender.tests.support.learning.retrieval._lessons_corpus import _write_les
 
 from defender.tests.support.shared._pre_p4_shipped import LESSONS as SHIPPED_LESSONS  # noqa: E402
 
-#: The corpus these cases rank against: the lessons this repo shipped before #1108 P4 moved
-#: lessons to each tenant (O1, O-U5), byte for byte — the retrieval engine is the subject, and
-#: its motivating lesson and the run reproductions below are pinned against that real corpus.
+#: The lessons this repo shipped before #1108 moved them to each tenant, byte for byte: the
+#: motivating lesson and the run reproductions below are pinned against that real corpus.
 CORPUS = SHIPPED_LESSONS
 
 TWO_VERTEX_DOC = """```invlang
@@ -73,7 +72,7 @@ def _match(text: str, *, top_k: int = LF.DEFAULT_TOP_K) -> list:
 
 
 def _prefixes(text: str) -> list:
-    """Build each append-stage document to exercise lesson retrieval over its evolution."""
+    """The frontier after each fence of `text` is appended, starting from the empty document."""
     frontiers = [frontier_from_text("")]
     document = ""
     for body in scan_fences(text).bodies:
@@ -82,10 +81,7 @@ def _prefixes(text: str) -> list:
     return frontiers
 
 
-# the missing table
-
-
-# defect 3 — the class match is monotonic in what the document records
+# the class match is monotonic in what the document records
 
 def test_recording_more_about_a_class_slot_never_loses_a_selector():
     sel = "ip-only/internet/novel"
@@ -99,8 +95,8 @@ def test_recording_more_about_a_class_slot_never_loses_a_selector():
         "a two-slot spelling of a three-slot type scored differently from the padded one — "
         "the cell is still being taken at its own length"
     )
-    # ...and the inversion still costs what it always cost: a pattern that matched NOWHERE by
-    # equality pins nothing, so the wholly-open cases stay at 0 rather than riding the padding.
+    # ...and a pattern that matched NOWHERE by equality pins nothing: the wholly-open cases
+    # stay at 0 rather than riding the padding.
     assert pins["??"] == pins["??/??"] == pins["??/??/??"] == 0
     assert pins["ip-only/??"] == 3
 
@@ -135,7 +131,7 @@ def test_a_cell_declaring_more_slots_than_its_type_is_widened_not_truncated():
     )
 
 
-# defect 1 — the node lane can tell a named attribute from a universal cell
+# the node lane can tell a named attribute from a universal cell
 
 def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
     assert diagnose(TWO_VERTEX_DOC, None) == [], "the reproduction is no longer a clean document"
@@ -167,7 +163,7 @@ def test_a_named_attribute_outscores_a_cell_every_vertex_carries():
     ), "`class` and `ident` are both universal cells and must weigh the same"
 
 
-# defect 2 — the edge lane can be heard
+# the edge lane can be heard
 
 def test_the_edge_lane_is_not_floored_below_the_node_lane():
     floor_edge = LF._EdgeSelector(rel="", auth_kind="", anchor_kind="iam-policy")
@@ -292,11 +288,7 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
         ), f"the loginuid lesson fell out of the block at fence {n}, where the run holds the value"
 
 
-# the gate the spread sits in front of
-
-#: One `compute` vertex with an open class triple and an open ident, and the ordinary append
-#: that declares a second. The pair is the churn shape the gate below exists for — see the test.
-
+# placement, and what a selector's open marker and candidate set mean
 
 def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers(tmp_path):
     corpus = tmp_path / "lessons"

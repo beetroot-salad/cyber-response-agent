@@ -50,7 +50,7 @@ def _parse_errors(errors: list[str]) -> list[str]:
 _CLEAN_VERTEX = "v-001|compute|bastion/internal/known-corp|bastion-01.corp|"
 
 
-# F-2 — a header the regex rejects no longer vaporizes its block
+# a header the regex rejects does not vaporize its block
 
 _REJECTED_HEADERS = (
     ":T conclude   # loop 2 wrap-up",
@@ -63,7 +63,8 @@ def _conclude_fence(header: str) -> str:
 
 
 def test_a_trailing_comment_on_a_header_no_longer_deletes_the_whole_block():
-    """The defect in one document:"""
+    """One habitual trailing comment would otherwise drop the whole `:T conclude` with no
+    warning, and with it the benign gate's dispatch."""
     for header in _REJECTED_HEADERS:
         doc = _conclude_fence(header)
         companion, warnings = parse_dense_companion(doc)
@@ -72,7 +73,7 @@ def test_a_trailing_comment_on_a_header_no_longer_deletes_the_whole_block():
         assert warnings[0].row == header
         assert "not a block header and no block is open" in warnings[0].reason
         assert "NOTHING after it" in warnings[0].reason
-        # ...and the write is refused, where it used to be accepted.
+        # ...and the write is refused.
         assert _parse_errors(validate_companion(doc)), header
 
 
@@ -99,7 +100,8 @@ def test_a_header_rejected_after_a_good_block_still_earns_its_own_warning():
 
 
 def test_a_story_section_does_not_swallow_the_rejected_header_under_it():
-    """The gap the story arm left open, which is F-2 whole:"""
+    """A header ATTEMPT ends a `### story` section, so a rejected header under one still
+    warns instead of being swallowed with every row beneath it."""
     doc = _doc(
         "### story h-001\nThe operator logged in from the bastion, as they do every morning.",
         _REJECTED_HEADERS[0] + "\n"
@@ -112,7 +114,7 @@ def test_a_story_section_does_not_swallow_the_rejected_header_under_it():
     assert _parse_errors(validate_companion(doc))
 
 
-# F-3 — a refuted hypothesis's row discharges nothing of a live one's
+# a refuted hypothesis's row discharges nothing of a live one's
 
 _TWO_HYPS = (
     ":H hypothesize.hypotheses "
@@ -158,7 +160,8 @@ def test_a_refuted_declarers_authz_row_no_longer_discharges_a_live_contract():
 
 
 def test_the_shared_id_is_repairable_by_the_append_the_error_names():
-    """What the "ignore an ambiguous row entirely" reading would have cost:"""
+    """`:H` rows are immutable, so the repair must be an append: a row carrying THIS contract's
+    anchor kind discharges it."""
     doc = _shared_id_doc("ac1").replace(
         ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n",
         ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
@@ -168,7 +171,8 @@ def test_the_shared_id_is_repairable_by_the_append_the_error_names():
 
 
 def test_a_contract_with_no_anchor_kind_never_reaches_the_scoping_at_all():
-    """What makes `anchor_kind` a usable discriminator rather than one more cell that might say nothing:"""
+    """A contract without an `anchor_kind` is a parse error, so the scoping never meets a
+    "both sides blank" case."""
     doc = _shared_id_doc("ac1").replace(
         'ac1|e-001|change-mgmt|"approved change ticket exists"',
         'ac1|e-001||"approved change ticket exists"',
@@ -180,7 +184,8 @@ def test_a_contract_with_no_anchor_kind_never_reaches_the_scoping_at_all():
 
 
 def test_a_shared_id_AND_a_shared_anchor_kind_discharges_nothing():
-    """The case with no honest reading left:"""
+    """Two declarers asking the SAME question under one id: no row can be attributed, so none
+    discharges."""
     doc = _shared_id_doc("ac1").replace("iam-policy", "change-mgmt")
     blocked = _blocked(validate_companion(doc))
     assert len(blocked) == 1
@@ -188,7 +193,7 @@ def test_a_shared_id_AND_a_shared_anchor_kind_discharges_nothing():
     assert "h-002" in blocked[0]
 
 
-# F-12 — an id repeated inside ONE block is named, not deleted in silence
+# an id repeated inside ONE block is named, not deleted in silence
 
 _REPEAT_REASON = (
     "'v-001' is declared twice in this block; only the FIRST row is kept and the later one "
@@ -201,8 +206,8 @@ _TYPO_ROW = "v-001|process|process:bash|bash[pid=42]|integrity=??"
 
 
 def test_a_repeated_vertex_id_in_one_block_warns_instead_of_deleting_the_open_slot():
-    """The document ACCEPTED `disposition benign` before this: the second row was dropped by
-    `_extend_by_id` before the companion existed, and with it the only `??` on the page."""
+    """The dropped repeat carries the only `??` on the page, so a silent drop would let
+    `disposition benign` through."""
     doc = _benign_doc(_vertices(_CLEAN_VERTEX, _TYPO_ROW))
     companion, warnings = parse_dense_companion(doc)
     assert [w.reason for w in warnings] == [_REPEAT_REASON]
@@ -211,7 +216,8 @@ def test_a_repeated_vertex_id_in_one_block_warns_instead_of_deleting_the_open_sl
 
 
 def test_the_two_hypothesis_declaration_sites_warn_on_the_same_shape():
-    """The other two `_extend_by_id` sites, and the sharpest case of the same drop:"""
+    """A repeated `h-001` would delete a whole hypothesis, and its `:H h-001.authz` contracts
+    would attach to the surviving row."""
     rows = (
         "h-001|?gpo-edit|v-001|modified|identity|service-account/known-corp||null|active\n"
         "h-001|?scheduled-task|v-001|created|identity|service-account/known-corp||null|active"
@@ -240,7 +246,7 @@ def test_the_same_id_across_two_blocks_is_still_the_silent_legal_re_emission():
     assert validate_companion(doc) == []
 
 
-# F-6 — a blank refinement value resolves nothing
+# a blank refinement value resolves nothing
 
 _OPEN_VERTEX = "v-001|compute|??/??/??|10.42.7.183|knowledge=??"
 
@@ -262,7 +268,8 @@ def test_a_blank_refinement_value_is_refused_and_clears_nothing():
 
 
 def test_a_blank_value_cannot_erase_a_value_the_document_settled():
-    """The other direction of the same guard, and the one only the fold can show:"""
+    """Erasing a resolved value to `""` moves no gate, so only the fold
+    (`effective_vertex_state`) shows the damage."""
     doc = _benign_doc(
         _vertices(
             "v-001|compute|bastion/internal/known-corp|bastion-01.corp|knowledge=documented"
@@ -282,11 +289,11 @@ def test_a_bad_key_with_a_blank_value_still_earns_only_the_key_warning():
     assert [e for e in validate_companion(doc) if "the `value` cell" in e] == []
 
 
-# F-26 — an unterminated candidate set in an ATTRIBUTE value blocks benign
+# an unterminated candidate set in an ATTRIBUTE value blocks benign
 
 def test_an_unterminated_candidate_set_in_an_attribute_blocks_benign():
     """The attribute-arm twin of #853's `test_an_unterminated_candidate_set_blocks_benign`,
-    which covers only the class cell. One character, and the value read as a settled fact."""
+    which covers only the class cell."""
     doc = _benign_doc(_vertices(
         "v-001|compute|bastion/internal/known-corp|bastion-01.corp|role={internal, dmz"
     ))
@@ -295,7 +302,7 @@ def test_an_unterminated_candidate_set_in_an_attribute_blocks_benign():
     assert "'role'" in blocked[0]
 
 
-# F-27 — a stray `:H l-NNN.<sub>` block stands nothing down
+# a stray `:H l-NNN.<sub>` block stands nothing down
 
 def _stray_doc(*extra: str) -> str:
     return _doc(
@@ -310,7 +317,8 @@ def _stray_doc(*extra: str) -> str:
 
 
 def test_a_stray_lead_sub_block_no_longer_hides_a_phantom_hypothesis():
-    """The stray block's own warning is error severity either way, so no write was ever at stake — the cost was diagnostic completeness."""
+    """The stray block is an error either way; what is pinned is that the phantom `h-999` is
+    still reported."""
     stray = ":H l-001.preds [id|subject|claim]\np9|v-001|\"the host is a bastion\""
     errors = validate_companion(_stray_doc(stray))
     assert any("unknown lead sub-block" in e for e in errors), errors
@@ -328,14 +336,15 @@ def test_the_singular_new_hypothesis_typo_still_defers_for_its_own_ids():
     assert not [e for e in validate_companion(_stray_doc(typo)) if "h-999" in e]
 
 
-# the silent-drop gate's own findings — baselined by #886, fixed here
+# rows the silent-drop gate (#886) flagged
 
 def _conclude_table(block: str) -> str:
     return _benign_doc(_vertices(_CLEAN_VERTEX), block)
 
 
 def test_a_surviving_row_with_no_hypothesis_id_is_named_not_dropped():
-    """One guard carried two cases — the documented `none` empty-TABLE marker, and a row whose `hyp_id` cell is simply empty."""
+    """An empty `hyp_id` cell is named; the documented `none` empty-table marker (below) stays
+    silent."""
     doc = _conclude_table(":T conclude.surviving [hyp_id|final_weight]\n|++")
     companion, warnings = parse_dense_companion(doc)
     assert len(warnings) == 1
@@ -355,7 +364,6 @@ def test_an_empty_table_written_as_the_none_marker_stays_silent():
 
 
 def test_a_hypothesis_row_with_an_empty_id_is_refused_once_not_twice():
-    """The third baselined finding, and the one that is NOT a drop."""
     doc = _benign_doc(
         _vertices(_CLEAN_VERTEX),
         ":H hypothesize.hypotheses "

@@ -1,4 +1,6 @@
-"""#983 mechanism A/B write gate: an authz contract resolved by convention must cite its own lead's recorded registry hit (a miss, a telemetry baseline, a stale window cannot ground it); baseline consultations; the `indeterminate` basis (retry vs exhausted, with exhausted paid for in the transcript); and that none of it changes the verdict or escalation."""
+"""#983 write gate (mechanisms A/B/C): an authz contract resolved by convention must cite its own
+lead's recorded registry hit; baseline consultations are context only; `indeterminate` carries a
+basis (`exhausted` paid for in the transcript); none of it changes the verdict or escalation."""
 
 from __future__ import annotations
 
@@ -11,9 +13,8 @@ from defender.tests.support.shared.contracts import _tacit983 as scene
 
 
 def _errors(text: str) -> list[str]:
-    """The validator's ERROR-severity refusals over a whole document — the surface every
-    production caller reads. Bound to the public entry point rather than to a private check,
-    so the tests survive the check being wired in wherever `diagnose` wants it."""
+    """The validator's ERROR-severity refusals over a whole document, through the public entry
+    point every production caller reads rather than a private check."""
     return validate_companion(text, None)
 
 
@@ -41,10 +42,7 @@ def _consultation_doc(row: str) -> str:
     )
 
 
-# ---------------------------------------------------------------- the vocabularies
-
-
-# ---------------------------------------------------------------- demand #0: the row shapes
+# ---------------------------------------------------------------- the row shapes
 
 
 def test_tacit_knowledge_authz_row_shape():
@@ -99,7 +97,7 @@ def test_authz_anchor_id_must_match_its_own_leads_recorded_hit():
 
 def test_a_missed_lookup_cannot_be_cited_as_a_hit():
     """A lead that recorded a MISS backs no citation: the `:R authz` row citing an entry id
-    beside its own lead's empty-handed lookup is refused (demand `authz_anchor_id_is_receipted`)."""
+    beside its own lead's empty-handed lookup is refused."""
     missed = scene.document(
         rows=scene.consult_block(scene.lookup_miss_row())
         + scene.authz_block(scene.authz_row()),
@@ -124,7 +122,7 @@ def test_a_missed_lookup_cannot_be_cited_as_a_hit():
 
 def test_a_telemetry_baseline_cannot_ground_an_authz_row():
     """`grounding_kind: telemetry-baseline` is consultation-only: a `:R authz` row carrying it
-    is refused, whatever verdict it claims (demand `no_statistical_self_authorization`, O2)."""
+    is refused, whatever verdict it claims."""
     grounded_on_density = scene.document(
         rows=scene.consult_block(scene.consultation_row())
         + scene.authz_block(scene.authz_row(
@@ -364,7 +362,7 @@ def test_exhausted_contract_is_not_looped_back():
 
 def test_exhausted_drops_only_its_own_contract():
     """With TWO live contracts and `basis=exhausted` on a row fulfilling ONE of them, only that
-    contract leaves the frontier; the other stays on it (demand `exhausted_is_not_redispatched`)."""
+    contract leaves the frontier; the other stays on it."""
     doc = scene.document(
         second_contract=True, settled=False,
         rows=scene.authz_block(

@@ -89,7 +89,7 @@ def _deferred_preds(*rows: str) -> str:
     return _table("deferred_preds", "prediction_ref|rationale", rows)
 
 
-# rule #13 — `ceiling_test` required when termination is severity-ceiling, forbidden otherwise
+# rule #13 — `ceiling_test` required when termination is severity-ceiling
 
 _TERMINATION_CATEGORIES = [
     "trust-root",
@@ -126,7 +126,6 @@ def test_severity_ceiling_whose_ceiling_test_is_the_none_marker_is_refused() -> 
     "carries no validator rule'. Recorded there and at ramp item 14.",
 )
 def test_severity_ceiling_without_a_ceiling_rationale_is_refused() -> None:
-    """This arm comes from `dense-investigation-format.md` §Validator translation, which renders #13 as "`:T conclude.ceiling_test` row ≠ `none` *iff* `termination.category` = `severity-ceiling`;"""
     doc = _doc(
         _PROLOGUE,
         _LEADS,
@@ -239,7 +238,8 @@ def _warning_messages(doc: str) -> list[str]:
     "`defender/docs/decisions/defender-invlang-enforcement-ramp.md`.",
 )
 def test_a_follower_matching_no_advance_to_warns_and_does_not_refuse_the_write() -> None:
-    """The one clause of #18 the spec grades softly:"""
+    """The one clause of #18 graded softly: a follower matching no `advance_to` warns, and the
+    write still lands."""
     doc = _lp_doc({"advance_to": "CONCLUDE"})
     assert _errors(doc) == []
     warnings = _warning_messages(doc)
@@ -255,7 +255,6 @@ def test_a_follower_matching_an_advance_to_produces_no_warning() -> None:
 
 
 def test_a_dangling_advance_to_is_an_error_and_not_merely_a_warning() -> None:
-    """The severity split inside #18:"""
     doc = _lp_doc({"advance_to": "process-lineage-walk"}, lead="l-002")
     assert len(_errors(doc)) == 1
     assert warn_diagnostics(doc) == ()
@@ -317,8 +316,6 @@ def test_a_contract_deferred_with_an_empty_rationale_is_refused() -> None:
 
 
 def test_a_contract_neither_resolved_nor_deferred_is_refused() -> None:
-    """"A contract that is declared and silently abandoned — never resolved, never deferred —
-    fails this rule.\""""
     doc = _authz_closure_doc(_ONE_CONTRACT, "", _deferred_authz())
     _one_error(doc, "ac1")
 
@@ -463,7 +460,8 @@ def test_an_impact_prediction_with_no_dimension_is_refused() -> None:
     "Recorded at rules #29 and #33 in `defender/docs/investigation-language.md`.",
 )
 def test_a_compound_impact_claim_is_refused(claim: str) -> None:
-    """"`claim` names one observable per entry — compound `AND` / `OR` / semicolon predicates must be split across entries." Stated in the rule text, so pinned here;"""
+    """Rule #29's text: "`claim` names one observable per entry — compound `AND` / `OR` /
+    semicolon predicates must be split across entries.\""""
     _one_error(_ip_doc({"claim": claim}), "ip1")
 
 
@@ -565,7 +563,8 @@ def test_an_off_enum_impact_grounding_kind_is_refused(grounding: str) -> None:
     ],
 )
 def test_an_impact_resolution_missing_a_required_field_is_refused(cell: str, token: str) -> None:
-    """"Required fields: `prediction_ref`, `dimension`, `verdict`, `grounding_kind`, `authority_for_question`, `as_of`, `reasoning`." The first two get their own tests above (they also carry resolution and match obligations);"""
+    """Rule #30's other required fields; `prediction_ref` and `dimension` have their own tests,
+    since they also carry resolution and match obligations."""
     _one_error(_r_impact_doc({cell: ""}), token)
 
 
@@ -672,8 +671,8 @@ def test_impact_verdict_none_is_legal_on_a_companion_that_declared_no_thresholds
 @pytest.mark.parametrize(
     "impact_verdict",
     [
-        "none-detected",              # what examples/example-c ships today
-        "attempted-lateral-movement",  # what fixtures-e2e/golden-sshpivot-ab3 ships today
+        "none-detected",              # what golden-v2sshd ships
+        "attempted-lateral-movement",  # what golden-sshpivot-ab3 ships
         "Within",                     # wrong case
         "unclear",                    # a `disposition` value, one axis over
         "exceeded",                   # near miss
@@ -699,7 +698,6 @@ def test_an_off_enum_impact_verdict_is_refused(impact_verdict: str) -> None:
 
 @pytest.mark.parametrize("impact_verdict", ["exceeds", "indeterminate"])
 def test_severity_absent_under_a_verdict_that_requires_it_is_refused(impact_verdict: str) -> None:
-    """Required-and-absent."""
     _one_error(_verdict_doc(impact_verdict, None), "impact_severity")
 
 
@@ -825,8 +823,8 @@ def test_an_attribute_prediction_must_close_too() -> None:
 
 
 def test_predictions_on_a_refuted_hypothesis_are_exempt() -> None:
-    """"on a hypothesis whose final status is not `refuted`". `:H` rows are immutable, so
-    `--` on the resolution chain is the only way a run can say "refuted" after the fact — which is also how `_check_benign_authz` already reads survival."""
+    """"on a hypothesis whose final status is not `refuted`". `:H` rows are immutable, so `--`
+    on the resolution chain is how a run says "refuted", as `_check_benign_authz` reads it."""
     doc = _pred_closure_doc(
         preds=_H1_PREDS,
         refuts=_H1_REFUT,

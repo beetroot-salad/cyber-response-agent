@@ -140,7 +140,8 @@ def test_siblings_on_different_anchors_are_not_siblings() -> None:
 
 
 def test_refuting_one_of_the_two_is_the_repair() -> None:
-    """`:H` rows are immutable and the document is append-only, so a collision already on disk can only be repaired by refuting one side."""
+    """`:H` rows are immutable and the document append-only, so a collision already on disk is
+    repaired only by refuting one side."""
     tail = (
         "\n"
         ":H h-002.refuts [id|refutes|claim]\n"

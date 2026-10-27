@@ -190,7 +190,8 @@ def test_lead_branch_effects_pattern_filter_excludes_unrelated_hypotheses():
 
 
 def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
-    """Codex P2: when `hypothesis_patterns` is supplied, `n` and `empty_rate` must reflect frontier-specific support only."""
+    """With `hypothesis_patterns`, `n` and `empty_rate` count only the occurrences that touched
+    the frontier."""
     corpus = [
         _case(
             f"hit-{i}",
@@ -220,7 +221,8 @@ def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
 
 
 def test_lead_branch_effects_surfaces_tested_hypothesis_without_resolutions():
-    """Codex P2: a lead with `tests_hypotheses` for a frontier hypothesis but no `resolutions[]` (e.g."""
+    """A lead testing a frontier hypothesis with no `resolutions[]` (an empty or failed gather)
+    still appears, with all-zero buckets: its empty_rate is the signal."""
     corpus = [
         _case(
             f"case-{i}",
@@ -391,6 +393,7 @@ def test_hypothesis_shape_uses_final_weight_from_resolutions():
 
 
 def test_hypothesis_shape_match_filters_via_anchor_field():
+    """Pins the canonical `anchor` key with a hand-built hypothesis, bypassing `_hyp`."""
     h = {
         "id": "h-001", "name": "?config-changed",
         "anchor": "v-001",
@@ -413,7 +416,8 @@ def test_hypothesis_shape_match_filters_via_anchor_field():
 
 
 def test_hypothesis_vocabulary_counts_hypotheses_the_run_raised_mid_investigation():
-    """`cli`'s vocabulary command counts BOTH declaration sites — the prologue's opening hypotheses and the ones a lead raised as it went."""
+    """`cli`'s vocabulary command counts BOTH declaration sites: the opening hypotheses and
+    the ones a lead raised as it went."""
     from defender.skills.invlang.cli import _hypothesis_vocabulary
 
     corpus = [

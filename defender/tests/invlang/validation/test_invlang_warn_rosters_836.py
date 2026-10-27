@@ -15,9 +15,8 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (
 
 
 def _registered_names(defn) -> set[str]:
-    """The REGISTERED tool-name census, read off a real Agent — the same route
-    `test_budget_seams_631._registered_names` uses, so registration is checked against what
-    the framework actually dispatches rather than against a hand-kept list."""
+    """The REGISTERED tool names, read off a real Agent as
+    `test_budget_seams_631._registered_names` does, rather than off a hand-kept list."""
     import os
 
     from pydantic_ai.models import override_allow_model_requests
@@ -40,10 +39,11 @@ def _registered_names(defn) -> set[str]:
     return set(agent._function_toolset.tools)
 
 
-# A5 — which agents are offered the repair verb
+# which agents are offered the repair verb
 
 def test_exactly_one_agent_definition_is_offered_fix_row():
-    """A5: `fix_row` rides `append=True` — no new capability bit, matching N4's posture of not widening the write surface — and exactly ONE definition in the tree grants it."""
+    """`fix_row` rides `append=True` (no new capability bit), and exactly ONE definition in the
+    tree grants it."""
     from defender.agents import AGENTS
     from defender._agent_role import AgentRole
 
@@ -63,10 +63,11 @@ def test_exactly_one_agent_definition_is_offered_fix_row():
     assert "read_file" in without_append, "the whole roster vanished — a vacuous comparison"
 
 
-# R1 — the budget roster, and what tail tier does and does not buy
+# the budget roster, and what tail tier does and does not buy
 
 def _budgeted(tmp_path, tool_calls: int):
-    """MAIN deps whose run's real budget — the run's `RunState`, started and counted through the production `RunState(...)` / `count_call` (#1235 round 2) and carried on the deps as the run's own — holds `tool_calls` executed calls."""
+    """MAIN deps whose real `RunState`, counted through the production `count_call`, holds
+    `tool_calls` executed calls."""
     from defender.hooks.budget_enforcer import count_call
     from defender.investigation.run_state import RunState
 
@@ -87,7 +88,8 @@ def _short_circuit(deps, tool_name, limits):
 
 
 def test_budget_tripped_run_still_completes_repair_cycle(tmp_path):
-    """Resolution R1: `fix_row` joins `_MAIN_TAIL_TOOLS`, so a run that trips its TOOL-CALL cap with an outstanding warning can still repair and close."""
+    """`fix_row` is in `_MAIN_TAIL_TOOLS`, so a run that trips its TOOL-CALL cap with an
+    outstanding warning can still repair and close."""
     from defender.hooks.budget_enforcer import (
         BUDGET_EXEMPT_TOOLS,
         DEFAULT_LIMITS,
@@ -112,7 +114,8 @@ def test_budget_tripped_run_still_completes_repair_cycle(tmp_path):
 
 
 def test_repair_verb_under_budget_pressure(tmp_path):
-    """R1's accepted trade-off, and the boundary the design's own text does not state."""
+    """Tail tier is not an exemption: past the tail allowance `fix_row` is killed, while the
+    close still runs."""
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS, TAIL_ALLOWANCE, BudgetKill, tier
     from defender._agent_role import AgentRole
 
@@ -129,7 +132,8 @@ def test_repair_verb_under_budget_pressure(tmp_path):
 
 
 def test_budget_stop_message_while_flagged(tmp_path):
-    """`BUDGET_REFUSAL_MESSAGE` names the survivor set the model still has — and with a repair window open, today's set is the WRONG one."""
+    """The budget refusal names the tools the model still has, and `fix_row` must be among
+    them while a repair window is open."""
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS, refusal_message
 
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
@@ -140,16 +144,10 @@ def test_budget_stop_message_while_flagged(tmp_path):
     assert "fix_row" in text, "the model is told the wrong survivor set while a window is open"
 
 
-# the remaining by-name rosters
-
-
-# A7 — the four model-facing prose sites
-
-
-# O3 / SEC1 — the grants the negative universal rests on
+# the grants the append-only negative rests on
 
 def test_main_is_not_regranted_write_file_or_edit_file():
-    """N4: the repair window does not re-open the surface #810 closed on measurement."""
+    """The repair window does not re-open the write surface #810 closed."""
     from defender.investigation.agent_definition import ToolSet
     from defender.investigation.driver import MAIN_DEF
 
@@ -163,7 +161,7 @@ def test_main_is_not_regranted_write_file_or_edit_file():
 
 
 def test_bash_grant_cannot_construct_a_write_reaching_investigation_md(tmp_path):
-    """O3/SEC1 are only as strong as this negative, which the brief stated with no claim behind it."""
+    """The append-only guarantees are only as strong as this negative."""
     from defender.investigation import permission
     from defender.investigation.agent_definition import compile_policy_for
     from defender.investigation.driver import MAIN_DEF
@@ -193,7 +191,7 @@ def test_bash_grant_cannot_construct_a_write_reaching_investigation_md(tmp_path)
     ):
         assert decide(cmd).allow is False, cmd
 
-    # rt6 — the gate ALLOWS write-shaped SQL; duckdb's locked configuration is the boundary.
+    # The gate ALLOWS write-shaped SQL; duckdb's locked configuration is the boundary.
     sql = f"COPY (SELECT 1 AS a) TO '{inv}' (FORMAT CSV)"
     assert decide(f"defender-sql \"{sql}\"").allow is True, (
         "the permission gate started parsing SQL — rt6's correction no longer applies and "

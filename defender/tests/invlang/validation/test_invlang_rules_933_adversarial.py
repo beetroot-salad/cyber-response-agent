@@ -163,7 +163,8 @@ l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|match
 
 
 def test_a_result_on_a_non_screen_lead_is_one_defect_not_two() -> None:
-    """One defect, one refusal:"""
+    """One defect, one refusal: the non-screen lead is refused for its mode, and the legal
+    screen lead beside it draws nothing."""
     errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|auth-history|v-001|||elastic|10m|no_match
 l-002|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
@@ -240,7 +241,8 @@ ap1|proposed_parent|signing|"The binary is   unsigned."
 
 
 def test_an_attribute_prediction_keys_on_what_the_value_is_a_value_of() -> None:
-    """The mirror of the pair above, and the reason `target` and `attribute` ARE in the key where `.preds`'s `subject` is not."""
+    """The mirror of the pair above: `target` and `attribute` ARE in the key, where `.preds`'s
+    `subject` is not."""
     assert _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -280,7 +282,8 @@ h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
 # rule #24: hypothesis persistence at CONCLUDE
 
 def test_naming_a_hypothesis_in_the_conclude_prose_is_not_a_discharge() -> None:
-    """v2.18 excised "cited in the conclude block" from arm (b):"""
+    """The two discharges are `--` and a `:T conclude.surviving` row; prose naming the id is
+    neither."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -327,7 +330,7 @@ p1|proposed_edge|"failures arrive in bursts"
 
 
 @pytest.mark.parametrize(("case", "apid"), [
-    # `a1` — the one shape the original file writes — is the only one a `\\w+` regex misses.
+    # test_invlang_rules_933.py covers `a1`, the only shape a `\\w+` regex misses.
     ("trailing-junk", "ap1x"),
     ("leading-junk", "xap1"),
     ("no-index", "ap"),
