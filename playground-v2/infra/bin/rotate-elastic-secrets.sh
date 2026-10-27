@@ -63,9 +63,11 @@ set_var V2_KIBANA_PASSWORD "${NEW_KP}"
 set_var V2_KIBANA_ENCRYPTION_KEY_PREVIOUS "${OLD_KEY}"
 set_var V2_KIBANA_ENCRYPTION_KEY "${NEW_KEY}"
 
-echo "-> recreating the stack with the new values (whole stack: the ES healthcheck and every"
-echo "   service holding the password read it from their container env)"
-docker --context "${CTX}" compose up -d --build
+echo "-> recreating the services that hold these secrets in their container env"
+# Only these: a whole-stack `up` from another checkout also recreates services with relative
+# bind mounts (ticket-server's seed), which resolve against this checkout's path on the VPS.
+docker --context "${CTX}" compose up -d --build --no-deps \
+    elasticsearch es-init kibana fleet-server fleet-init fleet-host-policies fleet-outputs-reconciler
 
 echo "-> waiting for Kibana"
 for _ in $(seq 1 60); do
