@@ -30,10 +30,8 @@ def forge_scratch(data_root: Path) -> Path:
     return root.with_name(f"{root.name}-p4-forge")
 
 
-def in_process_publish(scratch: Path | None = None,
-                       calls: list[tuple[str, Path]] | None = None) -> Callable[..., str]:
-    """A `publish=` for `run.main` (module doc). `calls`, when given, records each
-    `(tenant_id, data_root)` it was handed."""
+def in_process_publish() -> Callable[..., str]:
+    """A `publish=` for `run.main` (module doc)."""
 
     def publish(tenant_id: str, *, data_root: Any, **_kw: Any) -> str:
         from defender.learning.author.version_control import DeliveryRefused, LockBusy
@@ -41,9 +39,7 @@ def in_process_publish(scratch: Path | None = None,
         from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
         root = Path(str(data_root))
-        if calls is not None:
-            calls.append((str(tenant_id), root))
-        served = scratch if scratch is not None else forge_scratch(root)
+        served = forge_scratch(root)
         # Tests re-plant a folder in place, keeping its `.git`, so each publish fast-forwards one
         # remote; a folder with no `.git` beside an earlier remote means the planter replaced the
         # repo, a setup fault. `pytest.fail` (a BaseException), because `run.main` reads an
@@ -67,9 +63,9 @@ def in_process_publish(scratch: Path | None = None,
     return publish
 
 
-def with_publish(seams: MutableMapping[str, Any], scratch: Path | None = None) -> MutableMapping[str, Any]:
+def with_publish(seams: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     """`seams` with the in-process publish added, unless the caller already passes its own."""
-    seams.setdefault(PUBLISH_SEAM, in_process_publish(scratch))
+    seams.setdefault(PUBLISH_SEAM, in_process_publish())
     return seams
 
 

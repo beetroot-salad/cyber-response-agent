@@ -338,8 +338,8 @@ def test_no_production_module_outside_the_owner_reaches_the_product_layout():
 
 # --- positive controls over synthetic modules, through the same classifier -------------------
 
-def _scan_synthetic(source: str, rel: str = "defender/investigation/planted.py",
-                    roots: tuple[Path, ...] = (DEFENDER,)) -> list[Hit]:
+def _scan_synthetic(source: str, roots: tuple[Path, ...] = (DEFENDER,)) -> list[Hit]:
+    rel = "defender/investigation/planted.py"
     tree = _astlib.parse_source(source, rel)
     module, package = _astlib.module_and_package(rel.removeprefix("defender/"))
     return Census(roots).scan(rel, tree, module, package)
@@ -520,7 +520,6 @@ def test_the_author_config_carries_no_product_corpus_spelling():
 #: The accepted tenant's clone accessors (`_TenantLayout.knowledge/settings/agent`: the clone and
 #: its working-tree halves), which the run process never reads.
 TENANT = "defender.tenancy._tenant.Tenant"
-RUN_TENANT = "defender.systems.run_tenant.RunTenant"
 CLONE_ATTRS = frozenset({"knowledge", "settings", "agent"})
 RUN_ENTRIES = ("defender.run", "defender.run_common")
 

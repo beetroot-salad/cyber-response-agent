@@ -100,15 +100,15 @@ def test_o_warn_a_stale_runs_page_carries_a_banner_naming_kind_reason_and_commit
     assert html.escape(reason) not in fresh, "positive control"
     assert reason not in fresh, "positive control"
     assert html.escape(reason) in stale or reason in stale, (
-        f"O-WARN: the stale ({stale_kind}) run's page does not show why it is stale: {reason!r}")
+        f"the stale ({stale_kind}) run's page does not show why it is stale: {reason!r}")
     assert names_commit(stale, STALE_COMMIT), (
-        f"O-WARN: the stale run's page does not name the commit it used ({STALE_COMMIT})")
-    assert "stale" in stale.lower(), "O-WARN: the stale run's page does not say it is stale"
+        f"the stale run's page does not name the commit it used ({STALE_COMMIT})")
+    assert "stale" in stale.lower(), "the stale run's page does not say it is stale"
     assert stale_kind in stale.lower(), (
-        f"O-WARN: the stale run's page does not name its kind ({stale_kind})")
-    assert "stale" not in fresh.lower(), "O-WARN: a fresh run's page says it is stale"
+        f"the stale run's page does not name its kind ({stale_kind})")
+    assert "stale" not in fresh.lower(), "a fresh run's page says it is stale"
     assert stale_kind not in fresh.lower(), (
-        f"O-WARN: a fresh run's page names a stale kind ({stale_kind})")
+        f"a fresh run's page names a stale kind ({stale_kind})")
 
 
 #: What a tampering box writes into the stamp: a commit and a reason of its own.
@@ -134,15 +134,14 @@ def test_o_warn_a_box_rewritten_stamp_changes_nothing_on_the_page(run_dir, tampe
     tampered = _page(run_dir)
 
     assert _normalized(tampered) == _normalized(honest), (
-        f"O-WARN: a box-rewritten stamp ({tamper}) changed the run page — the page must read "
-        "the host record only")
+        f"a box-rewritten stamp ({tamper}) changed the run page")
     visible = _visible(tampered).lower()
     if tamper == "suppress":
         assert "stale" in visible, (
-            "O-WARN: the box suppressed the stale banner by rewriting the stamp to fresh")
-        assert names_commit(visible, STALE_COMMIT), "O-WARN: the banner lost the host's commit"
+            "the box suppressed the stale banner by rewriting the stamp to fresh")
+        assert names_commit(visible, STALE_COMMIT), "the banner lost the host's commit"
     else:
-        assert "stale" not in visible, "O-WARN: the box forged a stale banner through the stamp"
+        assert "stale" not in visible, "the box forged a stale banner through the stamp"
         assert TAMPERED_COMMIT[:SHORT_COMMIT] not in visible, "the planted commit is on the page"
         assert "evil.invalid" not in visible, "the planted reason is on the page"
 
@@ -153,7 +152,7 @@ def test_o_warn_the_banner_shows_a_hostile_reason_escaped(run_dir):
     _record(run_dir, knowledge_source("stale", stale_kind="operator", reason=HOSTILE_REASON))
     page = _page(run_dir)
     assert html.escape(HOSTILE_REASON, quote=False) in page or html.escape(HOSTILE_REASON) in page, (
-        "O-WARN: the banner does not show the stale reason (escaped)")
+        "the banner does not show the stale reason (escaped)")
     assert '<img src=x onerror="alert(1)">' not in page, (
         "the stale reason reached the page as markup")
 
@@ -165,9 +164,9 @@ def test_o_warn_fresh_and_pinned_runs_pages_carry_no_stale_banner(run_dir, kind,
     stale does (positive control)."""
     _record(run_dir, knowledge_source(kind, commit=commit))
     page = _visible(_page(run_dir))
-    assert "stale" not in page.lower(), f"O-WARN: a {kind} run's page carries a stale banner"
+    assert "stale" not in page.lower(), f"a {kind} run's page carries a stale banner"
     for stale_kind in STALE_KINDS:
-        assert stale_kind not in page.lower(), f"O-WARN: a {kind} run's page names {stale_kind}"
+        assert stale_kind not in page.lower(), f"a {kind} run's page names {stale_kind}"
 
     _record(run_dir, knowledge_source("stale", stale_kind="transient"))
     assert "stale" in _visible(_page(run_dir)).lower(), (
@@ -188,10 +187,10 @@ def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, h
 
     plant_unreadable_host_record(run_dir, how)  # the stamp says fresh
     page = _visible(_page(run_dir)).lower()
-    assert "stale" in page, f"OD22: a {how} host record left the page claiming fresh"
-    assert "operator" in page, f"OD22: the {how}-record banner is not of kind operator"
+    assert "stale" in page, f"a {how} host record left the page claiming fresh"
+    assert "operator" in page, f"the {how}-record banner is not of kind operator"
     assert "knowledge record unreadable" in page, (
-        f"OD22: the {how}-record banner does not say the knowledge record is unreadable")
+        f"the {how}-record banner does not say the knowledge record is unreadable")
 
 
 def test_od22_a_pre_p4_run_page_shows_no_banner(run_dir):
@@ -204,8 +203,8 @@ def test_od22_a_pre_p4_run_page_shows_no_banner(run_dir):
 
     plant_pre_p4_run(run_dir)
     page = _visible(_page(run_dir)).lower()
-    assert "stale" not in page, "OD22': a pre-P4 run's page carries a stale banner"
-    assert "knowledge record unreadable" not in page, "OD22': a pre-P4 run is called unreadable"
+    assert "stale" not in page, "a pre-P4 run's page carries a stale banner"
+    assert "knowledge record unreadable" not in page, "a pre-P4 run is called unreadable"
 
     plant_unreadable_host_record(run_dir, "missing-with-stamp")
     assert "knowledge record unreadable" in _visible(_page(run_dir)).lower(), (
@@ -224,8 +223,8 @@ def test_o_u6_the_run_page_has_no_lesson_history_section_or_toc_entry(run_dir):
         assert own in toc.group(0), (
             f"positive control: the table of contents still links the run's own {own}")
 
-    assert 'id="sec-footer"' not in page, "O-U6: the lesson-history section is still rendered"
-    assert 'href="#sec-footer"' not in page, "O-U6: the table of contents still links lesson history"
+    assert 'id="sec-footer"' not in page, "the lesson-history section is still rendered"
+    assert 'href="#sec-footer"' not in page, "the table of contents still links lesson history"
     for phrase in ("lesson commit", "lesson change tracking", "lesson history"):
         assert phrase not in visible.lower(), (
-            f"O-U6: the run page still shows lesson history ({phrase!r})")
+            f"the run page still shows lesson history ({phrase!r})")

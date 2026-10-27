@@ -204,11 +204,10 @@ def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
         server.close()
 
 
-def publish_once(scratch: Path, *, root: Path, tenant_id: str,
-                 repo_name: str | None = None) -> PublishedTenant:
+def publish_once(scratch: Path, *, root: Path, tenant_id: str) -> PublishedTenant:
     """`publish_placed` for a caller that needs only the export: the origin server is closed on
     return, so `publish()` needs another `publish_placed`/`publish_once`."""
-    with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
+    with publish_placed(scratch, root=root, tenant_id=tenant_id) as done:
         return done
 
 
@@ -226,16 +225,15 @@ def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENA
 
 
 @contextlib.contextmanager
-def second_tenant(first: PublishedTenant, *, tenant_id: str = OTHER_TENANT_ID,
-                  files: Files | None = None,
-                  repo_name: str = "other") -> Iterator[PublishedTenant]:
+def second_tenant(first: PublishedTenant, *,
+                  files: Files | None = None) -> Iterator[PublishedTenant]:
     """Another tenant under `first`'s data root, from the same fixture content plus
     `OTHER_LESSON` (unless `files` is given), with its own remote, origin server, forge fake and
     issuer fake, published for real."""
     if files is None:
         files = dict([OTHER_LESSON])
-    with published_tenant(first.scratch, root=first.data_root, tenant_id=tenant_id,
-                          files=files, repo_name=repo_name) as other:
+    with published_tenant(first.scratch, root=first.data_root, tenant_id=OTHER_TENANT_ID,
+                          files=files, repo_name="other") as other:
         yield other
 
 
@@ -257,8 +255,7 @@ def _row_path(t: PublishedTenant) -> Path:
     return Path(location_path(t.tenant.row_path))
 
 
-def bind_forge(t: PublishedTenant, *, origin: str | None = None,
-               audience: str = ISSUER_AUDIENCE, issuer_role: str | None = None,
+def bind_forge(t: PublishedTenant, *, origin: str | None = None, issuer_role: str | None = None,
                issuer_config: Path | None = None) -> dict:
     """Write the tenant row's `forge: {origin, audience, issuer_role, issuer_config}` binding and
     return it; other row fields are kept. Defaults agree with the fakes (`t.origin`, the fake's
@@ -266,7 +263,7 @@ def bind_forge(t: PublishedTenant, *, origin: str | None = None,
     for real writes its config. `published_tenant` never binds: P3's publish does not read it."""
     if issuer_config is None:
         issuer_config = default_issuer_config(t)
-    binding = {"origin": t.origin if origin is None else origin, "audience": audience,
+    binding = {"origin": t.origin if origin is None else origin, "audience": ISSUER_AUDIENCE,
                "issuer_role": f"tenant-{t.tenant_id}" if issuer_role is None else issuer_role,
                "issuer_config": str(Path(issuer_config).absolute())}
     path = _row_path(t)
@@ -318,10 +315,8 @@ __all__ = [
     "OTHER_LESSON",
     "OTHER_TENANT_ID",
     "ForgeHTTP",
-    "GitHTTP",
     "PublishedTenant",
     "Trickle",
-    "VaultHTTP",
     "agent_blobs",
     "bind_forge",
     "current_commit",
@@ -336,6 +331,5 @@ __all__ = [
     "published_tenant",
     "push_to_remote",
     "second_tenant",
-    "target",
     "unbind_forge",
 ]

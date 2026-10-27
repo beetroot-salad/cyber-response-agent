@@ -78,10 +78,10 @@ def _alive(pid: int) -> bool:
     return stat[stat.rindex(")") + 2] != "Z"
 
 
-def _outlives(pid: int, within: float = 2.0) -> bool:
-    """Still alive after `within` seconds? A SIGKILL is delivered asynchronously: the launch
-    returns once the group's pipes close, which can be a moment before the grandchild's exit."""
-    deadline = time.monotonic() + within
+def _outlives(pid: int) -> bool:
+    """Still alive after 2 seconds? A SIGKILL is delivered asynchronously: the launch returns
+    once the group's pipes close, which can be a moment before the grandchild's exit."""
+    deadline = time.monotonic() + 2.0
     while _alive(pid):
         if time.monotonic() > deadline:
             return True

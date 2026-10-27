@@ -13,6 +13,8 @@ import importlib
 import json
 import logging
 import shutil
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -224,7 +226,7 @@ def draft_folder(batch: Any) -> Path:
     """The draft folder `<T>/drafts/<id>` of `batch` (its stage's parent). Asserts the stage
     layout, so no case reads or plants an owner record in `<T>/drafts/` itself."""
     stage = Path(batch.draft_root)
-    assert stage.name == "stage", f"the draft is not in the U9 layout: {stage}"
+    assert stage.name == "stage", f"the draft root is not a `stage/` folder: {stage}"
     return stage.parent
 
 
@@ -237,6 +239,15 @@ def process_start(pid: int) -> str:
     """`pid`'s start time as the kernel records it (`/proc/<pid>/stat` field 22)."""
     stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     return stat[stat.rindex(")") + 2:].split()[19]
+
+
+def _dead_process() -> tuple[int, str]:
+    """`(pid, start time)` of a process that has exited (it reports its own start time)."""
+    out = subprocess.run(  # noqa: S603 — a test's own short-lived process
+        [sys.executable, "-c", "import os\ns=open('/proc/self/stat').read()\n"
+         "print(os.getpid(), s[s.rindex(')') + 2:].split()[19])"],
+        capture_output=True, text=True, check=True, timeout=60).stdout.split()
+    return int(out[0]), out[1]
 
 
 def write_owner(folder: Path, pid: int, start: Any) -> None:
@@ -261,7 +272,7 @@ def _p4_caught(fn: Callable[[], Any]) -> BaseException | None:
 
     got = caught(fn)
     assert not (isinstance(got, TypeError) and "unexpected keyword" in str(got)), (
-        f"the drain does not take the P4 seams yet: {got}")
+        f"the drain refused the client=/identity= seams: {got}")
     return got
 
 
@@ -419,15 +430,14 @@ class PitfallsStep:
                                                  on_curated=on_curated, **kw)
 
 
-def executed_lead(query_id: str, *, system: str = "cmdb", verb: str = "get-host",
-                  lead_id: str = "l-001") -> Any:
+def executed_lead(query_id: str, *, lead_id: str = "l-001") -> Any:
     """One executed lead as the offline extraction yields it (a successful call)."""
     from defender.learning.leads.lead_extraction import ExecutedLead
 
     return ExecutedLead(
         lead_id=lead_id, query_index=0, is_multi_query=False, entry_index=0,
-        query_id=query_id, system=system, verb=verb, params={"host": "h1"},
-        raw_command=f"{verb} host=h1", goal_text="who owns h1", what_to_summarize=("owner",),
+        query_id=query_id, system="cmdb", verb="get-host", params={"host": "h1"},
+        raw_command="get-host host=h1", goal_text="who owns h1", what_to_summarize=("owner",),
         raw_ref=None, payload_status="ok", payload_digest="digest-1", error_class=None)
 
 

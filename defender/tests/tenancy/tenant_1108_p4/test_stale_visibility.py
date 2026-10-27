@@ -175,8 +175,8 @@ def _added(fresh: str, stale: str) -> str:
         tail += 1
     added = stale[head:len(stale) - tail]
     assert stale[:head] + stale[len(stale) - tail:] == fresh, (
-        "the stale run's comment changes the fresh run's comment instead of only adding the "
-        f"stale sentence to it:\nfresh: {fresh!r}\nstale: {stale!r}")
+        "the stale comment is not the fresh comment plus the stale sentence:\n"
+        f"fresh: {fresh!r}\nstale: {stale!r}")
     return added.strip()
 
 
@@ -186,8 +186,7 @@ def _stale_sentence(tmp_path: Path, stale_kind: str) -> str:
                        label=f"stale-{stale_kind}")
     sentence = _added(fresh, stale)
     assert sentence, (
-        f"O-WARN: a stale ({stale_kind}) run posted exactly the comment a fresh run posts — "
-        "the ticket says nothing about the knowledge being out of date")
+        f"a stale ({stale_kind}) run posted the same comment as a fresh run")
     return sentence
 
 
@@ -200,19 +199,19 @@ def test_o_warn_a_stale_runs_verdict_comment_carries_the_fixed_sentence_naming_c
     sentence = _stale_sentence(tmp_path, stale_kind)
 
     assert names_commit(sentence, STALE_COMMIT), (
-        f"O-WARN: the stale sentence does not name the commit the run used ({STALE_COMMIT}): "
+        f"the stale sentence does not name the commit the run used ({STALE_COMMIT}): "
         f"{sentence!r}")
     assert CUSTOMER_WORD[stale_kind] in sentence.lower(), (
-        f"O-WARN: the {stale_kind} sentence does not say, in customer words, that the cause is "
+        f"the {stale_kind} sentence does not say the cause is "
         f"{'temporary' if stale_kind == 'transient' else 'awaiting operator action'}: {sentence!r}")
     other = CUSTOMER_WORD[next(k for k in STALE_KINDS if k != stale_kind)]
     assert other not in sentence.lower(), (
-        f"O-WARN: the {stale_kind} sentence uses the other kind's words ({other!r}): {sentence!r}")
+        f"the {stale_kind} sentence uses the other kind's words ({other!r}): {sentence!r}")
     leaked = [f for f in REASON_FRAGMENTS if f.lower() in sentence.lower()]
     assert leaked == [], (
-        f"O-WARN: the customer's ticket carries the raw publish reason ({leaked}): {sentence!r}")
+        f"the customer's ticket carries the raw publish reason ({leaked}): {sentence!r}")
     assert len(re.findall(r"[.!?](?:\s|$)", sentence)) <= 1, (
-        f"O-WARN: one fixed sentence, not several: {sentence!r}")
+        f"expected one fixed sentence, not several: {sentence!r}")
 
 
 def test_o_warn_transient_and_operator_sentences_differ_and_each_is_fixed_per_kind(
@@ -222,7 +221,7 @@ def test_o_warn_transient_and_operator_sentences_differ_and_each_is_fixed_per_ki
     use_mapping(monkeypatch, tmp_path / "dfn")
     first = {k: _stale_sentence(tmp_path / f"a-{k}", k) for k in STALE_KINDS}
     assert first["transient"] != first["operator"], (
-        "O-WARN: a temporary outage and a fault awaiting operator action post the same sentence")
+        "a temporary outage and a fault awaiting operator action post the same sentence")
 
     fresh, _ = _posted(tmp_path, "verdict", knowledge_source("fresh"), label="fresh-other-reason")
     for k in STALE_KINDS:
@@ -230,8 +229,7 @@ def test_o_warn_transient_and_operator_sentences_differ_and_each_is_fixed_per_ki
                                         reason=f"tenant lock busy (pid 4242) — {k} variant")
         stale, _ = _posted(tmp_path, "verdict", other_reason, label=f"other-reason-{k}")
         assert _added(fresh, stale) == first[k], (
-            f"O-WARN: the {k} sentence changes with the raw reason — it is not one fixed "
-            "sentence, and a reason reaches the ticket through it")
+            f"the {k} sentence changes with the raw reason")
 
 
 @pytest.mark.parametrize("branch", [b for b in BRANCHES if b != "verdict"])
@@ -248,13 +246,13 @@ def test_o_warn_every_comment_branch_carries_the_same_stale_sentence(
                        label="stale")
     assert sentence not in fresh, f"positive control: the fresh {branch} comment has it: {fresh!r}"
     assert sentence in stale, (
-        f"O-WARN: the {branch} comment of a stale ({stale_kind}) run lacks the stale sentence "
-        f"the verdict comment carries.\nsentence: {sentence!r}\ncomment: {stale!r}")
+        f"the {branch} comment of a stale ({stale_kind}) run lacks the stale sentence.\n"
+        f"sentence: {sentence!r}\ncomment: {stale!r}")
     assert _ws(stale.replace(sentence, "", 1)) == _ws(fresh), (
-        f"O-WARN: on the {branch} branch the stale comment differs from the fresh one by more "
+        f"on the {branch} branch the stale comment differs from the fresh one by more "
         f"than the sentence.\nfresh: {fresh!r}\nstale: {stale!r}")
     leaked = [f for f in REASON_FRAGMENTS if f.lower() in stale.lower()]
-    assert leaked == [], f"O-WARN: the {branch} comment leaks the raw reason: {leaked}"
+    assert leaked == [], f"the {branch} comment leaks the raw reason: {leaked}"
 
 
 @pytest.mark.parametrize("stale_kind", STALE_KINDS)
@@ -276,8 +274,7 @@ def test_o_warn_the_sentence_survives_the_wire_bound_on_a_long_verdict(
     assert len(stale_wire.encode("utf-8")) <= WIRE_BOUND_BYTES, (
         "the stale sentence pushed the posted comment past the wire bound")
     assert sentence in stale_wire, (
-        "O-WARN: the wire bound cut the stale sentence off a long verdict comment — the customer "
-        "is not told this investigation used out-of-date knowledge")
+        "the wire bound cut the stale sentence off a long verdict comment")
 
 
 @pytest.mark.parametrize("branch", list(BRANCHES))
@@ -296,8 +293,8 @@ def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
         "escalation-forced-close": case_ticket.ESCALATION_COMMENT_BODY.format(exit="request-limit"),
     }[branch]
     assert body == expected, (
-        f"O-WARN: a {kind} run's {branch} comment is not today's comment — only a stale run "
-        f"adds a sentence.\nexpected: {expected!r}\nposted:   {body!r}")
+        f"a {kind} run's {branch} comment changed (only a stale run adds a sentence).\n"
+        f"expected: {expected!r}\nposted:   {body!r}")
     assert not names_commit(body, FRESH_COMMIT), body
     assert not names_commit(body, PINNED_COMMIT), body
 
@@ -323,12 +320,12 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
     fresh = posted("fresh", knowledge_source("fresh"))
     assert fresh == (f"benign — {HOST_CAUSE}\n\n"
                      "The account is a decommissioned service identity; no egress followed."), (
-        f"O-WARN: a box-planted stale record changed a fresh run's comment: {fresh!r}")
+        f"a box-planted stale record changed a fresh run's comment: {fresh!r}")
     stale = posted("stale", knowledge_source("stale", stale_kind="transient"))
     assert names_commit(stale, STALE_COMMIT), (
-        f"O-WARN: the stale comment does not name the host's commit: {stale!r}")
+        f"the stale comment does not name the host's commit: {stale!r}")
     assert not names_commit(stale, planted_commit), (
-        f"O-WARN: the comment names the commit the box planted: {stale!r}")
+        f"the comment names the commit the box planted: {stale!r}")
     assert "evil.invalid" not in stale
 
 
@@ -390,14 +387,14 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
 
     rc = run_py.main(argv, publish=publish, ticket_writer=writer, **seams)
 
-    assert rc == 0, f"a stale launch with a snapshot must run to the end (O-STALE); rc={rc}"
+    assert rc == 0, f"a stale launch with a snapshot must run to the end; rc={rc}"
     assert len(publish_calls) == 1, f"the launch published {len(publish_calls)} times"
     comments = store.comment_payloads
     assert len(comments) == 1, [(c.method, c.path) for c in store.calls]
     body = store.comment_body()
     commit = p4_tenant.commit
     assert names_commit(body, commit), (
-        f"O-WARN: the comment does not name the commit the stale run used ({commit}): {body!r}")
+        f"the comment does not name the commit the stale run used ({commit}): {body!r}")
     assert CUSTOMER_WORD[stale_kind] in body.lower(), body
     assert [f for f in REASON_FRAGMENTS if f.lower() in body.lower()] == [], body
 
@@ -418,15 +415,15 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     leaked = [(name, f) for name, data in box_readable.items() for f in REASON_FRAGMENTS
               if f.encode() in data]
     assert leaked == [], (
-        f"U12: the raw publish reason sits in files the box can read: {leaked}")
+        f"the raw publish reason sits in files the box can read: {leaked}")
 
     page = (run_dir / "runtime.html").read_text(encoding="utf-8")
     assert names_commit(page, commit), (
-        "O-WARN: the saved run page of a stale run carries no banner naming its commit")
+        "the saved run page of a stale run carries no banner naming its commit")
     assert stale_kind in page.lower(), (
-        "O-WARN: the saved run page of a stale run carries no banner naming its kind")
+        "the saved run page of a stale run carries no banner naming its kind")
     assert html.escape(RAW_REASON[stale_kind]) in page or RAW_REASON[stale_kind] in page, (
-        "O-WARN: the run page does not show operators the raw reason from the host record")
+        "the run page does not show operators the raw reason from the host record")
 
 
 @pytest.mark.e2e
@@ -514,17 +511,16 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
     assert tampered, "fixture: the lifecycle stand-in never rewrote the record"
     body = store.comment_body()
     assert TAMPERED_COMMIT[:SHORT_COMMIT] not in body, (
-        f"O-WARN: the comment names the commit the box wrote into the record: {body!r}")
+        f"the comment names the commit the box wrote into the record: {body!r}")
     assert "evil.invalid" not in body, body
     if tamper == "suppress":
         assert names_commit(body, commit), (
-            "O-WARN: the box suppressed the stale sentence by rewriting the record to fresh — "
-            f"the comment must follow the host's stale outcome: {body!r}")
+            f"the box suppressed the stale sentence by rewriting the record to fresh: {body!r}")
         assert CUSTOMER_WORD["transient"] in body.lower(), body
     else:
         assert body == (f"benign — {HOST_CAUSE}\n\n"
                         "The account is a decommissioned service identity; no egress followed."), (
-            "O-WARN: the box forged a stale sentence into a fresh run's comment by rewriting "
+            "the box forged a stale sentence into a fresh run's comment by rewriting "
             f"the record: {body!r}")
 
 
@@ -660,7 +656,7 @@ def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_th
 
     served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge") == wire, (
-        f"O-WARN: the record {record} is served as {served.get('knowledge')}, not {wire}")
+        f"the record {record} is served as {served.get('knowledge')}, not {wire}")
     assert "reason" not in (served.get("knowledge") or {}), served
 
 
@@ -713,10 +709,10 @@ def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
     items = client.get(f"{_ROUTE}/investigations", headers=auth).json()["items"]
     knowledge = [i.get("knowledge") for i in items]
     stale = [k for k in knowledge if isinstance(k, dict) and k.get("status") == "stale"]
-    assert stale, f"O-WARN: the stub seeds no stale investigation: {knowledge}"
+    assert stale, f"the stub seeds no stale investigation: {knowledge}"
     for k in stale:
-        assert k.get("stale_kind") in STALE_KINDS, f"O-WARN: a stale seed names no kind: {k}"
-        assert k.get("commit"), f"O-WARN: a stale seed names no commit: {k}"
+        assert k.get("stale_kind") in STALE_KINDS, f"a stale seed names no kind: {k}"
+        assert k.get("commit"), f"a stale seed names no commit: {k}"
     assert any(isinstance(k, dict) and k.get("status") == "current" for k in knowledge), knowledge
 
 
@@ -769,15 +765,15 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
 
     sentence = _added(fresh, body)
     assert sentence, (
-        f"OD22: a run whose host record is {how} posted a fresh run's comment — it claimed fresh")
+        f"a run whose host record is {how} posted a fresh run's comment")
     assert CUSTOMER_WORD["operator"] in sentence.lower(), (
-        f"OD22: the {how}-record sentence is not the operator kind's: {sentence!r}")
+        f"the {how}-record sentence is not the operator kind's: {sentence!r}")
     assert CUSTOMER_WORD["transient"] not in sentence.lower(), sentence
     for commit in (FRESH_COMMIT, STALE_COMMIT, PINNED_COMMIT):
         assert not names_commit(sentence, commit), (
-            f"OD22: the {how}-record sentence names a commit id: {sentence!r}")
+            f"the {how}-record sentence names a commit id: {sentence!r}")
     assert not re.search(r"\b[0-9a-f]{7,64}\b", sentence), (
-        f"OD22: the {how}-record sentence carries something shaped like a commit id: {sentence!r}")
+        f"the {how}-record sentence carries something shaped like a commit id: {sentence!r}")
 
 
 def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
@@ -789,7 +785,7 @@ def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
     store = FakeStore()
     record(old, store)
     assert store.comment_body() == TODAYS_VERDICT_BODY, (
-        f"OD22': a pre-P4 run's comment changed: {store.comment_body()!r}")
+        f"a pre-P4 run's comment changed: {store.comment_body()!r}")
 
     control = make_run(tmp_path, name="s-c-od22-pre-p4-control")
     plant_unreadable_host_record(control, "missing-with-stamp")
@@ -812,7 +808,7 @@ def test_od22_an_investigation_with_no_run_serves_null_knowledge():
     store.add_run_knowledge(_TENANT, inv.investigation_id, None)
     served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge", "absent") is None, (
-        f"OD22': an investigation with no run is served {served.get('knowledge', 'absent')!r}")
+        f"an investigation with no run is served {served.get('knowledge', 'absent')!r}")
 
     store.add_run_knowledge(_TENANT, inv.investigation_id,
                             json.dumps(knowledge_source("fresh")))
@@ -849,4 +845,4 @@ def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case):
                             stamp_knowledge_source=stamp_source)
     served = client.get(f"{_ROUTE}/investigations/{inv.investigation_id}", headers=_AUTH).json()
     assert served.get("knowledge", "absent") == expected, (
-        f"OD22': the {case} run is served {served.get('knowledge', 'absent')!r}, not {expected!r}")
+        f"the {case} run is served {served.get('knowledge', 'absent')!r}, not {expected!r}")

@@ -86,7 +86,7 @@ def test_o_see_tenant_py_update_publishes_the_merged_main(p4_tenant, capsys):
     rc, said = _update(p4_tenant, capsys)
     assert rc == 0, said
     assert current_commit(p4_tenant.tenant) == merged, (
-        "O-SEE: `tenant.py update` did not publish the merged `main`")
+        "`tenant.py update` did not publish the merged `main`")
     assert (export_dir(p4_tenant.tenant, merged) / "agent" / "lessons"
             / "merged-by-a-human.md").is_file()
 
@@ -117,9 +117,9 @@ def test_o_see_check_reports_the_trail_and_a_content_refusal_until_a_publish_cat
 
     stalled = _new(_check(p4_tenant, capsys), clean)
     assert _trails_by(stalled, 2), (
-        f"O-SEE: `check` does not report `current` trailing `origin/main` by 2 commits: {stalled}")
+        f"`check` does not report `current` trailing `origin/main` by 2 commits: {stalled}")
     assert any(LINK_PATH in line for line in stalled), (
-        f"O-SEE: `check` does not report the last publish refusal (the refused link): {stalled}")
+        f"`check` does not report the last publish refusal (the refused link): {stalled}")
 
     fixed = p4_tenant.merge({LINK_PATH: None}, "remove the link")
     rc, said = _update(p4_tenant, capsys)
@@ -128,10 +128,9 @@ def test_o_see_check_reports_the_trail_and_a_content_refusal_until_a_publish_cat
     caught_up = _check(p4_tenant, capsys)
     for n in (1, 2, 3):
         assert _trails_by(caught_up, n) == [], (
-            f"O-SEE: `check` still reports a trail after the publish caught up: {caught_up}")
+            f"`check` still reports a trail after the publish caught up: {caught_up}")
     assert not any(LINK_PATH in line for line in caught_up), (
-        "O-SEE: `check` still reports the old link refusal after a later publish succeeded "
-        f"(the last publish was not refused): {caught_up}")
+        f"`check` still reports the old link refusal after a later publish succeeded: {caught_up}")
 
 
 def test_o_see_check_reports_an_unprotected_main_refusal(p4_tenant, capsys):
@@ -146,7 +145,7 @@ def test_o_see_check_reports_an_unprotected_main_refusal(p4_tenant, capsys):
 
     after = _new(_check(p4_tenant, capsys), before)
     assert any("protect" in line.lower() for line in after), (
-        f"O-SEE: `check` does not report the unprotected-`main` publish refusal: {after}")
+        f"`check` does not report the unprotected-`main` publish refusal: {after}")
 
 
 def test_o_see_check_reports_a_sealed_issuer_refusal(p4_tenant, capsys):
@@ -162,7 +161,7 @@ def test_o_see_check_reports_a_sealed_issuer_refusal(p4_tenant, capsys):
 
     after = _new(_check(p4_tenant, capsys), before)
     assert any(w in line.lower() for line in after for w in words), (
-        f"O-SEE: `check` does not report the sealed-issuer publish refusal: {after}")
+        f"`check` does not report the sealed-issuer publish refusal: {after}")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -192,7 +191,7 @@ def test_o_see_check_names_an_unprotected_main_met_by_the_launch_time_child(
 
     after = _new(_check(p4_tenant, capsys), before)
     assert any("protect" in entry.lower() for entry in after), (
-        f"O-SEE: `check` does not name the refusal the launch-time publish met: {after}")
+        f"`check` does not name the refusal the launch-time publish met: {after}")
 
 
 def test_o_see_check_names_a_merged_link_refused_by_the_launch_time_child(
@@ -214,9 +213,9 @@ def test_o_see_check_names_a_merged_link_refused_by_the_launch_time_child(
     assert current_commit(p4_tenant.tenant) == p4_tenant.commit
 
     after = _new(_check(p4_tenant, capsys), before)
-    assert _trails_by(after, 1), f"O-SEE: `check` reports no trail of 1 commit: {after}"
+    assert _trails_by(after, 1), f"`check` reports no trail of 1 commit: {after}"
     assert any(LINK_PATH in entry for entry in after), (
-        f"O-SEE: `check` does not name the link the launch-time publish refused: {after}")
+        f"`check` does not name the link the launch-time publish refused: {after}")
 
 
 def test_o_see_check_names_an_unprotected_main_met_at_drain_start(
@@ -248,4 +247,4 @@ def test_o_see_check_names_an_unprotected_main_met_at_drain_start(
 
     after = _new(_check(p4_tenant, capsys), before)
     assert any("protect" in entry.lower() for entry in after), (
-        f"O-SEE: `check` does not name the refusal the drain-start publish met: {after}")
+        f"`check` does not name the refusal the drain-start publish met: {after}")

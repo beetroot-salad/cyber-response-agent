@@ -56,8 +56,8 @@ def _unchanged(t) -> None:
 
 def _stale(line: str, kind: str) -> None:
     assert B.outcome_class(line) == f"stale:{kind}", (
-        f"O-STALE: expected stale:{kind}, the child reported {line!r}")
-    assert B.outcome_detail(line), f"O-STALE: a stale outcome names its reason: {line!r}"
+        f"expected stale:{kind}, the child reported {line!r}")
+    assert B.outcome_detail(line), f"a stale outcome names its reason: {line!r}"
 
 
 # --- fresh (positive control for every class below) -------------------------------------------
@@ -72,7 +72,7 @@ def test_o7b_a_merge_on_origin_is_published_and_reported_fresh_at_the_merge(tena
     with B.real_login(tenant, tmp_path / "operator") as (vault, config, secrets):
         line = B.run_child(tenant, config, login=vault)
     assert vault.logins() == [{"role_id": ROLE_ID, "secret_id": SECRET_ID}], (
-        "O8: the child did not log in from the config file")
+        "the child did not log in from the config file")
     assert tenant.server.authorized("git-upload-pack"), "the fetch never carried the minted token"
     assert B.leaks(secrets, report_line=line) == []
     assert B.outcome_class(line) == "fresh", line
@@ -151,7 +151,7 @@ def test_o_budget_a_stalled_fetch_ends_within_the_childs_timeout_and_leaves_noth
         elapsed = time.monotonic() - started
         stop.set()
     _stale(line, "transient")
-    assert elapsed < 30, f"O-BUDGET: the stalled publish took {elapsed:.1f}s"
+    assert elapsed < 30, f"the stalled publish took {elapsed:.1f}s"
     clone = B.clone_dir(tenant)
     assert quiet(clone, seconds=5) == [], "a git process outlived the child's publish"
     assert not (clone / ".git" / "index.lock").exists()
@@ -253,7 +253,7 @@ def test_o7b_lock_held_with_the_clone_at_origin_main_but_current_behind_is_stale
     with _lock(tenant):
         line = B.run_child(tenant, issuer_config)
     assert B.outcome_class(line).startswith("stale:"), (
-        f"O7b: `current` is behind origin/main and could not move, yet the child said {line!r}")
+        f"`current` is behind origin/main and could not move, yet the child said {line!r}")
     _unchanged(tenant)
 
 
@@ -318,7 +318,7 @@ def test_n2_origin_rewritten_to_a_non_descendant_of_current_is_operator_and_curr
     line = B.run_child(tenant, issuer_config)
     _stale(line, "operator")
     assert current_commit(tenant.tenant) == before, (
-        f"N2: `current` moved off {before[:12]} to a non-descendant of it ({target[:12]})")
+        f"`current` moved off {before[:12]} to a non-descendant of it ({target[:12]})")
 
 
 # --- misconfiguration: refused, before any network call ---------------------------------------
@@ -394,14 +394,14 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
                        visualize=run_common.visualize)
     assert out.reached, out.text()
     assert store.calls, "control: the run posted its comment"
-    assert vault.logins(), "O8: the child did not log in from the config file"
+    assert vault.logins(), "the child did not log in from the config file"
     page = out.run_dir / "runtime.html"
     assert page.is_file(), "control: the run page was saved"
     assert B.leaks(
         secrets, env=out.seen[0].environ, handed=out.publish_calls, report_line=lines,
         stamp=out.stamp_after, host_record=out.host_after, page=page.read_text(encoding="utf-8") if page.is_file() else "",
         comment=[str(c.body) for c in store.calls],
-    ) == [], "O8: login material left the publish child"
+    ) == [], "login material left the publish child"
     monkeypatch.setenv("S_B_CONTROL_PROBE", secrets[1])
     assert B.leaks(secrets[1:2], env=dict(os.environ)) == [("env", secrets[1])]
     assert out.rc == 0, out.text()
@@ -434,7 +434,7 @@ def test_o9_a_misconfigured_tenant_refuses_the_run_before_any_model_call(
     else:
         unbind_forge(tenant)
     out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, config))
-    assert not out.reached, f"O9: a misconfigured tenant's run reached its box: {out.text()}"
+    assert not out.reached, f"a misconfigured tenant's run reached its box: {out.text()}"
     assert out.raised is None or not isinstance(out.raised, TypeError), out.text()
     assert out.refusal is not None, out.text()
 
@@ -465,8 +465,8 @@ def child_env(monkeypatch):
 def _no_leftovers(t, spec: Path) -> None:
     clone = B.clone_dir(t)
     assert quiet(clone, naming=(str(spec),), seconds=5) == [], (
-        "O-BUDGET: a child (or its git) outlived the launch")
-    assert not (clone / ".git" / "index.lock").exists(), "O-BUDGET: index.lock left behind"
+        "a child (or its git) outlived the launch")
+    assert not (clone / ".git" / "index.lock").exists(), "index.lock left behind"
     with _lock(t):  # the tenant lock is free again
         pass
 
@@ -479,7 +479,7 @@ def _child_saw_no_login_material(marks: Path, secrets: tuple[str, ...]) -> None:
     seen = json.loads((marks / "seen.json").read_text(encoding="utf-8"))
     assert B.leaks(secrets, argv=seen["argv"], env=seen["env"]) == []
     assert [k for k in seen["env"] if B.ISSUER_ENV.search(k)] == [], (
-        "O8: the parent handed its publish child an issuer-named environment variable")
+        "the parent handed its publish child an issuer-named environment variable")
     assert seen["env"].get("S_B_ORDINARY") == "s-b-ordinary-value", (
         "control: an ordinary variable reaches the child, so the env channel is read")
 
@@ -516,7 +516,7 @@ def test_o_budget_the_parent_stops_waiting_at_the_budget_in_the_network_phase(
         stop.set()
     assert (marks / "started").exists(), "premise: the child process ran"
     _stale(line, "transient")
-    assert elapsed < BUDGET + SLACK, f"O-BUDGET: the launch waited {elapsed:.1f}s"
+    assert elapsed < BUDGET + SLACK, f"the launch waited {elapsed:.1f}s"
     assert not (marks / "locked").exists(), "premise: the child never reached its locked phase"
     _child_saw_no_login_material(marks, (*operator_env, B.ISSUER_SECRET_ID, B.ISSUER_ROLE_ID))
     _no_leftovers(tenant, spec)
@@ -538,12 +538,12 @@ def test_o_budget_a_child_holding_the_lock_is_allowed_to_finish(tenant, issuer_c
     assert locked_at < BUDGET, (
         f"premise: the child took the lock {locked_at:.1f}s in, after the {BUDGET}s budget")
     assert (marks / "locked-done").exists(), (
-        "O-BUDGET: the parent returned before the lock-holding child finished (killed it?)")
+        "the parent returned before the lock-holding child finished (killed it?)")
     assert B.outcome_class(line) == "fresh", line
     assert B.outcome_detail(line) == merged, line
     assert current_commit(tenant.tenant) == merged
     assert elapsed > BUDGET, "premise: the locked phase outlasted the budget"
-    assert elapsed < BUDGET + LOCKED_SLEEP + SLACK, f"O-BUDGET: the launch waited {elapsed:.1f}s"
+    assert elapsed < BUDGET + LOCKED_SLEEP + SLACK, f"the launch waited {elapsed:.1f}s"
     _no_leftovers(tenant, spec)
 
 
@@ -583,10 +583,10 @@ def _child_rc(marks: Path) -> int:
 def _child_reported(line: object) -> str:
     """A reported outcome is the child's own one-line report, passed through."""
     text = str(line)
-    assert "\n" not in text.strip(), f"OD20: a report spans lines: {text!r}"
-    assert "\r" not in text, f"OD20: a report spans lines: {text!r}"
+    assert "\n" not in text.strip(), f"a report spans lines: {text!r}"
+    assert "\r" not in text, f"a report spans lines: {text!r}"
     assert not B.outcome_detail(text).startswith("publish child failed"), (
-        f"OD20: the parent took a child that reported an outcome for a failed one: {text!r}")
+        f"the parent took a child that reported an outcome for a failed one: {text!r}")
     return text
 
 
@@ -611,14 +611,14 @@ def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passe
                           command=command)
     else:
         line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=30.0, command=command)
-    assert _child_rc(marks) == 0, "OD20: a child that reported an outcome exited non-zero"
+    assert _child_rc(marks) == 0, "a child that reported an outcome exited non-zero"
     _child_reported(line)
     if case == "dirty-clone":
         _stale(line, "operator")
     elif case == "lock-held":
         _stale(line, "transient")
         assert "lock" in B.outcome_detail(line).lower(), (
-            f"OD20: the lock-busy report does not name the lock: {line!r}")
+            f"the lock-busy report does not name the lock: {line!r}")
     else:
         assert B.outcome_class(line) == "misconfigured", line
         assert B.outcome_detail(line), f"a misconfiguration names its reason: {line!r}"
@@ -628,8 +628,8 @@ def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passe
 
         out = B.launch(tenant, tmp_path, publish=functools.partial(launch, budget=30.0,
                                                                    command=command))
-        assert _child_rc(marks) == 0, "OD20: the misconfigured child exited non-zero"
-        assert not out.reached, f"O9: a misconfigured launch reached its box: {out.text()}"
+        assert _child_rc(marks) == 0, "the misconfigured child exited non-zero"
+        assert not out.reached, f"a misconfigured launch reached its box: {out.text()}"
         assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
         assert out.refusal is not None, out.text()
         _unchanged(tenant)
@@ -657,7 +657,7 @@ def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proce
     out = B.launch(tenant, tmp_path, publish=publish)
     assert (marks / "forge-error-served").exists(), "premise: the child read the forge's error"
     assert lines, out.text()
-    assert _child_rc(marks) == 0, "OD20: a child that reported an outcome exited non-zero"
+    assert _child_rc(marks) == 0, "a child that reported an outcome exited non-zero"
     line = _child_reported(lines[0])
     assert B.outcome_class(line).startswith("stale:"), line
     assert out.reached, out.text()
@@ -665,12 +665,12 @@ def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proce
     source = B.knowledge_source(out)
     assert (source.get("kind"), source.get("commit")) == ("stale", tenant.commit), source
     reason = str(source.get("reason"))
-    assert "\n" not in reason, f"OD20: the recorded reason spans lines: {reason!r}"
+    assert "\n" not in reason, f"the recorded reason spans lines: {reason!r}"
     assert reason == B.outcome_detail(line), (
-        f"OD20: the recorded reason is not the child's one-line reason: {reason!r} vs {line!r}")
+        f"the recorded reason is not the child's one-line reason: {reason!r} vs {line!r}")
     for later in ("S-B-ERR-2", "S-B-ERR-3"):
         assert later in reason, (
-            f"OD20: the forge error's later lines were truncated, not collapsed: {reason!r}")
+            f"the forge error's later lines were truncated, not collapsed: {reason!r}")
 
 
 def test_o_budget_the_parents_default_budget_is_sixty_seconds():
@@ -742,7 +742,7 @@ def _bad_child(case: str, t, tmp_path: Path) -> list[str]:
 
 def _child_failed(line: object) -> None:
     assert B.outcome_class(line) == "stale:operator", (
-        f"U11: a child with no valid report line must be stale:operator: {line!r}")
+        f"a child with no valid report line must be stale:operator: {line!r}")
     assert B.outcome_detail(str(line)).startswith("publish child failed"), line
 
 
@@ -786,7 +786,7 @@ def test_u11_a_failed_child_without_a_snapshot_refuses_before_message_zero(tenan
     publish = functools.partial(B.launcher(), budget=BUDGET,
                                 command=_bad_child(case, tenant, tmp_path))
     out = B.launch(tenant, tmp_path, publish=publish)
-    assert not out.reached, "U11: a failed child with no snapshot reached the box"
+    assert not out.reached, "a failed child with no snapshot reached the box"
     assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
     assert out.rc not in (0, None) or out.refusal is not None, out.text()
 

@@ -72,7 +72,6 @@ def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse
     checkout = T.DEFENDER / 'skills' / 'gather' / 'SKILL.md'
     checkout_mark = 'The query computes the answer server-side and returns it small and exact.'
     assert checkout_mark in checkout.read_text(encoding='utf-8')
-    assert checkout_mark.strip(), 'checkout control must observe nonempty content'
     model = _drive_as(read_scene, role, [
         _read_turn(surface, _model(mine, tenant=tenant)), _read_turn(surface, other),
         _read_turn(surface, settings), _read_turn(surface, _model(checkout, tenant=tenant))])
@@ -81,7 +80,7 @@ def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse
     assert 'Blocked' in model.seen[2], 'another tenant root was not explicitly refused'
     assert 'SETTINGS-P2-CONTENT' not in '\n'.join(model.seen)
     assert 'Blocked' in model.seen[3], 'settings half was not explicitly refused'
-    assert checkout_mark in model.seen[4], 'P2 prematurely removed checkout corpus access'
+    assert checkout_mark in model.seen[4], 'a checkout file read did not return its bytes'
 
 
 @pytest.mark.parametrize('role', ['main', 'gather'])

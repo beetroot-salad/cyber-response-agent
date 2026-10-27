@@ -51,21 +51,21 @@ def test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_an
     seen = out.seen[0]
     copy_root = B.copy_root(tenant, seen.run_dir)
     assert _under(seen.agent, copy_root), (
-        f"O-B: the run's agent half {seen.agent} is not its run copy under {copy_root}")
+        f"the run's agent half {seen.agent} is not its run copy under {copy_root}")
     assert _under(seen.settings, copy_root), (
-        f"O-B: the run's settings half {seen.settings} is not its run copy under {copy_root}")
+        f"the run's settings half {seen.settings} is not its run copy under {copy_root}")
     # `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`.
     assert Path(seen.agent).resolve() == (copy_root / "stage" / "agent").resolve(), (
-        f"U9: the run's agent half is not the copy's `stage/agent/`: {seen.agent}")
+        f"the run's agent half is not the copy's `stage/agent/`: {seen.agent}")
     assert Path(seen.settings).resolve() == (copy_root / "settings").resolve(), (
-        f"U9: the run's settings half is not the copy's `settings/` (beside `stage/`): "
+        f"the run's settings half is not the copy's `settings/` (beside `stage/`): "
         f"{seen.settings}")
     assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent"), (
-        "O2/O-B: the run copy's agent/ is not byte-equal to the export `current` names")
+        "the run copy's agent/ is not byte-equal to the export `current` names")
     assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
     cmdb = seen.kw["tenant"].systems["cmdb"]
     assert cmdb.get(B.MARK_KEY) == B.SEEDED_MARK, (
-        f"O-B: the run resolved cmdb's settings from somewhere other than the copied export: "
+        f"the run resolved cmdb's settings from somewhere other than the copied export: "
         f"{dict(cmdb) if hasattr(cmdb, 'keys') else cmdb!r}")
 
 
@@ -85,11 +85,11 @@ def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_pa
     assert out.reached, out.text()
     seen = out.seen[0]
     assert B.CLONE_ONLY_MARK not in seen.agent_files[B.LESSON_REL].decode(), (
-        "O-B: the run read the clone's HEAD, not the export")
+        "the run read the clone's HEAD, not the export")
     assert B.SEEDED_MARK in seen.agent_files[B.LESSON_REL].decode()
     assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
-        f"O-B: the run's knowledge stamp is not the export it copied ({tenant.commit}); the "
+        f"the run's knowledge stamp is not the export it copied ({tenant.commit}); the "
         f"clone's HEAD is {head}: {B.stamped_commit(out.stamp_after)!r}")
     assert B.knowledge_source(out)["commit"] == tenant.commit
 
@@ -129,17 +129,17 @@ def test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp(
 
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
 
-    assert out.reached, f"O-B: a broken clone stopped the run: {out.text()}"
+    assert out.reached, f"a broken clone stopped the run: {out.text()}"
     assert out.rc == 0, out.text()
     seen = out.seen[0]
     assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent"), (
-        "O-B: the run's agent half is not the export `current` names")
+        "the run's agent half is not the export `current` names")
     assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
     assert B.CLONE_ONLY_MARK not in seen.agent_files[B.LESSON_REL].decode(), (
-        "O-B: the run read the clone's working tree")
+        "the run read the clone's working tree")
     assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
-        f"O-B: the stamp is not the export copied ({tenant.commit}): "
+        f"the stamp is not the export copied ({tenant.commit}): "
         f"{B.stamped_commit(out.stamp_after)!r}")
     source = B.knowledge_source(out)
     assert (source["kind"], source["commit"]) == ("fresh", tenant.commit), source
@@ -167,16 +167,15 @@ def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_know
 
     assert out.reached, out.text()
     assert out.rc == 0, (
-        f"O-STALE: a {report} launch with a snapshot must run (both stale kinds keep the run "
-        f"going): {out.text()}")
+        f"a {report} launch with a snapshot must run: {out.text()}")
     source = B.knowledge_source(out)
     assert source.get("commit") == tenant.commit, source
     assert out.seen[0].during == {"run dir": [], "stage": []}, (
-        f"OD17/U12: the raw publish reason is in a box-readable file: {out.seen[0].during}")
+        f"the raw publish reason is in a box-readable file: {out.seen[0].during}")
     # Only the saved run page may show the raw reason (OD21).
     after = [rel for rel in B.files_holding(out.run_dir, reason) if rel != "runtime.html"]
     assert after == [], (
-        f"OD17/U12: the raw publish reason was written into a run-dir file other than the saved "
+        f"the raw publish reason was written into a run-dir file other than the saved "
         f"page after the lifecycle: {after}")
     if report == "fresh":
         assert source.get("kind") == "fresh", source
@@ -186,7 +185,7 @@ def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_know
         assert source.get("stale_kind") == report.split(":")[1], source
         assert isinstance(source.get("reason"), str), source
         assert reason in source["reason"], (
-            f"R-S8: the host record does not carry the child's reason ({reason!r}): {source}")
+            f"the host record does not carry the child's reason ({reason!r}): {source}")
         # Positive control for the box-readable scan: the same text IS in the host file.
         assert reason in B.host_record_path(out.run_dir).read_text(encoding="utf-8")
 
@@ -210,7 +209,7 @@ def test_a_mismatch_a_copied_commit_descending_from_the_reported_one_is_fresh_at
     assert (source.get("kind"), source.get("commit")) == ("fresh", merged), source
     others = B.flat_values({k: v for k, v in source.items() if k != "commit"})
     assert any(tenant.commit in str(v) for v in others), (
-        f"A-MISMATCH: the record does not keep the child's reported commit {tenant.commit}: "
+        f"the record does not keep the child's reported commit {tenant.commit}: "
         f"{source}")
 
 
@@ -233,7 +232,7 @@ def test_o_a_no_current_and_a_failed_publish_refuses_before_message_zero(tenant,
     pointer.unlink()
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.stale(kind, "forge down"))
 
-    assert not out.reached, "O-A: a run with no snapshot and a failed publish reached its box"
+    assert not out.reached, "a run with no snapshot and a failed publish reached its box"
     assert out.rc not in (0, None) or out.refusal is not None, out.text()
     assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
 
@@ -251,7 +250,7 @@ def test_o9_a_misconfigured_publish_refuses_the_run_even_with_a_snapshot(tenant,
     reason = "the tenant row names no forge binding (S-B-MISCONFIG-REASON)"
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.misconfigured(reason))
 
-    assert not out.reached, "O9: a misconfigured launch reached its box"
+    assert not out.reached, "a misconfigured launch reached its box"
     assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
     assert out.refusal is not None, out.text()
     assert "S-B-MISCONFIG-REASON" in out.refusal, out.text()
@@ -282,7 +281,7 @@ def test_o_pin_a_pinned_launch_reads_that_export_skips_publish_and_records_pinne
     assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent")
     assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
-        "O-B: a pinned run's stamp is not the pinned export (it read the clone's HEAD?)")
+        "a pinned run's stamp is not the pinned export (it read the clone's HEAD?)")
     source = B.knowledge_source(out)
     assert source.get("kind") == "pinned", source
     assert source.get("commit") == tenant.commit, source
@@ -315,8 +314,7 @@ def test_o2_lead_zero_templates_come_from_the_run_copys_catalog_not_the_product_
                           files={**B.SEED_FILES, B.CORRELATE_PATH: None}) as t:
         out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
     assert not out.reached, (
-        "O2: the run started although its own export has no lead-zero template — it read the "
-        "product catalog")
+        "the run started although its own export has no lead-zero template")
     assert out.refusal is not None, out.text()
     assert B.CORRELATE_ID in out.refusal, out.text()
     _no_copy_left(t)
@@ -335,10 +333,10 @@ def test_o8_the_run_process_hands_the_publish_child_identifiers_only_and_holds_n
     spelled = sorted(str(location_path(leaf)) for leaf in leaves
                      if not isinstance(leaf, str) or leaf not in kwargs)
     assert spelled == sorted([tenant.tenant_id, str(Path(tenant.data_root))]), (
-        f"O8: the run process handed the publish child more (or less) than the tenant id and the "
+        f"the run process handed the publish child more (or less) than the tenant id and the "
         f"data root: {args!r} {kwargs!r}")
     assert not [k for k in out.seen[0].environ if B.ISSUER_ENV.search(k)], (
-        "P-4/O8: issuer material in the run process's environment")
+        "issuer material in the run process's environment")
 
 
 def test_o8_operator_issuer_variables_never_reach_the_runs_environment(tenant, tmp_path,
@@ -364,7 +362,7 @@ def test_o8_operator_issuer_variables_never_reach_the_runs_environment(tenant, t
     assert envs, "the ticket writer was never handed the run's environment"
     assert all(env.get("S_B_ORDINARY") == "s-b-ordinary-value" for env in envs), "control"
     assert B.leaks(("s-b-operator-bao-token-77e1", "s-b-operator-vault-token-91a4"),
-                   run_env=envs) == [], "O8: operator issuer material reached the run's env"
+                   run_env=envs) == [], "operator issuer material reached the run's env"
     assert [k for env in envs for k in env if B.ISSUER_ENV.search(k)] == []
 
 
@@ -372,7 +370,7 @@ def _no_copy_left(t: Any) -> None:
     """Nothing of a run is left under `<T>/run-knowledge/` after it ended."""
     copies = B.run_copies(t)
     left = sorted(os.listdir(copies)) if copies.is_dir() else []
-    assert left == [], f"R-S4/O-SWEEP: a run copy outlived its run: {left}"
+    assert left == [], f"a run copy outlived its run: {left}"
 
 
 @pytest.mark.parametrize("seam", ["ticket_writer", "visualize"])
@@ -410,5 +408,5 @@ def test_o_pin_knowledge_commit_accepts_only_a_full_commit_id(tenant, tmp_path, 
     assert out.raised is None, out.text()
     assert out.refusal is not None, out.text()
     assert "unrecognized arguments" not in out.refusal, (
-        f"argparse does not know the flag yet: {out.refusal}")
+        f"argparse does not know --knowledge-commit: {out.refusal}")
     _no_copy_left(tenant)

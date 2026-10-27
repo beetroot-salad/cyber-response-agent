@@ -26,9 +26,6 @@ FIXTURE_SETTINGS = FIXTURE / "settings"
 FIXTURE_AGENT = FIXTURE / "agent"
 TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
 
-#: The retired home: #1106 deleted `defender/knowledge/` whole.
-RETIRED_KNOWLEDGE = DEFENDER / "knowledge"
-
 #: The three files run start requires, relative to a tenant's `settings/`. A system's
 #: `config.env` is deliberately not here: some adapters need none, and a missing one fails only
 #: that system's settings check, so the system is down, not the run (#1256).
@@ -47,11 +44,6 @@ SHIPPED_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 def mod(dotted: str) -> Any:
     """Import `defender.<dotted>` at CALL time, never at collection time."""
     return importlib.import_module(f"defender.{dotted}")
-
-
-def tenants() -> Any:
-    """`defender.tenancy._tenants`, the tenant resolver module."""
-    return mod("tenancy._tenants")
 
 
 def run_grants(settings_dir: Path) -> Any:
@@ -503,19 +495,6 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
     return written
 
 
-def plant_tenant_record(runs_base: Path, tenant_id: str) -> Path:
-    """`<runs_base>/_tenant.json` naming `tenant_id` — the record a run reads its tenant from
-    (D4). Written in the record's own three-field shape."""
-    runs_base = Path(runs_base)
-    runs_base.mkdir(parents=True, exist_ok=True)
-    path = runs_base / "_tenant.json"
-    path.write_text(json.dumps({
-        "tenant_id": tenant_id, "base_world_id": "0" * 32,  # lint-stale-ref: ok — deliberately planted pre-1187 tenant record
-        "created_at": "2026-09-26T00:00:00+00:00",
-    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return path
-
-
 def paths_in(value: Any, *, _depth: int = 0, _seen: set[int] | None = None) -> set[Path]:  # noqa: C901 — one walk over every container shape a fake may be handed
     """Every `Path` (and absolute path string) reachable from `value` through mappings,
     sequences, dataclass fields and object attributes, a few levels deep: for asserting what a
@@ -595,7 +574,6 @@ __all__ = [
     "PLAYGROUND_ID",
     "REPO_ROOT",
     "REQUIRED_FILES",
-    "RETIRED_KNOWLEDGE",
     "SHIPPED_CORRELATION_TEMPLATE",
     "TABLE_A",
     "TABLE_B",
@@ -610,7 +588,6 @@ __all__ = [
     "paths_in",
     "place_tenant",
     "plant_tenant",
-    "plant_tenant_record",
     "accept",
     "fixture_gather_def",
     "fixture_grants",
@@ -621,6 +598,5 @@ __all__ = [
     "exposes",
     "reaches",
     "run_grants",
-    "tenants",
     "verb_context",
 ]

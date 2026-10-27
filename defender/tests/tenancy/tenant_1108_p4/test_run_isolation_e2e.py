@@ -93,15 +93,15 @@ def test_o2_own_copy_reads_answer_at_the_copied_revision_and_every_other_root_is
     assert main.calls == 5, f"the model did not finish its script: {main.calls}"
     assert current_commit(t.tenant) == main.merged, "premise: current advanced mid-run"
     assert B.SEEDED_MARK in main.seen[1], (
-        f"O2: the run's own lesson ({surface}) did not answer at the copied revision")
+        f"the run's own lesson ({surface}) did not answer at the copied revision")
     everything = "\n".join(main.seen)
-    assert B.MERGED_MARK not in everything, "O2: a read answered from the advanced `current`"
-    assert "Second-tenant fixture content" not in everything, "O2: another tenant's file read"
+    assert B.MERGED_MARK not in everything, "a read answered from the advanced `current`"
+    assert "Second-tenant fixture content" not in everything, "another tenant's file read"
     # `seen[i]` is the whole conversation so far: each refused read adds exactly one `Blocked`.
     for i, what in ((2, "the other tenant's export"), (3, "this tenant's clone"),
                     (4, "this tenant's export folder")):
         assert main.seen[i].count("Blocked") == main.seen[i - 1].count("Blocked") + 1, (
-            f"O2: the read of {what} was not refused: {main.seen[i][-400:]}")
+            f"the read of {what} was not refused: {main.seen[i][-400:]}")
 
 
 def test_o2_defender_lessons_in_bash_answers_from_the_run_copy(tenants, tmp_path, monkeypatch):
@@ -117,7 +117,7 @@ def test_o2_defender_lessons_in_bash_answers_from_the_run_copy(tenants, tmp_path
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     answer = main.seen[1]
-    assert "fixture-owner-before-close" in answer, f"O2: defender-lessons missed the copy: {answer[-600:]}"
+    assert "fixture-owner-before-close" in answer, f"defender-lessons missed the copy: {answer[-600:]}"
     assert B.SEEDED_MARK in answer, answer[-600:]
     assert B.MERGED_MARK not in answer, answer[-600:]
 
@@ -150,13 +150,13 @@ def test_o2_the_opening_messages_orientation_shows_the_copys_lessons(tenants, tm
     opening = main.seen[0]
     copy_root = B.run_copies(t) / out.seen[0].run_dir.name
     assert "fixture-owner-before-close" in opening, (
-        "O2: orient's lessons section did not find the copy's lesson by the run's signature")
+        "orient's lessons section did not find the copy's lesson by the run's signature")
     assert B.SEEDED_MARK in opening
     assert B.MERGED_MARK not in opening
     assert shim.envs, "orient never ran a shim"
     agent_dirs = {env.get("DEFENDER_AGENT_DIR") for env in shim.envs}
     assert all(d and Path(d).resolve().is_relative_to(copy_root.resolve()) for d in agent_dirs), (
-        f"O2: orient's shims were not pointed at the run copy {copy_root}: {agent_dirs}")
+        f"orient's shims were not pointed at the run copy {copy_root}: {agent_dirs}")
     assert "_(unavailable" not in opening, "orient's workspace map failed over the run copy"
 
 
@@ -176,10 +176,10 @@ def test_o2_the_gather_dispatch_prompt_shows_the_copys_descriptor_index(tenants,
     assert gather.calls >= 1, "the gather lead was never dispatched"
     prompt = gather.seen[0]
     assert FIXTURE_CMDB_DESCRIPTION in prompt, (
-        "O2: the gather dispatch prompt's descriptor index is not the copy's")
-    assert "CMDB stub system reference" not in prompt, "O2: the product's cmdb skill was shown"
+        "the gather dispatch prompt's descriptor index is not the copy's")
+    assert "CMDB stub system reference" not in prompt, "the product's cmdb skill was shown"
     assert "/defender/skills/cmdb" not in prompt, (
-        "O2/O-TEXT: the gather prompt points the model at the product tree's cmdb skill")
+        "the gather prompt points the model at the product tree's cmdb skill")
 
 
 # --- the tacit adapter ------------------------------------------------------------------------
@@ -240,9 +240,9 @@ def test_o2_the_tacit_adapter_answers_from_the_run_copys_registry_and_not_anothe
     raw = out.run_dir / "gather_raw" / TACIT_LEAD
     payloads = [json.loads((raw / f"{i}.json").read_text(encoding="utf-8")) for i in (0, 1)]
     assert (payloads[0].get("matched") or {}).get("id") == OWN_ENTRY[0], (
-        f"O2: the tacit adapter did not read the run copy's registry: {payloads[0]}")
+        f"the tacit adapter did not read the run copy's registry: {payloads[0]}")
     assert payloads[1].get("matched") is None, (
-        f"O2: another tenant's registry entry answered this run's lookup: {payloads[1]}")
+        f"another tenant's registry entry answered this run's lookup: {payloads[1]}")
 
 
 # --- traversal at the copy's geometry ---------------------------------------------------------
@@ -299,16 +299,16 @@ def test_r_i6_reads_climbing_out_of_the_agent_half_are_refused(tenants, tmp_path
     assert B.SEEDED_MARK in main.seen[1], "control: the own-copy read returned its bytes"
     for i, what in ((2, climb), (3, f"/agent/../{main.token}"), (4, "/agent/../../owner")):
         assert main.seen[i].count("Blocked") == main.seen[i - 1].count("Blocked") + 1, (
-            f"R-I6: {what} was not refused: {main.seen[i][-400:]}")
+            f"{what} was not refused: {main.seen[i][-400:]}")
     everything = "\n".join(main.seen)
-    assert B.MARK_KEY not in everything, "R-I6: the copy's settings reached the model"
-    assert main.owner_bytes, "premise (U9): the live run copy has an `owner` record"
+    assert B.MARK_KEY not in everything, "the copy's settings reached the model"
+    assert main.owner_bytes, "premise: the live run copy has an `owner` record"
     assert main.owner_bytes.decode(errors="replace").strip() not in everything, (
-        "R-I6: the copy's owner record reached the model")
+        "the copy's owner record reached the model")
     if main.token_bytes.strip():
         assert main.token_bytes.decode(errors="replace").strip() not in everything, (
-            "R-I6: the staged token's bytes reached the model")
+            "the staged token's bytes reached the model")
     shown = main.seen[5][len(main.seen[4]):]
     for sibling in ("settings", "owner", main.token):
         assert sibling not in shown, (
-            f"R-I6: a listing above `/agent` shows the copy's {sibling}: {shown[-400:]}")
+            f"a listing above `/agent` shows the copy's {sibling}: {shown[-400:]}")

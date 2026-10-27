@@ -19,15 +19,16 @@ from typing import Any
 import pytest
 
 from defender.tenancy import run_knowledge
-from defender.tests.e2e._box665 import RecordingDocker
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._drain_support import process_start, write_owner
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    _dead_process,
+    process_start,
+    write_owner,
+)
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 from defender.tests.tenancy.tenant_1108_p4.test_run_copy import (
-    _boxed_lifecycle,
-    _dead_process,
-    _Investigation,
+    _mount_sources,
     boxed_only,  # noqa: F401, F811 — fixture
 )
 
@@ -178,12 +179,6 @@ def test_r6_the_dev_issuer_config_location_lies_under_no_box_mount_source(tenant
     <tenant>/issuer.json`), named by the tenant's binding, is under no box mount source."""
     DEV_ISSUER_CONFIG = WORKTREE / "playground-issuer" / "client" / tenant.tenant_id / "issuer.json"
     bind_forge(tenant, issuer_config=DEV_ISSUER_CONFIG)
-    docker, investigation = RecordingDocker(), _Investigation()
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   lifecycle=_boxed_lifecycle(docker, investigation))
-    assert out.reached, out.text()
-    assert investigation.calls == 1, out.text()
-    sources = [Path(m["source"]) for m in docker.mounts()]
-    assert T.exposes(sources, T.DEFENDER), "control: the product tree is mounted"
+    sources = _mount_sources(tenant, tmp_path)
     assert not T.exposes(sources, DEV_ISSUER_CONFIG), (
         f"a box mount exposes the issuer client config {DEV_ISSUER_CONFIG}")

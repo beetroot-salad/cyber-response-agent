@@ -84,8 +84,7 @@ def test_flow2_materialise_writes_a_clone_commits_export_without_network_or_movi
     t.publish()
     after = _calls(t)
     assert all(a > b for a, b in zip(after, before, strict=True)), (
-        f"control: a publish did not call the origin, forge and issuer ({before} -> {after}), "
-        "so their records cannot show materialise's silence")
+        f"control: a publish did not call the origin, forge and issuer ({before} -> {after})")
 
 
 def test_flow2_materialise_rebuilds_a_deleted_export_and_never_writes_current(p4_tenant):

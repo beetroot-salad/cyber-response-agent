@@ -157,7 +157,7 @@ def test_u10_control_an_unrefused_lessons_batch_commits_both_claims(
     assert sorted(touched(t.remote, main, tip)) == sorted([LESSON_REL, SIBLING_REL])
     assert [c["head"] for c in t.forge.creates] == [branch]
     row = s.bad_row()
-    assert row is not None, "the committed row is held until its lesson reaches main (#952)"
+    assert row is not None, "the committed row is held until its lesson reaches main"
     assert int(row.get("attempts") or 0) == 0, row
     assert draft_entries(t) == []
 

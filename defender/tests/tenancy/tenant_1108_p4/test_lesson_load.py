@@ -54,4 +54,4 @@ def test_o5_a_lesson_read_from_the_run_copy_is_recorded_and_a_skill_read_is_not(
     reads = [r for r in _rows(out.run_dir) if r.get("kind") == "read"]
     assert [(r.get("lesson_name"), r.get("role")) for r in reads] == [
         ("fixture-owner-before-close", "main")], (
-        f"O5: the run copy's lesson read is not recorded as exactly one MAIN read: {reads}")
+        f"the run copy's lesson read is not recorded as exactly one MAIN read: {reads}")

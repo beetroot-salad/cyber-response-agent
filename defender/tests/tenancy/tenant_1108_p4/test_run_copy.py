@@ -29,6 +29,7 @@ from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1108_p2._support import start_with
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    _dead_process,
     owner_record,
     process_start,
     write_owner,
@@ -127,35 +128,35 @@ def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_tok
     assert docker.env().get("DEFENDER_AGENT_DIR") == str(MODEL_AGENT)
     inside = docker._through_binds(Path(MODEL_AGENT) / B.LESSON_REL)
     assert inside.resolve().is_relative_to(copy_root.resolve()), (
-        f"O-A: the box's {MODEL_AGENT} is bound to {inside}, not the run copy {copy_root}")
+        f"the box's {MODEL_AGENT} is bound to {inside}, not the run copy {copy_root}")
     assert inside.relative_to(copy_root).parts[:2] == ("stage", "agent"), inside
     sources = [Path(m["source"]) for m in docker.mounts()]
     for forbidden in (copy_root / "settings", copy_root / "owner", B.clone_dir(tenant),
                       export_dir(tenant.tenant, tenant.commit).parent,
                       B.host_record_path(out.run_dir)):
         assert not T.exposes(sources, forbidden), (
-            f"O-A/U9: a box mount exposes {forbidden}: {docker.mounts()}")
+            f"a box mount exposes {forbidden}: {docker.mounts()}")
     in_copy = [src for src in sources if src.resolve().is_relative_to(copy_root.resolve())]
     assert [src for src in in_copy if not src.resolve().is_relative_to(stage.resolve())] == [], (
-        f"U9: the box mounts a part of the run copy outside `stage/`: {in_copy}")
+        f"the box mounts a part of the run copy outside `stage/`: {in_copy}")
     assert T.exposes(sources, stage / "agent"), "control: the copy's stage/agent/ is mounted"
 
     listed = docker.at_create.get(copy_root.name)
     assert listed is not None, f"premise: the copy existed at box create: {docker.at_create}"
     assert listed["root"] == ["owner", "settings", "stage"], (
-        f"U9: the run copy is not {{owner, settings/, stage/}}: {listed['root']}")
+        f"the run copy is not {{owner, settings/, stage/}}: {listed['root']}")
     tokens_staged = [name for name in listed["stage"] if name != "agent"]
     assert "agent" in listed["stage"], listed
     assert len(tokens_staged) == 1, (
-        f"U9: the box's `stage/` holds more (or less) than agent/ and one token: {listed['stage']}")
+        f"the box's `stage/` holds more (or less) than agent/ and one token: {listed['stage']}")
 
     cats = _exec_cats(docker)
     tokens = [p for p in cats if p.resolve().is_relative_to(stage.resolve())
               and not p.resolve().is_relative_to((stage / "agent").resolve())]
     assert sorted({p.name for p in tokens}) == tokens_staged, (
-        f"O-A: startup did not read back the token staged in the copy's stage/: {cats}")
+        f"startup did not read back the token staged in the copy's stage/: {cats}")
     assert not [c for c in docker.calls if any(".tenant-id" in part for part in c)], (
-        "O-A: the retired in-box `.tenant-id` check still runs")
+        "the retired in-box `.tenant-id` check still runs")
     # Operator issuer variables never reach the box (control: the env is read above).
     assert B.leaks(("s-b-operator-bao-token-77e1", "s-b-operator-vault-token-91a4"),
                    create_argv=docker.create_argv) == []
@@ -188,15 +189,14 @@ def test_o_a_a_box_bound_to_another_copy_refuses_before_message_zero(tenant, tmp
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    lifecycle=_boxed_lifecycle(docker, investigation))
     assert out.reached, f"the run never got to its box: {out.text()}"
-    assert investigation.calls == 0, "O-A: a box bound to another copy got past startup"
+    assert investigation.calls == 0, "a box bound to another copy got past startup"
     assert out.rc != 0, out.text()
-    assert not _copy_root(tenant, out).exists(), "R-S4: a refused box start left the run copy"
+    assert not _copy_root(tenant, out).exists(), "a refused box start left the run copy"
 
 
-def test_o8_the_issuer_client_config_lies_under_no_box_mount_source(tenant, tmp_path,
-                                                                    boxed_only):
-    """The dev issuer client config (`<repo>/playground-issuer/client/`) is under no source the
-    run's box mounts. Control: the product `defender/` tree is mounted."""
+def _mount_sources(tenant, tmp_path) -> list[Path]:
+    """The mount sources of a fresh run's box, after asserting the run reached its investigation
+    and, as a control, that the product `defender/` tree is mounted."""
     docker, investigation = RecordingDocker(), _Investigation()
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    lifecycle=_boxed_lifecycle(docker, investigation))
@@ -204,8 +204,16 @@ def test_o8_the_issuer_client_config_lies_under_no_box_mount_source(tenant, tmp_
     assert investigation.calls == 1, out.text()
     sources = [Path(m["source"]) for m in docker.mounts()]
     assert T.exposes(sources, T.DEFENDER), "control: the product tree is mounted"
+    return sources
+
+
+def test_o8_the_issuer_client_config_lies_under_no_box_mount_source(tenant, tmp_path,
+                                                                    boxed_only):
+    """The dev issuer client config (`<repo>/playground-issuer/client/`) is under no source the
+    run's box mounts. Control: the product `defender/` tree is mounted."""
+    sources = _mount_sources(tenant, tmp_path)
     assert not T.exposes(sources, REPO_ISSUER_CONFIG), (
-        f"O8: a box mount exposes the issuer client config {REPO_ISSUER_CONFIG}")
+        f"a box mount exposes the issuer client config {REPO_ISSUER_CONFIG}")
     assert not T.exposes(sources, REPO_ISSUER_CONFIG.parents[1])
 
 
@@ -226,8 +234,8 @@ def test_o2_current_advanced_mid_run_changes_nothing_the_run_reads(tenant, tmp_p
     seen = out.seen[0]
     after = seen.during
     assert current_commit(tenant.tenant) == after["merged"], "premise: current advanced"
-    assert after["agent"] == seen.agent_files, "O2: the run's knowledge changed under it"
-    assert after["settings"] == seen.settings_files, "O-B: the run's settings changed under it"
+    assert after["agent"] == seen.agent_files, "the run's knowledge changed under it"
+    assert after["settings"] == seen.settings_files, "the run's settings changed under it"
     assert B.SEEDED_MARK in after["agent"][B.LESSON_REL].decode()
     assert after["stamp"] == seen.stamp
 
@@ -269,11 +277,11 @@ def test_o_sweep_the_run_copy_records_its_owner_and_is_removed_when_the_run_ends
     assert out.seen[0].copies_listing == [copy_root.name], (
         f"the run copy is not `<T>/run-knowledge/<run_id>/`: {out.seen[0].copies_listing}")
     record = out.seen[0].during
-    assert record is not None, "U9: the run copy has no `owner` record beside `stage/`"
+    assert record is not None, "the run copy has no `owner` record beside `stage/`"
     assert record.get("pid") == os.getpid(), record
     assert str(record.get("start")) == process_start(os.getpid()), (
-        f"U9: the owner record does not name this process's start time: {record}")
-    assert not copy_root.exists(), "O-SWEEP: the run copy outlived its run"
+        f"the owner record does not name this process's start time: {record}")
+    assert not copy_root.exists(), "the run copy outlived its run"
 
 
 def _plant_copy(t, name: str, pid: int, start: Any) -> Path:
@@ -285,15 +293,6 @@ def _plant_copy(t, name: str, pid: int, start: Any) -> Path:
     return root
 
 
-def _dead_process() -> tuple[int, str]:
-    """`(pid, start time)` of a process that has exited (it reports its own start time)."""
-    out = subprocess.run(  # noqa: S603 — a test's own short-lived process
-        [sys.executable, "-c", "import os\ns=open('/proc/self/stat').read()\n"
-         "print(os.getpid(), s[s.rindex(')') + 2:].split()[19])"],
-        capture_output=True, text=True, check=True, timeout=60).stdout.split()
-    return int(out[0]), out[1]
-
-
 def test_o_sweep_an_owner_naming_this_pid_with_another_start_time_is_dead(tenant):
     """A run copy whose owner names this running pid with another start time (a reused pid) is
     swept by the next publish; one naming the true start time survives (control)."""
@@ -303,8 +302,8 @@ def test_o_sweep_an_owner_naming_this_pid_with_another_start_time_is_dead(tenant
 
     tenant.publish()
 
-    assert kept.is_dir(), "O-SWEEP: a live owner's run copy was swept"
-    assert not reused.exists(), "O-SWEEP: a record naming a reused pid kept its copy"
+    assert kept.is_dir(), "a live owner's run copy was swept"
+    assert not reused.exists(), "a record naming a reused pid kept its copy"
 
 
 def test_o_sweep_a_dead_owners_half_built_temporary_is_swept_by_the_next_publish(tenant):
@@ -315,8 +314,8 @@ def test_o_sweep_a_dead_owners_half_built_temporary_is_swept_by_the_next_publish
 
     tenant.publish()
 
-    assert live.is_dir(), "O-SWEEP: a live build's temporary was swept"
-    assert not dead.exists(), "O-SWEEP: a dead owner's half-built temporary was not swept"
+    assert live.is_dir(), "a live build's temporary was swept"
+    assert not dead.exists(), "a dead owner's half-built temporary was not swept"
 
 
 def test_o_sweep_the_run_copy_is_removed_when_the_run_fails(tenant, tmp_path):
@@ -327,7 +326,7 @@ def test_o_sweep_the_run_copy_is_removed_when_the_run_fails(tenant, tmp_path):
                    lifecycle=crash)
     assert out.reached, out.text()
     assert isinstance(out.raised, RuntimeError), out.text()
-    assert not _copy_root(tenant, out).exists(), "O-SWEEP: a failed run left its copy behind"
+    assert not _copy_root(tenant, out).exists(), "a failed run left its copy behind"
 
 
 def test_o_sweep_a_publish_never_sweeps_a_live_runs_copy(tenant, tmp_path):
@@ -339,7 +338,7 @@ def test_o_sweep_a_publish_never_sweeps_a_live_runs_copy(tenant, tmp_path):
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
                    during=publish_now)
     assert out.reached, out.text()
-    assert out.seen[0].during is True, "O-SWEEP: a publish swept a live run's copy"
+    assert out.seen[0].during is True, "a publish swept a live run's copy"
 
 
 _ORPHAN_SCRIPT = textwrap.dedent("""
@@ -370,34 +369,14 @@ def issuer_config(tmp_path, tenant):
 def test_o_sweep_a_killed_runs_copy_is_swept_by_the_next_publish(tenant, tmp_path):
     """A run process SIGKILLed mid-run leaves its copy (its `finally` never ran); the next
     publish sees the owner dead and removes it."""
-    ready = tmp_path / "ready"
-    script = tmp_path / "orphan_run.py"
-    script.write_text(_ORPHAN_SCRIPT, encoding="utf-8")
-    env = {**os.environ, "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
-    proc = subprocess.Popen(  # noqa: S603 — a test's own child run process
-        [sys.executable, str(script), str(B.plant_alert(tmp_path / "alert")), tenant.tenant_id,
-         tenant.commit, str(ready)], env=env, cwd=str(WORKTREE),
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    try:
-        deadline = time.monotonic() + 120
-        while not ready.exists() and proc.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert ready.exists(), (
-            f"the child run never reached its lifecycle (rc={proc.poll()}): "
-            f"{proc.stderr.read().decode(errors='replace')[-2000:] if proc.poll() is not None else ''}")
-        proc.send_signal(signal.SIGKILL)
-        proc.wait(timeout=30)
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=30)
-    run_id = Path(ready.read_text(encoding="utf-8")).name
-    orphan = B.run_copies(tenant) / run_id
-    assert orphan.is_dir(), "premise: the killed run left its copy (the run copies under <T>/run-knowledge/)"
+    proc, orphan = _start_run_process(tenant, tmp_path)
+    proc.send_signal(signal.SIGKILL)
+    proc.wait(timeout=30)
+    assert orphan.is_dir(), "premise: the killed run left its copy"
 
     tenant.publish()
 
-    assert not orphan.exists(), "O-SWEEP: publish did not sweep a dead owner's run copy"
+    assert not orphan.exists(), "publish did not sweep a dead owner's run copy"
 
 
 def _start_run_process(tenant, tmp_path) -> tuple[subprocess.Popen, Path]:
@@ -432,14 +411,14 @@ def test_r_s5_a_live_run_in_another_process_keeps_its_copy_and_a_locked_out_publ
     try:
         assert copy.is_dir(), "premise: the live run's copy exists"
         tenant.publish()
-        assert copy.is_dir(), "O-SWEEP: a publish swept a LIVE run's copy (another process)"
+        assert copy.is_dir(), "a publish swept a LIVE run's copy (another process)"
     finally:
         proc.send_signal(signal.SIGKILL)
         proc.wait(timeout=30)
     tenant.merge(B.MERGE_FILES)  # origin ahead, so a locked-out child cannot be fresh
     with tenant_lock(tenant.tenant):
         line = B.run_child(tenant, issuer_config)
-        assert copy.is_dir(), "O-SWEEP: a sweep ran without the tenant lock"
+        assert copy.is_dir(), "a sweep ran without the tenant lock"
     assert B.outcome_class(line) == "stale:transient", line
     tenant.publish()
-    assert not copy.exists(), "O-SWEEP: publish did not sweep the dead owner's copy"
+    assert not copy.exists(), "publish did not sweep the dead owner's copy"

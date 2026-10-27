@@ -16,7 +16,6 @@ import io
 import json
 import os
 import re
-import shutil
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -65,10 +64,11 @@ MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), CMDB_ENV: cmdb_env(MERGED_MARK)
 
 
 @contextlib.contextmanager
-def run_tenant(tmp_path: Path, data_root: Path, **kw: Any) -> Iterator[Any]:
-    """`published_tenant` with the revision marks above written over the fixture."""
-    files = {**SEED_FILES, **kw.pop("files", {})}
-    with published_tenant(tmp_path / "forge", root=data_root, files=files, **kw) as t:
+def run_tenant(tmp_path: Path, data_root: Path, *,
+               files: dict[str, Any] | None = None) -> Iterator[Any]:
+    """`published_tenant` with the revision marks above (then `files`) written over the fixture."""
+    with published_tenant(tmp_path / "forge", root=data_root,
+                          files={**SEED_FILES, **(files or {})}) as t:
         yield t
 
 
@@ -166,13 +166,13 @@ def child_entry() -> Callable[..., str]:
     return vc.publish_for_run
 
 
-def run_child(t: Any, issuer_config: Path, *, identity: Any = None, client: Any = None,
-              login: Any = None, **kw: Any) -> str:
+def run_child(t: Any, issuer_config: Path, *, identity: Any = None, login: Any = None,
+              **kw: Any) -> str:
     """The real child, in-process, against P3's fakes and the forge client. With `login` (an
     `AppRoleVault`) the child really logs in from `issuer_config` through `login.transport`;
     otherwise it is handed `identity` (default: a fresh one over `t.vault`, so a fault set there
     is seen)."""
-    seams: dict[str, Any] = {"client": client if client is not None else t.forge.client}
+    seams: dict[str, Any] = {"client": t.forge.client}
     if login is not None:
         seams["issuer_transport"] = login.transport
     else:
@@ -355,17 +355,16 @@ def knowledge_source(out: Launch) -> dict[str, Any]:
     assert out.run_dir is not None, "the run never started"
     path = host_record_path(out.run_dir)
     assert not path.resolve().is_relative_to(out.run_dir.resolve()), (
-        f"U12: the host-held knowledge-source record {path} is inside the box-writable run dir")
+        f"the host-held knowledge-source record {path} is inside the box-writable run dir")
     source = out.host_after
     assert isinstance(source, dict), (
-        f"O-STALE/U12: run start wrote no host-held knowledge-source record at {path}")
+        f"run start wrote no host-held knowledge-source record at {path}")
     view = stamp_source(out.stamp_after)
     if view is not None:
         assert set(view) <= STAMP_SOURCE_KEYS, (
-            f"OD17: the box-readable stamp's knowledge_source carries {sorted(view)}")
+            f"the box-readable stamp's knowledge_source carries {sorted(view)}")
         assert view == {k: source.get(k) for k in view}, (
-            f"OD17: the stamp's informational knowledge_source disagrees with the host record: "
-            f"{view} vs {source}")
+            f"the stamp's knowledge_source disagrees with the host record: {view} vs {source}")
     return source
 
 
@@ -402,22 +401,10 @@ def flat_values(value: Any) -> list[Any]:
     return [value]
 
 
-def python() -> str:
-    return sys.executable
-
-
-def rmtree(path: Path) -> None:
-    shutil.rmtree(path, ignore_errors=True)
-
-
-
 # --- e2e: run.main over the real driver with replay models ------------------------------------
 
-def drive_main(  # noqa: PLR0913 — the e2e entry: one keyword per seam
-        t: Any, tmp_path: Path, monkeypatch: Any, *, main: Any, gather: Any = None,
-        orient_shim: Any = None, publish: Callable[..., Any] | None = None,
-        signature: str = "r-s-b", during: Callable[[Seen], Any] | None = None,
-        publish_seam: bool = True) -> Launch:
+def drive_main(t: Any, tmp_path: Path, monkeypatch: Any, *, main: Any, gather: Any = None,
+               orient_shim: Any = None, signature: str = "r-s-b") -> Launch:
     """`run.main` end to end: real `materialize`, production's lifecycle with production's
     `start_box` in its unsandboxed opt-out (no daemon, `DEFENDER_ALLOW_UNSANDBOXED=1`, as the
     replay harness reaches it), and the REAL driver over replay models
@@ -438,14 +425,11 @@ def drive_main(  # noqa: PLR0913 — the e2e entry: one keyword per seam
     (alert_dir / "alert.json").write_text(json.dumps({
         "rule": {"id": signature, "description": "slice S-B e2e"},
         "alert_timestamp": "2026-10-20T00:00:00Z"}), encoding="utf-8")
-    if publish is None:
-        commit = t.commit
+    commit = t.commit
 
-        def publish(*_a: Any, **_k: Any) -> str:
-            return fresh(commit)
-    return launch(t, tmp_path, publish=publish if publish_seam else None,
-                  lifecycle=lifecycle, during=during,
-                  alert_dir=alert_dir)
+    def publish(*_a: Any, **_k: Any) -> str:
+        return fresh(commit)
+    return launch(t, tmp_path, publish=publish, lifecycle=lifecycle, alert_dir=alert_dir)
 
 
 # --- the publish launcher's budget (parent half) -----------------------------------------------

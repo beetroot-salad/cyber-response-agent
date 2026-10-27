@@ -42,7 +42,7 @@ def _services() -> dict:
 
 def _bao() -> dict:
     services = _services()
-    assert "openbao" in services, "no `openbao` service in the dev compose file (U1)"
+    assert "openbao" in services, "no `openbao` service in the dev compose file"
     return services["openbao"]
 
 

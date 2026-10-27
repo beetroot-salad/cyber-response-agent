@@ -42,6 +42,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     CuratorTrigger,
     LeadStep,
     PitfallsStep,
+    _dead_process,
     author_drain,
     critical_text,
     draft_entries,
@@ -75,6 +76,14 @@ def thresholds(monkeypatch):
     """Both curators wake at one authorable row (env-backed knobs, read at call time)."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
+
+
+def _author_tick(t: Any, product: Path) -> tuple[Any, CuratorTrigger, BoxSpy]:
+    """`(paths, trigger, box)` for an author tick over `product`: one authorable row queued, its
+    fake curator writing that row's lesson."""
+    paths = drain_paths(t, product)
+    queue(paths, [S.finding_row("f1", run_id="f1")])
+    return paths, CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -156,9 +165,7 @@ def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_ca
     before touching the issuer, the forge, a draft, a box or the curator. Positive control: once
     bound, the same tick reaches them."""
     t = p4_tenant
-    paths = drain_paths(t, product_repo(tmp_path))
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+    paths, trigger, box = _author_tick(t, product_repo(tmp_path))
     # The fixture's own publish already asked the issuer and the forge; only the drain counts.
     t.vault.calls.clear()
     t.forge.requests.clear()
@@ -189,9 +196,7 @@ def test_o9_an_unprotected_tenant_main_surfaces_as_a_drain_refusal_naming_it(
     t = p4_tenant
     bind_forge(t)
     t.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
-    paths = drain_paths(t, product_repo(tmp_path))
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+    paths, trigger, box = _author_tick(t, product_repo(tmp_path))
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=trigger, box=box)
@@ -216,9 +221,7 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
     nothing, opens no PR and logs the status."""
     t = p4_tenant
     bind_forge(t)
-    paths = drain_paths(t, product_repo(tmp_path))
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+    paths, trigger, box = _author_tick(t, product_repo(tmp_path))
     lost = _AnswerLost(remote=t.remote, origin=t.origin)
 
     with caplog.at_level(logging.INFO):
@@ -401,15 +404,6 @@ def _sweeps_under(folder: Path):
     return pick
 
 
-def _dead_process() -> tuple[int, str]:
-    """`(pid, start time)` of a process that has exited (it reports its own start time)."""
-    out = subprocess.run(
-        [sys.executable, "-c", "import os\ns=open('/proc/self/stat').read()\n"
-         "print(os.getpid(), s[s.rindex(')') + 2:].split()[19])"],
-        capture_output=True, text=True, check=True, timeout=60).stdout.split()
-    return int(out[0]), out[1]
-
-
 def test_o_sweep_publish_sweeps_a_draft_whose_owner_died_and_keeps_a_live_owners(
         p4_tenant, tmp_path):
     """The next publish sweeps, under the tenant lock, a draft whose owner process died; this
@@ -524,9 +518,7 @@ def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_ro
     t = p4_tenant
     bind_forge(t)
     product = product_repo(tmp_path)
-    paths = drain_paths(t, product)
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    trigger, box = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
+    paths, trigger, box = _author_tick(t, product)
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=trigger, box=box)
