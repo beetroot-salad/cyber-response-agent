@@ -399,7 +399,7 @@ def _driver_call(recording: Recording, main: RoleModel, gather: RoleModel,
 
 def lifecycle(recording: Recording, *, main_turns: list[Any], clock: SteppingClock,
               registry_cls: type | None = None) -> Callable[..., dict[str, Any]]:
-    """The orchestrator's fixed arm composition (dossier "Arm composition"), for either run."""
+    """The fixed arm composition, for either run."""
     import defender.run as run_mod
     from defender import box as box_mod
     from defender.tests.e2e._replay_harness import _no_docker_daemon
@@ -437,8 +437,8 @@ def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
     try:
-        # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the tenant for
-        # real when run.main launches it).
+        # The in-process launch-time publish: publishes the tenant for real when run.main
+        # launches it.
         recording.exit_code = run_mod.main(
             argv, lifecycle=lifecycle(recording, main_turns=main_turns, clock=clock,
                                       registry_cls=registry_cls),
@@ -500,7 +500,7 @@ REPLICATE = "r"
 
 
 def replicate_world() -> dict[str, Any]:
-    """The replicate's manifest entry (slice A's `world_doc`, role null, no facts, no axis)."""
+    """The replicate's manifest entry (a `world_doc` with role null, no facts, no axis)."""
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     return T.world_doc(REPLICATE, role=None, axis=None, facts=[], story="the captured story")
@@ -997,7 +997,7 @@ def host_tokens(meta: Mapping[str, Any]) -> dict[str, str]:
 
 
 def identity_tokens(pair: Mapping[str, Any], which: str) -> dict[str, str]:
-    """O2's list (and P1's fixed names)."""
+    """The identities `which` run's model surfaces must not show (run/episode/world ids, fork labels)."""
     natural_id = str(pair["natural"]["run_id"])
     if which == "natural":
         return {"natural run id": natural_id}

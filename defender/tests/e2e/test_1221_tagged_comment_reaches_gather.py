@@ -26,11 +26,10 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-#: The later run — the one gathering — and so the key of its own case: a run id, so a UUID
-#: (#1187 declared change 1; the replay harness names the run's folder by it).
+#: The later, gathering run, and so the key of its own case: a run id, so a UUID (the replay
+#: harness names the run's folder by it).
 SELF = fixture_uuid("1221-later-run")
-#: The earlier run whose recorded investigation is on an open case — a run id too, so a UUID:
-#: #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>).
+#: The earlier run whose recorded investigation is on an open case (a run id too, so a UUID).
 PRIOR = fixture_uuid("20261001t090000z-1221-prior-run")
 LEAD = "l-001"
 ENRICHMENT = "OWN-CASE-ENRICHMENT-1221: the host is a CI runner owned by build-infra"
@@ -72,7 +71,7 @@ def _drive(tmp_path: Path, *, verbs: FakeVerbs, turns: list[Turn], system: str) 
 
 
 def _delta(model: ReplayFn) -> str:
-    """What the drive added to the model's history past its first request — the channel a tool result comes back..."""
+    """What the drive added to the model's history past its first request: where tool results arrive."""
     head = model.seen[0]
     assert model.seen[-1].startswith(head), "the flattened history is not append-only"
     return model.seen[-1][len(head):]
@@ -83,7 +82,7 @@ def _capture(run_dir: Path) -> Any:
 
 
 def test_a_posted_agent_comment_on_an_open_case_reaches_gather_beside_the_own_case(tmp_path):
-    """The writer's posted body, served back on an open case beside the gathering run's own case, reaches the..."""
+    """The real writer's posted body, served back on an open case beside the run's own, reaches gather."""
     tag = require(case_ticket, "agent_comment_tag", "#1221 M1: the agent tag line")(PRIOR)
 
     prior_dir = make_run(tmp_path / "prior", name=PRIOR, body=PRIOR_NOTES)

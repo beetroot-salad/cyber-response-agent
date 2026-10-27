@@ -55,7 +55,7 @@ class Asked:
         self.queries: list[str] = []
         #: `ctx.run_state.lead_rows(LEAD)` at each call — the state as the call saw it.
         self.inherited_seen: list[list[dict]] = []
-        #: The `RunState` object each call's context carried (R2).
+        #: The `RunState` object each call's context carried.
         self.states: list[Any] = []
 
     def registry(self, *, look: bool = False) -> FakeVerbs:
@@ -125,7 +125,7 @@ class Branched:
             "the legal source carries a claim for l-001, so the sibling could not re-dispatch it")
         self.spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
         store.close()
-        # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+        # A run id is a canonical UUID, so the folder is fixture_uuid(<label>).
         self.sibling = tmp_path / "defender-runs" / fixture_uuid("run-sibling-1235")
         RunPaths(self.sibling).gather_raw.mkdir(parents=True)
         from defender.tests.support.storage._alert_plant import plant_alert
@@ -166,8 +166,8 @@ def test_the_siblings_state_holds_its_inherited_rows_from_its_first_call(tmp_pat
 
 
 def test_the_repeat_guard_counts_inherited_rows(tmp_path):
-    """R1: with two identical `l-001` requests inherited, the sibling's first identical request
-    is the third occurrence and is refused before it reaches the backend."""
+    """With two identical `l-001` requests inherited, the sibling's first identical one is the
+    third occurrence and never reaches the backend."""
     branched = _two_same(tmp_path)
     asked = Asked("sibling")
     branched.resume(main=_main(LEAD), gather=ReplayFn([q("elastic", "query", _SAME), DONE]),
@@ -182,8 +182,7 @@ def test_the_repeat_guard_counts_inherited_rows(tmp_path):
 
 
 def test_a_siblings_next_row_takes_the_seq_after_its_inherited_rows(tmp_path):
-    """R1: the sibling's first `l-001` row is seq 2 (after the two it inherited), its payload is
-    `gather_raw/l-001/2.json`, and the inherited payload files keep the source's bytes."""
+    """Its payload is `gather_raw/l-001/2.json`; the inherited payload files keep the source's bytes."""
     branched = _two_same(tmp_path)
     branched.resume(main=_main(LEAD), gather=ReplayFn([q("elastic", "query", _OTHER), DONE]),
                     verbs=Asked("sibling").registry())
@@ -298,8 +297,7 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
 
 
 def test_two_runs_with_one_run_id_in_one_process_share_no_state(tmp_path):
-    """R2, the positive control: two runs driven one after the other in this process, with the
-    SAME run id in different folders, get two states."""
+    """Two runs driven one after the other in this process, SAME run id, different folders."""
     probe = Probe()
     first = _pool_script(materialize(tmp_path / "a", GOLDEN_AB3), run_id="r1235-v2-same",
                          probe=probe)["run_state"]
@@ -318,8 +316,8 @@ def test_two_runs_with_one_run_id_in_one_process_share_no_state(tmp_path):
 
 
 def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path):
-    """R4: after the run returns and the caller drops what `drive()` returned, no process-wide
-    reference keeps the run's state — a weak reference to it dies at the next collection."""
+    """Once the caller drops `drive()`'s result, a weak reference to the run's state dies at the
+    next collection."""
     answered: list[str] = []
 
     def probe(ctx, *, native_query: str = "FROM hosts") -> list[dict]:

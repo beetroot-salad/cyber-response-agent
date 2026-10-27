@@ -22,12 +22,12 @@ pytestmark = pytest.mark.e2e
 _SAME = {"native_query": "FROM logs"}
 
 
-# X5 — a planted row cannot re-attribute a reducer failure to another system.
+# A planted row cannot re-attribute a reducer failure to another system.
 def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
     from defender.investigation.run_state import RunState
     from defender.investigation import record_query as rq
 
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # A run id is a canonical UUID, so the folder is fixture_uuid(<label>).
     run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "k-x5")

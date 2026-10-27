@@ -1,4 +1,4 @@
-"""#1235 round 2: the correlation lead's calls ride the run's one RunState; an enforced role with no state raises rather than reaching a live run's state; concurrent breaker charges lose no failure."""
+"""#1235: the correlation lead's calls ride the run's one RunState; an enforced role with no state raises rather than reaching a live run's state; concurrent breaker charges lose no failure."""
 from __future__ import annotations
 
 
@@ -40,7 +40,6 @@ def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
 
 
 def test_a_deps_with_no_state_raises_and_never_reaches_a_live_runs_state(tmp_path):
-    """Round 3 (O2, the review's finding 2):"""
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1, "wall_clock_timeout": 3600,
               "grace_seconds": 600}
     run_dir = _run_dir(tmp_path, "k2")

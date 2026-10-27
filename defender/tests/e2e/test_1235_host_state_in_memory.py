@@ -102,7 +102,7 @@ def _zeroed_budget(run_id: str) -> str:
 
 
 def test_the_call_cap_refuses_at_the_cap(tmp_path, enforced):
-    """Positive control for every budget arm below, on the same script and cap:"""
+    """Positive control for every budget arm below, on the same script and cap."""
     main = ReplayFn(list(_FOUR_BASH))
     budget = _drive_main(tmp_path / "control", main, run_id="b1235-control", limits=_CAP_TWO)
 
@@ -117,7 +117,6 @@ def test_the_call_cap_refuses_at_the_cap(tmp_path, enforced):
 
 @pytest.mark.parametrize("plant", ["overwrite", "delete"])
 def test_a_reset_budget_file_does_not_reopen_the_cap(tmp_path, enforced, plant):
-    """O1:"""
     run_dir_holder: list[Path] = []
 
     def reset() -> None:
@@ -143,7 +142,7 @@ def test_a_reset_budget_file_does_not_reopen_the_cap(tmp_path, enforced, plant):
 
 
 def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced):
-    """O1, the clock limb:"""
+    """The control: the same script under a zero timeout is refused on every call."""
     roomy = {**DEFAULT_LIMITS, "max_tool_calls": 100, "wall_clock_timeout": 3600,
              "grace_seconds": 600}
     holder: list[Path] = []
@@ -205,7 +204,7 @@ def _down(gather: ReplayFn) -> bool:
 
 
 def test_a_system_tripped_by_two_infra_failures_answers_down(tmp_path):
-    """Positive control for the breaker arms:"""
+    """Positive control for the breaker arms below."""
     rec = VerbRecorder()
     gather = ReplayFn([_cmdb(1), _cmdb(2), _cmdb(3), DONE])
     state = _drive_gather(tmp_path / "control", gather,
@@ -220,7 +219,6 @@ def test_a_system_tripped_by_two_infra_failures_answers_down(tmp_path):
 
 @pytest.mark.parametrize("plant", ["blank", "delete"])
 def test_a_reset_breaker_file_does_not_untrip_a_system(tmp_path, plant):
-    """O1:"""
     holder: list[Path] = []
 
     def reset() -> None:

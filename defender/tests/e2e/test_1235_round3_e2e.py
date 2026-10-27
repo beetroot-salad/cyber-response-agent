@@ -1,4 +1,4 @@
-"""#1235 round 3, through the real run_investigation: a failing query whose view write is refused (box-planted symlink) ends the run holding its row and breaker charge; a run handed no state resolves its own at the boundary; a state for another run is refused before the run starts."""
+"""#1235, through the real run_investigation: a failing query whose view write is refused (box-planted symlink) ends the run holding its row and breaker charge; a run handed no state resolves its own at the boundary; a state for another run is refused before the run starts."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -63,7 +63,7 @@ def _lead(*queries: str) -> ReplayFn:
 
 def test_a_failing_query_whose_view_write_is_refused_ends_the_run_holding_its_row_and_charge(
         tmp_path):
-    """O1, driven:"""
+    """The verb plants a link at the queries table, then fails; a clean run is the control."""
     run_dir = materialize(tmp_path / "planted", GOLDEN_AB3, run_id='r3-view-refused')
     outside = tmp_path / "outside.jsonl"
     outside.write_bytes(b"")
@@ -91,7 +91,7 @@ def test_a_failing_query_whose_view_write_is_refused_ends_the_run_holding_its_ro
 
 
 def test_a_run_handed_no_state_resolves_its_own_at_the_boundary(tmp_path):
-    """O6, production's path (`run.py` hands no state):"""
+    """Production's path: `run.py` hands the driver no state."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='r3-own-state')
     carried: list = []
 
@@ -116,7 +116,6 @@ def test_a_run_handed_no_state_resolves_its_own_at_the_boundary(tmp_path):
 
 @pytest.mark.parametrize("other", ["folder", "run-id"])
 def test_an_injected_state_for_another_run_is_refused_before_the_run_starts(tmp_path, other):
-    """O6:"""
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='r3-mismatch')
     elsewhere = tmp_path / "elsewhere" / run_dir.name
     elsewhere.mkdir(parents=True)

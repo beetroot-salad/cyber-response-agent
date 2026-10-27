@@ -277,12 +277,8 @@ DENIED = Turn(tool_calls=[("query", {"system": "identity", "verb": "list-authori
 
 
 def _planted_tree(root: Path) -> Path:
-    """Create a checkout mirror, and plant the scene's lessons for the restored file checks.
-
-    #1108 P4 (O1, O4): the lessons a run matches its writes against are its TENANT's
-    (`agent/lessons/`, from the export the run reads), never the checkout's — so the three
-    lessons go into the fixture tenant's agent half (the replays run as that tenant, and the
-    harness publishes its folder before each drive); the checkout mirror carries none."""
+    """A checkout mirror without lessons, and the scene's three lessons in the fixture tenant's
+    agent half: a run matches its writes against its TENANT's lessons, never the checkout's."""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in DEFENDER.iterdir():
@@ -303,7 +299,7 @@ def _lines(path: Path) -> list[bytes]:
 
 
 def _rows(path: Path) -> list[dict]:
-    """A log's rows with their timestamp dropped: the one field a re-made row may differ in (the run clock's restore is slice D's)."""
+    """A log's rows with their timestamp dropped: the one field a re-made row may differ in."""
     return [{k: v for k, v in json.loads(line).items() if k != "ts"} for line in _lines(path)]
 
 

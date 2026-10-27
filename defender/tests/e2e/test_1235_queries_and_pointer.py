@@ -1,4 +1,4 @@
-"""#1235, second half: the repeat guard and the rejection budget read the rows the host recorded in memory, so truncating, deleting or planting rows in executed_queries.jsonl moves neither; the run-to-case link is a sidecar beside the run folder, so a pointer planted inside the folder (or a hand-copied folder) is never followed."""
+"""#1235: the repeat guard and the rejection budget read the rows the host recorded in memory, so truncating, deleting or planting rows in executed_queries.jsonl moves neither; the run-to-case link is a sidecar beside the run folder, so a pointer planted inside the folder (or a hand-copied folder) is never followed."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -31,7 +31,7 @@ from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: 
 pytestmark = pytest.mark.e2e
 
 LEAD = "l-001"
-#: The in-folder name the case link had before #1235.
+#: The case link's old in-folder name: a pointer planted under it must not be followed.
 OLD_POINTER_NAME = "session_store_pointer.json"
 
 
@@ -92,7 +92,6 @@ def test_three_identical_requests_trip_the_repeat_guard(tmp_path):
 
 @pytest.mark.parametrize("plant", ["truncate", "delete"])
 def test_an_emptied_queries_table_does_not_reset_the_repeat_count(tmp_path, plant):
-    """O1:"""
     holder: list[Path] = []
 
     def empty() -> None:
@@ -114,7 +113,6 @@ def test_an_emptied_queries_table_does_not_reset_the_repeat_count(tmp_path, plan
 
 
 def test_planted_rows_do_not_fire_the_repeat_guard(tmp_path):
-    """O1, the other direction:"""
     holder: list[Path] = []
 
     def duplicate() -> None:
@@ -147,7 +145,6 @@ _CORRECTED = q("elastic", "query", {"native_query": "FROM corrected"})
 
 
 def test_an_emptied_queries_table_does_not_refund_the_rejection_budget(tmp_path):
-    """O1:"""
     holder: list[Path] = []
 
     def empty() -> None:
@@ -166,7 +163,7 @@ def test_an_emptied_queries_table_does_not_refund_the_rejection_budget(tmp_path)
 
 
 def _finished_run(root: Path, run_id: str) -> Path:
-    """A real, finished run with its own case store:"""
+    """A real, finished run with its own case store."""
     run_dir = materialize(root, GOLDEN, run_id=run_id)
     drive(run_dir, run_id=run_id, main=ReplayFn([Turn(text="Investigation complete.")]))
     return run_dir
@@ -177,7 +174,6 @@ def _pointer(run_dir: Path) -> dict:
 
 
 def test_a_pointer_planted_inside_the_folder_is_not_the_case_link(tmp_path):
-    """O3:"""
     run_a = _finished_run(tmp_path / "a", "o3-a")
     run_b = _finished_run(tmp_path / "b", "o3-b")
     a_link, b_link = _pointer(run_a), _pointer(run_b)
@@ -204,9 +200,9 @@ def test_a_pointer_planted_inside_the_folder_is_not_the_case_link(tmp_path):
 
 
 def test_a_hand_copied_run_folder_carries_no_case_link(tmp_path):
-    """O3:"""
+    """The copy opens no store; with an old in-folder pointer planted in it, the open is refused."""
     run_dir = _finished_run(tmp_path / "a", "o3-copied")
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # A run id is a canonical UUID, so the folder is fixture_uuid(<label>).
     copy = tmp_path / "elsewhere" / fixture_uuid("run")
     shutil.copytree(run_dir, copy)
 

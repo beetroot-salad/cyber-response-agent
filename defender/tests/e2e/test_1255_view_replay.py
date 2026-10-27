@@ -102,10 +102,8 @@ def test_b6_o3_message_zero_lessons_section_shows_no_host_layout(tmp_path, monke
     from defender.investigation import orient
 
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
-    # #1108 P4 (O1, O4): the corpus the signature lookup reads is the run TENANT's
-    # (`agent/lessons/`), never the checkout's; the fixture tenant carries no lesson for this
-    # alert's signature, so the scene plants one there (made up; the default signature of
-    # `_write_lesson` is this alert's rule id).
+    # The signature lookup reads the run TENANT's lessons; the fixture tenant has none for this
+    # alert, so the scene plants one (`_write_lesson`'s default signature is this alert's rule id).
     _write_lesson(layout.agent / "lessons", "view-b6-signature-lesson")
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-lessons0")
     main = V.Recorder([Turn(text="done")])
@@ -160,8 +158,8 @@ def _outside(text: str, evidence: list[str]) -> str:
 
 def test_b4_evidence_naming_this_runs_own_trees_is_shown_byte_for_byte(tmp_path, monkeypatch):
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
-    # #1279 A3: setup mints the run id, so the evidence naming this run's folder is planted into
-    # the alert after the run exists, at the place the view reads the alert from.
+    # Setup mints the run id, so the evidence naming this run's folder is planted into the alert
+    # after the run exists, at the place the view reads the alert from.
     run_dir = V.natural_run(layout, ALERT, "view-evid-own")
     old = f"{location_path(layout.data_root)}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
     own = _own_tree_evidence(layout, run_dir)
@@ -426,9 +424,7 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
 
 
 def test_b3_the_lessons_block_names_lessons_by_model_path(tmp_path, monkeypatch):
-    # #1108 P4 (O1, O4): the lessons a run's writes are matched against are its TENANT's
-    # (`agent/lessons/`, at the model root `MODEL_AGENT`), never the checkout's — so the
-    # lesson is planted in the tenant's agent half and named back by its `/agent` path. The
+    # Writes are matched against the TENANT's lessons, named back under `MODEL_AGENT`; the
     # checkout is a mirror elsewhere, so a block that leaked either host tree is caught.
     tree = V.mirror_checkout(tmp_path / "co" / "src")
     layout = V.make_layout(tmp_path / "a", V.TENANT_A, checkout=tree)

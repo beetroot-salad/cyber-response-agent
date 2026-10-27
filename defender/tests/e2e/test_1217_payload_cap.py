@@ -23,7 +23,7 @@ WIDE = "é"
 def test_persist_payload_refuses_a_payload_one_byte_over_the_read_limit(tmp_path):
     text = WIDE * (READ_LIMIT // 2) + "x"
     assert len(text) <= READ_LIMIT < len(text.encode("utf-8"))
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # A run id is a canonical UUID, so the folder is fixture_uuid(<label>).
     run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
 
@@ -37,7 +37,6 @@ def test_persist_payload_writes_a_payload_of_exactly_the_read_limit_and_it_reads
     """The boundary the reader draws: `READ_LIMIT` bytes is readable, so it is written."""
     text = WIDE * (READ_LIMIT // 2)
     assert len(text.encode("utf-8")) == READ_LIMIT
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
 

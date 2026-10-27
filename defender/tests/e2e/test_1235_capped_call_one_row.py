@@ -20,7 +20,7 @@ from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 
 
 def test_a_capped_call_whose_view_write_is_refused_is_recorded_once(tmp_path):
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    # A run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "adv3-capped")
