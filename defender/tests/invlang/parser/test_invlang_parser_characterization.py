@@ -80,6 +80,9 @@ def test_split_cells_quoted_pipe_and_backslash():
     cells = _split_cells(row)
     assert len(cells) == 5
     assert cells[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
+    assert _split_cells(row + ";user=root") == [
+        "v-002", "process", "process:bash", "bash[pid=42]",
+        'flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root']
     assert _split_cells(r"a|b\|c|d") == ["a", "b|c", "d"]
 
 
@@ -217,8 +220,7 @@ _WARNING_SITES = [
     ids=[c[0] for c in _WARNING_SITES],
 )
 def test_warning_site_block_label_and_reason(label, body, exp_block, exp_reason, exp_row_index):
-    """Each reachable ParseWarning site keeps its exact block label + reason.
-    These strings are the contract the `_warn` consolidation must reproduce."""
+    """Each reachable ParseWarning site keeps its exact block label and reason."""
     _, warnings = parse_dense_companion(_fence(body))
     assert len(warnings) == 1, f"{label}: expected exactly one warning, got {warnings}"
     w = warnings[0]
@@ -337,8 +339,7 @@ def test_a_lead_subblock_does_not_make_later_rows_inherit_its_lead():
 
 
 def test_relisting_a_lead_with_fail_reason_keeps_its_projected_buckets():
-    """A second `:L findings` row for a lead used to replace its whole outcome
-    dict, discarding resolution buckets an earlier `:R` block had projected."""
+    """A second `:L findings` row for a lead keeps the buckets an earlier `:R` block projected."""
     body, warnings = parse_dense_companion(
         _fence(
             _LEAD_HEADER_FAIL + "\n"

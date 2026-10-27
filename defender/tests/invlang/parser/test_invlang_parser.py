@@ -9,18 +9,10 @@ import pytest
 from defender.skills.invlang.parser import (
     RowError,
     _resolution_record,
-    _split_cells,
     parse_dense_companion,
 )
 from defender.skills.invlang.validate import validate_companion
 from defender.tests.support.storage._alert_plant import plant_alert
-
-
-def test_split_cells_honors_quoted_pipe():
-    row = 'v-002|process|process:bash|bash[pid=42]|flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root'
-    cells = _split_cells(row)
-    assert len(cells) == 5
-    assert cells[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root'
 
 
 _CONFORMANT = """\
@@ -150,7 +142,7 @@ ceiling_rationale      "both gaps are corroboration, not the load-bearing check"
 
 
 def test_conclude_row_spanning_two_lines_warns_instead_of_truncating():
-    """A value written across two lines used to keep line one — opening quote and all — and drop the rest in SILENCE."""
+    """Both halves of the spilled value warn and reach the write gate; no line is dropped silently."""
     text = """\
 ```invlang
 :T conclude
@@ -172,7 +164,7 @@ detection_notes        "Rule joins on host.name only.
 
 
 def test_conclude_row_without_a_value_is_not_silently_dropped():
-    """`<key>` alone matches no `<key> <value>` row, and the projector used to `continue` past it."""
+    """`<key>` alone matches no `<key> <value>` row; it must warn, not vanish."""
     text = """\
 ```invlang
 :T conclude
@@ -483,7 +475,7 @@ summary                "x"
 
 
 def test_authz_slim_column_form_round_trips():
-    """Defender's documented column subset (the form taught in skills/invlang/SKILL.md) parses without warnings and both contracts land as distinct authorization_resolutions rows on the right leads."""
+    """The slim column form taught in `skills/invlang/SKILL.md` parses cleanly, each contract on its own lead."""
     body, warnings = parse_dense_companion(_AUTHZ_R_BLOCK_SLIM)
     assert warnings == []
 
@@ -692,7 +684,7 @@ def test_load_report_separates_skipped_files_from_partial_loads(tmp_path):
 
 
 def test_load_report_detail_names_the_case_behind_each_count(tmp_path):
-    """The counts say a case is missing;"""
+    """The counts say a case is missing; the detail lines say which one and why."""
     from defender.skills.invlang.corpus import load_corpus
 
     _, report = load_corpus(_mixed_corpus(tmp_path))

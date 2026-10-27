@@ -36,9 +36,8 @@ from defender.tests.support.learning.curation._curator_scene import (
 
 
 def _scene(tmp_path: Path):
-    """Both live corpora — this suite's subject is the curator's read confinement, which is
-    vacuous if the sibling root does not exist. (#1108 P4 U5: the retired `lessons-actor`/
-    `lessons-environment` are deleted; `lessons-questioner` is the sibling that remains.)"""
+    """Both live corpora: the curator's read confinement is vacuous if the sibling root
+    (`lessons-questioner`) does not exist."""
     return curator_scene(tmp_path, extra_corpora=("lessons-questioner",))
 
 
@@ -75,7 +74,7 @@ def _lesson(corpus: Path, stem: str, *, name_key: bool = True, body: str = "less
 
 
 def test_l1_body_default_strips_frontmatter(tmp_path):
-    """demand: L1 — ``lesson_read(path)`` (default part='body') returns the frontmatter-stripped body."""
+    """With `read_file` dropped, the curator still reads a lesson body through `lesson_read`."""
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l1", body="L1-BODY-SENTINEL")
     agent, logger = _build_curator_agent(scene.tmp)
@@ -89,7 +88,6 @@ def test_l1_body_default_strips_frontmatter(tmp_path):
 
 
 def test_l2_full_returns_whole_file(tmp_path):
-    """demand: L2 — ``part='full'`` returns the whole file including frontmatter, observably != body."""
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l2", body="L2-BODY")
     agent, logger = _build_curator_agent(scene.tmp)
@@ -105,7 +103,6 @@ def test_l2_full_returns_whole_file(tmp_path):
 
 
 def test_l4_part_enum_is_body_or_full(tmp_path):
-    """demand: L4 — ``part`` is a Literal enum {body, full}: the tool schema pins exactly those two."""
     scene = _scene(tmp_path)
     agent, logger = _build_curator_agent(scene.tmp)
     try:
@@ -116,8 +113,7 @@ def test_l4_part_enum_is_body_or_full(tmp_path):
 
 
 def test_l5_non_fenced_file_degrades_to_whole_text(tmp_path):
-    """demand: L5 — a non-fenced file (FrontmatterError) degrades to whole text under body (no raise);
-    part='full' returns whole text unconditionally."""
+    """A non-fenced file degrades to its whole text under `body` instead of raising."""
     scene = _scene(tmp_path)
     (scene.corpus / "l5.md").write_text("PLAIN TEXT NO FENCE\nsecond line\n")
     lp = "defender/lessons/l5.md"
@@ -153,8 +149,8 @@ def test_l6_pattern_grep_folds_the_selected_text(tmp_path):
 
 
 def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
-    """demand: L7 — a path outside {run_dir, defender_dir} is denied with ModelRetry (no existence
-    oracle, no leaked bytes); positive control: an in-corpus path returns its content."""
+    """Denied with `ModelRetry` and no leaked bytes; positive control: an in-corpus path returns
+    its content."""
     scene = _scene(tmp_path)
     outside = scene.tmp / "outside.md"
     outside.write_text("OUTSIDE-SECRET-CONTENT\n")
@@ -199,15 +195,13 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     finally:
         logger.close()
     assert "L11-RAW-BODY" in out
-    # #875: the frame's salt is minted at wrap time, so it is READ off the return, never
-    # predicted from deps — which no longer carry one.
+    # The frame's salt is minted at wrap time, so it is read off the return, never predicted (#875).
     salt = frame_salt_of(out, "untrusted")
     assert out.startswith(f"<run-{salt}-untrusted>\n")
     assert out.endswith(f"\n</run-{salt}-untrusted>")
 
 
 def test_t2_corpus_author_def_drops_read_adds_lesson_read(tmp_path):
-    """demand: T2 — ``CORPUS_AUTHOR_DEF.tools`` has lesson_read=True AND NOT read=True."""
     assert CORPUS_AUTHOR_DEF.tools.lesson_read is True
     assert CORPUS_AUTHOR_DEF.tools.read is False
 
@@ -220,8 +214,7 @@ def test_t3_registers_lesson_read_not_read_file(tmp_path):
         assert "read_file" not in tools
     finally:
         logger.close()
-    # The corpus author is the one role granting `lesson_read` (#1166 retired the repair spawn,
-    # the other).
+    # The corpus author is the one role granted `lesson_read`.
     lesson_read_roles = {AgentRole.CORPUS_AUTHOR}
     for role, defn in AGENTS.items():
         assert defn.tools.lesson_read is (role in lesson_read_roles)
@@ -231,19 +224,6 @@ def test_t3_registers_lesson_read_not_read_file(tmp_path):
     assert "read_file" in ctrl_tools
     assert "lesson_read" not in ctrl_tools
     assert "pattern" in ctrl_tools["read_file"].tool_def.parameters_json_schema["properties"]
-
-
-def test_t4_curator_still_reads_a_body_after_read_dropped(tmp_path):
-    """demand: T4 — the curator can still read a lesson body after ``read=True`` was dropped:
-    ``lesson_read`` discharges the removed read_file's read capability."""
-    scene = _scene(tmp_path)
-    lp = _lesson(scene.corpus, "t4", body="T4-SURVIVES")
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
-        out = _read(agent, _deps(scene), path=lp)
-    finally:
-        logger.close()
-    assert "T4-SURVIVES" in out
 
 
 def _bare_agent():
