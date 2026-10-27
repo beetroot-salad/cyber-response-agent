@@ -1,5 +1,4 @@
-"""The open-trees plumbing for #1134 step 6's tests, and the scene its two new files share. It
-defines no tests."""
+"""The open-trees plumbing for #1134's lead-author tests, and the scene those files share."""
 from __future__ import annotations
 
 import dataclasses
@@ -40,13 +39,6 @@ def lane_tree_for(repo: Path) -> TreeForFn:
     return lead_trees(LoopPaths(repo_root=repo, state_dir=repo / "defender" / "learning")).tree_for
 
 
-def lane_fields(paths: LoopPaths) -> dict[str, Any]:
-    """`LeadAuthorDeps`' two step-6 fields over `paths`, for a test that builds the deps by
-    hand: `skills` (the held `skills/` mount) and `tree_for` (the same trees' lookup)."""
-    trees = lead_trees(paths)
-    return {"skills": trees.mount(paths.skills_dir), "tree_for": trees.tree_for}
-
-
 def lead_deps(paths: LoopPaths, *, state: Any = None, **replaced: Any) -> Any:
     """`build_lead_author_deps(paths, trees=<the lead drain's trees over paths>)`, with the
     `replaced` fields swapped in (`dataclasses.replace`). The deps hold the trees' `Held` and
@@ -75,8 +67,8 @@ def held_skills(root: Path) -> Held:
 
 def drafts_under(catalog: Path) -> dict[str, Any]:
     """`skills=` / `where=` for the draft writer over a test catalog at `<skills>/gather/queries`
-    (where a lane's catalog sits, O5.4): its skills root, held, and that root's spelling. The
-    drafts land at `catalog/<sys>/_draft/` as they did when the writer took `catalog_dir=`."""
+    (where a lane's catalog sits): its skills root, held, and that root's spelling. The drafts
+    land at `catalog/<sys>/_draft/`."""
     root = catalog.parents[1]
     return {"skills": held_skills(root), "where": root}
 
@@ -89,24 +81,14 @@ def skills_view(root: Path) -> Bound:
 
 def repo_skills() -> dict[str, Any]:
     """`skills=` / `where=` for a reader that needs a real-shaped skills tree it does not write:
-    the committed fixture tenant's `agent/skills` (made-up content), spelled as that folder.
-
-    #1108 P4 O1/O11: it was the view of this checkout's `PATHS.skills_dir`; the product tree
-    holds no tenant skills or catalog after P4, so product tests read the fixture instead."""
+    the committed fixture tenant's `agent/skills` (made-up content), spelled as that folder: the
+    product tree holds no tenant skills or catalog."""
     root = FIXTURE_AGENT / "skills"
     return {"skills": skills_view(root), "where": root}
 
 
-@contextmanager
-def opened(paths: LoopPaths, label: str = LEAD_AUTHOR_DRAIN_LABEL) -> Iterator[DrainTrees]:
-    """`open_drain_trees(paths, label)` scoped to the `with`: the form the new tests use when
-    they look at the process's descriptors afterwards."""
-    with open_drain_trees(paths, label) as trees:
-        yield trees
-
-
 # ---------------------------------------------------------------------------------------
-# The scene the two new step-6 files share
+# The scene the lead-author files share
 # ---------------------------------------------------------------------------------------
 
 #: What every link target, hard link's other name and moved folder carries (and every plain
@@ -260,13 +242,13 @@ def errors(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 # ---------------------------------------------------------------------------------------
-# #1108 P4 (O7, OD6): the same plumbing rooted at a tenant repo / batch draft
+# The same plumbing rooted at a tenant repo / batch draft
 # ---------------------------------------------------------------------------------------
 #
-# After P4 the lead lane's `skills/` mount is `<draft>/agent/skills` (a P3 batch draft: the tenant
-# repo's `agent/` at the batch base, with no `.git`), its rules take that root and repo-relative
-# `agent/skills/...` names, and the adapters stay in the product checkout (#1172). The legacy
-# helpers above stay as they are for the suites not yet moved; these are their P4 siblings.
+# The lead lane's `skills/` mount is `<draft>/agent/skills` (a batch draft: the tenant repo's
+# `agent/` at the batch base, with no `.git`); its rules take that root and repo-relative
+# `agent/skills/...` names, and the adapters stay in the product checkout. The helpers above
+# serve the suites that still use a product-shaped tree (`defender/skills`).
 
 
 def draft_tree_for(root: Path) -> TreeForFn:
@@ -277,7 +259,7 @@ def draft_tree_for(root: Path) -> TreeForFn:
 
 def draft_lead_deps(lane: Any, *, state: Any = None, **replaced: Any) -> Any:
     """`build_lead_author_deps(lane.paths, trees=<the draft's skills mount>, batch=lane.batch)`
-    over a `_curator1134.DraftLane` (ASSUMED SEAM `batch=`), `replaced` swapped in."""
+    over a `_curator1134.DraftLane`, `replaced` swapped in."""
     from defender.learning.leads import lead_author
     from defender.tests.support.learning.curation._curator1134 import open_state
 
@@ -313,9 +295,9 @@ class DraftScene(Scene):
 
 @contextmanager
 def draft_scene_over(tmp_path: Path, product: Path) -> Iterator[DraftScene]:
-    """`scene_over` after P4: `product`'s `defender/skills` tree (a `seed_tree` fixture) moved
-    to a tenant-shaped root `<tmp>/tenant/agent/skills`, committed when `product` has commits
-    (the batch base the rules compare against; a P3 draft is this tree without `.git`), and the
+    """`scene_over` at a tenant-shaped root: `product`'s `defender/skills` tree (a `seed_tree`
+    fixture) copied to `<tmp>/tenant/agent/skills`, committed when `product` has commits (the
+    batch base the rules compare against; a batch draft is this tree without `.git`), and the
     lane's one `skills/` mount held over it. `product` keeps the adapters."""
     from defender.tests.support.learning.curation._drain719 import git
 
@@ -347,10 +329,9 @@ def draft_scene_over(tmp_path: Path, product: Path) -> Iterator[DraftScene]:
 
 
 def product_lane(tmp_path: Path, product: Path) -> Any:
-    """A lead lane over `product`'s seeded `defender/skills` (a `seed_tree` fixture) after P4:
-    that tree published as the tenant's `agent/skills` (one export commit) under a real P3 batch
-    with the lead lane `skills`; the product checkout keeps the adapters and loses the corpus
-    (O1, #1172)."""
+    """A lead lane over `product`'s seeded `defender/skills` (a `seed_tree` fixture): that tree
+    published as the tenant's `agent/skills` (one export commit) under a real batch with the lead
+    lane `skills`; the product checkout keeps the adapters and loses the corpus."""
     import subprocess
 
     from defender.tests.support.learning.curation import _curator1134 as C
@@ -366,7 +347,7 @@ def product_lane(tmp_path: Path, product: Path) -> Any:
 @contextmanager
 def lane_scene(tmp_path: Path, lane: Any) -> Iterator[DraftScene]:
     """A `DraftScene` over a `_curator1134.DraftLane`'s draft: `repo` is the draft's root (it
-    holds `agent/skills`), `paths` the lane's (product-rooted, OD16), the lane's one `skills/`
+    holds `agent/skills`), `paths` the lane's (product-rooted), the lane's one `skills/`
     mount held for the `with`. What landed is the lane's to read (`lane.landed()`)."""
     outside = tmp_path / "outside"
     outside.mkdir(exist_ok=True)

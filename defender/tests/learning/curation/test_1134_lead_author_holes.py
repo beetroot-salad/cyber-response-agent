@@ -71,31 +71,10 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
-# #1108 P4 (O7, OD6): the held-read cases run over a tenant-shaped root (`draft_scene_over`: the
-# lane's `skills/` mount at `<root>/agent/skills`, names `agent/skills/...`, adapters in the product
-# checkout), and the reducer surface is the tenant's pitfalls add-on (`_declared870.REDUCER_REL`, the
-# test's own oracle — not the production constant, which still names the product page). These
-# shadow the handle file's product spellings (S-D's file, imported above, not edited here).
-from defender.systems import _scaffold_rules  # noqa: E402
-from defender import _git  # noqa: E402
+# The held-read cases run over a tenant-shaped root (`draft_scene_over`: the `skills/` mount at
+# `<root>/agent/skills`, adapters in the product checkout); the reducer surface is the tenant's
+# pitfalls add-on (`_declared870.REDUCER_REL`, the test's own oracle).
 from defender.tests.support.learning.core._declared870 import REDUCER_REL as ADDON_REL  # noqa: E402
-
-REDUCER_NAME = ADDON_REL.removeprefix("agent/skills/")  # noqa: F811
-
-
-def resolver(s: Scene) -> _scaffold_rules.VerbResolver:  # noqa: F811
-    """The adapters' verbs, read from the product checkout (#1172), never the tenant root."""
-    product = getattr(s, "product", None)
-    return _scaffold_rules.VerbResolver((product if product is not None else s.repo) / "defender")
-
-
-def _commit_reducer(s: Scene) -> None:  # noqa: F811
-    """The add-on committed at the base with `REDUCER_TEXT`, so a draft holding the same bytes is
-    an unchanged document."""
-    assert s.rel(REDUCER_NAME) == ADDON_REL
-    write(s.at(REDUCER_NAME), REDUCER_TEXT)
-    _git.git(["add", "-A"], cwd=s.repo)
-    _git.git(["commit", "-q", "-m", "reducer surface"], cwd=s.repo)
 
 
 @pytest.fixture
@@ -116,11 +95,10 @@ def plain_template(tid: str, status: str = "established", *, covers=()) -> str:
 
 
 class SwapsAfterKind(RealOs):
-    """The real `os`, handed to `DrainTrees.open` as `os_`, with a race at one entry: the plain
-    file at `victim` is replaced by a symlink to `target` the moment a no-follow stat of it
-    answers, or at its first open if that comes first. `entry_kind` asks neither (it judges the
-    entry from its parent's listing), so the swap lands after it answered, at the read's open. With `swap=False` it is the real `os` (the control). `swapped` says the
-    race fired (non-vacuity)."""
+    """The real `os` as `DrainTrees.open`'s `os_`, racing one entry: the plain file at `victim`
+    becomes a symlink to `target` once a no-follow stat of it answers, or at its first open.
+    `entry_kind` asks neither (it judges from the parent's listing), so the swap lands after it
+    answered, at the read's open. `swap=False` is the control; `swapped` says the race fired."""
 
     def __init__(self, victim: Path, target: Path, *, swap: bool = True) -> None:
         self.victim = os.path.join(os.path.realpath(victim.parent), victim.name)
@@ -281,15 +259,15 @@ def _moved(moved: Path, name: str, site: str) -> Path:
 
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, caplog):
-    # #1108 P4 (O7, OD6, OD16): one claim of a real batch over its draft (`product_lane`); the
-    # handoff names the template repo-relative, `agent/skills/...` (`DraftScene.rel`).
+    # One claim of a real batch over its draft (`product_lane`); the handoff names the template
+    # `agent/skills/...` (`DraftScene.rel`).
     lane = product_lane(tmp_path, _worktree(tmp_path))
     run_dir = _run_dir()
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
     spawn = LeadAuthorSpawn(rc=1)
     with lane_scene(tmp_path, lane) as s:
         # Untracked, so only a catalog loader reaches it: the run's `git status` re-hashes a
-        # TRACKED file behind a linked holding folder, which is git's read (N-a), not the lane's.
+        # TRACKED file behind a linked holding folder, which is git's read, not the lane's.
         write(s.at(TEMPLATE_NAME), marked_template("wazuh.probe"))
         template = s.at(TEMPLATE_NAME)
         if site is not None:
@@ -606,13 +584,7 @@ FOLLOWS = [
                s.repo, ADDON_REL, tree_for=tf),
            lane=lambda got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
-    # The per-path composite gates: each must hand its parts the `tree_for` it was given
-    # (adversary E1). The two whole-tree verifiers over git status (`_verify_skills_state`,
-    # `_verify_pitfalls_state` with a `ClaimGit` and a git-status stray baseline) were deleted
-    # (#1108 P4 OD12 i): after P4 the claim is the batch's ChangeSet, derived from the draft
-    # no-follow by P3 (tests/tenancy/tenant_1108_delivery/test_changes.py::
-    # test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole), and the gates'
-    # verdicts over a draft are driven end to end in test_lead_author.py / test_pitfalls_curator.py.
+    # The per-path composite gates: each must hand its parts the `tree_for` it was given.
     Follow("_skills_rule",
            lambda s: place(s, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain"),
            lambda c: _put(c, TEMPLATE_NAME, BAD_TEMPLATE),
@@ -716,8 +688,8 @@ def test_a_refused_listing_warns_once_and_discovers_nothing(skills: Path, route:
     assert _warnings(caplog) == [f"warn: skipping {skills} ({reason})"]
 
 
-#: Each folder below the mount is listed on its own (#1134 addendum 2, B2): a fault there costs
-#: that folder, never the whole listing (v2's walk refused everything on an EIO below the top).
+#: Each folder below the mount is listed on its own: a fault there costs that folder, never the
+#: whole listing.
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
 @pytest.mark.parametrize("err", [errno.EIO, errno.EACCES], ids=["EIO", "EACCES"])
 @pytest.mark.parametrize("deny", ["elastic", "elastic/_draft"])
@@ -766,7 +738,6 @@ def test_a_folder_swapped_between_listings_is_refused_or_gone_and_never_listed_t
 
 
 def test_an_absent_skills_folder_discovers_nothing_silently(tmp_path: Path, caplog):
-    """A view whose folder is absent: `[]`, no warning."""
     root = tmp_path / "repo" / "defender" / "skills"
     root.mkdir(parents=True)
     with DrainTrees.open((root,)) as trees:
@@ -806,14 +777,14 @@ def test_discover_never_enters_or_returns_a_non_plain_entry(
     assert _warnings(caplog) == ([] if site == "ghost" else [GHOST])
 
 
-#: #1108 P4 (OD6): the lane's catalog under a tenant-shaped root, spelled by the test (the oracle),
-#: never read off the production constant: `agent/skills/gather/queries`.
+#: The lane's catalog under a tenant-shaped root, spelled by the test (the oracle), never read off
+#: the production constant.
 TENANT_CATALOG_REL = "agent/skills/gather/queries"
 
 
 def _catalog_repo(tmp_path: Path) -> Path:
     """A stranded draft under `elastic` whose identity was taken over this batch, and another
-    system (`wazuh`) holding a draft too, in a tenant-shaped root (`agent/skills`, OD6)."""
+    system (`wazuh`) holding a draft too, in a tenant-shaped root (`agent/skills`)."""
     repo = tmp_path / "repo"
     catalog = repo / TENANT_CATALOG_REL
     write(catalog / "elastic" / "_draft" / "d1.md",
@@ -861,7 +832,7 @@ def test_half_promote_control_reads_every_system(tmp_path: Path, caplog):
 def test_half_promote_over_a_refused_catalog_walk_warns_once_and_refuses_nothing(
         tmp_path: Path, caplog):
     """The catalog folder itself refused (EIO reopening it): one warning naming the catalog,
-    nothing refused (a refused folder reads as a missing one, O5.5)."""
+    nothing refused (a refused folder reads as a missing one)."""
     repo = _catalog_repo(tmp_path)
     refuser = RefusesFolder(repo / TENANT_CATALOG_REL, "reopen", errno.EIO)
     assert _half_promote_under(repo, {"elastic.taken"}, refuser) == ("returned", None)
