@@ -207,14 +207,11 @@ def session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     caller that still depends on both.
     """
     ss = store_mod()
-    store = ss.open_store_for_read(ss.resolve_store_path(_run_handle_1165(Path(run_dir))))
-    try:
+    with ss.open_store_for_read(ss.resolve_store_path(_run_handle_1165(Path(run_dir)))) as store:
         session_id = ss.resolve_session_id(_run_handle_1165(Path(run_dir))) or ss.main_session_id(store)
         messages = ss.hydrate(store, session_id, role="analysis")
         coords = ss.hydrate(store, session_id, role="actor")
         return list(zip(messages, [c["coord"] for c in coords], strict=True))
-    finally:
-        store.connection.close()
 
 
 def raised_by(fn: Any, *args: Any, **kwargs: Any) -> BaseException | None:
@@ -241,20 +238,20 @@ _READBACK = """
 import json, sys
 from defender.records import session_store as ss
 
-store = ss.open_store_for_read(sys.argv[1])
 out = {}
-for session_id in sys.argv[2:]:
-    head = store.connection.execute(
-        "SELECT head_message_id FROM session WHERE session_id = ?", (session_id,)).fetchone()
-    log = store.connection.execute(
-        "SELECT id, session_id, from_message_id, to_message_id, attached_to_message_id, "
-        "reason FROM session_head_log WHERE session_id = ? ORDER BY id", (session_id,)
-    ).fetchall()
-    out[session_id] = {
-        "head": head[0] if head is not None else None,
-        "path": ss.path_row_ids(store, session_id),
-        "log": [list(r) for r in log],
-    }
+with ss.open_store_for_read(sys.argv[1]) as store:
+    for session_id in sys.argv[2:]:
+        head = store.connection.execute(
+            "SELECT head_message_id FROM session WHERE session_id = ?", (session_id,)).fetchone()
+        log = store.connection.execute(
+            "SELECT id, session_id, from_message_id, to_message_id, attached_to_message_id, "
+            "reason FROM session_head_log WHERE session_id = ? ORDER BY id", (session_id,)
+        ).fetchall()
+        out[session_id] = {
+            "head": head[0] if head is not None else None,
+            "path": ss.path_row_ids(store, session_id),
+            "log": [list(r) for r in log],
+        }
 print(json.dumps(out))
 """
 

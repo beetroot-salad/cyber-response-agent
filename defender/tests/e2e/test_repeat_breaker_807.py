@@ -189,7 +189,7 @@ def _run_inherited(
     # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN the
     # pre-#1255 shape branched at. The source is hand-planted (`planted_source`, not N4's).
     spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
-    store.close()
+    store.connection.close()
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     sibling = root / "defender-runs" / fixture_uuid("run-sibling-807")
     RunPaths(sibling).gather_raw.mkdir(parents=True)

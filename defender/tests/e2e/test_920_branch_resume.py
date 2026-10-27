@@ -31,6 +31,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     _split_at_fences,
     drive,
 )
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -105,7 +106,7 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
     assert source.summary_dict.get("truncated_by") is None, (
         f"the SOURCE run did not finish cleanly ({source.summary_dict}); nothing below is "
         "about branching")
-    store = sink[0]
+    store = reread(sink[0])
     source_session = ss.main_session_id(store)
     spec, prefix_ids = _spec(source, store)
 
@@ -142,7 +143,7 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
     # `ForkSnapshot.restore_files` is the other half.
     sink: list = []
     source = _source_run(tmp_path, sink, docs=NO_DOCS)
-    spec, _prefix_ids = _spec(source, sink[0])
+    spec, _prefix_ids = _spec(source, reread(sink[0]))
     inherited = RunPaths(source.run_dir).investigation.read_text(encoding="utf-8")
     landed = inherited.count("```invlang")
     assert landed > FENCES, (
@@ -182,7 +183,7 @@ def test_a_resumed_run_does_not_orient_again(tmp_path):
     assert source.has_sidecar(L3), "the source run claimed no l-00c leads row"
     assert source.rows_for(L3), "the source run captured no query rows under l-00c"
 
-    spec, _prefix_ids = _spec(source, sink[0])
+    spec, _prefix_ids = _spec(source, reread(sink[0]))
     sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
     rec = VerbRecorder()
     sibling = S.Recorder([Turn(text="Resumed and stopping.")])
@@ -263,7 +264,7 @@ def test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowled
 
     sink: list = []
     source = _source_run(tmp_path, sink, docs=NO_DOCS)
-    spec, _prefix_ids = _spec(source, sink[0])
+    spec, _prefix_ids = _spec(source, reread(sink[0]))
     inherited_word = "dev.dana"
     assert inherited_word in RunPaths(source.run_dir).investigation.read_text(encoding="utf-8"), (
         f"the SOURCE run wrote no document naming {inherited_word!r} ({source.summary_dict}); "

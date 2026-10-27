@@ -34,6 +34,7 @@ from defender.tests.e2e._replay_harness import (
     load_turns_from_trace,
     materialize,
 )
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -70,7 +71,7 @@ def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
     opened: list = []
     drive(run_dir, run_id=run_id, main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
-    return run_dir, opened[0], replay
+    return run_dir, reread(opened[0]), replay
 
 
 def _trace_events(run_dir: Path) -> list[dict]:
@@ -271,7 +272,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         Path(body["store_path"]).unlink()
         for suffix in ("-wal", "-shm"):
             Path(str(body["store_path"]) + suffix).unlink(missing_ok=True)
-        store.close()
+        store.connection.close()
 
     # the standalone re-render really exits non-zero — the real script, the real argv
     # (`--tenant T <run_id>`, #1105 PR 2 declared change 7), the real broken input
@@ -314,7 +315,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
           store_factory=store_factory(tmp_path, sink=opened))
 
     bodies = "".join(row[0] for row in
-                     sql(opened[0], "SELECT payload FROM message_payload"))
+                     sql(reread(opened[0]), "SELECT payload FROM message_payload"))
     assert "window.__pwned" in bodies, (
         "the crafted payload never reached the store — the fixture, not the renderer, "
         "would be what this test measured")

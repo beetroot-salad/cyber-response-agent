@@ -33,6 +33,7 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     wire_text,
 )
 from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -169,7 +170,7 @@ def test_a_substituted_calls_metadata_survives_persist_and_hydrate_through_the_s
     _substituting_run(tmp_path, turns=2, stores=stores)
     assert stores, "no session store was opened, so nothing was persisted to read back"
 
-    payloads = [row[0] for row in sql(stores[-1], "SELECT payload FROM message_payload")]
+    payloads = [row[0] for row in sql(reread(stores[-1]), "SELECT payload FROM message_payload")]
     assert payloads, "the store holds no message payloads"
     carriers = [p for p in payloads if _is_json(p) and _carries_view(json.loads(p), view)]
     assert carriers, (

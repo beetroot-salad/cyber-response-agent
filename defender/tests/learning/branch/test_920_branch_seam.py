@@ -162,16 +162,16 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
     factory = branch.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-001"
     sibling_dir.mkdir(parents=True, exist_ok=True)
-    handle = factory("a-brand-new-case-id", sibling_dir)
-
-    assert Path(handle.path) == ss.resolve_store_path(_run_handle_1165(run_dir)), (
-        f"the sibling opened {handle.path}, not the source run's own store "
-        f"({ss.resolve_store_path(_run_handle_1165(run_dir))}) — its fork would inherit nothing")
-    assert ss.main_session_id(handle) == session_id, (
-        "the source run's own main session is not reachable through the handle the factory "
-        "returned, so there is no lineage to branch from")
-    assert ss.path_row_ids(handle, session_id) == path_ids, (
-        "the prefix rows are not visible through the sibling's handle")
+    with factory("a-brand-new-case-id", sibling_dir) as handle:
+        assert Path(handle.path) == ss.resolve_store_path(_run_handle_1165(run_dir)), (
+            f"the sibling opened {handle.path}, not the source run's own store "
+            f"({ss.resolve_store_path(_run_handle_1165(run_dir))}) — its fork would inherit "
+            "nothing")
+        assert ss.main_session_id(handle) == session_id, (
+            "the source run's own main session is not reachable through the handle the factory "
+            "returned, so there is no lineage to branch from")
+        assert ss.path_row_ids(handle, session_id) == path_ids, (
+            "the prefix rows are not visible through the sibling's handle")
 
 
 def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
@@ -185,9 +185,10 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
     assert all(p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for p in params), (
         f"the driver calls `factory(case_id, run_dir)` positionally: {params}")
 
-    first = factory("case-one", tmp_path / "one")
-    second = factory("case-two", tmp_path / "two")
-    assert Path(first.path) == Path(second.path), (
+    with factory("case-one", tmp_path / "one") as first, \
+            factory("case-two", tmp_path / "two") as second:
+        paths = Path(first.path), Path(second.path)
+    assert paths[0] == paths[1], (
         "the factory's answer moved with its arguments; a sibling's own case id and run dir "
         "must not choose which database its prefix lives in")
 
