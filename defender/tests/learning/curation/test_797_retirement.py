@@ -52,14 +52,12 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     )
     assert result.cause == CAUSE_REVIEW_INCOMPLETE
     assert result.failure_kind == STAGE_ERROR, (
-        f"the override names {result.failure_kind!r} — a gate with no reviewer is the "
-        "machinery failing, not a finding about the evidence"
+        f"the override names {result.failure_kind!r}, not a stage error"
     )
 
     fm, _raw, _body = split_frontmatter((run_dir / "report.md").read_text(encoding="utf-8"))
     assert fm["disposition"] == "unresolved", (
-        f"report.md committed {fm['disposition']!r} — the drafted confident disposition "
-        "reached disk unreviewed"
+        f"report.md committed {fm['disposition']!r} unreviewed"
     )
     assert fm["outcome"] == FORCED_INCONCLUSIVE
     assert fm["failure_kind"] == STAGE_ERROR
@@ -67,8 +65,7 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     record = json.loads(Path(result.record_path).read_text(encoding="utf-8"))
     assert record["failure_kind"] == STAGE_ERROR
     assert "not bound" in record["detail"], (
-        "the review record does not say WHY the review could not run — an operator reading "
-        f"the run gets an anonymous stage error: {record['detail']!r}"
+        f"the review record does not say why the review could not run: {record['detail']!r}"
     )
 
     bypass_deps, bypass_dir = _main_deps(tmp_path / "bypass")
@@ -77,8 +74,7 @@ def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     assert bypass.outcome == FORCED_INCONCLUSIVE
     assert bypass.cause == CAUSE_REVIEW_INCOMPLETE
     assert bypass.failure_kind == STAGE_ERROR, (
-        "an unbound bundle on an inconclusive close is the machinery failing, exactly as it "
-        "is on a confident close"
+        "an inconclusive close with no reviewer is not a stage error"
     )
     bypass_fm, _r, _b = split_frontmatter(
         (bypass_dir / "report.md").read_text(encoding="utf-8")

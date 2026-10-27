@@ -16,6 +16,18 @@ def _committing(**kw):
     return S.FakeCurator(writes={"l1.md": S.lesson("f1")}, **kw)
 
 
+def _assert_the_control_commits(tmp_path) -> None:
+    """The control: an honest result over the same tree commits the one changed lesson."""
+    control = S.build_draft_scene(
+        tmp_path / "control",
+        rows=[S.finding_row("f1", run_id="f1")],
+        curator=_committing(),
+    )
+    assert control.run() == 0
+    assert control.head_files() == [LESSON]
+    assert control.category_of("f1") == "consumed_committed"
+
+
 def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the_commit_773(
     tmp_path,
 ):
@@ -59,14 +71,7 @@ def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
     assert not (sc.corpus / "attacker-chosen.md").exists()
     assert not (tmp_path / "etc").exists()
 
-    # Control: an honest result over the same tree commits the one changed lesson.
-    control = S.build_draft_scene(
-        tmp_path / "control",
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-    )
-    assert control.run() == 0
-    assert control.head_files() == [LESSON]
+    _assert_the_control_commits(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -117,14 +122,7 @@ def test_author_result_retired_observability_gaps_with_row_shaped_content_is_ref
     assert sc.head_files() == []
     assert not (tmp_path / "etc").exists()
 
-    control = S.build_draft_scene(
-        tmp_path / "control",
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=_committing(),
-    )
-    assert control.run() == 0
-    assert control.head_files() == [LESSON]
-    assert control.category_of("f1") == "consumed_committed"
+    _assert_the_control_commits(tmp_path)
 
 
 def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
@@ -172,13 +170,7 @@ def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
     )
     assert sc.run() == 2
 
-    control = S.build_draft_scene(
-        tmp_path / "control",
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-    )
-    assert control.run() == 0
-    assert control.head_files() == [LESSON]
+    _assert_the_control_commits(tmp_path)
 
 
 def test_changed_lesson_files_citation_list_is_empty_773(tmp_path):

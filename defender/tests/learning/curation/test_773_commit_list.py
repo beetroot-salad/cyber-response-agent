@@ -182,7 +182,7 @@ def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
         assert sc.head_files() == [LESSON]
         assert sc.category_of("f1") == "consumed_committed"
         return
-    assert rc == 0, "a refused-only tick is routed, not a stage failure (OD19)"
+    assert rc == 0, "a refused-only tick failed the stage"
     assert sc.commit_count() == 1
     assert sc.head_files() == []
     assert sc.draft_drift() == []
@@ -230,7 +230,7 @@ def test_author_result_committed_id_is_foreign_to_this_batch_773(tmp_path):
     assert sc.head_files() == []
 
 
-def test_git_status_reports_a_rename_pair_or_a_mode_or_name_only_change_773(tmp_path):
+def test_a_rename_lands_as_the_new_path_and_the_old_path_deleted_773(tmp_path):
     """A rename lands as the new path plus the old path deleted."""
     def rename_it(rows, batch_id, cfg):
         (cfg.corpus_dir / "old.md").rename(cfg.corpus_dir / "new.md")

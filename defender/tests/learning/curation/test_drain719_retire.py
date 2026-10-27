@@ -10,7 +10,7 @@ import pytest
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # through the harness's guarded import
+from defender.learning.author import drain
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core.state import FINDINGS
 from defender.tests.support.learning.core import _state1135
@@ -97,9 +97,7 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     assert survivors["a/2"] == outsiders[1]
 
 
-def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
-    tmp_path: Path, monkeypatch
-):
+def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(tmp_path: Path):
     """The retire step's own write failing is systemic: it propagates, and the queue survives."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")

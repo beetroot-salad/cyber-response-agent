@@ -9,7 +9,7 @@ from pathlib import Path
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # noqa: F401 — the target; the shim keeps collection alive
+from defender.learning.author import drain
 from defender._git import GitError  # type: ignore[import-not-found]
 
 
@@ -40,10 +40,7 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
     tick = h.Background(lambda: drain.run_batch(cfg=cfg))
     try:
         tick._thread.start()
-        assert tick.finished_within(20), (
-            "the retire seam is still waiting on the append lock — it is holding the repo "
-            "lock, and therefore every sibling channel's tick, with no deadline"
-        )
+        assert tick.finished_within(20), "the retire seam waited on the append lock with no deadline"
     finally:
         appender.__exit__()
 
@@ -80,9 +77,6 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
     assert not stray.exists(), "the out-of-corpus write survived the faulted tick"
     assert h.attempts_of(paths, ch, "a/0") == 1
 
-    assert drain.run_batch(cfg=cfg) == 2, (
-        "the second tick authored — the stray was absorbed into the new baseline and the "
-        "out-of-scope-write guard is now permanently suppressed for this worktree"
-    )
+    assert drain.run_batch(cfg=cfg) == 2, "the second tick authored: the stray was absorbed into the baseline"
     assert h.attempts_of(paths, ch, "a/0") == 2
     assert not stray.exists()

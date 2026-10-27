@@ -10,7 +10,7 @@ from pydantic_ai.exceptions import ModelRetry
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # through the harness's guarded import
+from defender.learning.author import drain
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core.config import FatalConfigError, StageAbort  # type: ignore[import-not-found]
 from defender.learning.core.state import FINDINGS, PITFALLS, StateRefused  # type: ignore[import-not-found]
@@ -71,20 +71,15 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
 
         latest = records[-1]
         assert latest["fault_class"] == "FileNotFoundError", (
-            "the record does not name the fault class, so an operator cannot tell this failure "
-            "from any other — a generic 'batch failed' line would satisfy a weaker assertion"
+            "the stuck record does not name the fault class"
         )
         assert sorted(latest["row_ids"]) == ["a/0", "a/1"], "the stalled rows are not named"
-        assert latest["consecutive_ticks"] == tick, (
-            "the record carries no rising count, so a row stuck for three ticks is "
-            "indistinguishable from one that failed once"
-        )
+        assert latest["consecutive_ticks"] == tick, "the stuck record's tick count does not rise"
 
-    assert h.pending_by_id(paths, ch).keys() == {"a/0", "a/1"}, "the rows are stuck, as decision 8 wants"
+    assert h.pending_by_id(paths, ch).keys() == {"a/0", "a/1"}, "the stuck rows left the queue"
     assert h.graveyard(paths, ch) == []
     assert not ((location_path(paths.state_root) / FINDINGS.queue).parent / "held_report.log").exists(), (
-        "the signal must exist on a channel that has no held_report — D7 keeps that one "
-        "lessons-local, so it cannot be the stuck-row surface"
+        "the stuck rows were reported through a held_report.log"
     )
 
     member = h.cfg_for(
@@ -96,13 +91,10 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     before = len(h.stuck_records(paths, ch))
     assert drain.run_batch(cfg=member) == 2
     assert len(h.graveyard(paths, ch)) == 2, "the member fault retired the rows"
-    assert len(h.stuck_records(paths, ch)) == before, (
-        "a fault that RETIRED wrote a stuck-row record — the signal is firing on every failure "
-        "rather than on the non-retiring ones, which makes it noise"
-    )
+    assert len(h.stuck_records(paths, ch)) == before, "a fault that retired its rows wrote a stuck record"
 
 
-def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(tmp_path: Path):
+def test_a_retire_set_member_retires_the_row_and_a_non_member_leaves_it_queued(tmp_path: Path):
     """On every author channel a `RETIRE_SET` member retires the row and a non-member propagates
     leaving it queued, so a channel naming fewer classes fails here."""
     paths = h.make_paths(tmp_path)
@@ -110,7 +102,7 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
 
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(name)
-        rid = "run-W/0" if name == "findings" else "w/0"
+        rid = "run-W/0"
 
         h.seed(paths, ch, [h.row_for(name, rid)])
         member = h.cfg_for(

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # through the harness's guarded import
+from defender.learning.author import drain
 from defender.learning.core.state import (
     AUTHOR_DRAIN_LOCK, FINDINGS, REPO_LOCK, TRY_ONCE, LearningState,
 )

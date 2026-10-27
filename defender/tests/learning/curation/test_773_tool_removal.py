@@ -94,9 +94,7 @@ def test_a_questioner_tick_whose_curator_committed_nothing_773(tmp_path):
     assert sc.category_of("w1") == "consumed_skip"
 
 
-def test_the_questioner_tick_skips_only_the_verdict_stage_not_the_surrounding_ordering_773(
-    tmp_path,
-):
+def test_the_questioner_channel_does_not_consume_a_committed_row_no_file_cites_773(tmp_path):
     """On the questioner channel too, a row claimed committed that no file cites is not
     consumed, while the cited one lands."""
     sc = S.build_questioner_draft_scene(

@@ -10,39 +10,18 @@ from dataclasses import replace
 
 import pytest
 
-from defender.learning.core.state import FINDINGS, REPO_LOCK, TRY_ONCE
+from defender.learning.core.state import REPO_LOCK, TRY_ONCE
 
-from defender.tests.support.learning.curation import _curator1134 as C
-
-
-# The lessons author over a batch's git-free draft; its config (`_curator1134.draft_author_cfg`)
-# is built on first use of `cfg`.
-class _DraftRepo:
-    def __init__(self, lane):
-        from defender.learning.author.lessons import run as author_mod
-
-        self.lane = lane
-        self.author = author_mod
-        self.paths = lane.paths
-        self.lessons_dir = lane.lessons_dir
-        self.state = C.open_state(lane.paths)
-        self._cfg = None
-
-    @property
-    def cfg(self):
-        if self._cfg is None:
-            self._cfg = C.draft_author_cfg(self.lane, state=self.state)
-        return self._cfg
+from defender.tests.support.learning.curation._author_draft import DraftRepo
 
 
 @pytest.fixture
 def draft_repo(tmp_path):
-    """The fixture tenant's batch draft (lanes `lessons`, `lessons-questioner`) and its author."""
-    return _DraftRepo(C.draft_lane(tmp_path))
+    return DraftRepo.over(tmp_path)
 
 
 
-def test_lock_refuses_concurrent_run(draft_repo, helpers):
+def test_lock_refuses_concurrent_run(draft_repo):
     """The drain role's lock admits one `TRY_ONCE` holder at a time and frees on release."""
     role = draft_repo.cfg.channel.drain_role
     state = draft_repo.state
@@ -59,7 +38,7 @@ def test_repo_lock_held_returns_zero(draft_repo, helpers):
     import fcntl
 
     a = draft_repo.author
-    helpers.write_finding(location_path(draft_repo.paths.state_root) / FINDINGS.queue, finding_id="run-A/0", run_id="run-A")
+    helpers.write_finding(draft_repo.queue, finding_id="run-A/0", run_id="run-A")
 
     lock_file = location_path(draft_repo.paths.state_root) / REPO_LOCK.file
     lock_file.parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +49,7 @@ def test_repo_lock_held_returns_zero(draft_repo, helpers):
 
     def fake_invoke(findings, batch_id, cfg):
         invoked["count"] += 1
-        return {"committed": [], "held_forward_bad": [], "consumed_skip": [], "commit_sha": None}
+        return {"committed": [], "consumed_skip": [], "commit_sha": None}
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke, repo_lock_wait_seconds=1)
     try:
@@ -84,41 +63,41 @@ def test_repo_lock_held_returns_zero(draft_repo, helpers):
 
     pending = [
         json.loads(line)
-        for line in (location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text().splitlines()
+        for line in draft_repo.queue.read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-A/0"]
 
 
-def test_idempotency_filter_skips_already_authored(tmp_path, helpers, monkeypatch):
+def test_idempotency_filter_skips_already_authored(tmp_path, helpers):
     # The covering lesson is published in the export commit the draft is built from.
-    draft_repo = _DraftRepo(C.draft_lane(tmp_path, files={"lessons/preexisting.md": (
+    draft_repo = DraftRepo.over(tmp_path, files={"lessons/preexisting.md": (
         "---\n"
         "name: preexisting\n"
         "description: covers the same pitfall\n"
         "source_finding_ids:\n"
         "  - run-X/0\n"
         "created_at: 2026-05-09T00:00:00+00:00\n"
-        "---\n\nbody\n")}))
+        "---\n\nbody\n")})
     a = draft_repo.author
-    helpers.write_finding(location_path(draft_repo.paths.state_root) / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
+    helpers.write_finding(draft_repo.queue, finding_id="run-X/0", run_id="run-X")
 
 
     invoked = {"called": False}
 
     def fake_invoke(findings, batch_id, cfg):
         invoked["called"] = True
-        return {"committed": [], "held_forward_bad": [], "consumed_skip": [], "commit_sha": None}
+        return {"committed": [], "consumed_skip": [], "commit_sha": None}
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
     rc = a.run_batch(cfg=cfg)
     assert rc == 0
     assert invoked["called"] is False, "agent must not be invoked when all findings are idempotent"
 
-    assert (location_path(draft_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
+    assert draft_repo.queue.read_text().strip() == ""
     consumed = [
         json.loads(line)
-        for line in (location_path(draft_repo.paths.state_root) / FINDINGS.consumed).read_text().splitlines()
+        for line in draft_repo.consumed.read_text().splitlines()
         if line.strip()
     ]
     assert len(consumed) == 1
@@ -126,10 +105,10 @@ def test_idempotency_filter_skips_already_authored(tmp_path, helpers, monkeypatc
     assert "consumed_at" in consumed[0]
 
 
-def test_empty_queue_is_noop(draft_repo, monkeypatch):
+def test_empty_queue_is_noop(draft_repo):
     a = draft_repo.author
-    (location_path(draft_repo.paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    (location_path(draft_repo.paths.state_root) / FINDINGS.queue).write_text("")
+    draft_repo.queue.parent.mkdir(parents=True, exist_ok=True)
+    draft_repo.queue.write_text("")
     called = {"n": 0}
 
     def fake_invoke(*args, **kwargs):

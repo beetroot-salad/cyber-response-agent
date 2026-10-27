@@ -12,7 +12,7 @@ import pytest
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # through the harness's guarded import
+from defender.learning.author import drain
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core import drains, persist  # type: ignore[import-not-found]
 from defender.learning.core import config as learning_config
@@ -169,8 +169,7 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
                                       invoke=lambda *a, **k: 7, trees=C.draft_trees(lane),
                                       batch=lane.batch)
     assert type(raised.value) in tuple(drain.RETIRE_SET), (
-        f"the converted rc raises {type(raised.value).__name__}, which is not in the retire set — "
-        "it would fall through uncaught and the channel would stay stuck"
+        f"the converted rc raises {type(raised.value).__name__}, which is not in the retire set"
     )
 
     def leg(_paths, _state, box=None, **_kw):

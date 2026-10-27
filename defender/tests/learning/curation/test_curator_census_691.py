@@ -49,7 +49,7 @@ def test_the_generic_bash_census_enumerates_the_curator(tmp_path):
         build_registry((_misconfigured_writer_def(),))
 
 
-def test_the_registry_validates_the_curator_at_import_time(tmp_path):
+def test_the_registry_validates_the_curator_at_import_time():
     assert CORPUS_AUTHOR_DEF.write_shapes != ()
     with pytest.raises(ValueError):  # noqa: PT011
         build_registry((_misconfigured_writer_def(),))  # the registry's validation runs

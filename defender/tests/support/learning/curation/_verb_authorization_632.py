@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from defender.records import RunPaths
-import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -22,13 +21,9 @@ from defender.systems.verbs import (  # noqa: E402
     DENIED,
     GRANTED,
     UNDECLARED,
-    ModuleVerbRegistry,
     VerbContext,
-    VerbDecision,
     VerbRegistry,
-    read_roster,
 )
-from defender.kit.verbs import verb_class_of
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,
@@ -39,9 +34,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 
-pytestmark = pytest.mark.e2e
-
-SALT = "aabbccddeeff0011"
 LEAD = "l-001"
 ADAPTERS_DIR = DEFENDER / "integrations"
 
@@ -75,18 +67,7 @@ BENIGN_JUDGE_PAIRS: tuple[tuple[str, str], ...] = (
 UNGRANTED_PAIRS: tuple[tuple[str, str], ...] = (
     ("cmdb", "list-roles"), ("identity", "list-authorized-hosts"),
 )
-# Pairs withheld from gather's grant.
-WITHHELD_FROM_GATHER: tuple[tuple[str, str], ...] = (
-    ("ticket", "get-ticket"), ("ticket", "key-pattern"), *UNGRANTED_PAIRS,
-)
 HEALTH_CHECK = "health-check"
-GATHER_ROLE = "gather"
-
-# The store's real `list_tickets` envelope, `{"total", "tickets"}`, so a granted-call positive
-# control answers in the real shape.
-def ticket_envelope(*keys: str) -> dict:
-    return {"tickets": [{"key": k, "status": "closed"} for k in keys], "total": len(keys)}
-
 
 # The evidence surface a denial must conserve: the payload tree and the queries table. Not
 # `llm_requests.jsonl` or the tool trace, which move on every model call; these two are what an
@@ -124,65 +105,15 @@ class WatchingReplay(ReplayFn):
         self.snapshots.append(evidence_snapshot(self.run_dir))
         return super().__call__(messages, info)
 
-# One verb name, granted on one system and withheld on another: why every roster assertion
-# reads pairs, since no rendering satisfies a name-keyed screen for `list-roles`.
-COLLIDING_VERB = "list-roles"
-GRANTED_COLLIDING_PAIR = ("identity", COLLIDING_VERB)
-WITHHELD_COLLIDING_PAIR = ("cmdb", COLLIDING_VERB)
-
-_CALL_ID = re.compile(r"\b([a-z][a-z0-9-]*)\.([a-z][a-z0-9-]*)\b")
-_VERB_KWARG = re.compile(r"""verb\s*=\s*["']([a-z][a-z0-9-]*)["']""")
 
 SYSTEMS: tuple[str, ...] = tuple(sorted(
     {s for s, _ in (*GATHER_PAIRS, *BENIGN_JUDGE_PAIRS, *UNGRANTED_PAIRS)}
 ))
 
 
-def declared_verbs_everywhere() -> frozenset[str]:
-    """Every verb NAME the shipped adapters declare, read cold off the real tree."""
-    roster = read_roster(ADAPTERS_DIR)
-    return frozenset(v for system in SYSTEMS for v in roster.declared_verbs(system))
-
-
-def bare_only_surfaces(files, verb_names: frozenset[str]) -> tuple[Path, ...]:
-    """The committed files that name a declared verb ONLY as a bare name — no `S.v` call id
-    and no `verb='v'` keyword anywhere in them."""
-    out = []
-    for p in files:
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        qualified = {m.group(2) for m in _CALL_ID.finditer(text)} | set(_VERB_KWARG.findall(text))
-        if qualified & verb_names:
-            continue  # a pair audit already reaches this file
-        if any(re.search(rf"(?<![\w-]){re.escape(v)}(?![\w-])", text) for v in verb_names):
-            out.append(p)
-    return tuple(sorted(out))
-
-
-def roster_pairs(text: str) -> set[tuple[str, str]]:
-    """Every `(system, verb)` pair a roster text advertises, read off its `{system}.{verb}`
-    call ids. That rendered shape is a contract: bare names cannot be screened (the withheld
-    and granted sets share a name), and since positive checks read pairs too, a roster
-    rendering nothing parseable fails instead of passing its negative half vacuously."""
-    return {(m.group(1), m.group(2)) for m in _CALL_ID.finditer(text)}
-
-
 def grant_of(role: str, pairs, *, verb_class: str = "r") -> VerbGrant:
     """A `VerbGrant` over `pairs`, every entry expecting `verb_class`."""
     return VerbGrant(role=role, entries=tuple((s, v, verb_class) for s, v in pairs))
-
-
-def shipped_grants() -> dict[str, VerbGrant]:
-    """The run grants the real-tree model-surface audit is handed, keyed by role: gather's
-    alone (the only verb-bearing role since #922). A grant is a run's, projected from its
-    tenant's table (`GATHER_DEF` carries none); this is the committed playground tenant's."""
-    from defender.tests.support.tenancy import _tenants1106 as T1106
-
-    return {GATHER_ROLE: T1106.fixture_grants().gather}
-
-
 
 
 class ScopedFakeVerbs(VerbRegistry):
@@ -205,23 +136,6 @@ class ScopedFakeVerbs(VerbRegistry):
 
     def verbs(self, system: str) -> Mapping[str, Callable[..., Any]]:
         return self._table[system]
-
-
-class RegistryShaped:
-    """A registry-shaped object that never went through `VerbRegistry.__init__`: the duck-typed
-    stand-in the seam must reject, though it answers every question the registry answers."""
-
-    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]]):
-        self._table = {s: dict(v) for s, v in table.items()}
-
-    def systems(self) -> tuple[str, ...]:
-        return tuple(sorted(self._table))
-
-    def verbs(self, system: str) -> Mapping[str, Callable[..., Any]]:
-        return self._table[system]
-
-    def decide(self, system: str, verb: str) -> Any:  # answers the question, holds no grant
-        return VerbDecision(outcome=GRANTED, fn=self._table[system][verb], refusal=None)
 
 
 def recording_table(rec: VerbRecorder, systems_verbs: Mapping[str, tuple[str, ...]],
@@ -370,44 +284,28 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
 
 __all__ = [
     "ADAPTERS_DIR",
-    "COLLIDING_VERB",
     "EVIDENCE_SURFACE",
-    "GATHER_ROLE",
     "WatchingReplay",
     "evidence_snapshot",
-    "shipped_grants",
-    "ticket_envelope",
     "DENIED",
     "DENY_ALL",
     "DONE",
     "GATHER_PAIRS",
     "GRANTED",
-    "GRANTED_COLLIDING_PAIR",
     "GrantError",
     "HEALTH_CHECK",
     "LEAD",
     "PAYLOAD",
-    "SALT",
     "SYSTEMS",
     "UNDECLARED",
     "UNGRANTED_PAIRS",
     "VERB_CLASSES",
-    "WITHHELD_COLLIDING_PAIR",
-    "WITHHELD_FROM_GATHER",
-    "ModuleVerbRegistry",
-    "RegistryShaped",
     "ScopedFakeVerbs",
-    "VerbContext",
-    "VerbDecision",
     "VerbGrant",
     "VerbRegistry",
-    "bare_only_surfaces",
     "breaker_doc",
-    "declared_verbs_everywhere",
     "grant_of",
     "q",
     "recording_table",
-    "roster_pairs",
     "run_gather",
-    "verb_class_of",
 ]

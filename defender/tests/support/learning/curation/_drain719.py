@@ -13,25 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-try:  # a missing module fails each test on use rather than aborting collection
-    from defender.learning.author import drain  # type: ignore[import-not-found]
-except ImportError as _missing_target:  # pragma: no cover — the pre-implementation state
-
-    class _NotYetWritten:
-        """Stands in for a missing target module: every attribute access raises, so each test
-        fails loudly on its own (not a skip) while the rest of the tree still collects."""
-
-        def __init__(self, dotted: str, err: BaseException) -> None:
-            self._dotted, self._err = dotted, err
-
-        def __getattr__(self, item: str):
-            raise ImportError(
-                f"{self._dotted}.{item} does not exist yet — this suite is the executable "
-                f"spec for it (spec_graph_719.yaml). Original: {self._err}"
-            )
-
-    drain = _NotYetWritten("defender.learning.author.drain", _missing_target)  # type: ignore[assignment]
-
+from defender.learning.author import drain  # type: ignore[import-not-found]  # noqa: F401 — re-exported (`D.drain`)
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
 from defender import _flock as _lockfile  # type: ignore[import-not-found]
 from defender.learning.core.state import (  # type: ignore[import-not-found]
@@ -190,8 +172,7 @@ def row_for(name: str, rid: str, **extra) -> dict:
             "error_class": "agent-fixable",
             **extra,
         }
-    default_outcome = "survived" if name == "environment_observations" else "caught"
-    return obs_row(rid, outcome=extra.pop("outcome", default_outcome), **extra)
+    raise ValueError(f"no row shape for channel {name!r}")
 
 
 def seed(paths: LoopPaths, channel: Channel, rows: list[dict]) -> None:
@@ -264,7 +245,6 @@ def committing(stem: str = "lesson", *, also=None):
         return {
             "committed": list(ids),
             "consumed_skip": [],
-            "held_forward_bad": [],
             "commit_message": f"author {stem} batch",
         }
 
@@ -279,16 +259,8 @@ def skipping():
         return {
             "committed": [],
             "consumed_skip": [{key: r[key], "reason": "dup"} for r in rows],
-            "held_forward_bad": [],
             "commit_message": "",
         }
-
-    return fake
-
-
-def returning(result: dict):
-    def fake(rows, batch_id, cfg):
-        return dict(result)
 
     return fake
 
@@ -303,18 +275,6 @@ def recording(inner):
         return inner(rows, batch_id, cfg)
 
     fake.calls = calls  # type: ignore[attr-defined]
-    return fake
-
-
-def blocking(gate: threading.Event, released: threading.Event, inner=None):
-    """An agent call that parks until `gate` is set: an in-flight batch. `released` fires on
-    entry, so a test waits for the agent phase instead of sleeping."""
-
-    def fake(rows, batch_id, cfg):
-        released.set()
-        gate.wait(timeout=30)
-        return (inner or skipping())(rows, batch_id, cfg)
-
     return fake
 
 
@@ -406,7 +366,7 @@ def elapsed(fn) -> tuple[object, float]:
     return out, time.monotonic() - t0
 
 
-def run_in_subprocess(script: str, *, repo: Path, env_extra: dict[str, str] | None = None):
+def run_in_subprocess(script: str, *, repo: Path):
     """Run `script` (with `repo` as `argv[1]`) in a fresh interpreter rooted at this checkout:
     a genuinely separate actor."""
     # This checkout's root from this file's place in it, never `defender.__path__[0]`: for the
@@ -415,7 +375,6 @@ def run_in_subprocess(script: str, *, repo: Path, env_extra: dict[str, str] | No
     root = Path(__file__).resolve().parents[5]
     env = dict(os.environ)
     env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
-    env.update(env_extra or {})
     return subprocess.run(
         ["python3", "-c", script, str(repo)],
         capture_output=True,

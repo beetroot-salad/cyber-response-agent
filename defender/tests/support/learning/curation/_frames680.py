@@ -1,13 +1,9 @@
 """Shared harness for the #680 stage-frame tests: real prompt producers and bound tool scenes."""
 from __future__ import annotations
 
-import importlib.util
-import inspect
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-
-import pytest
 
 from defender.agents import (
     CORPUS_AUTHOR_DEF,
@@ -51,9 +47,6 @@ class Box:
 
 
 def _shared_module():
-    spec = importlib.util.find_spec("defender._untrusted")
-    if spec is None:
-        return None
     import defender._untrusted as untrusted
 
     return untrusted
@@ -104,19 +97,6 @@ def _assert_frame_envelope(observation: PromptObservation, tags, salts, gaps) ->
     )
 
 
-def assert_body_survives(observation: PromptObservation, hostile: str) -> None:
-    """A hostile body reached the model verbatim inside a real frame: whatever it impersonates
-    (a sibling section, a closing delimiter, the reader contract), the frame set is unchanged
-    and the string stays body, never structure.
-    """
-    tags, bodies, salts, gaps = _shape(observation)
-    _assert_frame_envelope(observation, tags, salts, gaps)
-    assert any(hostile == body or hostile in body for body in bodies), (
-        f"{observation.producer}: the hostile body did not survive verbatim inside any "
-        f"frame — it was transformed, split, or promoted to structure"
-    )
-
-
 def assert_producer_shape(observation: PromptObservation) -> None:
     """A real producer emitted its ordered frames with every template slot substituted: a
     surviving `{salt}`/`{content}` means the template itself shipped, and a frame salted with
@@ -136,23 +116,9 @@ def assert_producer_shape(observation: PromptObservation) -> None:
     )
 
 
-def _with_salt(fn, /, *args, salt: str, **kwargs):
-    """Call the real producer, passing `salt` when its signature takes one."""
-    if "salt" in inspect.signature(fn).parameters:
-        kwargs["salt"] = salt
-    return fn(*args, **kwargs)
-
-
-
-
-
-
-
-
 def _curator_prompt(tmp_path: Path, *, hostile="ROW-BODY", rows=None, salt="5a" * 16):
     rows = [{"lesson": hostile}] if rows is None else rows
-    prompt = _with_salt(
-        author_shared.build_curator_user_prompt,
+    prompt = author_shared.build_curator_user_prompt(
         rows,
         "batch",
         corpus=corpus_view(tmp_path),
@@ -243,13 +209,12 @@ def _all_prompt_observations(
     )
 
 
-def _deps(tmp_path: Path, definition, *, box=None, read_root=None):
+def _deps(tmp_path: Path, definition, *, box=None):
     run = tmp_path / "run"
     dfn = tmp_path / "tree" / "defender"
     run.mkdir(parents=True)
     dfn.mkdir(parents=True)
-    scope = RunScope(add_dirs=(read_root,), model_roots=((PurePosixPath("/inputs/shared"), read_root),)) if read_root else RunScope()
-    return bind(definition, run, defender_dir=dfn, scope=scope, box=box)
+    return bind(definition, run, defender_dir=dfn, box=box)
 
 
 
@@ -345,17 +310,6 @@ def _main_bash(tmp_path, payload):
 # Frame primitives
 
 
-def _shared_wrap():
-    spec = importlib.util.find_spec("defender._untrusted")
-    if spec is None:
-        pytest.fail(
-            "#680 requires the shared defender._untrusted module; runtime.untrusted is the superseded location"
-        )
-    import defender._untrusted as untrusted
-
-    return untrusted.wrap
-
-
 def _expected_frame(body: str, tag: str, salt: str = STAGE_SALT) -> str:
     return f"<run-{salt}-{tag}>\n{body}\n</run-{salt}-{tag}>"
 
@@ -381,7 +335,7 @@ def assert_one_frame(text: str, body: str, tag: str = "untrusted") -> str:
 
 def _drive_frame(body: str, tag: str = "payload", salt: str = STAGE_SALT) -> str:
     """Drive the primitive without asserting policy on behalf of a test owner."""
-    return _shared_wrap()(body, tag, salt)
+    return _shared_module().wrap(body, tag, salt)
 
 
 @dataclass(frozen=True)

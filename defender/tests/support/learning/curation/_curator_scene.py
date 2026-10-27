@@ -1,7 +1,6 @@
 """The curator scene the lesson-read suites build."""
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +9,7 @@ from defender.learning.author.curator_engine import CuratorDeps
 
 
 def curator_scene(tmp_path: Path, *, extra_corpora: Sequence[str] = ()) -> SimpleNamespace:
-    """A worktree, a lessons corpus, a runs dir and an empty pending-findings file.
+    """A worktree, a lessons corpus and the `_pending` run dir.
 
     `extra_corpora` creates sibling lesson corpora (`lessons-questioner`) for the
     read-confinement suite, whose checks are vacuous if the sibling does not exist.
@@ -20,50 +19,19 @@ def curator_scene(tmp_path: Path, *, extra_corpora: Sequence[str] = ()) -> Simpl
     corpus.mkdir(parents=True)
     for name in extra_corpora:
         (repo / "defender" / name).mkdir(parents=True)
-    runs = tmp_path / "state" / "runs"
-    runs.mkdir(parents=True)
     curdir = tmp_path / "state" / "_pending"
-    pending = curdir / "findings.jsonl"
-    pending.parent.mkdir(parents=True, exist_ok=True)
-    pending.write_text("")
-    return SimpleNamespace(
-        tmp=tmp_path, repo=repo, corpus=corpus, runs=runs, pending=pending, curdir=curdir,
-    )
+    curdir.mkdir(parents=True)
+    return SimpleNamespace(tmp=tmp_path, repo=repo, corpus=corpus, curdir=curdir)
 
 
-def curator_deps(scene, *, corpus: Path | None = None, box=None) -> CuratorDeps:
+def curator_deps(scene, *, corpus: Path | None = None) -> CuratorDeps:
     """`CuratorDeps` over the scene, through the real `for_run` entry point."""
     return CuratorDeps.for_run(
         scene.curdir,
         scene.repo,
         corpus if corpus is not None else scene.corpus,
-        box=box,
+        box=None,
     )
-
-
-#: One parse of the BATCH summary for both accessors below; every count is required, so a field
-#: that stops being emitted fails the match loudly instead of reading as zero.
-_BATCH_RE = re.compile(
-    r"BATCH:\s*n_good=(?P<good>\d+)\s+n_bad=(?P<bad>\d+)"
-    r"\s+n_exempt=(?P<exempt>\d+)\s+n_error=(?P<error>\d+)"
-)
-
-
-def _batch(out: str) -> dict[str, int]:
-    m = _BATCH_RE.search(out)
-    assert m, f"no BATCH summary line in output:\n{out}"
-    return {k: int(v) for k, v in m.groupdict().items()}
-
-
-def batch_counts(out: str) -> tuple[int, int, int]:
-    """`(n_good, n_bad, n_error)` off the BATCH summary line; `n_exempt` has its own accessor."""
-    counts = _batch(out)
-    return counts["good"], counts["bad"], counts["error"]
-
-
-def batch_exempt(out: str) -> int:
-    """How many pairs the check declared out of its own scope."""
-    return _batch(out)["exempt"]
 
 
 def build_curator_agent(tmp_path: Path, prompt_path: Path, make_model):

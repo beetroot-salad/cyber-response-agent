@@ -11,7 +11,7 @@ import pytest
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain
+from defender.learning.author import drain
 from defender.learning.core import drains
 from defender.learning.core.state import LEAD_QUEUE_LOCK, Claimed
 from defender.learning.leads import lead_author
@@ -82,7 +82,6 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
         return {
             "committed": ["run-G/0"],
             "consumed_skip": [],
-            "held_forward_bad": [{"finding_id": "run-B/0", "reason": "flips a green case"}],
             "commit_message": "defender: lesson vouched",
         }
 
@@ -99,9 +98,7 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
     assert h.attempts_of(paths, ch, "run-G/0") == 1
 
 
-def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
-    tmp_path: Path,
-):
+def test_852_f02_an_attributable_mixed_batch_still_commits(tmp_path: Path):
     """The control: without the unattributable file the batch commits, and the row the tick
     never mentioned stays queued with no hold stamped."""
     lane = _f02_lane(tmp_path)
@@ -324,8 +321,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
     assert author_markers(paths) == ["case-A.json"]
     body = marker_body(location_path(paths.state_root) / "author-queue" / "case-A.json")
     assert _address(body) == _address(_state1135.curation_row("case-A", second)), (
-        "the retry replaced the fresher curation request with the stale run dir — the case "
-        "will be re-served off the run the operator already superseded"
+        "the retry replaced the fresher curation request with the stale run dir"
     )
     assert "attempts" not in body, \
         "the superseding request inherited the retried run's attempt count"

@@ -10,14 +10,12 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import dataclasses
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
 from defender.tests.support.learning.curation._drain719 import (  # noqa: F401 — re-exported substrate
-    Background,
     Holder,
     channel_of,
     consumed,
@@ -25,16 +23,13 @@ from defender.tests.support.learning.curation._drain719 import (  # noqa: F401 �
     git,
     graveyard,
     make_paths,
-    make_repo,
     pending,
     pending_by_id,
-    read_rows,
     seed,
     stuck_records,
 )
 
 from defender.learning.author import drain
-from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import QUESTIONER_FINDINGS, Channel, LearningState
@@ -50,13 +45,11 @@ DEFERRED_CEILING_REASON = "deferred_ceiling"
 # ---------------------------------------------------------------------------
 
 
-def lesson(*finding_ids: str, body: str = "the lesson body", **frontmatter: Any) -> str:
+def lesson(*finding_ids: str, body: str = "the lesson body") -> str:
     """One corpus `*.md` citing `finding_ids` under `source_finding_ids`, the key
     `provenance_field("finding_id")` derives and both the idempotency gate and vouching read."""
     lines = ["---", "source_finding_ids:"]
     lines += [f"- {fid}" for fid in finding_ids]
-    for key, val in frontmatter.items():
-        lines.append(f"{key}: {json.dumps(val)}")
     lines += ["---", "", body, ""]
     return "\n".join(lines)
 
@@ -256,11 +249,6 @@ def build_questioner_scene(
 # The same tick over a batch's git-free draft
 # ---------------------------------------------------------------------------
 
-#: Each lane's lessons, spelled as in the tenant repository.
-DRAFT_LESSONS = "agent/lessons"
-DRAFT_QUESTIONER = "agent/lessons-questioner"
-
-
 @dataclass
 class DraftScene(Scene):
     """`Scene` over a batch: `corpus` is the draft's lane, `repo` the tenant clone, and every
@@ -300,18 +288,17 @@ class DraftScene(Scene):
 def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded rather than global
         tmp_path: Path, *, corpus_name: str, rows: list[dict], channel: Channel,
                  curator: FakeCurator | None, seed_corpus: dict[str, str] | None,
-                 state_dir: Path | None, build: Callable[..., Any], runner: Callable[..., int],
+                 build: Callable[..., Any], runner: Callable[..., int],
                  cfg_overrides: dict[str, Any],
                  agent_files: dict[str, str] | None = None) -> DraftScene:
     from defender.tests.support.learning.curation import _curator1134 as C
 
     files = {**(agent_files or {}),
              **{f"{corpus_name}/{rel}": text for rel, text in (seed_corpus or {}).items()}}
-    lane = C.draft_lane(tmp_path, files=files, state_dir=state_dir)
+    lane = C.draft_lane(tmp_path, files=files)
     seed(lane.paths, channel, rows)
-    # A fresh fake per scene (it is mutated below), so it cannot be a signature default.
+    # A fresh fake per scene (it records its calls), so it cannot be a signature default.
     fake = curator if curator is not None else FakeCurator()
-    fake.outside_root = lane.root
     base = build(lane, state=LearningState.open(lane.paths))
     wiring: dict[str, Any] = {"invoke_agent": fake}
     wiring.update(cfg_overrides)
@@ -324,8 +311,8 @@ def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded ra
 
 
 def build_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
-                      state_dir: Path | None = None, curator: FakeCurator | None = None,
-                      seed_corpus: dict[str, str] | None = None, channel_name: str = "findings",
+                      curator: FakeCurator | None = None,
+                      seed_corpus: dict[str, str] | None = None,
                       agent_files: dict[str, str] | None = None,
                       **cfg_overrides: Any) -> DraftScene:
     """`build_scene` over a draft lane (`_curator1134.draft_lane`): `seed_corpus` is published
@@ -337,8 +324,8 @@ def build_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
     return _draft_scene(
         tmp_path, corpus_name="lessons",
         rows=list(rows if rows is not None else [finding_row("f1", run_id="f1")]),
-        channel=channel_of(channel_name), curator=curator, seed_corpus=seed_corpus,
-        state_dir=state_dir, build=C.draft_author_cfg, runner=lessons_run.run_batch,
+        channel=channel_of("findings"), curator=curator, seed_corpus=seed_corpus,
+        build=C.draft_author_cfg, runner=lessons_run.run_batch,
         cfg_overrides=cfg_overrides, agent_files=agent_files)
 
 
@@ -356,7 +343,7 @@ def build_questioner_draft_scene(tmp_path: Path, *, rows: list[dict] | None = No
         tmp_path, corpus_name="lessons-questioner",
         rows=list(rows if rows is not None else [world_row("w1")]),
         channel=QUESTIONER_FINDINGS, curator=curator, seed_corpus=seed_corpus,
-        state_dir=None, build=C.draft_questioner_cfg, runner=questioner_run.run_batch,
+        build=C.draft_questioner_cfg, runner=questioner_run.run_batch,
         cfg_overrides=cfg_overrides, agent_files=agent_files)
 
 
@@ -373,7 +360,6 @@ class FakeCurator:
 
     writes: dict[str, str] = field(default_factory=dict)
     deletes: tuple[str, ...] = ()
-    outside: dict[str, str] = field(default_factory=dict)
     committed: list[str] | None = None
     consumed_skip: list[dict] | None = None
     commit_message: str = "author findings batch"
@@ -382,9 +368,6 @@ class FakeCurator:
     raises: BaseException | None = None
     also: Callable[..., None] | None = None
     calls: list[dict] = field(default_factory=list)
-    #: Where `outside` writes land: the repo root by default; a draft scene sets the draft's
-    #: root, so `outside` names `agent/<not a lane>/...`.
-    outside_root: Path | None = None
 
     def __call__(self, rows: list[dict], batch_id: str, cfg: Any) -> dict:
         self.calls.append({"rows": list(rows), "batch_id": batch_id, "cfg": cfg})
@@ -398,11 +381,6 @@ class FakeCurator:
             target = cfg.corpus_dir / rel
             if target.is_file():
                 target.unlink()
-        for rel, text in self.outside.items():
-            root = self.outside_root if self.outside_root is not None else cfg.repo_root
-            target = root / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8")
         if self.also is not None:
             self.also(rows, batch_id, cfg)
         if self.result is not None:
@@ -434,47 +412,19 @@ def git_error(msg: str = "injected") -> BaseException:
     return GitError(["status"], 128, msg)
 
 
-def model_retry(msg: str = "injected") -> BaseException:
-    """`ModelRetry`: a `RETIRE_SET` member."""
-    from pydantic_ai.exceptions import ModelRetry
-
-    return ModelRetry(msg)
-
-
-def stage_abort(msg: str = "injected") -> BaseException:
-    """`StageAbort`: not a `RETIRE_SET` member."""
-    from defender.learning.core.config import StageAbort
-
-    return StageAbort(msg)
-
-
-def fatal_config(msg: str = "injected") -> BaseException:
-    """`FatalConfigError`: a `ValueError` outside `RETIRE_SET`, so a handler must re-raise it
-    before any broad `except Exception`."""
-    from defender.learning.core.config import FatalConfigError
-
-    return FatalConfigError(msg)
-
-
 __all__ = [
-    "Background",
     "DEFERRED_CEILING_REASON",
     "FakeCurator",
     "Holder",
     "Scene",
     "author_error",
-    "author_shared",
     "build_scene",
     "drain",
-    "fatal_config",
     "finding_row",
     "git",
     "git_error",
     "lesson",
     "lessons_run",
     "malformed_lesson",
-    "model_retry",
-    "read_rows",
     "seed",
-    "stage_abort",
 ]

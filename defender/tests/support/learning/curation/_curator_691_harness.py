@@ -68,25 +68,19 @@ def curator_scope(wt: Path, corpus_name: str = "lessons", *, read_confine=None) 
     return RunScope(corpus_name=corpus_name, read_confine=conf)  # type: ignore[call-arg]
 
 
-def bind_curator(
-    wt: Path, run_dir: Path, corpus_name: str = "lessons", *,
-    read_confine=None, defender_dir: Path | None = None,
-):
+def bind_curator(wt: Path, run_dir: Path, corpus_name: str = "lessons", *, read_confine=None):
     """Bind the curator by corpus name against its worktree tree, through the real ``bind``."""
-    dd = (wt / "defender") if defender_dir is None else defender_dir
     return bind(
         CORPUS_AUTHOR_DEF, run_dir,
         scope=curator_scope(wt, corpus_name, read_confine=read_confine),
-        defender_dir=dd,
+        defender_dir=wt / "defender",
     )
 
 
-def curator_deps(
-    wt: Path, run_dir: Path, corpus_name: str = "lessons", *, box=None,
-) -> CuratorDeps:
+def curator_deps(wt: Path, run_dir: Path, corpus_name: str = "lessons") -> CuratorDeps:
     """A ``CuratorDeps`` through the production ``for_run`` entry point (a thin wrapper over
     ``bind``); tests drive its ``.policy`` through the real gates."""
-    return CuratorDeps.for_run(run_dir, wt, corpus(wt, corpus_name), box=box)
+    return CuratorDeps.for_run(run_dir, wt, corpus(wt, corpus_name), box=None)
 
 
 # Real-gate drivers: each hits a real permission primitive, and tests assert on its Decision or
@@ -119,6 +113,6 @@ def edit_file(deps, path: str, old: str, new: str) -> str:
     return _tool_edit_file(deps, path, old, new)
 
 
-def lesson_read(deps, path: str, part: str = "body", pattern=None) -> str:
+def lesson_read(deps, path: str) -> str:
     """The lesson_read tool wrapper (raises ModelRetry on a decide_read deny)."""
-    return _tool_lesson_read(deps, path, part, pattern)
+    return _tool_lesson_read(deps, path)
