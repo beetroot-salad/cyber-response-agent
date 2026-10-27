@@ -1,4 +1,4 @@
-"""The session store's path comes from its owner, refusal included (#1077, the leftover of D7)."""
+"""The session store's path comes from its owner, refusal included (#1077)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base

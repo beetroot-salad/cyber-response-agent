@@ -37,8 +37,6 @@ from defender.records import SessionPaths  # noqa: E402
 # fork: the branch point becomes a log entry
 
 def test_fork_logs_null_to_branch_point(tmp_path):
-    """Constructing a fork sets the new session's head to the branch point and records that move"""
-    # provenance: issue obligation 4a.
     ss = store_mod()
     store = make_store(tmp_path)
     main = store.new_session(agent_id="main")
@@ -58,8 +56,6 @@ def test_fork_logs_null_to_branch_point(tmp_path):
 
 
 def test_branch_point_survives_the_parent_folding_past_it(tmp_path):
-    """After the parent folds past the branch point, the fork's branch point is still answerable"""
-    # provenance: issue obligation 4b (D2), reproduced from B5 (executed).
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -84,9 +80,7 @@ def test_branch_point_survives_the_parent_folding_past_it(tmp_path):
 
 
 def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
-    """`fork` sets the child's `last_render_len` to the length of the prefix it inherits, so the"""
-    # provenance: PR-24 (executed) measured it — three inherited messages became ids [4,5,6]
-    # beside [1,2,3]. Driven through fork plus ingest, not through the store alone.
+    """`fork` sets the child's `last_render_len` to its inherited prefix's length."""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -120,8 +114,6 @@ def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
 
 
 def test_the_full_fold_history_is_readable_in_order(tmp_path):
-    """Over a session that folded three times, the fold history returns all three displaced tips"""
-    # provenance: FK-A(a) and (d); P77 is the reconstruction case.
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -148,9 +140,8 @@ def test_the_full_fold_history_is_readable_in_order(tmp_path):
 
 
 def test_branch_point_ignores_a_log_row_with_a_non_null_from_message_id(tmp_path):
-    """A `fork`-reasoned entry whose `from_message_id` is not NULL is not a branch point and the"""
-    # provenance: P48, the sharpest single observation in the measurement; P32 for the raw
-    # route. The writer-side refusal and the reader-side filter are two independent guards.
+    """The non-NULL-origin `fork` row is inserted raw (`append` refuses it): the writer's refusal
+    and the reader's filter are independent guards."""
     ss = store_mod()
     store = make_store(tmp_path)
     unearned = store.new_session(agent_id="main")
@@ -185,7 +176,6 @@ def test_branch_point_ignores_a_log_row_with_a_non_null_from_message_id(tmp_path
 
 
 def test_branch_point_requires_a_fork_reason_not_just_a_null_origin(tmp_path):
-    """A branch point is a log row that is BOTH origin-less and fork-reasoned: the reader"""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -217,10 +207,9 @@ def test_branch_point_requires_a_fork_reason_not_just_a_null_origin(tmp_path):
         "control: a fold that DID displace something is still recoverable")
 
 
-# obligation 8 — the one transaction, in every failure shape
+# the one transaction, in every failure shape
 
 def test_head_and_log_move_in_one_transaction(tmp_path):
-    """The head UPDATE and the conditional log INSERT ride inside the same transaction as the"""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     r1, r2, r3 = linear_turns(store, session_id, 3)
@@ -255,7 +244,7 @@ def test_head_and_log_move_in_one_transaction(tmp_path):
 
 
 def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(tmp_path):
-    """A refused append is invisible to a later reader, whatever refused it: when the wait for a"""
+    """Each refusal tried: an expired lock wait, a full disk, a writer dying mid-transaction."""
     ss = store_mod()
     base = runs_base(tmp_path)
     real = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
@@ -332,7 +321,6 @@ def test_a_unique_seq_collision_rolls_back_the_head_move_and_the_log(tmp_path):
 
 
 def test_foreign_key_violations_on_the_head_and_log_writes_raise_and_roll_back(tmp_path):
-    """Every foreign key this change relies on is enforced at write time and every violation"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -369,9 +357,8 @@ def test_foreign_key_violations_on_the_head_and_log_writes_raise_and_roll_back(t
 
 
 def test_the_path_walk_crosses_session_boundaries_and_head_is_not_confined(tmp_path):
-    """The key on `head_message_id` requires only that SOME message row with that id exists,"""
-    # provenance: P21, P28 and P33, grounded in B12/B13 (executed): the walk follows parent_id
-    # regardless of session_id, and agent_id does not scope it either.
+    """`head_message_id`'s key only asks that SOME message row has that id; the walk ignores
+    `session_id` and `agent_id`."""
     ss = store_mod()
     store = make_store(tmp_path)
     donor = store.new_session(agent_id="main")

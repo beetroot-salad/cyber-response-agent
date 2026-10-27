@@ -17,7 +17,7 @@ tree = H5.tree_state
 #: The arm roster's file name in the episode folder (pinned by the contract; the production
 #: owner is `defender.records._episode_paths.ARM_ROSTER_NAME`).
 ROSTER_NAME = "arms.json"
-#: The manifest's file name (`_episode_paths.FAMILY_NAME` today, unchanged).
+#: The manifest's file name (`_episode_paths.FAMILY_NAME`).
 MANIFEST_NAME = "family.yaml"
 #: The one-time command, as every refusal that sends the operator to it must spell it.
 COMMAND = "defender/cli/retire_legacy_runs.py"
@@ -27,7 +27,7 @@ EPISODES_LEGACY = "episodes-legacy"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
 
-#: Ids the design names as off the new grammar (O2's observable list), plus near misses.
+#: Ids off the uuid grammar: the old minted and pinned shapes, and near misses of a uuid.
 OLD_MINTED_ID = "20260101t000000z-x"
 OLD_PINNED_ID = "live-lever-up-20260930-sudo"
 SAMPLE_UUID = "af3ba774-355d-4dbc-b8b6-3becc9d3e7a1"
@@ -46,7 +46,7 @@ NON_CANONICAL_IDS = (
     "..",
 )
 
-#: The known sidecar suffixes beside a run folder (`_layout._SIDECAR_SUFFIXES`, via #1105).
+#: The known sidecar suffixes beside a run folder (`_layout._SIDECAR_SUFFIXES`).
 SIDECAR_SUFFIXES = H5.SIDECAR_SUFFIXES
 
 
@@ -188,7 +188,7 @@ def torn(text: str) -> str:
     return text[: max(1, len(text) // 2)]
 # Links and old entries
 
-#: The levels below `<T>` that O8 says are opened without following links, by name.
+#: The levels below `<T>` that are opened without following links, by name.
 LINK_LEVELS = ("runs", "episodes", "episode", "arm_container", "run")
 
 

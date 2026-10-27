@@ -1,4 +1,4 @@
-"""#1077 — O6's read gate and O7's box posture: what the name move must not weaken."""
+"""The read gate and the box posture that the #1077 record-name move must not weaken."""
 from __future__ import annotations
 
 import shutil
@@ -36,7 +36,7 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
     from defender.investigation.agent_definition import RunScope, compile_policy_for
     from defender._agent_role import AgentRole
     from defender.tests.support.tenancy import _tenants1106
-    # #1106 M4: gather binds with a RUN's grant (its definition carries none), as the driver does.
+    # gather binds with a RUN's grant (its definition carries none), as the driver does.
     defs = {role: (_tenants1106.fixture_gather_def() if role is AgentRole.GATHER else defn)
             for role, defn in AGENTS.items()}
     # A role that requires a per-spawn corpus (`requires_corpus`) refuses the default scope by
@@ -112,8 +112,8 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     writable = [m for m in mounts if "readonly" not in m]
     assert len(writable) == 1, f"the box has more than one read-write bind: {writable}"
-    # #1255 (design rev 4, P1) flipped the TARGETS to the model view: the run folder is bound at
-    # `/runs/current`, the checkout at `/defender`; the SOURCES still name this host's trees.
+    # The TARGETS are the model view (the run folder at `/runs/current`, the checkout at
+    # `/defender`); the SOURCES name this host's trees.
     assert f"source={run_dir}," in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
         "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
     assert "target=/runs/current" in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
@@ -137,7 +137,7 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
             "the tenant record beside it unreachable from inside a box (demand d49)")
         assert source != run_dir.parent, bound_the_base
         assert target != run_dir.parent, bound_the_base
-        assert target != Path("/runs"), bound_the_base  # the model view's runs base (#1255)
+        assert target != Path("/runs"), bound_the_base  # the model view's runs base
     assert "--cap-add" not in joined
     assert "--privileged" not in joined
 

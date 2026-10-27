@@ -357,7 +357,7 @@ _BAD_NAMES = [
     pytest.param(lambda ep: ep.world("a/b").draw(0).write("x"), id="label-two-components"),
     pytest.param(lambda ep: ep.world("..").dir.ensure(), id="label-dotdot"),
     pytest.param(lambda ep: ep.served_world("e1133.B").append(""), id="token-not-case-stable"),
-    # Rev 3's patch: the WHOLE token is judged, not only the text after its last dot.
+    # The WHOLE token is judged, not only the text after its last dot.
     pytest.param(lambda ep: ep.served_world("Control").append(""),
                  id="token-dotless-not-case-stable"),
     pytest.param(lambda ep: ep.served_world("E1133.b").append(""),

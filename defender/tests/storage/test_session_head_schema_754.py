@@ -40,7 +40,6 @@ from defender.records import SessionPaths  # noqa: E402
 # the two tables' declared shape
 
 def test_session_head_log_has_the_declared_shape(tmp_path):
-    """`session_head_log` is one STRICT table with SIX columns — an integer primary key, the"""
     sel = selection_mod()
     store = make_store(tmp_path)
 
@@ -77,7 +76,7 @@ def test_session_head_log_has_the_declared_shape(tmp_path):
 # the log as an append-only record
 
 def test_no_head_log_row_is_ever_updated_or_deleted(tmp_path):
-    """No head move the store's own API can make ever rewrites or removes an entry already in the"""
+    """Append-only is a property of the store's write surface, not an SQL constraint."""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -111,9 +110,7 @@ def test_no_head_log_row_is_ever_updated_or_deleted(tmp_path):
 
 def test_a_message_id_named_by_both_a_fold_and_a_fork_entry_stays_independently_recoverable(
         tmp_path):
-    """One message id named by a fold entry as the tip it displaced AND by a fork entry as the"""
-    # provenance: P78, asserted against the raw log as well as through the helpers so it holds
-    # whatever either reader does.
+    """Checked on the raw log and through the readers, so it holds whatever either reader does."""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -137,15 +134,10 @@ def test_a_message_id_named_by_both_a_fold_and_a_fork_entry_stays_independently_
     assert r1 in ss.path_row_ids(store, main), "and the lineage root survived it"
 
 
-# the reason domain has no SQL enforcement behind it
-
-
 # every role-scoped reader over a NULL-head session
 
 def test_every_role_scoped_reader_returns_empty_for_a_null_head_session(tmp_path):
-    """Every role-scoped read of a session whose head is NULL returns empty — `send`, `analysis`"""
-    # provenance: P117 (2/2 after discounting one copy) and P116, settled by C7: all four
-    # surfaces go through path_row_ids, so an empty path yields nothing on every one.
+    """All four role-scoped reads go through `path_row_ids`, so an empty path yields nothing."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -179,7 +171,6 @@ def test_every_role_scoped_reader_returns_empty_for_a_null_head_session(tmp_path
 
 
 def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
-    """When the walked path contains an id no `message` row resolves, every role-scoped read"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -215,8 +206,6 @@ def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
 # the schema version, and where the refusal lands
 
 def test_open_store_refuses_a_user_version_1_file(tmp_path):
-    """A store file stamped `PRAGMA user_version = 1` — the shape shipped before this change — is"""
-    # provenance: issue obligation 9, as narrowed by correction C2.
     ss = store_mod()
     base = runs_base(tmp_path)
     stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(fixture_runs_base(base))))
@@ -234,9 +223,6 @@ def test_open_store_refuses_a_user_version_1_file(tmp_path):
 
 
 def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
-    """The reader refuses a stale file at the same point the writer does: `open_store_for_read` on"""
-    # provenance: OC-1 (census) refuted 'open_store_for_read version-checks': the check is
-    # wired exclusively to hydrate. C11 for the asymmetry, OC-2 for the writer's fresh file.
     ss = store_mod()
     base = runs_base(tmp_path)
     stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(fixture_runs_base(base))))
@@ -272,7 +258,6 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
 
 
 def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):
-    """The session the pick resolves is the ROOT-OF-LINEAGE main session — the one whose"""
     run_dir, store = _rendered_run(tmp_path)
     leg = store.new_session(agent_id="gather-l1")
     linear_turns(store, leg, 1, agent_id="gather-l1", label="leg")
@@ -302,9 +287,6 @@ def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):
 
 
 def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
-    """When the root-of-lineage query does not resolve to exactly one session the pick"""
-    # provenance: P111 (the bare rowid fallback the design never mentions — a branch no test
-    # can reach is worse than none) and P90 (the new finding the measurement surfaced).
     empty_dir, empty_store = _rendered_run(tmp_path, case_id="case-nomain")
     leg = empty_store.new_session(agent_id="gather-l1")
     linear_turns(empty_store, leg, 1, agent_id="gather-l1", label="leg")

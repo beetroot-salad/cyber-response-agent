@@ -270,7 +270,7 @@ def _held_matrix():
 
 def _held_control(held: Any, verb: str, path: Path) -> None:
     """The same verb on the same address, nothing planted, then a plain file there. A durable
-    append makes no folder (R4), so its holding folders are made real first."""
+    append makes no folder, so its holding folders are made real first."""
     if verb == "unlink":
         assert held.unlink(REC) is False
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -371,7 +371,7 @@ def test_d1_one_write_is_one_walk_off_the_held_root_that_makes_its_holding_folde
 def test_d1_a_durable_append_fsyncs_the_leaf_then_its_holding_folder(tree, rel):
     root, _host = tree
     leaf = root / rel
-    leaf.parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
+    leaf.parent.mkdir(parents=True, exist_ok=True)  # a durable append makes no folder
     spy = S.OsSpy(watch=leaf)
     with S.hold(root, os_=spy) as held:
         at = len(spy.fsyncs)
@@ -401,7 +401,7 @@ def test_d1_a_durable_append_fsyncs_the_leaf_then_its_holding_folder(tree, rel):
 @pytest.mark.parametrize("rel", ["rec.jsonl", "fa/rec.jsonl"])
 def test_d1_a_failed_holding_folder_sync_fails_the_durable_append(tree, rel):
     root, _host = tree
-    (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)  # a durable append makes no folder
     with S.hold(root, os_=DirSyncFails()) as held:
         raised = S.raised_by(lambda: held.write(rel, ROW, mode="append", durable=True))
         assert isinstance(raised, OSError), (
@@ -428,7 +428,7 @@ def test_d1_a_durable_append_after_a_rename_syncs_the_moved_holding_folder(tmp_p
                for s in syncs), f"the moved holding folder {folder} was not fsynced: {syncs}"
 
 
-#: Rev 3 has no `Held.read`: the view's own close race is in `test_1133_rev3.py`.
+#: `Held` has no `read`; the view's own close race is in `test_1133_rev3.py`.
 _LIFETIME_VERBS = (*WRITE_VERBS, "mkdir", "unlink")
 
 
@@ -569,7 +569,7 @@ def test_n_h_every_descriptor_a_held_root_opens_is_close_on_exec(tree):
             name = REC if verb != "create" else "fa/fb/created.jsonl"
             S.held_verb(held, verb, name, _payload(verb, "cloexec"))
         held.mkdir("fa/fc")
-        # The view's reads open (and, rev 3, dup) through the same seam.
+        # The view's reads open (and dup) through the same seam.
         held.view().read("fa/fb/created.jsonl")
         held.view().under("fa").entries()
     opened = [o for o in spy.opens if o.fd is not None]
@@ -630,7 +630,7 @@ def test_o6_a_held_root_that_was_removed_refuses_every_write_and_is_never_recrea
         assert not os.path.lexists(root), f"Held.{verb} recreated the removed root"
     root.mkdir()
     if verb == "durable_append":
-        (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: it makes no folder
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)  # a durable append makes no folder
     with S.hold(root) as held:
         S.held_verb(held, verb, rel if verb != "mkdir" else "fa")
 
@@ -642,7 +642,7 @@ def test_o6_a_held_root_that_was_renamed_is_written_in_its_new_place(tmp_path, v
     root = tmp_path / "root"
     root.mkdir()
     if verb == "durable_append":
-        (root / "fa").mkdir()  # R4: a durable append makes no folder
+        (root / "fa").mkdir()  # a durable append makes no folder
     moved = tmp_path / "moved"
     with S.hold(root) as held:
         root.rename(moved)

@@ -19,9 +19,8 @@ def test_preflight_never_reads_an_episode_through_a_link(tmp_path, monkeypatch, 
     P.roots(tmp_path, monkeypatch)
     monkeypatch.delenv(R.EPISODES_BASE_ENV, raising=False)
     est, src = P.launch_source(tmp_path, source_run_id=R.new_id())
-    # Today's repository opens the source only through its container record; #1187's natural
-    # container holds none (R1). The record goes once the handle is held, so pre-flight meets
-    # #1187's container either way.
+    # The container record (`_tenant.json`) goes once the source handle is held, so pre-flight
+    # meets the record-free natural container either way.
     source = T.open_source(src)
     (src.parent / "_tenant.json").unlink(missing_ok=True)
     rows = [S.captured(c.system, c.verb, c.params, c.payload) for c in P.source_calls()]

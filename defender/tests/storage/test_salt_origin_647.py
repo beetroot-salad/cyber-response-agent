@@ -38,23 +38,15 @@ PAYLOAD = [
 
 
 def build(tmp_path, monkeypatch, golden: Path = GOLDEN):
-    """Materialize a run dir with the REAL production builder.
-
-    The data root is redirected into `tmp_path` and the tenant set up there (#1120: the
-    builder is handed the accepted `Tenant`, whose runs base it builds under); everything
-    else — the directory layout, the alert copy — is production code.
-
-    #1279 (A3): run setup mints the id, so `build` takes none.
-
-    Returned a `(run_dir, salt)` pair until #875. The builder no longer mints a token at all:
-    `wrap_fresh` mints each frame's delimiter after its content is in hand, so there is no
-    run-scoped salt for a builder to originate."""
+    """Materialize a run dir with the REAL production builder, under a tenant set up in a data
+    root inside `tmp_path`; run setup mints the id. No salt comes back: `wrap_fresh` mints each
+    frame's delimiter after its content is in hand, so there is no run-scoped salt."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
-    # The D9 tenant: the replay harness's `drive` runs the run under the fixture tenant it sets
-    # up in this same data root, and a data root holds one tenant (O10).
+    # The fixture tenant: `drive` runs the run under the tenant it sets up in this same data
+    # root, and a data root holds one tenant.
     tenant = set_up_tenant(data_root)
     return run_common.materialize_run(golden / "alert.json", tenant=tenant).run_dir
 
@@ -195,7 +187,8 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
 def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set(
     tmp_path, monkeypatch
 ):
-    """The two run-dir builders present the same file set FOR A FIXTURE THAT CARRIES NO"""
+    """The production builder and the harness's `materialize` present the same file set, for a
+    fixture without a sibling `ground_truth.yaml`."""
     assert not (GOLDEN / "ground_truth.yaml").exists(), (
         "this parity claim is scoped to fixtures WITHOUT a sibling ground_truth.yaml, and the "
         "golden now carries one — the production builder would copy it and the harness would "

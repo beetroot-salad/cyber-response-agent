@@ -21,7 +21,7 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 TENANT = R.H5.T_ID
 #: The manifest's worlds: `a` the control, `b` and `c` the siblings (`_triplet_947.family_doc`).
 LABELS = ("a", "b", "c")
-#: The source run every manifest names (a UUID, as every run id after #1187).
+#: The source run every manifest names (a UUID, as every run id is).
 SOURCE_ID = "5d0c3f7e-2a91-4b6e-8f14-9c7a2e5b3d60"
 #: World `b`'s axis: manifest text the page renders whatever the arms' state.
 AXIS_B = "AXIS-1187-B whether a second login to web-1 came from 10.0.0.9"
@@ -99,7 +99,7 @@ def _page(episode_id: str, tenant_id: str = TENANT) -> P.CliResult:
 
 def _arm_hrefs(page: E.Page) -> list[str]:
     return [h for h in page.hrefs if h.endswith("runtime.html")]
-# R5 — the manifest's episode_id is its folder's name, checked in the one loader
+# The manifest's episode_id is its folder's name, checked in the one loader
 
 def _loadable(which: str, episode_id: str) -> dict:
     """A real loadable manifest from an existing fixture, rewritten to `episode_id`."""
@@ -239,7 +239,7 @@ def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
     assert episode_id in text, text
     T.write_family(ep, _doc(episode_id))
     exercise(False)
-# Flow 4 — the episode page reads its arms from the roster
+# The episode page reads its arms from the roster
 
 def test_page_links_each_arm_by_its_roster_id_never_a_composed_name(data_root):
     ep, episode_id, roster = _episode(data_root, null_world=True)
@@ -382,7 +382,7 @@ def test_the_page_for_one_tenant_never_renders_another_tenants_episode(data_root
     ok = _page(episode_id, other)
     assert ok.rc == 0, f"the control did not render: {ok.said}"
     assert (ep / E.PAGE_NAME).is_file()
-# Flow 2 steps 7-9 — VERIFY, the archive, the judge and the page after RUNS
+# VERIFY, the archive, the judge and the page after RUNS
 
 def test_verify_opens_each_finished_arm_by_its_roster_id(data_root):
     from defender.learning.branch import cli
@@ -452,7 +452,7 @@ def test_a_launch_verifies_finished_arms_by_roster_id_archives_no_pointer_and_pa
     P.roots(tmp_path, monkeypatch)
     source_id = R.new_id()
     est, src = P.launch_source(tmp_path, source_run_id=source_id)
-    # The natural container in #1187's shape: no `_tenant.json` (R1).
+    # The natural container holds no `_tenant.json`.
     (src.parent / "_tenant.json").unlink(missing_ok=True)
     spawn = J.FakeSibling(data_root=data_root, exits={"c": 3})
 
@@ -766,7 +766,7 @@ def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name(tmp_
             assert isinstance(err, JudgeRefused), err
 
 
-# S-red — the redaction set is the roster's
+# The redaction set is the roster's
 
 def _family(episode_id: str) -> Any:
     return T.sym("records._family", "parse_family")(_doc(episode_id))
@@ -894,7 +894,7 @@ def test_the_siblings_query_tool_knows_every_roster_arm_id(tmp_path, monkeypatch
     doc = P.family_doc(src, episode_id=episode_id, source_run_id=source_id)
     ep = T.episode(tmp_path, doc=doc, root=R.episodes_dir(data_root, tenant_id),
                    episode_id=episode_id)
-    # The natural container in #1187's shape: no `_tenant.json` (R1).
+    # The natural container holds no `_tenant.json`.
     (src.parent / "_tenant.json").unlink(missing_ok=True)
     roster = {w["world_id"]: R.new_id() for w in doc["worlds"]}
     (ep / "runs").mkdir()

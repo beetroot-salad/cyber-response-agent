@@ -1,4 +1,4 @@
-"""#1077 — the name owners: `RunPaths`, `EpisodePaths`, and the one rule every composing accessor
+"""The #1077 name owners: `RunPaths`, `EpisodePaths`, and the one rule every composing accessor
 inherits."""
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def _concrete(template: str, acc: S.Accessor) -> str:
     return out.rstrip("/")
 
 
-# D1 — the enumerated names, walked off the kinds table
+# the enumerated names, walked off the kinds table
 
 def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
     """`RunPaths` resolves every run-level name the design enumerates, the three sidecars beside
@@ -74,12 +74,12 @@ def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
     assert missing == [], (
         "claim G5: the owner owns exactly 7 accessors today and D1 takes it to roughly twenty; "
         f"these names have no accessor: {missing}")
-    # The sessions directory and the database, whose root is a SIBLING of the runs base (C10/C15).
+    # The sessions directory and the database, whose root is a SIBLING of the runs base.
     assert location_path(S.RunPaths(run_dir).sessions_dir(fixture_runs_base(base))) == base.parent / "sessions"
     assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID).name == f"{S.LINEAGE_ID}.db"
 
 
-# O8 — the two model-facing payload forms
+# the two model-facing payload forms
 
 
 def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admits_it(run_dir):
@@ -103,7 +103,7 @@ def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admi
         "GATHER_RAW_SHAPE admits it, and that admission is what makes O8's note usable")
 
 
-# Decision 2 — one rule for every composing accessor
+# one rule for every composing accessor
 
 
 def test_no_composed_accessor_resolves_outside_its_root(base, run_dir, episode_dir):
@@ -134,8 +134,7 @@ def test_no_composed_accessor_resolves_outside_its_root(base, run_dir, episode_d
 
 
 def test_lead_id_containing_path_traversal_segment(run_dir):
-    """Security dive universal (1) at the lead-id component: a traversal-shaped lead_id must not
-    resolve to a path outside the run dir."""
+    """A traversal-shaped lead id is refused by every lead-keyed accessor."""
     owner = S.RunPaths(run_dir)
     assert owner.payload(S.LEAD_ID, S.SEQ).is_relative_to(run_dir / "gather_raw")
     assert owner.lead_claim(S.LEAD_ID).is_relative_to(run_dir / "gather_raw")
@@ -190,7 +189,7 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
     assert b"OK" in done.stdout, unreachable
 
 
-# The session database — RG-4: pin the pattern BY REFERENCE, never re-spell it
+# the session database: the case-id pattern pinned BY REFERENCE, never re-spelled
 
 def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
     from defender.records.session_store._write import InvalidCaseId
@@ -201,7 +200,7 @@ def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
 
 def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_dir):
     """`session_db` refuses a lineage id the case-id pattern rejects, exactly as `store_path_for`
-    does today."""
+    does."""
     from defender.records.session_store._write import CASE_ID_RE, InvalidCaseId, store_path_for
     for lineage in ("-leading-dash", "has space", "a/b", "héllo", "..", "_under"):
         assert not CASE_ID_RE.match(lineage), (
@@ -210,12 +209,12 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
         _refuses(run_dir, base, lineage)
         with pytest.raises(InvalidCaseId):
             store_path_for(lineage, sessions=SessionPaths(fixture_runs_base(base)))
-    # Positive control: the id today's resolver admits resolves to today's path.
+    # Positive control: an id the resolver admits resolves to the store's own path.
     assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID) == store_path_for(
         S.LINEAGE_ID, sessions=SessionPaths(fixture_runs_base(base)))
 
 
-# Decision 12 — composed-identifier collisions
+# composed-identifier collisions
 
 def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_dir):
     from defender.records._world_label import world_label_fault
@@ -249,7 +248,7 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
             owner.world_dir(label)
     with pytest.raises(Exception):  # noqa: B017,PT011
         owner.served_world(f"{S.EPISODE_ID}.Overlay")
-    # The session-database path gains the check BESIDE its existing CASE_ID_RE format check.
+    # The session-database path carries the check BESIDE its CASE_ID_RE format check.
     from defender.records.session_store._write import CASE_ID_RE, InvalidCaseId
     mixed = "Case-0011223344556677"
     assert CASE_ID_RE.match(mixed), (
@@ -259,6 +258,3 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
         S.RunPaths(run_dir).session_db(fixture_runs_base(base), mixed)
     assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID).name.endswith(".db"), (
         "positive control: a case-stable lineage id still resolves")
-
-
-# What the move must NOT change

@@ -32,8 +32,7 @@ SCOPE_LISTS: dict[str, tuple[str, str]] = {
     ENV_READS: ("SWEPT", "."),
 }
 
-#: The stage-frames lint's default scope, fixed by the design (D4: the entry `learning/` under
-#: `defender/`).
+#: The stage-frames lint's default scope (`learning/` under `defender/`).
 STAGE_FRAMES_SCOPE = "defender/learning"
 
 #: The data files `lint_run_records.main` reads (its kinds registry and the page it renders).
@@ -180,8 +179,8 @@ def _expect(result: subprocess.CompletedProcess[str], rc: int, named: str, *, on
 
 
 def _selects(entry: str, rel: str) -> bool:
-    """The amendment's selection rule, as this spec's own oracle (independent of
-    `_astlib.selects`): equal, or `entry` ends in `/` and `rel` is under it."""
+    """The selection rule as the test's own oracle (independent of `_astlib.selects`): equal,
+    or `entry` ends in `/` and `rel` is under it."""
     return rel == entry or (entry.endswith("/") and rel.startswith(entry))
 
 
@@ -329,14 +328,14 @@ def _run_records_mini(root: Path) -> tuple[Path, tuple[str, ...]]:
     sweep = tuple(lint.SWEEP_DIRS)
     for d in sweep:
         if d == lint.OWNER_PACKAGE:
-            # #1105: every module in the owner package is an owner the lint imports by name, so
-            # the package is the real one, not an inert plant.
+            # Every module in the owner package is an owner the lint imports by name, so the
+            # package is the real one, not an inert plant.
             for src in sorted((DEFENDER / d).glob("*.py")):
                 _write(root / "defender" / d / src.name, src.read_text(encoding="utf-8"))
         else:
             _write(root / "defender" / d / PLANTED)
-    # D13: a `defender/...` entry of UNSCANNED_TREES must select a file too, so the mini repo
-    # holds one under each.
+    # A `defender/...` entry of UNSCANNED_TREES must select a file too, so the mini repo holds
+    # one under each.
     for tree in lint.UNSCANNED_TREES:
         if tree.startswith("defender/"):
             _write(root / tree / PLANTED)
@@ -538,7 +537,7 @@ def test_source_files_refuses_an_undecodable_directory_name(tmp_path):
 
 
 def test_source_files_lists_the_suffixes_it_is_asked_for(tmp_path):
-    """D8: `source_files(root, excluded, suffixes=(".py",))` — the default lists `.py`; the
+    """`source_files(root, excluded, suffixes=(".py",))`: the default lists `.py`; the
     text-file lints pass their own suffixes and get exactly those files."""
     astlib = import_lint_lib("_astlib")
     for rel in ("a.py", "b.md", "c.txt", "d.json", "sub/e.md", "sub/f.py"):
@@ -575,8 +574,8 @@ def test_source_files_is_blind_on_an_unreadable_directory(tmp_path):
 
 
 def test_o9_an_unreadable_directory_blinds_a_lint(tmp_path, capsys):
-    """O9 through a lint: the tree-write lint over a planted scope holding a mode-000 directory
-    exits 2 naming it. Control: with the directory readable again, the same run exits 0."""
+    """The tree-write lint over a planted scope holding a mode-000 directory exits 2 naming it.
+    Control: with the directory readable again, the same run exits 0."""
     lint = _fresh(TREE_WRITE)
     scope = tmp_path / "defender"
     _write(scope / "kept.py")
@@ -631,8 +630,8 @@ def test_source_files_drops_ignored_modules_under_a_root_git_does_not_ignore(tmp
 
 
 def test_o11_a_lint_over_a_tree_inside_an_ignored_directory_reports_its_plant(tmp_path, capsys):
-    """O11 through a lint: the tree-write lint with `scope=<repo>/build/planted` (`build/`
-    ignored by the enclosing repo) reports the raw write planted there (exit 1, named)."""
+    """The tree-write lint with `scope=<repo>/build/planted` (`build/` ignored by the enclosing
+    repo) reports the raw write planted there (exit 1, named)."""
     repo = tmp_path / "repo"
     _write(repo / "kept.py")
     _git_repo(repo, "build/\n")
@@ -718,8 +717,8 @@ def test_source_files_from_a_relative_root_keeps_anchored_ignores(tmp_path, spel
 
 @pytest.mark.parametrize("committed", [False, True], ids=["staged", "committed"])
 def test_source_files_skips_a_tracked_module_deleted_from_the_tree(tmp_path, committed):
-    """O17/D17: a tracked module (staged, or committed) deleted from the working tree but not
-    from the index is not listed — the listing never names a file that is no longer there."""
+    """A tracked module (staged, or committed) deleted from the working tree but not from the
+    index is not listed: the listing never names a file that is no longer there."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     _write(repo / "defender" / "kept.py")
@@ -732,7 +731,7 @@ def test_source_files_skips_a_tracked_module_deleted_from_the_tree(tmp_path, com
     assert astlib.source_files(repo / "defender", ()) == ["kept.py"]
 
 
-# --- amendment 3, the adversary's holes: what IS in the tree ------------------------------
+# --- what IS in the tree: forced-tracked, quoted, dangling and unstatable names ---------
 
 
 def _git_tree(repo: Path) -> Path:
@@ -760,8 +759,8 @@ QUOTED_NAMES = ('q"uote_1191.py', "back\\slash_1191.py", "tab\t_1191.py")
 
 @pytest.mark.parametrize("case", ["tracked", "untracked"])
 def test_source_files_lists_names_git_would_quote(tmp_path, case):
-    """O5 restated: a tracked or untracked, not-ignored module whose valid UTF-8 name git
-    C-quotes (a `"`, a backslash, a tab) is in the tree, so listed as named."""
+    """A tracked or untracked, not-ignored module whose valid UTF-8 name git C-quotes (a `"`,
+    a backslash, a tab) is in the tree, so listed as named."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     _write(repo / "defender" / "kept.py")

@@ -36,7 +36,6 @@ SALT = "0011223344556677"
 
 
 def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_path):
-    """A dispatched gather leg gets a `session` row of its own, so it carries a head like any"""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='leg-head')
     opened: list = []
     main = ReplayFn([
@@ -82,9 +81,6 @@ def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_pa
 
 
 def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_path):
-    """A store failure raised while the run is still being SET UP ends the run through the same"""
-    # provenance: c19/C11. This is the one demand in the spec that binds the driver rather than
-    # the store.
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN, run_id='stale-setup')
     legacy_v1_store_file(ss.store_path_for("stale-case", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path)))))

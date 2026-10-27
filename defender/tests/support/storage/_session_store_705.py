@@ -1,4 +1,4 @@
-"""Shared machinery for the #705 session-store spec suite — NO test scripts."""
+"""Shared machinery for the #705 session-store tests; it defines no tests."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
@@ -29,15 +29,12 @@ from pydantic_ai.messages import (  # noqa: E402
 DEFENDER = Path(__file__).resolve().parents[3]
 
 
-#: An investigation.md whose loop 1 is CLOSED (`:T close`) with a resolved lead, and whose
-#: loop 2 is still open — `compaction.fold_boundary` reads 1 from it, which is what makes
-#: `driver._fold_decision` authorize a fold. The active loop 2 is what keeps the fold from
-#: swallowing the turn in progress. HERE, in the helper both fold suites already import
-#: (`test_store_driver_705`, `test_936_fold_lessons_push` via `_fold_936`), so the two fold
-#: on ONE document — a transcribed copy let them drift while claiming to share a fixture.
-#: OPENS NO SLOT, and `test_store_driver_705` pins that: the fold's mint walks
-#: `defender_dir/lessons`, which for a `drive` that plants no tree is the checkout's live
-#: corpus.
+#: An investigation.md whose loop 1 is CLOSED (`:T close`), so `compaction.fold_boundary`
+#: reads 1 and `driver._fold_decision` authorizes a fold, and whose loop 2 is still open, so
+#: the fold never swallows the turn in progress. Both fold suites (`test_store_driver_705`,
+#: `test_936_fold_lessons_push` via `_fold_936`) fold this ONE document. It opens no slot: the
+#: fold's mint walks `defender_dir/lessons`, the checkout's live corpus for a `drive` that
+#: plants no tree.
 CLOSED_LOOP_INVLANG = """```invlang
 :L findings [id|loop|name|target|tests|system|window]
 l-001|1|raw-auth|v-001||elastic|w
@@ -58,15 +55,15 @@ l-005|2|cmdb-ip|v-006||cmdb|w
 """
 
 
-# the two new targets, imported per test
+# the modules under test, imported per test
 
 def store_mod():
-    """`defender.records.session_store` — M1's module."""
+    """`defender.records.session_store`."""
     return importlib.import_module("defender.records.session_store")
 
 
 def selection_mod():
-    """`defender.records.selection` — M2's module."""
+    """`defender.records.selection`."""
     return importlib.import_module("defender.records.selection")
 
 
@@ -103,8 +100,8 @@ def thinking_response(content: str = "hmm") -> ModelResponse:
 
 
 def part_kind_zoo() -> list[Any]:
-    """One message per part kind the runtime actually produces — the round-trip
-    demand's subject set (O5/C14)."""
+    """One message per part kind the runtime actually produces: the round-trip tests'
+    subject set."""
     return [
         user_request("investigate the alert", instructions="SKILL.md resolved body"),
         thinking_response("weighing the two hypotheses"),
@@ -115,8 +112,7 @@ def part_kind_zoo() -> list[Any]:
 
 
 def complete_pair() -> list[Any]:
-    """A (response with a tool call, request carrying its returns) pair — the legal
-    cut unit O10 names."""
+    """A (response with a tool call, request carrying its returns) pair: the legal cut unit."""
     return [tool_call_response(), tool_return_request()]
 
 
@@ -161,7 +157,8 @@ def mid_pair_session(store, *, agent_id: str = "main"):
 
 
 def nine_row_fixture(store, *, folded_body: str = "pre-fold chatter"):
-    """Invariant 7's fixture, built as rows in a real store."""
+    """Nine rows in a real store: a fold (frontier 5 re-parented to root 1, orphaning 2-4),
+    then a fork `fork_a` at row 6 holding rows 8-9."""
     main = store.new_session(agent_id="main")
     ids: dict[int, int] = {}
     ids[1] = store.append(main, [user_request("orientation")], agent_id="main")[0]
@@ -171,10 +168,8 @@ def nine_row_fixture(store, *, folded_body: str = "pre-fold chatter"):
                           agent_id="main", parent_id=ids[2])[0]
     ids[4] = store.append(main, [text_response(folded_body)],
                           agent_id="main", parent_id=ids[3])[0]
-    # the fold: the frontier is re-parented to the ROOT, orphaning 2,3,4. `reason="fold"` is
-    # #754's, not #705's: re-parenting off the session's head is a NON-LINEAR move under the
-    # head-pointer rule, and a non-linear move with no reason is refused (obligation 7). The
-    # fixture hand-builds a fold, so it hands over the reason a fold hands over.
+    # the fold: the frontier is re-parented to the ROOT, orphaning 2,3,4. Re-parenting off the
+    # head is a non-linear move, refused without a reason, so the hand-built fold passes one.
     ids[5] = store.append(main, [user_request("FRONTIER: summary of turns 2-4")],
                           agent_id="main", synthesized=True, parent_id=ids[1],
                           reason="fold")[0]
@@ -201,16 +196,11 @@ class StoreFault:
     on: str = "append"          # "append" | "read" | "open"
     after: int = 1              # let this many successful calls through first
     mode: str = "absent"        # "absent" | "corrupt" | "locked" | "disk-full"
-    #: How long the store's REAL connection is allowed to block on the `locked` fault's real
-    #: `BEGIN EXCLUSIVE` before the real `sqlite3` gives up. Ignored by every other mode.
-    #:
-    #: Short by default, and that is not a weakening: `auth:P7` (what a contention outlasting
-    #: `busy_timeout` does) is UNPROBED, so no demand here asserts an exception class OR a
-    #: wait — only that the run stops. The wait is still real, still served by the real engine,
-    #: and still outlasted; only its length is pinned. At the shipped
-    #: `session_store.STORE_BUSY_TIMEOUT_MS` (30s) the two blocked appends in
-    #: `test_store_append_is_fail_closed[locked]` cost 60s — 13% of CI's whole unit-test step,
-    #: and the single largest test in the suite — to observe the same stop.
+    #: How long the store's REAL connection blocks on the `locked` fault's real
+    #: `BEGIN EXCLUSIVE` before `sqlite3` gives up (other modes ignore it). Short on purpose:
+    #: the tests assert only that the run stops, never the wait or an exception class, and at
+    #: the shipped `STORE_BUSY_TIMEOUT_MS` (30s) `test_store_append_is_fail_closed[locked]`
+    #: alone cost 60s.
     busy_timeout_ms: int = 250
 
 
@@ -280,8 +270,8 @@ class FaultStore:
         file already occupies, and the slack left inside those pages is then consumed
         by writing real blobs until the engine refuses. From that point the file
         cannot grow and the real `sqlite3` raises its own `SQLITE_FULL` — nothing here
-        names an exception class (`rp-c1`). The ceiling is per-connection, which is
-        why it is applied to the handle the run actually appends through.
+        names an exception class. The ceiling is per-connection, which is why it is
+        applied to the handle the run actually appends through.
         """
         conn = self._real.connection
         conn.execute("CREATE TABLE IF NOT EXISTS _disk_fill (b BLOB)")
@@ -318,12 +308,9 @@ class FaultStore:
 
 def store_factory(tmp_path: Path, *, fault: StoreFault | None = None,
                   case_id: str | None = None, sink: list | None = None):
-    """Build the callable R12 threads through `run_investigation(store_factory=…)`.
-
-    The factory signature IS part of the contract: `factory(case_id, run_dir)` returns
-    an open per-case store handle. `sink` collects the handles the run opened so a
-    scenario can assert on the rows after the run ends.
-    """
+    """The `run_investigation(store_factory=…)` callable: `factory(case_id, run_dir)` returns
+    an open per-case store handle. `sink` collects the handles the run opened, so a test can
+    read the rows after the run ends."""
     base = runs_base(tmp_path)
 
     def factory(run_case_id: str, run_dir: Path):

@@ -1,4 +1,4 @@
-"""Shared machinery for #1133's Episode-handle spec, rev 3. It defines NO tests."""
+"""Shared machinery for the #1133 Episode-handle tests. It defines no tests."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -39,9 +39,8 @@ WORLD_ID = fixture_uuid("world:1133:b")
 WIRE_NAME = WIRE_LOG_NAMES.agent_framed_trace(f"judge:{WORLD_ID}:0")
 DRAW_N = 0
 
-#: D1's record table (kept by D2'), row for row: address -> the verbs that row grants. Rev 3
-#: (R1): records are write-only, so `family` and `review` lose `read`; reading a record is the
-#: view's `read(LAYOUT.<record>)`.
+#: The record table: address -> the verbs that record grants. Records are write-only; reading
+#: one is the view's `read(LAYOUT.<record>)`.
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "family": ("create",),
     "family_stamp": ("write",),
@@ -56,33 +55,26 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
     "family_draw": ("write", "delete"),
-    # #1187 R8 (declared change 12): the archive pointer `world.run_dir_pointer` is retired with
-    # its write — nothing reads it, and the arm roster supersedes it — so the row is gone.
-    # #1224: the episode outcome and each world's own record, both created once.
+    # The episode outcome and each world's own record, both created once.
     "world_record": ("create",),
     "outcome": ("create",),
-    # PR #1232 round 7: why `verify_family` withheld the family stamp, replaced like the stamp.
+    # Why `verify_family` withheld the family stamp; replaced like the stamp.
     "not_comparable": ("write",),
-    # #1255 D6 (owner decision, 2026-10-16): the primer's skip record — the source's pre-fork
-    # calls that left no recording (the call failed, the payload was unreadable) — created
-    # once beside the capture.
+    # The primer's skip record (pre-fork calls that left no recording), created once.
     "served_unrecorded": ("create",),
 }
 
-#: D1's folders (kept by D2'): `served`, `runs`, `worlds`, `world(label).dir`,
-#: `world(label).draws`. `runs` is the handle's PRIVATE `_runs` since #1105 PR 2 (F-13): the
-#: container and its arms are the runs repository's episode view, built on this handle, and
-#: the one public hand-out of its path is `box_mounted_container` (`PRIVATE_FOLDERS`).
+#: The handle's folders. `runs` is private (`_runs`): the runs repository's episode view is
+#: built on it, and its one public path hand-out is `box_mounted_container`.
 FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws", "family_draws")
 #: The folders the handle serves under a private attribute (the key's name, `_`-prefixed).
 PRIVATE_FOLDERS: tuple[str, ...] = ("runs",)
 
-#: Every verb name a record could answer. `read` stays listed although rev 3 grants it to no
-#: record, so the class and surface pins check its ABSENCE on every record. (#1224 removed the
-#: last record granting `append_durable`, the staging record, and the verb with it.)
+#: Every verb name a record could answer. No record grants `read`; it stays listed so the
+#: surface pins check its absence on every record.
 ALL_VERBS = ("read", "write", "create", "append", "delete")
 
-#: The write verbs, and the `Held.write` mode each is (D2': one `held.write` per write verb).
+#: The write verbs, and the `Held.write` mode each one is.
 WRITE_MODE = {"write": "replace", "create": "create", "append": "append"}
 
 #: The components each composing record is addressed with.
@@ -96,7 +88,7 @@ RECORD_ARGS: dict[str, tuple[Any, ...]] = {
 
 
 # ---------------------------------------------------------------------------------------
-# Lazy access to the rev-2 names
+# Lazy access to the handle and the core
 # ---------------------------------------------------------------------------------------
 
 def handle() -> Any:
@@ -120,7 +112,7 @@ def create_episode(episode_dir: Path, io: Any = _io) -> Any:
 
 
 def hold(root: Path, **kw: Any) -> Any:
-    """`_io.hold(root, **kw)`, resolved at call time so a missing core fails the calling test."""
+    """`_io.hold(root, **kw)`."""
     return _io.hold(root, **kw)  # type: ignore[attr-defined]
 
 
@@ -171,7 +163,8 @@ def expected_folder_rel(key: str) -> PurePosixPath:
 
 
 def resolve(episode: Any, key: str) -> Any:
-    """The record or folder at `key` on `episode` (the address grammar in the docstring)."""
+    """The record or folder at `key` on `episode`: `world.<name>` is on `episode.world(WORLD_ID)`,
+    a `PRIVATE_FOLDERS` key is the `_`-prefixed attribute, and a method is called with `RECORD_ARGS`."""
     head, dot, rest = key.partition(".")
     owner, attr = (episode.world(WORLD_ID), rest) if (head == "world" and dot) else (episode, key)
     if owner is episode and attr in PRIVATE_FOLDERS:
@@ -219,15 +212,14 @@ CORE_REFUSAL = r"aliased|symlinked|not a directory"
 ROWS = {**O6_ROWS, "dangling": O6_ROWS["symlink"]}
 
 #: The plants that sit at a FOLDER on the way (or at a folder's own name): the walk's refusal, a
-#: plain `OSError(ELOOP)` or `NotADirectoryError`, never the leaf class (R2). Every other row of
+#: plain `OSError(ELOOP)` or `NotADirectoryError`, never the leaf class. Every other row of
 #: `ROWS` is a plant AT the name: the core's leaf refusal, `_io.NotPlainEntry`.
 FOLDER_ROWS = frozenset({"folder_link_inside", "folder_link_outside", "folder_file",
                          "folder_fifo"})
 
 
 def not_plain_entry() -> type[OSError]:
-    """`_io.NotPlainEntry` (rev 3, R2), looked up per call: its absence fails the calling test,
-    never the suite's collection."""
+    """`_io.NotPlainEntry`, checked to be an `OSError` subclass."""
     cls = getattr(_io, "NotPlainEntry", None)
     assert isinstance(cls, type), (
         "defender._io has no `NotPlainEntry` — rev 3 (R2) gives the core's refusal of a "
@@ -238,8 +230,8 @@ def not_plain_entry() -> type[OSError]:
 
 def assert_refusal(exc: BaseException | None, kind: str, *, where: str) -> None:
     """`exc` is the core's refusal row for a `kind` plant: its type, its errno and its alias
-    mark (`write_guarded_alias`; absent and False are both unmarked). Rev 3 (R2): a plant AT the
-    name is the leaf class `_io.NotPlainEntry`; a plant at a folder on the way is not."""
+    mark (`write_guarded_alias`; absent and False are both unmarked). A plant AT the name is the
+    leaf class `_io.NotPlainEntry`; a plant at a folder on the way is not."""
     typ, code, marked = ROWS[kind]
     assert exc is not None, f"{where}: a {kind} plant was not refused"
     want = f"the core's {typ.__name__} {errno.errorcode[code]}"
@@ -418,7 +410,7 @@ class RecordingHeld:
             self._before(method, args, kwargs)
         return getattr(self._inner, method)(*args, **kwargs)
 
-    # No `read`: rev 3's `Held` has none, so a handle that reaches for it shows up in `calls` as
+    # No `read`: `Held` has none, so a handle reaching for it shows up in `calls` as
     # `getattr:read` and fails on the real `Held`.
 
     def write(self, *args: Any, **kwargs: Any) -> Any:
@@ -450,7 +442,7 @@ class RecordingHeld:
 
 
 class RecordingIo:
-    """The handle's `io=` seam, offering ONLY `hold` and `hold_new` (D2'): an `Episode` that
+    """The handle's `io=` seam, offering ONLY `hold` and `hold_new`: an `Episode` that
     reaches for anything else (`rooted_write`, `bind`, ...) fails with `AttributeError`. Each
     call is recorded and answered by the real core (with `os_` when given), wrapped in a
     `RecordingHeld`."""
@@ -618,8 +610,7 @@ def run_in_thread(fn: Callable[[], Any], *, timeout: float = DEADLINE) -> bool:
 
 def held_verb(held: Any, verb: str, name: Any, payload: str | bytes = "held row\n") -> Any:
     """One `Held` verb by the name the suite parametrizes over: the write modes (`create`,
-    `replace`, `append`, `durable_append`), `mkdir`, `unlink`. (Rev 3 has no `Held.read`; a
-    read is the view's.)"""
+    `replace`, `append`, `durable_append`), `mkdir`, `unlink`."""
     if verb == "durable_append":
         return held.write(name, payload, mode="append", durable=True)
     if verb in ("create", "replace", "append"):
@@ -631,7 +622,7 @@ def held_verb(held: Any, verb: str, name: Any, payload: str | bytes = "held row\
     raise AssertionError(verb)
 
 
-#: `Held`'s whole public surface in rev 3 (R1: no `read`).
+#: `Held`'s whole public surface (no `read`).
 HELD_SURFACE = frozenset({"write", "mkdir", "unlink", "view", "close"})
-#: The view's (`Bound`'s) whole public surface (O3).
+#: The view's (`Bound`'s) whole public surface.
 VIEW_SURFACE = frozenset({"read", "read_bytes", "read_jsonl", "entries", "under", "close"})

@@ -1,8 +1,7 @@
 """The Episode handle's constructors are exactly its two doors.
 
-The source-reading census this file used to hold (episode I/O in the migrated modules, the handle's
-I/O, path-taking parameters, the path makers, the doors) is `tooling/lint/lint_episode_paths.py`.
-What stays here needs the live class, which a lint cannot import."""
+The source-reading checks are `tooling/lint/lint_episode_paths.py`; this one needs the live
+class, which a lint cannot import."""
 from __future__ import annotations
 
 import importlib

@@ -1,14 +1,10 @@
-"""The archive round trip, addressed ONLY through the owners' accessors (#1077 D7).
+"""The archive round trip, addressed ONLY through the owners' accessors (#1077).
 
-NOT A TEST MODULE (the leading underscore keeps pytest from collecting it). It is the payload
-`test_1077_rename_proof.py` runs in a subprocess, against a tree whose owner modules have had
-every record name rewritten to something else.
-
-Nothing in this file spells a record name, so it keeps working under any rename. Any module it
-drives that DOES spell one stops finding its file — which is the whole point: the gate proves
-no module SAYS a name, and this proves no module NEEDS to.
-
-Run as `python -m defender.tests.support.storage._rename_proof_1077 <work dir>`.
+The payload `test_1077_rename_proof.py` runs in a subprocess (`python -m
+defender.tests.support.storage._rename_proof_1077 <work dir>`) against a tree whose owner modules
+had every record name rewritten. Nothing here spells a record name, so a module it drives that
+does spell one stops finding its file: the gate proves no module SAYS a name; this proves none
+NEEDS to.
 """
 from __future__ import annotations
 
@@ -48,7 +44,6 @@ def main(root: Path) -> int:
     from defender.learning.branch.archive import archive_episode
 
     episode_dir.mkdir(parents=True)
-    # `archive_episode` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
     with Episode.open(episode_dir) as episode:
         episode.family.create(_yaml.safe_dump(T.family_doc(
             episode_id=episode_dir.name, worlds=[T.base_world(), T.world_doc("b", world_id=WORLD_ID)])))
@@ -70,9 +65,8 @@ def main(root: Path) -> int:
         assert path.is_file(), f"{label}: the archive wrote nothing at {path}"
         assert want in path.read_text(encoding="utf-8"), f"{label}: wrong bytes at {path}"
 
-    # And through the BOUND readers, which address by the owner's RELATIVE form — the half of
-    # the tree the gate was blind to before D7, because a relative name carries no root a
-    # dataflow pass can trace.
+    # And through the BOUND readers, which address by the owner's RELATIVE form: a relative
+    # name carries no root a dataflow gate can trace.
     with bind(episode_dir) as bound:
         rec = bound.read(LAYOUT.world(WORLD_ID).report)
         assert rec.text is not None, f"bound read of the report failed: {rec.reason}"
@@ -86,10 +80,9 @@ def main(root: Path) -> int:
         read = family.read_archived_report(bound, LAYOUT.world(WORLD_ID).report)
         assert read.disposition == "benign", f"the judge read no disposition: {read.reason}"
 
-    # Say which tree this actually loaded. `python -m` puts the CWD first on
-    # `sys.path`, so a harness that sets only PYTHONPATH silently drives the real
-    # package and passes while exercising nothing — the failure mode this whole
-    # file exists to rule out, so the caller is given the evidence to check.
+    # Say which tree this loaded: `python -m` puts the CWD first on `sys.path`, so a harness
+    # setting only PYTHONPATH would silently drive the real package and pass, exercising
+    # nothing. The caller checks this evidence.
     print(f"ALERT_NAME={run.alert.name}")
     print("ROUNDTRIP OK")
     return 0

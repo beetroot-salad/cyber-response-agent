@@ -1,4 +1,4 @@
-"""#1077 — O3's tree observer, and the writers that share a run directory."""
+"""The #1077 run-tree observer, and the writers that share a run directory."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
@@ -23,11 +23,9 @@ pytestmark = pytest.mark.e2e
 
 
 def _agent(tmp_path: Path) -> Path:
-    """The tenant agent tree the replay reads (`drive(agent=)`, #1108 P4 A8): the fixture
-    tenant's, plus one lesson the golden's document matches. The baseline was captured when the
-    product tree's corpus answered this golden (so the run pushed a lesson and kept
-    `lessons_loaded.jsonl`); after O1/O2 the run's corpus is its tenant's, so the tenant carries
-    the lesson the golden pushes."""
+    """The tenant agent tree the replay reads (`drive(agent=)`): the fixture tenant's plus one
+    lesson the golden's document matches, so the run pushes a lesson and keeps
+    `lessons_loaded.jsonl`, as the tree baseline expects."""
     import shutil
 
     from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson
@@ -60,7 +58,7 @@ def _baseline_exists() -> None:
         "they compare one normalised investigation text and three iterdir() names)")
 
 
-# d13 / d14 — the structural check, and the narrow content check beside it
+# the structural check
 
 def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Path):
     _baseline_exists()
@@ -70,7 +68,7 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
         "\n".join(S.structural_findings(run_dir, doc)))
 
     # The check is over the WHOLE tree: no name is excused, and the machinery offers no lever
-    # to excuse one. Decision 21 removed `O3_EXEMPT` rather than lengthening it.
+    # to excuse one.
     assert not hasattr(S, "O3_EXEMPT"), (
         "an exemption list came back. Decision 21 removed it: eight files differ between two "
         "replays of UNCHANGED code, so an exemption list is a widening lever, not a contract")
@@ -85,7 +83,7 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
             "splitting the two checks rather than exempting the file")
 
 
-# g04 — the writers that share one run directory
+# the writers that share one run directory
 
 def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_path: Path):
     from defender.investigation import record_query
@@ -111,7 +109,6 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
         claim("challenge_gate", owner.review_trace(role))
     claim("_alias", run_dir / ".alias-probe-deadbeefdeadbeef-symlink")
     claim("box", owner.box_sentinel)
-    # #1235: `budget` and `circuit_breaker` are no longer run records (in-memory state).
     for fixed in ("tool_trace", "executed_queries", "policy_denials", "lessons_loaded",
                   "wire_log", "provenance"):
         claim("Run", getattr(owner, fixed))
@@ -124,7 +121,7 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
                 assert not a.startswith(f"{b}/"), f"{a} lands inside {b}, another writer's key"
 
 
-# h26 — the sandbox probe fails closed
+# the sandbox probe fails closed
 
 def test_the_alias_ban_probe_fails_closed_on_a_timeout_or_a_malformed_result(tmp_path: Path):
     """The sandbox alias-ban probe fails closed — a timeout or a malformed result refuses,

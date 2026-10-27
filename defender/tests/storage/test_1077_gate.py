@@ -1,4 +1,4 @@
-"""#1077 — D6's gate rewrite, and the two sibling lints coupled to the owners."""
+"""The #1077 record-name gate (`lint_run_records.scan`): its literal and accessor-derived passes."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,7 +9,7 @@ from defender.tests.support.shared.contracts import _spec1077 as S
 NAME_LITERAL = "executed_queries.jsonl"
 
 
-# D6(a) — the negative, name-keyed, root-agnostic literal pass
+# (a) the name-keyed, root-agnostic literal pass
 
 def test_gate_flags_a_record_name_literal_outside_the_owners(tmp_path: Path):
     """A record name spelled as a string constant, an f-string piece or a glob argument outside
@@ -76,7 +76,7 @@ def test_gate_suppression_comment_missing_reason(tmp_path: Path):
             f"{comment!r} carries the marker with no reason after it and must not suppress; "
             "the UNDERLYING finding is what this asserts — no second malformed-suppression "
             "diagnostic is demanded (§7 non-material item 6)")
-    # Positive control: the well-formed suppression still admits the line (demand d5).
+    # Positive control: the well-formed suppression still admits the line.
     ok = S.gate_findings(
         tmp_path / "wellformed", "investigation/msg.py",
         f'def explain():\n    raise ValueError("no {NAME_LITERAL}")'
@@ -110,7 +110,7 @@ def from_a_data_file(run_dir: Path, names: list[str]) -> Path:
     assert literal, "positive control: a name that IS a literal is reported"
 
 
-# D6(b) — the accessor-derived pass in `_astlib`
+# (b) the accessor-derived pass in `_astlib`
 
 def test_gate_flags_a_literal_free_join_onto_an_owner_derived_value(tmp_path: Path):
     """A join onto a value the accessor pass traced back to an owner —
@@ -176,15 +176,3 @@ def test_the_gate_reports_a_finding_for_a_source_file_it_cannot_parse(tmp_path: 
         f"which D6(b)'s own stated 'never a skip' forbids:\n{displays}")
     assert "spells.py" in displays, (
         "the unparseable file took the rest of the sweep down with it — the sweep continues")
-
-
-# O1's scope — what the checker does and does not enter
-
-
-# The allow-list and the migration's intermediate states
-
-
-# The two tables and the page
-
-
-# The two sibling lints coupled to the owners

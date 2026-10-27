@@ -1,4 +1,4 @@
-"""#1077 — the handle's surface: the constructors, the five sub-collections, `RunRecord` and the
+"""The #1077 run handle's surface: the constructors, the sub-collections, `RunRecord` and the
 per-kind `RecordHandle`."""
 from __future__ import annotations
 
@@ -31,10 +31,7 @@ def _tenanted(base: Path, run_id: str = S.RUN_ID):
     return S.Run().under(fixture_runs_base(base), run_id, tenant_id=S.DEFAULT_TENANT_ID)
 
 
-# Demand #0 — the return-value contract, RESOLVED at §7 on all four axes
-
-
-# Decision 1b/1c/1d — the three flipped axes
+# the constructors' refusals
 
 
 def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
@@ -94,7 +91,7 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
     assert S.Run().under(fixture_runs_base(base), two, tenant_id=S.DEFAULT_TENANT_ID) is not None
 
 
-# d42 / d45 / d43 — the fields, the receivers, the archive projection
+# the archive projection
 
 
 def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path: Path):
@@ -116,7 +113,7 @@ def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path
     assert not hasattr(aw, "record"), "an ArchivedWorld is not addressed by (tenant_id, run_id)"
 
 
-# Settled premises on the constructors' admission domain
+# the constructors' admission domain
 
 def test_run_under_run_id_containing_path_separator(base):
     escaped = base.parent / "escaped"
@@ -151,7 +148,7 @@ def test_handle_over_the_learning_run_directory_that_this_issue_leaves_unowned(t
     run = S.Run().at(learning_run)
     assert run.run_dir == learning_run, "N8: it is run-dir-shaped, so Run.at takes it"
     assert location_path(run.runs_base) is None, "this root is not a runs base and the handle claims none"
-    # Claim C16 is REFUTED: this root IS written. A trace landing here is ordinary, not a fault.
+    # This root IS written: a trace landing here is ordinary, not a fault.
     trace_dir = learning_run / "wire_logs"
     trace_dir.mkdir()
     (trace_dir / "forward.a-lesson.2.trace.jsonl").write_text("{}\n", encoding="utf-8")
@@ -166,7 +163,7 @@ def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent
     companion = corpus / "a-document.md"
     companion.write_text("# not a run\n", encoding="utf-8")
 
-    # The live site builds from the FILE's parent, which is a directory — unaffected by h09.
+    # The live site builds from the FILE's parent, which is a directory.
     assert S.RunPaths(companion.parent).alert == corpus / "alert_input" / "alert.json", (
         "RunPaths still composes ad hoc over an arbitrary companion-corpus directory")
     assert location_path(S.Run().at(companion.parent).runs_base) is None
@@ -176,7 +173,7 @@ def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent
         "this live name use is unaddressed rather than a finding")
 
 
-# Decision 4 — 'absent or unreadable', the three arms on RunRecord
+# `RunRecord`: absent, unparseable, wrong-shaped
 
 
 def test_a_field_whose_record_is_unparseable_reads_none_and_records_the_fault(base, run_dir):
@@ -199,7 +196,7 @@ def test_a_field_whose_record_is_wrong_shaped_reads_none_and_records_the_fault(b
     assert record.world_id is None, "a numeric world_id is a wrong shape, not a value"
     assert record.disposition is None
     assert record.faults, "decision 4's third arm records the fault as well as reading None"
-    # An explicitly-NULL key is decision 4's non-case (F045): `str | None` admits it, no fault.
+    # An explicitly-NULL key is no fault: `str | None` admits it.
     S.plant_stamp(run_dir, commit="c0ffee", dirty=False, tenant_id=None, world_id=None)
     (run_dir / "report.md").write_text("disposition: benign\n", encoding="utf-8")
     quiet = S.Run().at(run_dir).record
@@ -210,7 +207,7 @@ def test_a_field_whose_record_is_wrong_shaped_reads_none_and_records_the_fault(b
         "type admits (D3), not a wrong shape — no fault is recorded for it")
 
 
-# Decision 10 (dissolved) — each accessor's OWN root
+# each accessor's own root
 
 def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base, run_dir):
     owner = S.RunPaths(run_dir)
@@ -228,7 +225,7 @@ def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base
         assert getattr(owner, name).is_relative_to(run_dir), f"{name}'s root is the run directory"
 
 
-# Decision 11 (dissolved) — read everywhere, write where the runtime produces
+# write verbs only where the runtime produces
 
 
 def test_run_observability_group_stays_append_only_through_the_handle(base, run_dir):
@@ -241,8 +238,8 @@ def test_run_observability_group_stays_append_only_through_the_handle(base, run_
 
     for name in S.GROUP_MEMBERS["observability"]:
         rec = S.member(run, "observability", name, *S.member_args(name))
-        # No locked JSON state is left in this group (#1235 moved the budget and the breaker
-        # into the run process's memory), so no member takes a read-modify-write `update`.
+        # No member holds locked JSON state (the budget and the breaker live in the run
+        # process's memory), so none takes a read-modify-write `update`.
         assert not hasattr(rec, "update"), f"run.observability.{name} exposes an update"
         if S.MEMBER_VERB[name] == "append":
             assert not hasattr(rec, "write"), (
@@ -253,9 +250,6 @@ def test_run_observability_group_stays_append_only_through_the_handle(base, run_
             # entries to append to, and appending JSONL to it would corrupt it.
             assert not hasattr(rec, "append"), (
                 f"run.observability.{name} is a whole document; an append would corrupt it")
-
-
-# Decision 9 — read purity
 
 
 def _rule_refusal(rule: Any, text: str) -> BaseException | None:

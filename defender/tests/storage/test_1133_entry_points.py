@@ -28,14 +28,14 @@ from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._state1135 import env_state
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-#: #1187: an episode id is a uuid4 (`fixture_uuid` of the readable label).
+#: An episode id is a uuid4 (`fixture_uuid` of a readable label).
 EPISODE_ID = fixture_uuid("ep-1133")
 WORLD_B = T.fixture_world_id("b")
 #: Where a primer waits for its rival, and a launcher for the other: generous, since a wedged
 #: wait costs one failed test, never a hung worker.
 WAIT = 10.0
 #: Where a planted link points: a host folder outside the episode, or a folder elsewhere inside
-#: it (see the module docstring).
+#: it.
 REACH = ("outside", "inside")
 #: A link at a record's own name: to a file, or dangling (a write that followed it would CREATE
 #: its target).
@@ -153,10 +153,8 @@ def branch_cli() -> Any:
 
 
 def start_family(episode: Any, spawn: Any) -> dict[str, int]:
-    """The launcher's RUNS step for tenant `acme` (#1105 PR 2): the siblings' container made
-    through the episode's view (the `runs/` ensure `start_family` no longer does; #1187 R2:
-    `view.start_runs(<every manifest world>)` replaces `create_container` — `runs/`, then the
-    arm roster), then the siblings started."""
+    """The launcher's RUNS step for tenant `acme` (`view.start_runs(<every manifest world>)`:
+    `runs/`, then the arm roster), then `cli.start_family` starts the siblings."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     acme = set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), fixture_uuid("tenant:acme"))
@@ -202,8 +200,8 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
     assert exits == {T.world_id(ep, label): 0 for label in ("b", "c")}
     assert len(spawn.argvs) == 2
     assert_real_folder(ep / "runs")
-    # #1187 declared change 6 (R1): the arm container holds no `_tenant.json`; an arm's tenant
-    # is the one whose folder holds the episode.
+    # The arm container holds no `_tenant.json`: an arm's tenant is the one whose folder holds
+    # the episode.
     assert not (ep / "runs" / "_tenant.json").exists(), (
         "start_family wrote the retired tenant record into the arm container")
 
@@ -214,8 +212,7 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
         tmp_path, host, scrub_ran, reach):
     cli = branch_cli()
     ep = T.episode(tmp_path)
-    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
-    # the arm planter reads the roster and never writes one (review-3 F33).
+    # The scene's explicit RUNS step: the arm planter reads the roster and never writes one.
     T.plant_roster(ep)
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, scrub_ran=scrub_ran)
@@ -248,8 +245,6 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
         tmp_path, host, kind, reach):
     cli = branch_cli()
     ep = T.episode(tmp_path)
-    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
-    # the arm planter reads the roster and never writes one (review-3 F33).
     T.plant_roster(ep)
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, commit="cafe1")
@@ -281,8 +276,6 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
         tmp_path, host, at, reach):
     archive = T.mod("learning.branch.archive")
     ep = T.episode(tmp_path)
-    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
-    # the arm planter reads the roster and never writes one (review-3 F33).
     T.plant_roster(ep)
     run_dir = T.sibling_run_dir(ep / "runs", "b")
     if at == f"worlds/{WORLD_B}":
@@ -546,8 +539,7 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     _base, src = location_path(T.runs_base)(tmp_path)
-    # #1187 (O9): an episode is the tenant's own `<T>/episodes/<id>`; the configured
-    # `episode_dir` resolver is retired, so the address is the tenant's folder.
+    # An episode is the tenant's own `<T>/episodes/<id>`.
     ep = location_path(T.current_tenant().episodes) / T.EPISODE_ID
     claim = ep / "served" / ".priming"
     priming, second_done = threading.Event(), threading.Event()
@@ -648,8 +640,8 @@ def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it
     ep = T.episode(tmp_path, doc=doc)
     manifest = ep / "family.yaml"
     good = manifest.read_bytes()
-    # #1187 R5 (review-4 F36): the expected id is a required keyword, the episode's own folder
-    # name, so a refusal below is the link's, never a missing argument's.
+    # The expected id (the episode's folder name) is passed, so a refusal below is the link's,
+    # never a missing argument's.
     call = functools.partial(fam.load_family, expected_episode_id=ep.name)
 
     host = tmp_path / "host"
