@@ -20,10 +20,10 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
 from defender.tests.support.storage._setup_faults_1279 import PlantAfterRunDirIo, materialize_through
 
-#: The admission shapes A8 refuses (every distinguished shape but the two it admits).
+#: The admission shapes refused (every shape but the two admitted).
 REFUSED_SHAPES = tuple(s for s in S.ADMISSION_SHAPES if s not in S.ADMITTED_SHAPES)
-#: A1's "refuses anything else, naming why", read as: refusals of DIFFERENT causes differ. The
-#: cause classes (92-reconciliation A3); shapes within one class may share a reason, and `bom` /
+#: "Refused, naming why": refusals of different causes differ. Shapes within one class may share
+#: a reason; `bom` and `whitespace_only` belong to no class, so their reasons are not compared.
 CAUSE_CLASSES: dict[str, tuple[str, ...]] = {
     "encoding": ("non_utf8", "utf16"),
     "not_one_json_object": ("not_json", "top_level_array", "scalar", "empty"),
@@ -176,8 +176,7 @@ def _assert_refused_before_any_folder(d: S.Drive, what: str) -> None:
     assert d.lifecycle_calls == [], f"{what}: the run's lifecycle (its box) started for a refused alert"
     assert d.main.requests == 0, f"{what}: MAIN was asked for a turn on a refused alert"
     assert d.router.leads() == [], f"{what}: leads were dispatched for a refused alert: {d.router.leads()}"
-    # #1187 (R1): run setup writes no `_tenant.json`, so a refused alert leaves the runs base
-    # with no entry at all — nothing is excluded from the census.
+    # Run setup writes no `_tenant.json`, so a refused alert leaves the runs base empty.
     left = d.runs_base_entries()
     assert left == [], f"{what}: a refused alert left {left} under the runs base"
 
@@ -247,10 +246,10 @@ def _request_key_for(run_dir: Path) -> str | None:
 
 def _union_shown(tmp_path: Path, source_alert: bytes, runs_base: Path, tag: str) -> str:
     """Grade an accepted episode whose launch copy holds `source_alert` (and its record) over
-    `runs_base`, and return everything the judge was SHOWN — the sibling-trials section names
-    each run of the union by its run id."""
-    # #1187 (Layout A): the episode sits under the planted tenant's `<T>/episodes/`, where the
-    # judge reaches it by id; `tmp_path / tag` tells this scene from another (`T.episode`).
+    `runs_base`, and return everything the judge was shown: no run id of a prior trial may
+    appear in it (the sibling union is retired)."""
+    # The episode sits under the tenant's `<T>/episodes/`, where the judge reaches it by id;
+    # `tag` tells this scene from another in the same test.
     ep = J.accepted_episode(Path(tmp_path) / f"episodes-{tag}",
                             ledgers={"b": [J.oracle_row("b")], "c": []})
     S.plant_episode_copy(ep, alert=source_alert)
@@ -261,10 +260,8 @@ def _union_shown(tmp_path: Path, source_alert: bytes, runs_base: Path, tag: str)
 
 
 def _launch(planted: S.Planted, source_run_dir: Path) -> tuple[Path | None, str | None]:
-    """The branch launcher's `prepare_episode(runs, source, *, prime=)` over `source_run_dir`
-    (priming stubbed through its `prime=` seam), in the tenant's runs repository (#1187
-    declared change 3, review-4 F37: the episode is a fresh UUID `runs.create_episode()`
-    claims — no id argument, no `data_root=`). Returns (episode dir, None) or (None, the
+    """The branch launcher's `prepare_episode` over `source_run_dir` in the tenant's runs
+    repository (priming stubbed through `prime=`). Returns (episode dir, None) or (None, the
     refusal's text)."""
     cli = S.mod("learning.branch.cli")
     capture = S.mod("learning.branch.capture")
@@ -315,7 +312,7 @@ def test_a8_admission_refuses_a_bad_alert_before_any_run_folder(tmp_path):
     for shape in REFUSED_SHAPES:
         d = _drive(tmp_path, planted, alert=S.admission_bytes(shape))
         _assert_refused_before_any_folder(d, shape)
-        # Refused before any run folder, so before any run id exists (#1279): nothing to mask.
+        # Refused before any run id exists: nothing to mask.
         reasons[shape] = str(d.refusal)
 
     for shape, raw in _same_shape_other_content().items():
@@ -336,6 +333,7 @@ def test_a8_admission_refuses_a_bad_alert_before_any_run_folder(tmp_path):
     for shape in S.ADMITTED_SHAPES:
         d = _drive(tmp_path, planted, alert=S.admission_bytes(shape))
         run_dir = _assert_admitted(d, shape)
+        assert d.router.dispatched(S.L3), f"{shape}: the admitted alert dispatched no correlation lead"
         assert d.stored_alert == d.input_bytes, f"{shape}: the stored alert is not the admitted bytes"
         assert S.recorded_digest(run_dir) == S.sha256_hex(d.input_bytes), (
             f"{shape}: the record's digest is not the admitted bytes' sha256")
@@ -357,23 +355,6 @@ def test_p015_non_json_alert_text_with_fence_lines_of_every_sh(tmp_path):
     prompt = control.router.first_prompt(S.L3)
     assert marker not in prompt, "alert bytes reached the correlation lead's prompt"
     assert "`" * 20 not in prompt, "alert bytes reached the correlation lead's prompt"
-
-
-def test_p018_alert_bytes_not_utf8(tmp_path):
-    planted = S.plant_tenant()
-    first, second = S.generic_alert(), S.generic_alert(rule_id="R-3003", user={"login": "ops-9"})
-    for shape in ("bom", "non_utf8"):
-        reasons = []
-        for base in (first, second):
-            d = _drive(tmp_path, planted, alert=S.admission_bytes(shape, base))
-            _assert_refused_before_any_folder(d, shape)
-            reasons.append(str(d.refusal))
-        assert reasons[0] == reasons[1], f"{shape}: the reason is not fixed: {reasons}"
-
-    control = _drive(tmp_path, planted, alert=S.admission_bytes("valid_object", first))
-    run_dir = _assert_admitted(control, "the same alert without the mark")
-    assert control.router.dispatched(S.L3), "the admitted twin dispatched no correlation lead"
-    assert S.recorded_digest(run_dir) == S.sha256_hex(_admitted_bytes(control))
 
 
 def test_p045_alert_nests_deeper_than_the_parser_follows(tmp_path):
@@ -444,10 +425,8 @@ def test_p138_refused_alert_leaves_a_run_folder_without_a_reco(tmp_path):
 
 
 def test_p139_record_cannot_be_written_at_run_start(tmp_path):
-    """Recovered (#1279 R2): setup mints the id, so the obstruction cannot be planted at a chosen
-    id beforehand. It is planted right after the REAL run-dir creation, through the runs
-    repository's `io=` seam (a real directory at the record's name), and the real writers refuse
-    it."""
+    """Setup mints the run id, so the obstruction (a real directory at the record's name) is
+    planted right after the real run-dir creation, through the runs repository's `io=` seam."""
     planted = S.plant_tenant()
     squatted: list[Path] = []
 
@@ -590,7 +569,7 @@ def test_p141_record_for_a_value_the_signature_rule_refuses(tmp_path):
         f"{note('whitespace')} / {note('over-bound')} vs {note('unmapped')}")
 
 
-# A8 / C47 — the recorded digest is the alert's one identity
+# A8 — the recorded digest is the alert's one identity
 
 def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
     planted = S.plant_tenant()
@@ -608,7 +587,6 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
         return change
 
     def run(label: str, alert: bytes, change: Callable[[Path], None] | None = None) -> Path:
-        """One run; #1279: its id is the one setup minted, read off the run folder."""
         d = _drive(tmp_path, planted, alert=alert, enqueue=enqueue, before=change,
                    main=S.closing_main_turns())
         run_dir = _assert_admitted(d, label)
@@ -714,8 +692,7 @@ def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
 def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
     planted = S.plant_tenant()
     source = S.alert_bytes(_alert())
-    # #1279: each run's id is minted by setup, so the three runs are named by the label they were
-    # driven under and found by the folder each run reports.
+    # Setup mints each run's id, so the runs are keyed by label and found by the folder each reports.
     dirs = {label: _assert_admitted(_drive(tmp_path, planted, alert=source,
                                            main=S.closing_main_turns()), label)
             for label in ("rewritten", "gone", "intact")}
@@ -745,6 +722,3 @@ def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
     assert S.episode_alert_file(episode).read_bytes() == source
     assert json.loads(S.episode_record_file(episode).read_text(encoding="utf-8")).get(
         S.COINED["record.digest"]) == S.sha256_hex(source)
-
-
-# R7 — the shared test builders make admissible alerts

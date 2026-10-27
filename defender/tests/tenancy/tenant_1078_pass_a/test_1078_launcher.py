@@ -26,7 +26,8 @@ TID = H.VALID_ID
 
 
 def _episodes_root(tmp_path: Path, monkeypatch) -> Path:
-    """A configured episodes root OUTSIDE the data root (the only place pass A accepts one)."""
+    """The retired episodes-root variable, pointed outside the data root: a decoy nothing may
+    write into (an episode lives at `<root>/<T>/episodes/`)."""
     root = tmp_path / "episodes-root"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(root))
     return root
@@ -52,9 +53,8 @@ def _launch(source: Path, *, tenant_id: str = TID, **over):
 
 
 def _launch_id(source_run_id: str, *, tenant_id: str = TID, **over):
-    """The REAL launcher over `--tenant tenant_id <source_run_id>` verbatim (#1105 PR 2,
-    declared change 1) — for a source argument that is not a run folder's name (a path where
-    the id belongs, a sidecar's name)."""
+    """The REAL launcher over `--tenant tenant_id <source_run_id>` verbatim — for a source
+    argument that is not a run folder's name (a path where the id belongs, a sidecar's name)."""
     seams = _seams(**over)
     spawn = seams.pop("spawn")
     seams.setdefault("preflight", H.no_preflight)
@@ -70,9 +70,8 @@ def _launch_id(source_run_id: str, *, tenant_id: str = TID, **over):
 
 def _repository_refusal(root: Path, run_id: str, tenant_id: str = TID) -> BaseException:
     """The refusal tenant `tenant_id`'s runs repository (accepted under `root`) gives for the
-    source `run_id` — what the launcher opens its source through and passes through verbatim
-    (#1105 PR 2). The replacement for `tenant_of_run_dir`'s location refusal (F-13): a run that
-    is not at `<root>/<T>/runs/<run_id>` is not T's to fork."""
+    source `run_id` — what the launcher opens its source through and passes through verbatim:
+    a run that is not at `<root>/<T>/runs/<run_id>` is not T's to fork."""
     from defender.records._tenant_id import TenantRefused
     from defender.records import RunId, RunRefused
 
@@ -83,7 +82,7 @@ def _repository_refusal(root: Path, run_id: str, tenant_id: str = TID) -> BaseEx
 
 def _opens_as(root: Path, run_id: str, tenant_id: str = TID) -> str:
     """The tenant a run opened by id through `tenant_id`'s repository under `root` is addressed
-    to — the replacement for `tenant_of_run_dir(...) == T` (F-13)."""
+    to."""
     from defender.records import RunId
 
     return H.accept(root, tenant_id).runs_repository().open(RunId.parse(run_id)).tenant_id
@@ -106,7 +105,7 @@ def _assert_refused_writing_nothing(result, *, owner: BaseException | None, epis
 
 
 def _old_layout_source(tmp_path: Path, tenant_id: str = TID) -> tuple[Path, Path]:
-    """A runs base OUTSIDE `<root>/<T>/runs` whose `_tenant.json` names `tenant_id` — N4's old
+    """A runs base OUTSIDE `<root>/<T>/runs` whose `_tenant.json` names `tenant_id` — the old
     layout, carrying a record that names the EXISTING tenant."""
     base = tmp_path / "defender-runs"
     base.mkdir(parents=True)
@@ -115,7 +114,8 @@ def _old_layout_source(tmp_path: Path, tenant_id: str = TID) -> tuple[Path, Path
 
 
 def test_o5_no_record_refused_never_minted(tmp_path, monkeypatch, data_root):
-    'A run dir at <root>/T/runs/r1 whose base has no _tenant.json is refused, and no\n_tenant.json is created.'
+    """A run at `<root>/T/runs/<id>` with no `_tenant.json` beside it opens as T's, and no
+    `_tenant.json` is minted."""
     base, src = H.tenant_source(data_root, TID)
     before = H.census(data_root)
     assert not (base / H.RECORD_NAME).exists(), "precondition: the base holds no record"
@@ -138,7 +138,7 @@ def test_o5_requires_row(tmp_path, data_root):
 
 def test_d4_launch_location_check(tmp_path, monkeypatch, data_root):
     episodes = _episodes_root(tmp_path, monkeypatch)
-    # #1108 P4: the good half launches a branch, which needs a published tenant (flow 7).
+    # The good half launches a branch, which needs a published tenant.
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     set_up_tenant(data_root, TID, published=True)
@@ -153,7 +153,7 @@ def test_d4_launch_location_check(tmp_path, monkeypatch, data_root):
 
     good_base = H.runs_dir(data_root, TID)
     good_base.mkdir(parents=True)
-    good = H.source_run(good_base)  # #1187 (R1): no runs-base record
+    good = H.source_run(good_base)  # no runs-base record
     _result, spawn, agent = _launch(good)
     assert agent.calls > 0, f"a tenant-location source was refused: {_result!r}"
     assert spawn.launches, f"a tenant-location source started no sibling: {_result!r}"
@@ -161,12 +161,15 @@ def test_d4_launch_location_check(tmp_path, monkeypatch, data_root):
 
 
 def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
-    "ONE whole episode through the real launcher, judge included (`_judge_921`'s own drive:\n`J.FakeSibling` leaves finished, archivable siblings, so the family is accepted and the\nJUDGE step actually runs). The source sits at `<root>/<T>/runs/`; with `collide`, a finished\nrun named for graded world `b` stands beside it there. Returns (status, episode dir)."
+    """ONE whole episode through the real launcher, judge included (`J.FakeSibling` leaves
+    finished, archivable siblings, so the family is accepted and the JUDGE step runs). With
+    `collide`, a run named for graded world `b` stands beside the source in `<root>/<T>/runs/`.
+    Returns (status, episode dir)."""
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)  # the retired knob: nothing may read it
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     episodes = _episodes_root(tmp_path, monkeypatch)
-    del episodes  # #1187 (O9): the episode is `<root>/<T>/episodes/<uuid>`, the variable a decoy
-    _base, src = H.tenant_source(root, TID, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
+    del episodes  # the episode is `<root>/<T>/episodes/<uuid>`; the variable is a decoy
+    _base, src = H.tenant_source(root, TID, published=True)  # a branch launch pins a published commit
     if collide:
         (H.runs_dir(root, TID) / "b").mkdir()
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
@@ -203,13 +206,14 @@ def test_d4_launcher_derives_once(tmp_path, monkeypatch, data_root, capfd):
 
 
 def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_root):
-    'With <root>/T (or <root>/T/runs) a symlink to another directory, a launch from a run\nthere is refused, nothing spent and nothing written.'
+    """With `<root>/T` (or `<root>/T/runs`) a symlink to another directory, a launch from a run
+    there is refused, spending and writing nothing."""
     episodes = _episodes_root(tmp_path, monkeypatch)
     # shape 1: <root>/T is a symlink to a real tenant folder elsewhere
     real_tenant = tmp_path / "real-tenant-folder"
     real_tenant.mkdir()
     (data_root / TID).symlink_to(real_tenant, target_is_directory=True)
-    H.place_knowledge(data_root, TID)  # #1120 DC2: the operator's clone, before the row
+    H.place_knowledge(data_root, TID)  # the operator's clone, before the row
     H.plant_row(data_root, TID)
     _base, src = H.tenant_source(data_root, TID, row=False)
     owner = H.owner_refusal(H.accept, data_root, TID)
@@ -230,13 +234,13 @@ def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_roo
     real_runs = tmp_path / "real-tenant-2" / "runs"
     real_runs.mkdir(parents=True)
     (root2 / TID / "runs").symlink_to(real_runs, target_is_directory=True)
-    # Built AT THE RESOLVED base, so the source's case pointer names the store beside
-    # `real-runs` — the one C67's own derive-and-compare (unchanged by #1078, it resolves the
-    # run dir first) re-derives. That keeps the location check the only question asked here.
+    # Built AT THE RESOLVED base, so the source's case pointer names the store the launcher's
+    # derive-and-compare re-derives (it resolves the run dir first): the location check stays
+    # the only question asked here.
     H.source_run(real_runs)
     src2 = root2 / TID / "runs" / T.SOURCE_RUN_ID
     owner2 = _repository_refusal(root2, src2.name)
-    # An open answers a container fault as `RunUnreachable` from it (#1105 PR 2 review).
+    # An open answers a container fault as `RunUnreachable` from it.
     assert isinstance(owner2.__cause__, H.tenant().TenantRefused), (
         f"T's runs repository did not refuse a linked <root>/T/runs as a container: {owner2!r}")
     before2 = {root2: H.census(root2), real_runs: H.census(real_runs)}
@@ -251,7 +255,7 @@ def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_roo
 def test_launch_from_a_nonexistent_run_dir_at_a_tenant_location(tmp_path, monkeypatch, data_root):
     episodes = _episodes_root(tmp_path, monkeypatch)
     base, _src = H.tenant_source(data_root, TID)
-    ghost = base / fixture_uuid("no-such-run")  # #1187 dc1: refused as absent, not by shape
+    ghost = base / fixture_uuid("no-such-run")  # refused as absent, not by shape
     before = {data_root: H.census(data_root)}
     result, _spawn, agent = _launch(ghost)
     _assert_refused_writing_nothing(result, owner=None, episodes=episodes, roots=before,
@@ -266,10 +270,14 @@ def test_launch_from_a_nonexistent_run_dir_at_a_tenant_location(tmp_path, monkey
 
 
 
-@pytest.mark.parametrize("entry", [H.RECORD_NAME, "r1.run-end.json"])
+@pytest.mark.parametrize("entry", [
+    H.RECORD_NAME, "r1.run-end.json",
+    # A regular file named like a run id: refused as a file (a run is only ever a directory).
+    pytest.param(fixture_uuid("1078-as-file"), id="file-named-as-a-run-id"),
+])
 def test_launch_from_a_non_run_entry_of_the_runs_base(tmp_path, monkeypatch, data_root, entry):
-    """A non-run entry of T's runs base (_tenant.json, a run-end sidecar) given as the source
-    id is refused by the launcher's source open; nothing is written."""
+    """A non-run entry of T's runs base given as the source id is refused by the launcher's
+    source open; nothing is written."""
     episodes = _episodes_root(tmp_path, monkeypatch)
     base, _src = H.tenant_source(data_root, TID)
     source = base / entry
@@ -277,19 +285,6 @@ def test_launch_from_a_non_run_entry_of_the_runs_base(tmp_path, monkeypatch, dat
         source.write_text('{"exit_class": "completed"}\n', encoding="utf-8")
     before = {data_root: H.census(data_root)}
     result, _spawn, agent = _launch_id(source.name)
-    _assert_refused_writing_nothing(result, owner=None, episodes=episodes, roots=before,
-                                    agent=agent)
-
-
-def test_tenant_of_run_dir_given_a_run_dir_that_is_a_file_not_a_directory(
-        tmp_path, monkeypatch, data_root):
-    "A run id naming a regular file inside T's runs base is refused by the launcher's source\nopen (a run is only ever a real directory); nothing is written."
-    episodes = _episodes_root(tmp_path, monkeypatch)
-    base, _src = H.tenant_source(data_root, TID)
-    as_file = base / fixture_uuid("1078-as-file")  # #1187 dc1: refused as a file, not by shape
-    as_file.write_text("not a directory\n", encoding="utf-8")
-    before = {data_root: H.census(data_root)}
-    result, _spawn, agent = _launch(as_file)
     _assert_refused_writing_nothing(result, owner=None, episodes=episodes, roots=before,
                                     agent=agent)
 
@@ -314,8 +309,7 @@ def _accepted(root: Path):
 
 
 def _sibling_state(sib: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
-    """A fresh run state for the sibling at `sib`, which seeding takes as its third argument
-    (#1235 round 2, where it was the sibling's run dir)."""
+    """A fresh run state for the sibling at `sib` (seeding's third argument)."""
     from defender.investigation.run_state import RunState
 
     return RunState(sib, sib.name)
@@ -333,7 +327,7 @@ def test_o4_fork_store_location(tmp_path, data_root):
         as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))
     finally:
         store.close()
-    # #1255 (D1, P4) COMPAT: the prompt reaches the spec only while the spec declares it.
+    # Compat: the retired prompt reaches the spec only while the spec still declares it.
     retired = ({B947.RETIRED_PROMPT_FIELD: H.CONTINUATION}
                if B947.declares_retired_prompt() else {})
     spec = br.BranchSpec(source_run_dir=src, branch_message_id=T.BRANCH_MESSAGE_ID,

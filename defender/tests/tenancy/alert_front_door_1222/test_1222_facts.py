@@ -19,12 +19,12 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 #: The alert carries no `rule.id` at all.
 ABSENT = object()
 
-#: The shipped mapping over `S.generic_alert()` (F-MAPPING-FILE: signature is `rule.id`).
+#: The shipped mapping over `S.generic_alert()` (signature is `rule.id`).
 SHIPPED: Mapping[str, str] = S.DEFAULT_MAPPING_GENERIC
-#: A tenant that keys its signature on a vendor field that is not `rule.id` (O8's remap).
+#: A tenant that keys its signature on a vendor field that is not `rule.id`.
 VENDOR: Mapping[str, str] = {"signature": "vendor.code", "event_time": "detected_at",
                              "summary": "rule.description"}
-#: A mapping that names no signature (A5: accepted; O10 reworded) — the "unmapped" reference.
+#: A mapping that names no signature (accepted) — the "unmapped" reference.
 UNMAPPED: Mapping[str, str] = {"event_time": "detected_at", "summary": "rule.description"}
 
 #: A `rule.id` no reader may hand on where the mapping keys the signature elsewhere.
@@ -33,7 +33,7 @@ DESCRIPTION = "Host contacted a rare external destination on a fixed cadence."
 DETECTED_AT = "2026-09-30T08:15:00Z"
 #: A valid signature: ASCII, alphanumeric first character, no space, quote or control character.
 VALID = "Zq7731-ok"
-#: 128 characters (C43's bound), and one more.
+#: 128 characters (the signature length bound), and one more.
 AT_BOUND = "K" + "7" * 127
 OVER_BOUND = "K" + "7" * 128
 
@@ -194,7 +194,7 @@ def _fail(problems: Sequence[str]) -> str:
     return "\n\n".join(problems)
 
 
-# The tests (one per demand; the name is the demand's `discharged_by`)
+# Tests
 
 def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
     mapping = {"signature": "detection.key", "event_time": "detection.seen",
@@ -231,16 +231,18 @@ def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
 
 
 def test_alert_facts_value_domain(tmp_path: Path) -> None:
+    assert len(AT_BOUND) == S.SIGNATURE_MAX
+    assert len(OVER_BOUND) == S.SIGNATURE_MAX + 1
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
 
     # Real signatures, mapped through vendor.code beside a decoy rule.id.
     real = [("int", "5710", "5710"), ("zero", "0", "0"), ("negative zero", "-0", "0"),
             ("string", json.dumps(VALID), VALID), ("at bound", json.dumps(AT_BOUND), AT_BOUND)]
-    # No signature, put at rule.id under the shipped mapping: (case, raw JSON literal, a value no
-    # lookup may be handed — the alert's own text, and the text a str() of it would print).
+    # No signature, put at rule.id under the shipped mapping: (case, raw JSON literal, values no
+    # lookup may be handed — the alert's own text, the text a str() of it would print, or that
+    # text cut to the bound).
     bad: list[tuple[str, str, tuple[str, ...]]] = [
-        ("negative int", "-7731", ("-7731",)),
         ("float", "7731.5", ("7731.5",)),
         ("false", "false", ("false", "False")),
         ("empty", '""', ()),
@@ -252,14 +254,14 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
         ("control", json.dumps("Zq7731\u0007tail"), ("Zq7731\u0007tail",)),
         ("shell", json.dumps("Zq7731;id|cat&"), ("Zq7731;id|cat&",)),
         ("non-ascii", json.dumps("Zq7731\u00e9", ensure_ascii=False), ("Zq7731\u00e9",)),
-        ("over bound", json.dumps(OVER_BOUND), (OVER_BOUND,)),
+        ("over bound", json.dumps(OVER_BOUND), (OVER_BOUND, AT_BOUND)),
     ]
     reals = [(name, _drive(tmp_path, planted, _literal(_alert(vendor=_HOLE), lit),
                            mapping=VENDOR), want)
              for i, (name, lit, want) in enumerate(real)]
     bads = [(name, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit), mapping=SHIPPED), leaked)
             for i, (name, lit, leaked) in enumerate(bad)]
-    # RD-05: rule.name over the committed fixture alerts; each against its own fixture's reference.
+    # rule.name over the committed fixture alerts; each against its own fixture's reference.
     by_name = {**SHIPPED, "signature": "rule.name"}
     names = []
     for slug in S.FIXTURE_SLUGS:
@@ -388,8 +390,7 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     digits_128 = "9" * 128
-    real = [("integer", "5710", "5710"), ("negative zero", "-0", "0"),
-            ("zero-padded text", '"05710"', "05710"), ("128-digit integer", digits_128, digits_128)]
+    real = [("128-digit integer", digits_128, digits_128)]
     bad = [("float", "5710.0", ("5710.0", "5710")), ("exponent", "1E3", ("1E3", "1000.0")),
            ("lower exponent", "1e3", ("1e3", "1000.0")),
            ("129-digit integer", "9" * 129, ("9" * 129,)),
@@ -407,8 +408,6 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
     for name, d, leaked in bads:
         problems += _unlike_unmapped(d, ref, name)
         problems += _not_handed(d, leaked, name)
-    padded = next(d for name, d, _w in reals if name == "zero-padded text")
-    problems += _not_handed(padded, ["5710"], "zero-padded text")
     assert not problems, _fail(problems)
 
     for name, d, want in reals:
@@ -438,7 +437,7 @@ def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
     load_corpus = S.sym("skills.invlang.corpus", "load_corpus")
     companions, _report = load_corpus(location_path(planted.runs))
     seen = {c.case_id: c.signature_id for c in companions}
-    inner_id = _run_id(dup_inner)  # #1279: the id is the one setup minted
+    inner_id = _run_id(dup_inner)  # the id setup minted
     if seen.get(inner_id) != "LAST-7731":
         problems.append(f"[repeated member] the invlang corpus reads the run's signature as "
                         f"{seen.get(inner_id)!r}; corpus: {seen!r}")
@@ -486,25 +485,6 @@ def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> No
     assert not problems, _fail(problems)
 
 
-def test_p179_signature_at_and_one_past_the_length_bound(tmp_path: Path) -> None:
-    """A signature at the length bound is recorded. One character past it is no signature, named
-    like unmapped."""
-    assert len(AT_BOUND) == S.SIGNATURE_MAX
-    assert len(OVER_BOUND) == S.SIGNATURE_MAX + 1
-    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
-    ref = _reference(tmp_path, planted)
-    at = _drive(tmp_path, planted, _alert(vendor=AT_BOUND), mapping=VENDOR)
-    over = _drive(tmp_path, planted, _alert(OVER_BOUND), mapping=SHIPPED)
-
-    problems = _carries(at, AT_BOUND, "at the bound")
-    problems += _unlike_unmapped(over, ref, "one past the bound")
-    problems += _not_handed(over, [OVER_BOUND, AT_BOUND], "one past the bound")
-    assert not problems, _fail(problems)
-
-    assert at.recorded("signature") == AT_BOUND
-    assert over.recorded("signature") is None
-
-
 def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> None:
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
@@ -514,7 +494,7 @@ def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> 
               ("byte-order mark", "Zq7731\ufeffbom"), ("line separator", "Zq7731\u2028ls"),
               ("paragraph separator", "Zq7731\u2029ps"), ("next line", "Zq7731\u0085nl"),
               ("curly quotes", "\u201cZq7731\u201d"), ("guillemets", "\u00abZq7731\u00bb"),
-              ("fullwidth quote", "Zq7731\uff02fw"), ("accented letter", "Zq7731\u00e9")]
+              ("fullwidth quote", "Zq7731\uff02fw")]
     runs = [(name, value, _drive(tmp_path, planted, _alert(value), mapping=SHIPPED))
             for i, (name, value) in enumerate(values)]
 

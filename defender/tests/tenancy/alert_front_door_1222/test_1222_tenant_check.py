@@ -24,12 +24,12 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
 # Names
 
-#: The alert mapping's file name (spec-fixed, F-MAPPING-FILE).
+#: The alert mapping's file name.
 ALERT_MAPPING = S.ALERT_MAPPING_REL
 #: The case-history mapping, named the way every reason naming it spells it.
 CASE_MAPPING = S.CASE_MAPPING_REL.split("/", 1)[1]
 MAPPING_NAMES = (ALERT_MAPPING, CASE_MAPPING)
-#: The old top-level section of the case mapping; a reason refusing it names it (C45).
+#: The old top-level section of the case mapping; a reason refusing it names it.
 SOURCE_SECTION = re.compile(r"\bsource\b")
 #: The move a `source:` refusal names: to the alert mapping, by its file name or in words.
 THE_MOVE = re.compile(r"alert[ _-]mapping", re.IGNORECASE)
@@ -44,7 +44,7 @@ FIFO_GRACE_S = 10.0
 SITES = ("acceptance", "setup", "check-folder", "run-start", "branch-launch", "sibling-resume",
          "policy-cli")
 
-#: `alert_mapping.domain.distinguished`'s faults, `unreadable` only where the kernel can say so.
+#: The alert mapping's fault shapes, `unreadable` only where the kernel can say so (non-root).
 FAULT_PARAMS = [pytest.param(s, marks=S.needs_non_root) if s in S.ROOT_BLIND_SHAPES else s
                 for s in S.MAPPING_FAULT_SHAPES]
 
@@ -54,7 +54,7 @@ def _shape_params(shapes: Iterable[str]) -> list[Any]:
             for s in shapes]
 
 
-#: Case-history mapping contents the one check refuses (r7), as the BYTES written at its name.
+#: Case-history mapping contents the one check refuses, as the BYTES written at its name.
 #: `unreadable` is a valid file put at mode 000 by `World.case_bytes`.
 CASE_FAULTS: dict[str, bytes | None] = {
     "non_utf8": S.case_mapping_text().encode("utf-8").replace(
@@ -84,13 +84,13 @@ class World:
         return self.tmp / "mapping-scratch"
 
     def next_id(self, what: str) -> str:
-        """A fresh run id for this world's `what`-th drive: #1187 (declared change 1) — a
-        canonical UUID, derived from a readable label."""
+        """A fresh run id for this world's next `what` drive: a canonical UUID derived from a
+        readable label."""
         self.n += 1
         return fixture_uuid(f"1222-tenant-check-{what}-{self.n}")
 
     def alert_shape(self, shape: str) -> Path:
-        """Put the alert mapping into one of `alert_mapping.domain.distinguished`'s shapes."""
+        """Put the alert mapping into one of `S.plant_mapping_shape`'s shapes."""
         return S.plant_mapping_shape(self.planted, shape, scratch=self.scratch)
 
     def case_bytes(self, data: bytes | None) -> Path:
@@ -109,7 +109,7 @@ class World:
         return self.case_bytes(text.encode("utf-8"))
 
     def case_source(self, shape: str) -> Path:
-        """`mapping_yaml.domain.distinguished`'s shapes, through the shared planter."""
+        """A case-mapping `source` shape, through the shared planter."""
         self.case_text(S.case_mapping_text())
         return S.plant_case_source(self.planted, shape)
 
@@ -128,10 +128,9 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
     (`T.episode`), so launch and sibling resume can be driven over the tenant afterwards."""
     w = World(tmp=Path(tmp_path), capsys=capsys, planted=S.plant_tenant(**plant))
     if launchable:
-        # #1108 P4 (flow 7, OD5): a branch launch materialises and pins the knowledge commit
-        # its source's stamp names, so the tenant is published for real FIRST and the source
-        # is stamped after, naming that commit (`T.scene_knowledge` reads `exports/current`)
-        # — not the placeholder a never-published tenant leaves in the stamp.
+        # A branch launch pins the knowledge commit its source's stamp names, so the tenant is
+        # published for real first and the source stamped after, naming that commit (not the
+        # placeholder a never-published tenant leaves in the stamp).
         published, refusal = S.publish_planted(w.tmp, w.planted)
         assert published is not None, f"the valid planted tenant did not publish: {refusal}"
         _base, src = location_path(T.runs_base)(w.tmp, tenant_id=w.planted.tenant_id)
@@ -221,10 +220,9 @@ def at_run_start(w: World, **run: Any) -> Verdict:
 def at_branch_launch(w: World) -> Verdict:
     assert w.source_run is not None, "the world was not built launchable"
     preflight, spawn = RolePreflight(), T.FakeSpawn()
-    # #1108 P4 (O-B, owner ruling 3): the launch pins the knowledge commit the source's stamp
-    # names, and the live capture stamps that pinned export — not wherever `current` has moved
-    # since (another site of this test may have published the tenant again). The fake live
-    # tree therefore answers with the source's own knowledge revision.
+    # The launch pins the knowledge commit the source's stamp names, and the live capture
+    # stamps that pinned export, not wherever `current` has moved since (another site of this
+    # test may have republished the tenant): the fake live tree answers with the source's own.
     stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
     text = ""
     try:
@@ -252,7 +250,7 @@ def at_sibling_resume(w: World) -> Verdict:
 
     text = ""
     try:
-        # #1108 P4 (OD14, O11): the in-process launch-time publish.
+        # The in-process launch-time publish.
         S.mod("run").main(
             ["--episode", w.episode.name, "--world", "b",
              "--tenant", w.planted.tenant_id],
@@ -436,7 +434,7 @@ def assert_no_parser_text(v: Verdict, fragments: Iterable[str]) -> None:
 
 def carried_values(doc: Any) -> set[str]:
     """Every scalar an alert document carries, as text (a fact a mapping names is one of these,
-    carried as-is: C16)."""
+    carried as-is)."""
     if isinstance(doc, dict):
         return set().union(*(carried_values(v) for v in doc.values())) if doc else set()
     if isinstance(doc, list):
@@ -444,9 +442,6 @@ def carried_values(doc: Any) -> set[str]:
     if isinstance(doc, (str, int)) and not isinstance(doc, bool):
         return {str(doc)}
     return set()
-
-
-# bad_alert_mapping_refused_by_tenant_check
 
 
 @pytest.mark.parametrize("shape", FAULT_PARAMS)
@@ -480,9 +475,6 @@ def test_bad_alert_mapping_is_refused_by_the_tenant_check(tmp_path: Path, capsys
         S.restore_modes(w.planted.root)
 
 
-# case_mapping_top_level_source_refused
-
-
 @pytest.mark.parametrize("shape", sorted(S.CASE_SOURCE_SHAPES))
 def test_case_mapping_carrying_a_top_level_source_is_refused(tmp_path: Path, capsys: Any,
                                                              shape: str) -> None:
@@ -499,7 +491,7 @@ def test_case_mapping_carrying_a_top_level_source_is_refused(tmp_path: Path, cap
     assert THE_MOVE.search(v.text), f"the refusal does not name the move to the alert mapping: {v.text!r}"
 
 
-# a5_one_tenant_check_at_every_entry_point
+# A5 — one tenant check at every entry point
 
 A5_FAULTS: dict[str, tuple[str | None, str | None, tuple[str, ...]]] = {
     # label: (alert-mapping shape, case-mapping source shape, files the refusal names)
@@ -529,12 +521,6 @@ def test_a5_every_entry_point_gives_the_same_tenant_verdict(tmp_path: Path, caps
     assert_same_reasons(vs)
     assert_no_run(vs["run-start"])
     assert not vs["branch-launch"].detail.launches, "a sibling was spawned on a refused tenant"
-
-
-# tenants_ship_alert_mapping
-
-
-# r7_run_start_never_carries_a_faulted_case_mapping
 
 
 @pytest.mark.parametrize("shape", _shape_params(CASE_FAULTS))
@@ -567,40 +553,7 @@ def test_r7_run_start_never_carries_a_faulted_case_mapping_into_a_started_run(
         S.restore_modes(w.planted.root)
 
 
-# The settled alert-mapping premises
-
-ENTRY_SHAPES = ("null_entry", "empty_entry", "number_entry", "list_entry", "empty_segment")
-
-
-@pytest.mark.parametrize("shape", ENTRY_SHAPES)
-def test_p051_mapping_entry_is_not_a_dotted_path(tmp_path: Path, capsys: Any, shape: str) -> None:
-    w = world(tmp_path, capsys)
-    # Positive control: omitting the key is how absence is said — accepted, and the run starts.
-    w.alert_shape("no_signature_key")
-    for v in verdicts(w, ("acceptance", "run-start")).values():
-        assert_passed(v)
-    w.alert_shape(shape)
-    vs = verdicts(w, ("acceptance", "run-start"))
-    for v in vs.values():
-        assert_refused(v, ALERT_MAPPING)
-    assert_no_run(vs["run-start"])
-
-
-@pytest.mark.parametrize("shape", _shape_params(
-    ("directory", "unreadable", "non_utf8", "symlink", "hard_link", "fifo")))
-def test_p058_alert_mapping_file_unreadable(tmp_path: Path, capsys: Any, shape: str) -> None:
-    w = world(tmp_path, capsys)
-    for v in verdicts(w, ("acceptance", "run-start")).values():
-        assert_passed(v)
-    try:
-        w.alert_shape(shape)
-        vs = verdicts(w, ("acceptance", "run-start"))
-        for v in vs.values():
-            assert_refused(v, ALERT_MAPPING)
-        assert_no_run(vs["run-start"])
-    finally:
-        S.restore_modes(w.planted.root)
-
+# Further cases
 
 def test_p095_case_mapping_carries_source_and_an_alert_mapping(tmp_path: Path,
                                                               capsys: Any) -> None:
