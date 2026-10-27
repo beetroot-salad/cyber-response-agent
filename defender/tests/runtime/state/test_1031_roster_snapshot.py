@@ -12,6 +12,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.knowledge import _scaffold_rules  # noqa: E402
+from defender.systems.verb_resolver import VerbResolver  # noqa: E402
 from defender.tests.learning.oracle.live_contracts._spec1224 import build_registry  # noqa: E402
 from defender.systems import verbs  # noqa: E402
 from defender.investigation.query_tool import QueryCapture  # noqa: E402
@@ -157,10 +158,10 @@ def test_a_symlink_loop_named_like_an_adapter_is_the_registrys_own_error(tmp_pat
         assert str(adapters) in str(exc.value), \
             f"the registry error does not name the directory: {exc.value}"
         with pytest.raises(_scaffold_rules.ScaffoldRuleError):
-            _scaffold_rules.VerbResolver(tmp_path / "defender")
+            VerbResolver(tmp_path / "defender")
     else:
         assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
-        assert _scaffold_rules.VerbResolver(tmp_path / "defender").is_system("elastic")
+        assert VerbResolver(tmp_path / "defender").is_system("elastic")
 
     (adapters / "loop_adapter.py").unlink()
     assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
@@ -216,17 +217,17 @@ def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_chec
     assert world.systems() == ("elastic",), "the subclass re-reads the roster from the disk"
 
 
-# D2 / D1 through `_scaffold_rules.VerbResolver`
+# D2 / D1 through `VerbResolver`
 
 
 def test_the_scaffold_resolver_fails_at_construction_over_a_tree_with_no_adapters(tmp_path):
     with pytest.raises(_scaffold_rules.ScaffoldRuleError) as exc:
-        _scaffold_rules.VerbResolver(tmp_path)
+        VerbResolver(tmp_path)
     assert str(tmp_path / "integrations") in str(exc.value), \
         f"the resolver's error does not name the directory: {exc.value}"
 
     write(tmp_path / "integrations" / "elastic_adapter.py", ADAPTER_BODY)
-    resolver = _scaffold_rules.VerbResolver(tmp_path)
+    resolver = VerbResolver(tmp_path)
     assert resolver.is_system("elastic")
     assert not resolver.is_system("cmdb")
 

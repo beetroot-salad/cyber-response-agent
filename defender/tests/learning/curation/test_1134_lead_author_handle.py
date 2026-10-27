@@ -16,6 +16,7 @@ import pytest
 
 from defender import _git
 from defender.knowledge import _scaffold_rules
+from defender.systems.verb_resolver import VerbResolver
 from defender.configuration._env import FatalConfigError
 from defender.learning.core import drains
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
@@ -103,10 +104,10 @@ def scene(tmp_path: Path):
         yield s
 
 
-def resolver(s: Scene) -> _scaffold_rules.VerbResolver:
+def resolver(s: Scene) -> VerbResolver:
     """The adapters' verbs, read from the product checkout (#1172), never the tenant root."""
     product = getattr(s, "product", None)
-    return _scaffold_rules.VerbResolver((product if product is not None else s.repo) / "defender")
+    return VerbResolver((product if product is not None else s.repo) / "defender")
 
 
 def _lead(query_id: str, *, system: str, verb: str, params: dict | None = None,

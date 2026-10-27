@@ -11,7 +11,6 @@ may not name such a param either, since it exempts a `${name}` from checking.
 """
 from __future__ import annotations
 
-import asyncio
 import errno
 import os
 import re
@@ -22,9 +21,6 @@ from defender.knowledge._corpus import QueryTemplate
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, RecordRead, bind
 from defender._model import model
-from defender._paths import adapters_under
-from defender.systems.verb_grant import DENY_ALL
-from defender.systems.verbs import ModuleVerbRegistry, RegistryError, read_roster
 from defender.kit.verbs import Verb, engine_of, model_facing_params, wrapper_only_params
 
 #: The checked placeholder grammar, as `SCHEMA.md` documents it. The bare `{name}` form
@@ -51,7 +47,9 @@ class Finding:
 
 class ScaffoldRuleError(Exception):
     """A rule could not be evaluated (an adapter that will not import, a system with none).
-    Distinct from a finding: the checker could not tell, which callers must not treat as a pass."""
+    Distinct from a finding: the checker could not tell, which callers must not treat as a pass.
+    Raised by `systems.verb_resolver.VerbResolver`, which resolves the verbs `check_template`
+    is handed."""
 
 
 def _id_findings(t: QueryTemplate) -> list[Finding]:
@@ -210,68 +208,9 @@ def _unreadable_reason(rec: RecordRead, spelled: str) -> str:
     return str(FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), spelled))
 
 
-class VerbResolver:
-    """`{system} -> declared verbs`, resolved off one tree and cached per system.
-
-    Takes a `defender_dir` because the commit gate runs in the main checkout but checks a drain
-    worktree; adapters load by resolved path, so the verdict is about the worktree's code.
-    Importing them is safe because the lane's scope check already refuses agent edits outside
-    `defender/skills/**.md`. Uses `DENY_ALL` because this asks what a system declares, not what
-    a role may call.
-    """
-
-    def __init__(self, defender_dir: Path) -> None:
-        self._adapters_dir = adapters_under(Path(defender_dir))
-        # An unlistable adapters dir fails here as "could not check", never as an empty roster.
-        try:
-            self._registry = ModuleVerbRegistry(read_roster(self._adapters_dir), DENY_ALL)
-        except RegistryError as e:
-            raise ScaffoldRuleError(str(e)) from e
-        self._cache: dict[str, Mapping[str, Verb]] = {}
-
-    def is_system(self, system: str) -> bool:
-        """Does `system` name an adapter in this tree — cold, no import?
-
-        `defender/skills/` also holds authored surfaces that are not systems (some are agent
-        system prompts, e.g. `gather/SKILL.md`), so the lead author's write gate asks this too.
-        """
-        # The roster is fixed at construction, which callers do after the writes being checked.
-        return system in self._registry.systems()
-
-    def verbs(self, system: str) -> Mapping[str, Verb]:
-        # Failures are not cached, so they are re-raised rather than remembered as empty.
-        if system not in self._cache:
-            self._cache[system] = self._resolve(system)
-        return self._cache[system]
-
-    def _resolve(self, system: str) -> Mapping[str, Verb]:
-        # Membership first: a `KeyError` from the adapter's own import would otherwise be
-        # indistinguishable from `verbs()`'s "no adapter" `KeyError`.
-        if not self.is_system(system):
-            raise ScaffoldRuleError(
-                f"no adapter for system {system!r} under {self._adapters_dir}"
-            )
-        try:
-            verbs = self._registry.verbs(system)
-        except (KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
-            # Interrupts and cancellation are not a broken adapter; without this the blanket
-            # clause below would make a corpus sweep un-interruptible.
-            raise
-        except BaseException as exc:  # noqa: BLE001 — a module that will not import is a broken adapter
-            raise ScaffoldRuleError(
-                f"adapter for system {system!r} failed to import: {type(exc).__name__}: {exc}"
-            ) from exc
-        if not verbs:
-            raise ScaffoldRuleError(
-                f"adapter for system {system!r} declares no verbs (empty or missing VERBS)"
-            )
-        return verbs
-
-
 __all__ = [
     "Finding",
     "ScaffoldRuleError",
-    "VerbResolver",
     "check_system_skill",
     "check_template",
     "placeholders",

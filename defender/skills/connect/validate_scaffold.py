@@ -18,7 +18,6 @@ from defender._io import TEXT_READ_ERRORS, read_plain, read_text_soft  # noqa: E
 from defender._paths import adapters_under, process_defender_dir  # noqa: E402
 from defender.knowledge._scaffold_rules import (  # noqa: E402
     ScaffoldRuleError,
-    VerbResolver,
     check_system_skill,
     check_template,
 )
@@ -35,6 +34,7 @@ from defender.systems.verbs import (  # noqa: E402
     fresh_adapter_module,
     read_roster,
 )
+from defender.systems.verb_resolver import VerbResolver  # noqa: E402
 from defender.kit.verbs import VerbContext as AdapterContext, engine_of  # noqa: E402
 from defender.records._tenant_id import TenantRefused
 

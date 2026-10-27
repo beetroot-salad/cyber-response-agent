@@ -76,17 +76,17 @@ LEAD = LEAD_AUTHOR_DRAIN_LABEL
 # checkout), and the reducer surface is the tenant's pitfalls add-on (`_declared870.REDUCER_REL`, the
 # test's own oracle — not the production constant, which still names the product page). These
 # shadow the handle file's product spellings (S-D's file, imported above, not edited here).
-from defender.knowledge import _scaffold_rules  # noqa: E402
+from defender.systems.verb_resolver import VerbResolver  # noqa: E402
 from defender import _git  # noqa: E402
 from defender.tests.support.learning.core._declared870 import REDUCER_REL as ADDON_REL  # noqa: E402
 
 REDUCER_NAME = ADDON_REL.removeprefix("agent/skills/")  # noqa: F811
 
 
-def resolver(s: Scene) -> _scaffold_rules.VerbResolver:  # noqa: F811
+def resolver(s: Scene) -> VerbResolver:  # noqa: F811
     """The adapters' verbs, read from the product checkout (#1172), never the tenant root."""
     product = getattr(s, "product", None)
-    return _scaffold_rules.VerbResolver((product if product is not None else s.repo) / "defender")
+    return VerbResolver((product if product is not None else s.repo) / "defender")
 
 
 def _commit_reducer(s: Scene) -> None:  # noqa: F811
