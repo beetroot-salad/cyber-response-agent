@@ -25,5 +25,7 @@ def test_a_passed_tests_dirs_are_removed_and_a_failed_tests_kept(tmp_path: Path)
     failed = json.loads((record / "failed.json").read_text())
     assert not (Path(passed["tmp_path"]) / "passed").exists()
     assert not (Path(passed["data_root"]) / "passed").exists()
+    # The emptied data root stays, so its number is not handed to the failing test.
+    assert Path(passed["data_root"]).is_dir() and passed["data_root"] != failed["data_root"]
     assert (Path(failed["tmp_path"]) / "failed").exists()
     assert (Path(failed["data_root"]) / "failed").exists()

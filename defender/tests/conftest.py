@@ -158,15 +158,21 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 @pytest.fixture(autouse=True)
 def data_root(tmp_path_factory, monkeypatch, request) -> Iterator[Path]:
     """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078 D9, §7 J57(b)).
-    Removed once the test passes, as `tmp_path` is (`tmp_path_retention_policy`); a failed
-    test's is kept to inspect."""
+    Emptied once the test passes, as `tmp_path` is removed (`tmp_path_retention_policy`); a
+    failed test's is kept to inspect. The directory itself stays: removed, its number would go
+    to the next test, which then meets whatever support code left beside it under the same name
+    (`data-rootN-p4-forge`: run 40508746837's failed pushes)."""
     from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("data-root")
     monkeypatch.setenv(DATA_ROOT_ENV, str(root))
     yield root
     if request.node.stash.get(_CALL_PASSED, False):
-        shutil.rmtree(root, ignore_errors=True)
+        for entry in root.iterdir():
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
 
 
 @pytest.fixture
