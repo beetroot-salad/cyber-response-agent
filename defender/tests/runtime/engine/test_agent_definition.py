@@ -18,9 +18,10 @@ from defender._paths import PATHS  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.agents import QUESTIONER_DEF  # noqa: E402
 from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
-from defender.runtime import driver, observe, permission, providers  # noqa: E402
+from defender import providers  # noqa: E402
+from defender.runtime import driver, observe, permission  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.runtime.tools import AgentDeps  # noqa: E402
 

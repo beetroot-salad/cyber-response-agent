@@ -380,7 +380,7 @@ def _answers_at_the_tool_boundary(defn: Any, agent_id: str, run_dir: Path,
     from defender.runtime import driver, observe
     from defender.runtime.agent_definition import bind, effective_tools_for
     from defender.execution.box_codec import BoxResult
-    from defender.runtime.providers import BuiltModel
+    from defender.providers import BuiltModel
     from defender.runtime.run_state import RunState
     from defender.tests.e2e._replay_harness import Turn
     from defender.tests.sandbox.test_959_downstream import Box

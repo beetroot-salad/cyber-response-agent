@@ -39,14 +39,14 @@ def test_r6_the_publish_child_gets_none_of_the_issuer_named_variables(planted, t
 
 
 def test_r6_every_other_host_child_gets_none_of_the_issuer_named_variables(planted, tmp_path):
-    from defender import run_common
+    from defender import box as box_mod
 
-    scrubbed = run_common.provider_scrubbed_environ()
+    scrubbed = box_mod.provider_scrubbed_environ()
     assert scrubbed.get("R6_ORDINARY") == "ordinary", "control: the env channel is read"
     assert sorted(n for n in planted if n in scrubbed) == []
     run_dir = tmp_path / "runs" / "r6"
     run_dir.mkdir(parents=True)
-    env = run_common.run_env(tmp_path / "defender", run_dir)
+    env = box_mod.run_env(tmp_path / "defender", run_dir)
     assert sorted(n for n in planted if n in env) == []
     assert not [v for v in env.values() if VALUE in v]
 

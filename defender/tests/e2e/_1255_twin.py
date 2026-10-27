@@ -368,7 +368,7 @@ def _driver_call(recording: Recording, main: RoleModel, gather: RoleModel,
     from pydantic_ai.models.function import FunctionModel
 
     from defender.runtime import driver
-    from defender.runtime.providers import BuiltModel
+    from defender.providers import BuiltModel
     from defender.tests.e2e._replay_harness import _awaiting
 
     main_built = BuiltModel(FunctionModel(_awaiting(main)), None)

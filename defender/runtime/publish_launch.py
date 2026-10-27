@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.execution._process_group import kill_group
-from defender.run_common import provider_scrubbed_environ
+from defender.box import provider_scrubbed_environ
 from defender.runtime import run_knowledge
 from defender.tenancy._exports import knowledge_lock_holder
 from defender.tenancy._publish_status import STALE_TRANSIENT, record_report

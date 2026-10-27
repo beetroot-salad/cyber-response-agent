@@ -15,7 +15,8 @@ from defender.learning.core.config import (
     StageContext,
     StageWiring,
 )
-from defender.runtime import observe, providers
+from defender import providers
+from defender.runtime import observe
 from defender._agent_role import AgentRole
 from defender._model_view import ModelView
 from defender.runtime.driver import MakeModel, build_agent_core

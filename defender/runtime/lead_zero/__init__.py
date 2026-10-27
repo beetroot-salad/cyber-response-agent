@@ -14,7 +14,8 @@ from defender._io import read_text_utf8
 from defender.records import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
-from defender.runtime import circuit_breaker, providers, run_end, system_status
+from defender import providers
+from defender.runtime import circuit_breaker, run_end, system_status
 from defender.runtime.exception_groups import carried, carried_unless_overridden
 from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import GrantError, VerbGrant

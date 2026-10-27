@@ -10,7 +10,7 @@ import pytest
 from defender import box
 from defender.execution import bash_exec
 from defender.runtime.exception_groups import carried
-from defender.runtime.providers import ProviderDown
+from defender.providers import ProviderDown
 from defender.runtime.run_end import CALL_RECORDS, CallRecordWriteFailed
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.support.sandbox._spec1092 import make_run_dir

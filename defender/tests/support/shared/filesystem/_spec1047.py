@@ -356,7 +356,7 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
         _spec1107.plant(root, "t1047", configs={})
         record = _spec1107.resolve(root, "t1047")
     return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
-            "env": mod("run_common").run_env(_tenants1106.DEFENDER, Path(run_dir))}
+            "env": mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir))}
 
 
 def receipt_path(run_dir: Path) -> Path:

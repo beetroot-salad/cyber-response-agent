@@ -14,7 +14,7 @@ from typing import Any
 from defender.configuration._env import env_int
 from defender._model import model
 from defender.records import Run
-from defender.runtime.providers import ProviderDown
+from defender.providers import ProviderDown
 from defender.runtime.tools._deps import run_of
 from defender._untrusted import wrap_fresh
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION

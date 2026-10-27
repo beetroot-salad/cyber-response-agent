@@ -58,7 +58,7 @@ def _registered_tools():
     from defender.agents import MAIN_DEF
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS
     from defender.runtime import driver, observe
-    from defender.runtime.providers import BuiltModel
+    from defender.providers import BuiltModel
     from defender.runtime.tools import AgentDeps
     from defender.tests.e2e._replay_harness import ReplayFn
 

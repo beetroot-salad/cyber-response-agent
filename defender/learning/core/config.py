@@ -423,7 +423,7 @@ _logger = logging.getLogger(__name__)
 
 
 def source_first_party_key(model: str, *, label: str = "judge") -> None:
-    from defender.runtime import providers
+    from defender import providers
     from defender._first_party_key import resolve_first_party_key
 
     try:

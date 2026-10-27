@@ -556,7 +556,7 @@ class _NullLogger:
 
 
 def _built(model):
-    from defender.runtime.providers import BuiltModel
+    from defender.providers import BuiltModel
     return BuiltModel(FunctionModel(model), None)
 
 

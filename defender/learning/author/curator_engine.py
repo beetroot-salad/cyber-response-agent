@@ -19,7 +19,7 @@ from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning._pydantic_stage import run_stage
 from defender.learning._prompt import stage_user_message
-from defender.runtime import providers
+from defender import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender._agent_role import AgentRole
 from defender.runtime.driver import MakeModel

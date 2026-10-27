@@ -524,7 +524,7 @@ _LANE_TABLE: tuple[tuple[str, tuple[str, ...], bytes], ...] = (
 
 def _lane_env(tmp: Path, lane: str, trace: Path) -> dict[str, str]:
     """The lane's own environment from its own builder: the box's `_render_env` (what `docker
-    run --env` carries), or the host's `run_common.run_env`. The `_interp` folder goes first on
+    run --env` carries), or the host's `box_mod.run_env`. The `_interp` folder goes first on
     PATH: the box image's `python3` here, and the host python3 a tree without a venv falls back
     to."""
     if lane == "box":
@@ -532,10 +532,10 @@ def _lane_env(tmp: Path, lane: str, trace: Path) -> dict[str, str]:
         docker = importlib.import_module("defender.box._docker")
         env = dict(docker._render_env({}, S.REPO_ROOT))
     else:
-        from defender import run_common
+        from defender import box as box_mod
         run_dir = tmp / "runs" / "r1"
         run_dir.mkdir(parents=True, exist_ok=True)
-        env = dict(run_common.run_env(S.DEFENDER, run_dir))
+        env = dict(box_mod.run_env(S.DEFENDER, run_dir))
     env["PATH"] = f"{_interp(tmp)}{os.pathsep}{env['PATH']}"
     env["SPEC1080_TRACE"] = str(trace)
     env["COLUMNS"] = "80"  # argparse wraps `-h` to the terminal width it is told

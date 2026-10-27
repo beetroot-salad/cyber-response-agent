@@ -29,7 +29,7 @@ from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: 
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams_631 import ScriptedModel, drive_agent  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106

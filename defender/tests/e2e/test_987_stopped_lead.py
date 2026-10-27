@@ -35,7 +35,7 @@ from defender.records import RunPaths  # noqa: E402
 from defender.runtime import driver, observe, tools_gather  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.runtime.query_tool import (  # noqa: E402
     QUERY_DOOR_CLOSED,
     QUERY_NOT_RUN,

@@ -36,7 +36,7 @@ from defender.runtime import driver, observe  # noqa: E402
 from defender.runtime.agent_definition import bind, effective_tools_for  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.providers import BuiltModel  # noqa: E402
 from defender.runtime.query_tool import CONTROL_FLOW_EXCEPTIONS  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402

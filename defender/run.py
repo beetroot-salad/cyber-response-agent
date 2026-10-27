@@ -61,7 +61,7 @@ from defender.tenancy import _tenant  # noqa: E402
 from defender.records._episode_handle import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
-from defender.runtime import providers  # noqa: E402
+from defender import providers  # noqa: E402
 from defender.runtime import run_end  # noqa: E402
 from defender.runtime import run_knowledge  # noqa: E402
 from defender.runtime import system_status  # noqa: E402
@@ -962,7 +962,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                 if ns.update_ticket:
                     ticket_writer.open_case_ticket(
                         run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
+                        env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
 
                 _logger.info(f"run_dir={run_dir} model={model}")
                 _announce_provenance(run_dir)
@@ -1014,7 +1014,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                     # Both inputs come from the driver's summary, not from a possibly stale sidecar.
                     ticket_writer.record_case_ticket(
                         run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                        env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
+                        env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
                         closed_before_cut=summary.get("closed_before_cut") is True)
 
                 # A sibling's evidence was staged on purpose, so it must never feed the catalog.
