@@ -12,7 +12,7 @@ from defender.tests.support.shared.filesystem import _spec1047 as S
 
 
 def _owner():
-    """The owner function, imported at CALL time — `AttributeError` here is a real red."""
+    """The owner function, looked up at call time so a missing one fails the test."""
     return S.sym("records.session_store", "normalized_truncated_by")
 
 
@@ -26,14 +26,14 @@ def test_session_store_owns_what_a_truncated_by_value_means():
     for member in members:
         assert normalized(member) == member, (
             f"{member!r} is a declared member of TRUNCATED_BY_VALUES and the owner refused it")
-    for outside in (None, "", "request_limit", "REQUEST-LIMIT", 7, ["aborted"]):
+    for outside in (None, "", "request_limit", "REQUEST-LIMIT", 7, ["aborted"],
+                    # Fragments a partial write leaves: near-misses, never completed.
+                    "request-", "-limit", "requestlimit", "retry-exhaust"):
         assert normalized(outside) is None, (
             f"{outside!r} is not a member and the owner answered something other than None")
 
 
 def test_normalized_truncated_by_is_strict_about_whitespace_case_and_confusables():
-    """The owner is STRICT (fork F-M, §7 round 2): a whitespace-padded member, a case variant and a
-    Unicode confusable each return None rather than being folded onto the member they resemble."""
     normalized = _owner()
     assert normalized("aborted") == "aborted", (
         "the control failed: the owner refused an exactly-spelled member, so the refusals "
@@ -52,22 +52,6 @@ def test_normalized_truncated_by_is_strict_about_whitespace_case_and_confusables
             "strips or folds it must be answered exactly as one that never was")
 
 
-# the owner's input domain, one settled premise per value
-
-
-def test_normalized_truncated_by_given_none():
-    """None returns None, and this is the LEGITIMATE case: "no exit class" is a real domain member
-    meaning the run was not cut short, not a rejection."""
-    assert _owner()(None) is None
-
-
-def test_normalized_truncated_by_given_a_value_torn_by_a_partial_write():
-    """A fragment left by a partial write returns None — a torn value is a near-miss, never
-    coerced."""
-    for torn in ("request-", "-limit", "requestlimit", "retry-exhaust"):
-        assert _owner()(torn) is None, f"the torn value {torn!r} was completed into a member"
-
-
 # coherence — the three interpretation sites give one answer
 
 
@@ -78,7 +62,6 @@ def _three_sites(tmp_path, value):
     ep = S.episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
     S.plant_sidecar(run_dir, truncated_by=value)
-    # `archive_episode` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
     with Episode.open(ep) as episode:
         S.mod("learning.branch.archive").archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
     archived = json.loads((ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).read_text(encoding="utf-8"))

@@ -21,11 +21,11 @@ from defender.tests.support.shared.contracts._by_path import (
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 
 
-#: The field a gate writes on a row it holds (today's name; d08e spells it; `S.EXISTING`).
+#: The field a gate writes on a row it holds.
 HELD_REASON = S.EXISTING["queue.held_reason"]
-#: The three fields a post-change defender row carries in place of `judge_outcome` (d00d).
+#: The three fields a defender row carries in place of the retired `judge_outcome`.
 NEW_FIELDS = (S.CONTRAST, S.ON_PATH, S.DOUBT)
-#: A post-change defender row's pointer pair: the focus run's conduct and the control's.
+#: A defender row's pointer pair: the focus run's conduct and the control's.
 PAIR = (S.conduct("b"), S.conduct("a"))
 #: The run id queue-only scenarios key their rows under (any episode id would do).
 RUN = S.EPISODE_ID
@@ -37,9 +37,7 @@ def _fid(label: str, draw: int, index: int, *, run: str = RUN) -> str:
 
 
 def _new_row(fid: str, *, label: str = "b", **over: Any) -> dict:
-    """A defender queue row in the post-change shape (d00d; `S.defender_row`): today's keys
-    minus `judge_outcome`, plus `contrast_evidence` (the resolving pair), `on_verdict_path`,
-    `world_label_doubted`."""
+    """A defender queue row in the current shape (`S.defender_row`)."""
     return S.defender_row(fid, label=label, **over)
 
 
@@ -61,8 +59,8 @@ def _paths(tmp_path: Path) -> Any:
 
 
 def _lane(tmp_path: Path) -> Any:
-    """`_paths` for a drain tick (#1108 P4, OD12 class ii): a batch's git-free draft
-    (`_curator1134.draft_lane`), its state root the env-named learning-state root."""
+    """`_paths` for a drain tick: a batch's git-free draft (`_curator1134.draft_lane`), its
+    state root the env-named learning-state root."""
     return C.draft_lane(tmp_path, state_dir=Path(os.environ[S.LEARNING_STATE_ENV]))
 
 
@@ -135,8 +133,8 @@ def _seed_rows() -> list[dict]:
 
 
 def _eval_harness() -> Any:
-    """`evals/harness.py`, loaded by path (it imports its siblings by bare name), `evals/` on
-    sys.path for the load only — as test_680 loads its lead twin."""
+    """`evaluations/harness.py`, loaded by path with `evaluations/` on `sys.path` for the load
+    only (it imports its siblings by bare name)."""
     evals = S.DEFENDER.parent / "evaluations"
     with on_sys_path(evals):
         return load_module(evals / "harness.py", name="issue_1234_eval_harness")
@@ -198,7 +196,8 @@ def test_1234_gate_family_authors_rows_carrying_the_new_fields(tmp_path):
         f"the post-change row was not handed to the curator: handed {_handed(curator)}, still "
         f"queued {_pending(paths, 'FINDINGS')}")
     assert row["finding_id"] not in _pending(paths, "FINDINGS")
-    assert row["finding_id"] in _consumed_ids(paths, "FINDINGS")
+    assert [r["finding_id"] for r in D.consumed(paths, _channel("FINDINGS"))] == [
+        row["finding_id"]]
 
 
 def test_1234_gate_family_holds_rows_lacking_the_new_fields(tmp_path):

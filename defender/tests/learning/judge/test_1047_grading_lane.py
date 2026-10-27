@@ -1,4 +1,4 @@
-"""#1047 O1 — a world whose run the host cut short is never graded as a verdict about the case."""
+"""#1047 — a world whose run the host cut short is never graded as a verdict about the case."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -8,13 +8,12 @@ import json
 
 from defender.tests.support.shared.filesystem import _spec1047 as S
 
-#: The host's own forced close, as `_close_a_run_cut_short` writes it — `unresolved`, `stands`,
+#: The host's forced close as `_close_a_run_cut_short` leaves it: an `unresolved` report.
 FORCED_REPORT = S.report_text("unresolved")
 
 
 def _forced_close(episode_dir, label="b"):
-    """Overwrite one archived world's report with the host's forced `unresolved` close — claim
-    h2's configuration, reproduced as a real document through the real reader."""
+    """Overwrite one archived world's report with the host's forced `unresolved` close."""
     (episode_dir / "worlds" / T.world_id(episode_dir, label) / "report.md").write_text(FORCED_REPORT, encoding="utf-8")
 
 
@@ -91,7 +90,7 @@ def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_report(tm
             "writes one")
 
 
-# F-A — a model that closed, and a run cut short afterwards
+# a model that closed, and a run cut short afterwards
 
 
 def test_a_world_whose_model_closed_and_was_then_cut_short(tmp_path):
@@ -140,19 +139,9 @@ def test_the_record_must_distinguish_a_host_written_close_from_the_models_own(tm
 
 
 def _cut_short_of(episode_dir, label="b"):
-    """What the grading pass made of one world's archived run-end record: the `cut_short` the
-    row carries, or `None` — the judge's one read of the record (`family._read_run_end_record`,
-    through `run_end.parse_record`) feeds the row and nothing else."""
+    """The `cut_short` one world's graded row carries, or `None`: the judge's one read of the
+    run-end record (`family._read_run_end_record`) feeds the row and nothing else."""
     return S.graded(episode_dir)[label].get("cut_short")
-
-
-def test_read_world_facts_given_an_empty_run_end_json(tmp_path):
-    """A zero-byte archived record reads as None (unreadable) and the world grades as today, by
-    `missing_run_end_grades_as_today`'s own rule."""
-    ep = S.cut_short_episode(tmp_path)
-    S.plant_archived_record(ep, "b", raw="")
-    assert _cut_short_of(ep) is None
-    assert S.graded(ep)["b"].get("ungradable") is not True
 
 
 def test_read_world_facts_given_a_mapping_with_truncated_by_explicitly_null(tmp_path):
@@ -182,24 +171,18 @@ def test_read_world_facts_given_a_wrong_typed_truncated_by_value(tmp_path):
 
 def test_read_world_facts_given_truncated_json_or_a_json_list(tmp_path):
     ep = S.cut_short_episode(tmp_path)
-    for raw in ('{"truncated_by": "abort', '[{"truncated_by": "aborted"}]', '"aborted"', "null"):
+    for raw in ("", '{"truncated_by": "abort', '[{"truncated_by": "aborted"}]', '"aborted"',
+                "null"):
         S.plant_archived_record(ep, "b", raw=raw)
         assert _cut_short_of(ep) is None, f"{raw!r} was read as an exit class"
         assert S.graded(ep)["b"].get("ungradable") is not True, f"{raw!r} made the world ungradable"
-
-
-# the absent record, and every route to it
-
-
-# the cut-short check runs before every artifact-presence check, not just the report's
 
 
 # families: several worlds, several shapes, one pass
 
 
 def test_a_cut_short_world_and_a_malformed_world_in_the_same_episode(tmp_path):
-    """The three row shapes coexist in one episode without interference — `tier_split_survives`'s
-    own stated purpose, driven over a real family."""
+    """The three row shapes coexist in one episode without interference."""
     ep = S.cut_short_episode(
         tmp_path, labels=("a", "b", "c", "d"),
         dispositions={"a": "benign", "b": "malicious", "c": "malicious", "d": "malicious"},

@@ -32,13 +32,9 @@ def _enqueue():
 
 
 def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
-    """One `FindingRow` in the `direction: family` shape M5 appends.
-
-    `subject="defender"` overrides `D.finding_row`'s own placeholder `"subj"` value — that
-    fixture predates #1007's `subject` partition and this suite is entirely about the DEFENDER
-    lane. #1234 (d00d): no `judge_outcome` (A4), and the three fields the family partition
-    reads as the row's ground truth — `contrast_evidence`, `on_verdict_path`,
-    `world_label_doubted`.
+    """One `FindingRow` in the `direction: family` shape the judge appends: `subject="defender"`
+    (not `D.finding_row`'s placeholder), no `judge_outcome`, and the three fields the family
+    gate reads as ground truth (`contrast_evidence`, `on_verdict_path`, `world_label_doubted`).
     """
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
                type="decision-discipline", subject="defender",
@@ -64,22 +60,8 @@ def _graded(tmp_path, **kw):
     return ep, J.judge_record(ep)
 
 
-# #1108 P4 (OD12 class ii): the gate rows drive the REAL lessons tick over a batch's git-free
-# draft (`_curator1134.draft_lane` / `draft_author_cfg`); their assertions are the queue's.
-
-
-def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
-    D.seed(paths, channel, [_family_row()])
-    cfg = C.draft_author_cfg(lane, invoke_agent=D.committing("family-lesson"))
-
-    assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
-    assert D.pending(paths, channel) == [], (
-        "the family row is still queued; without a gate of its own it is held forever as "
-        "no_ground_truth")
-    assert [r["finding_id"] for r in D.consumed(paths, channel)] == ["ep-1/b/0/0"]
+# The gate tests drive the real lessons tick over a git-free draft lane
+# (`_curator1134.draft_lane` / `draft_author_cfg`) and assert on the queue.
 
 
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
@@ -102,19 +84,6 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
     assert still_held == {"run-adv/0": "retired_direction('adversarial')",
                           "run-held/0": "retired_direction('adversarial')"}, (
         "an adversarial row stopped being held, or the family row was held with it")
-
-
-def test_921_gate_family_authors_a_survived_row(tmp_path):
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
-    D.seed(paths, channel, [_family_row()])
-    agent = D.recording(D.committing("survived"))
-
-    assert J.mod("learning.author.drain").run_batch(
-        cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
-    assert agent.calls, "the new-shape row authored nothing; it was held, not admitted"
-    assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/0"]
 
 
 def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
@@ -254,7 +223,7 @@ def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path
 def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
     from defender.tests.support.shared.contracts._by_path import load_lint_gate
 
-    enqueue = _enqueue()          # RED until M5 exists: a lint that scans nothing is clean
+    enqueue = _enqueue()          # must exist: a lint that scans nothing is clean
     assert hasattr(enqueue, "append_rows")
     gate = load_lint_gate("lint_unguarded_tree_write")
     tree = tmp_path / "synthetic" / "defender" / "learning" / "judge"
@@ -280,8 +249,8 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
     assert (defender_dir / "learning" / "judge").is_dir(), (
         "the positive control failed: there is no learning/judge/ package on disk for the gate "
         "to scan, so a clean result below says nothing about the shipped appender")
-    # Rooted AT the package, not at `defender/` and filtered: a finding is decided per file, and
-    # the wider root only walked the rest of the tree (and its `.venv`) to throw it away.
+    # Rooted at the package: findings are per file, and a wider root would walk the whole tree
+    # (and `.venv`) for nothing.
     real = {f.fingerprint for f in gate._scan(defender_dir / "learning" / "judge")}
     assert not real, f"the judge's own appender trips the write lint: {sorted(real)}"
 
@@ -355,8 +324,8 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         f"the record claims {record['enqueued_rows']} enqueued rows and {len(family_ids)} are "
         "readable; a row of this pass's own was swallowed by the fragment")
 
-    # The stall F-11 exists to prevent, on the real channel: the tick runs to completion and
-    # drains the queue rather than stuck-recording the whole batch behind one torn line.
+    # On the real channel the tick drains the queue rather than stuck-recording the whole batch
+    # behind one torn line.
     agent = D.recording(D.committing("torn-tail"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0

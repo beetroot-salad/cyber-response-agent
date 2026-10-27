@@ -42,6 +42,7 @@ def test_921_family_record_carries_a_row_per_graded_world(tmp_path):
     })
     rows = J.rows(_grade(ep))
 
+    assert "a" not in rows, "the control world was given a bucket row"
     assert sorted(rows) == ["b", "c"], "a graded non-control world has no row in the record"
     for label, row in rows.items():
         missing = [fact for fact in J.PER_WORLD_FACTS if fact not in row]
@@ -53,7 +54,7 @@ def test_921_family_record_carries_a_row_per_graded_world(tmp_path):
 
 def test_921_served_nothing_reads_x_own_rows_off_the_composed_token(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={
-        # b: one family-tier base row and nothing of its own — J2's whole case.
+        # b: one family-tier base row and nothing of its own.
         "b": [J.ledger_row(source="base", world_label=None)],
         # c: the same call, this time as the world's own decision row.
         "c": [J.ledger_row(source="passthrough", world_label="c")],
@@ -194,7 +195,7 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
             "# investigation b\n\n```invlang\n:T resolutions\n"
             "h-001  open → held    [l-001 r1 severe ⟂ e-001 :: cut off here\n",
             encoding="utf-8")),
-        # F-7 — the partially archived world.
+        # The partially archived world.
         ("partial", lambda ep: (
             ep / "worlds" / T.world_id(ep, "b") / "gather_summaries" / "l-001.md").unlink()),
     ):
@@ -238,7 +239,7 @@ def test_921_two_world_entries_under_one_label_are_refused_at_manifest_load(tmp_
 
 
 def test_921_a_world_label_equal_to_a_real_run_id_grades(tmp_path):
-    # #1224: a label is a world token (lower-case), so the collision is with a run of that name.
+    # A label is a world token (lower-case), so the collision is with a run of that name.
     colliding = "fresh_case_n59"
     ep = J.accepted_episode(
         tmp_path, labels=("a", "b", colliding),

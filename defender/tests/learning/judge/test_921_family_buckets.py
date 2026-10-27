@@ -24,15 +24,6 @@ def _grade(ep, **kw):
     return J.grade(ep, **kw)
 
 
-def test_921_control_world_is_graded_per_world_only_and_gets_no_bucket(tmp_path):
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    rows = J.rows(_grade(ep))
-    assert "a" not in rows, "the control world was given a bucket row"
-    assert "b" in rows, "the positive control failed: no non-control world is graded at all"
-    assert "bucket" in rows["b"], (
-        "the positive control failed: no non-control world carries a bucket either")
-
-
 def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path):
     import shutil
 
@@ -114,7 +105,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     discard = J.as_reply_text(J.reply_doc(findings=[
         J.finding_doc(), J.finding_doc(subject="world", bucket="incoherent")]))
-    # Two answers, then the seam degrades: `raise_after=2` is P9's one class, both ways.
+    # Two answers, then every later call fails (`raise_after=2`).
     judge = J.FakeJudge(replies=[discard, discard], default=discard,
                         fault=J.Fault(raise_after=2))
     J.grade_at(ep, judge=judge, draws=4, state=env_state())
