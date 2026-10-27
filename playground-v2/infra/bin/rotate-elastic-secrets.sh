@@ -79,6 +79,14 @@ for _ in $(seq 1 60); do
     sleep 10
 done
 
+echo "-> re-encrypting every saved object with the new key"
+# Kibana keeps a single decrypt-only key. Without this, the next rotation drops the key that
+# today's objects (rule API keys, Fleet tokens) are still encrypted with, and they go unreadable.
+printf 'user = "elastic:%s"\n' "${NEW_EP}" \
+    | docker --context "${CTX}" exec -i kibana curl -sS -K - -H 'kbn-xsrf: x' \
+        -X POST 'http://localhost:5601/api/encrypted_saved_objects/_rotate_key?batch_size=1000'
+echo
+
 echo "-> rotating Fleet's message-signing key pair"
 printf 'user = "elastic:%s"\n' "${NEW_EP}" \
     | docker --context "${CTX}" exec -i kibana curl -sS -K - -H 'kbn-xsrf: x' \
