@@ -378,6 +378,18 @@ def test_membership_lookups_are_per_user_and_per_tenant(seeded):
     assert {m.id for m in seeded.memberships_of_tenant(T1)} == {a1.id, b1.id}
     assert seeded.active_membership(a.id, T1).id == a1.id
     assert seeded.active_membership(a.id, T2) is None  # invited is not active
+
+
+def test_people_of_a_tenant_are_its_rows_in_one_status_with_their_users(seeded):
+    """The member and invitation listings read one tenant's rows of one status, each with its user."""
+    a, b, c = _user(seeded, "a@x.org"), _user(seeded, "b@x.org"), _user(seeded, "c@x.org")
+    a1, b1 = _active(seeded, a, T1), _invited(seeded, b, T1)
+    _active(seeded, c, T2)  # another tenant
+    gone = _invited(seeded, c, T1)
+    seeded.revoke_invitation(gone.id)
+    assert [(m.id, u) for m, u in seeded.people_of_tenant(T1, "active")] == [(a1.id, seeded.user(a.id))]
+    assert [(m.id, u) for m, u in seeded.people_of_tenant(T1, "invited")] == [(b1.id, seeded.user(b.id))]
+    assert [m.id for m, _ in seeded.people_of_tenant(T1, "revoked")] == [gone.id]
     assert seeded.active_membership(b.id, T1) is None
     assert seeded.membership("no-such-row") is None
 

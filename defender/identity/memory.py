@@ -257,6 +257,13 @@ class InMemoryIdentityRepository:
         with self._lock:
             return [m for m in self._memberships.values() if m.tenant_id == str(tenant_id)]
 
+    def people_of_tenant(
+        self, tenant_id: str, status: MembershipStatus,
+    ) -> list[tuple[Membership, User]]:
+        with self._lock:
+            return [(m, self._users[m.user_id]) for m in self.memberships_of_tenant(tenant_id)
+                    if m.status == status]
+
     def active_membership(self, user_id: str, tenant_id: str) -> Membership | None:
         with self._lock:
             row = self._live_row(user_id, str(tenant_id))

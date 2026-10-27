@@ -11,7 +11,7 @@ from typing import Protocol
 from defender._model import model
 from defender.tenancy._tenant import TenantId
 
-from .rows import Membership, Session, User
+from .rows import Membership, MembershipStatus, Session, User
 
 
 @model(frozen=True)
@@ -79,6 +79,11 @@ class IdentityRepository(Protocol):
     def membership(self, membership_id: str) -> Membership | None: ...
     def memberships_of_user(self, user_id: str) -> list[Membership]: ...
     def memberships_of_tenant(self, tenant_id: str) -> list[Membership]: ...
+    def people_of_tenant(
+        self, tenant_id: str, status: MembershipStatus,
+    ) -> list[tuple[Membership, User]]:
+        """The tenant's rows in `status`, each with its user, in one read."""
+        ...
     def active_membership(self, user_id: str, tenant_id: str) -> Membership | None: ...
 
     # --- sends: a send is pending while requested_seq > sent_seq

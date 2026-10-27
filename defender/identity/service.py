@@ -374,20 +374,13 @@ class IdentityService:
 
     # --- tenant people -----------------------------------------------------------------------
     def members(self, tenant_id: str) -> list[MemberView]:
-        views = []
-        for row in self._repo.memberships_of_tenant(tenant_id):
-            user = self._repo.user(row.user_id)
-            if row.status == "active" and user is not None:
-                views.append(MemberView(user_id=user.id, email=user.email, display_name=user.display_name))
+        views = [MemberView(user_id=user.id, email=user.email, display_name=user.display_name)
+                 for _, user in self._repo.people_of_tenant(tenant_id, "active")]
         return sorted(views, key=lambda v: v.email)
 
     def invitations(self, tenant_id: str) -> list[InvitationView]:
-        views = []
-        for row in self._repo.memberships_of_tenant(tenant_id):
-            user = self._repo.user(row.user_id)
-            if row.status == "invited" and user is not None:
-                views.append(InvitationView(
-                    id=row.id, email=user.email, status="invited", created_at=row.created_at))
+        views = [InvitationView(id=row.id, email=user.email, status="invited", created_at=row.created_at)
+                 for row, user in self._repo.people_of_tenant(tenant_id, "invited")]
         return sorted(views, key=lambda v: (v.created_at, v.id))
 
     def _invite(self, inviter: str, tenant_id: str, email: str) -> InvitationView:

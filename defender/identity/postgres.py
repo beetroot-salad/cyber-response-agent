@@ -1,12 +1,13 @@
 """The PostgreSQL identity repository: the same rules as `InMemoryIdentityRepository`, held by
 the schema (unique indexes, CHECKs, foreign keys) and by conditional updates, and answering the
-same contract suite. Needs `psycopg` (the `api` extra); nothing else imports this module.
+same contract suite. Needs `psycopg` and its pool (the `api` extra); nothing else imports this module.
 
-One short connection per operation, so the sender thread and request threads never share one.
-A pool is the first thing to add if that cost shows."""
+Each operation borrows a connection from a pool for its one transaction, so the sender thread and
+request threads never share one at the same time and none pays for a new connection."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
 import re
 import uuid
@@ -18,6 +19,7 @@ import psycopg
 from psycopg import errors as pg_errors
 from psycopg import sql
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from defender.tenancy._tenant import TenantId
 
@@ -88,33 +90,43 @@ CREATE INDEX sessions_by_user ON sessions (user_id);
 _NO_TIME: Any = None
 
 
+@contextmanager
+def _data_rules() -> Iterator[None]:
+    """A write the schema refuses, as the port's `DataRuleViolation`."""
+    try:
+        yield
+    except (pg_errors.UniqueViolation, pg_errors.ForeignKeyViolation, pg_errors.CheckViolation) as e:
+        raise DataRuleViolation(str(e).splitlines()[0]) from e
+
+
+#: The user's columns renamed `u_<column>`, so one row can carry a membership and its user.
+_USER_AS_U = ", ".join(f"u.{f.name} AS u_{f.name}" for f in dataclasses.fields(User))
+
+
 class PostgresIdentityRepository:
-    def __init__(self, dsn: str, *, schema: str) -> None:
+    def __init__(self, dsn: str, *, schema: str, max_connections: int = 10) -> None:
         if not _SCHEMA_NAME.match(schema):
             raise ValueError(f"not a schema name: {schema!r}")
         self._dsn = dsn
         self._schema = schema
         self._migrate()
+        self._pool: ConnectionPool[psycopg.Connection[dict[str, Any]]] = ConnectionPool(
+            dsn, min_size=1, max_size=max_connections, open=True,
+            kwargs={"row_factory": dict_row, "options": f"-c timezone=UTC -c search_path={schema}"})
 
     def close(self) -> None:
-        """Connections are per operation, so there is nothing held to release."""
+        self._pool.close()
 
     # --- plumbing ----------------------------------------------------------------------------
     @contextmanager
-    def _conn(self, *, schema_search: bool = True) -> Iterator[psycopg.Connection[dict[str, Any]]]:
-        options = f"-c timezone=UTC -c search_path={self._schema}" if schema_search else "-c timezone=UTC"
-        conn: psycopg.Connection[dict[str, Any]] = psycopg.connect(
-            self._dsn, row_factory=dict_row, options=options)
-        try:
-            with conn.transaction():
-                yield conn
-        except (pg_errors.UniqueViolation, pg_errors.ForeignKeyViolation, pg_errors.CheckViolation) as e:
-            raise DataRuleViolation(str(e).splitlines()[0]) from e
-        finally:
-            conn.close()
+    def _conn(self) -> Iterator[psycopg.Connection[dict[str, Any]]]:
+        with self._pool.connection() as conn, _data_rules(), conn.transaction():
+            yield conn
 
     def _migrate(self) -> None:
-        with self._conn(schema_search=False) as conn:
+        """On a connection of its own, before the pool opens: the schema may not exist yet."""
+        with psycopg.connect(self._dsn, row_factory=dict_row, options="-c timezone=UTC") as conn, \
+                _data_rules(), conn.transaction():
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATION_LOCK,))
             conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(self._schema)))
             conn.execute(sql.SQL("SET LOCAL search_path TO {}").format(sql.Identifier(self._schema)))
@@ -304,6 +316,17 @@ class PostgresIdentityRepository:
         with self._conn() as conn:
             return [Membership(**r) for r in conn.execute(
                 "SELECT * FROM memberships WHERE tenant_id = %s ORDER BY created_at, id", (str(tenant_id),))]
+
+    def people_of_tenant(
+        self, tenant_id: str, status: MembershipStatus,
+    ) -> list[tuple[Membership, User]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT m.*, {_USER_AS_U} FROM memberships m JOIN users u ON u.id = m.user_id"
+                " WHERE m.tenant_id = %s AND m.status = %s ORDER BY m.created_at, m.id",
+                (str(tenant_id), status)).fetchall()
+        return [(Membership(**{k: v for k, v in r.items() if not k.startswith("u_")}),
+                 User(**{k[2:]: v for k, v in r.items() if k.startswith("u_")})) for r in rows]
 
     def active_membership(self, user_id: str, tenant_id: str) -> Membership | None:
         with self._conn() as conn:

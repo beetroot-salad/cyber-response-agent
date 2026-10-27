@@ -96,8 +96,9 @@ api = [
     # The HTTP client `identity/keycloak.py` uses for the token endpoint and admin API; the `dev`
     # extra's `httpx` is not installed in a production `api` sync.
     "httpx",
-    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq.
-    "psycopg[binary]>=3.2",
+    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq,
+    # `[pool]` the connection pool the request and sender threads share.
+    "psycopg[binary,pool]>=3.2",
 ]
 dev = [
     "pytest>=8.0",
