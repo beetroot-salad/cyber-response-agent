@@ -6,9 +6,8 @@ import html
 import json
 import os
 import shutil
-import signal
+import sys
 import threading
-import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -894,33 +893,26 @@ PAGE_FILE = "visualize_episode.py"
 
 
 @contextlib.contextmanager
-def when_inside(act: Callable[[], Any], *, marker: str = PAGE_FILE, tick: float = 0.001,
-                budget: float = 60.0) -> Iterator[dict[str, Any]]:
-    """Run `act()` from a signal handler the first time a frame of `marker` is on the main
-    thread's stack — an interrupt, a rewrite or a raise landing INSIDE the render, with no seam
-    on the render itself (d40: the renderer is a plain call)."""
-    seen = {"hit": False, "count": 0}
-    started = time.monotonic()
+def when_inside(act: Callable[[], Any], *, at: str, marker: str = PAGE_FILE) -> Iterator[dict[str, Any]]:
+    """Run `act()` the first time function `at` of `marker` is entered on this thread — an
+    interrupt, a rewrite or a raise landing INSIDE the render, with no seam on the render
+    itself (d40: the renderer is a plain call). A profile hook, not a timer: a timer only
+    landed when the render happened to be in a `marker` frame at the tick (#1325)."""
+    seen = {"hit": False}
 
-    def handler(_signum: int, frame: Any) -> None:
-        seen["count"] += 1
-        f = frame
-        while f is not None:
-            if f.f_code.co_filename.endswith(marker):
-                seen["hit"] = True
-                act()
-                return
-            f = f.f_back
-        if time.monotonic() - started < budget:
-            signal.setitimer(signal.ITIMER_REAL, tick)
+    def hook(frame: Any, event: str, _arg: Any) -> None:
+        code = frame.f_code
+        if event == "call" and code.co_name == at and code.co_filename.endswith(marker):
+            sys.setprofile(previous)
+            seen["hit"] = True
+            act()
 
-    previous = signal.signal(signal.SIGALRM, handler)
-    signal.setitimer(signal.ITIMER_REAL, tick)
+    previous = sys.getprofile()
+    sys.setprofile(hook)
     try:
         yield seen
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
+        sys.setprofile(previous)
 
 
 def raise_now(exc: BaseException) -> Callable[[], None]:

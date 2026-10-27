@@ -37,9 +37,11 @@ jobs:
   # <2.5 min for every other job), and its CPU time is balanced across the runner's four cores, so
   # the only way down is more cores. `--shard I/N` (defender/tests/_shard.py) hands each shard whole
   # test files, balanced by each file's recorded cost, so together they run every test exactly once
-  # (tests/test_shard_plan.py pins that). Each shard pays the ~25s of setup below (box image, uv sync,
-  # gVisor) again, which is what the split costs; the repo is public, so the extra runner minutes
-  # are free. `fail-fast: false` so one shard failing still reports the other's results.
+  # (tests/tooling/test_shard_plan.py pins that, and fails once the table misses too many files;
+  # refresh it with defender/tests/_shard_weights_refresh.py). Each shard pays the ~25s of setup
+  # below (box image, uv sync, gVisor) again, which is what the split costs; the repo is public, so
+  # the extra runner minutes are free. `fail-fast: false` so one shard failing still reports the
+  # other's results.
   test:
     name: test (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
@@ -197,34 +199,6 @@ jobs:
           -n auto --dist loadfile --durations=25
           --shard ${{ matrix.shard }}/2
           --ignore tests/e2e/test_540_box_boundary.py
-
-      # write-tests' suite checks (check_calls, check_stub) ship with the contract-first
-      # plugin. Defender's tests and the path-scoped tooling/lint gates don't scope to the
-      # plugin, so this step is its only test coverage. The suite drives the real scripts
-      # against throwaway git-repo fixtures; it lives outside defender/ but reuses the
-      # defender venv's pytest, so it runs from the repo root against defender/.venv (the
-      # same idiom as the code-smells lint gates below).
-      - name: Run contract-first tool tests
-        # Once, not per shard: it is a separate suite (contract-first/scripts), not part of the split.
-        if: matrix.shard == 1
-        run: defender/.venv/bin/python -m pytest contract-first/scripts -q
-
-      # The lints' own tests (planted trees run through each lint) live beside the lints they
-      # test, not in the defender suite: the lints are standalone programs that do not import the
-      # product. Same idiom as the step above: the defender venv's pytest, from the repo root.
-      - name: Run lint tool tests
-        # Once, not per shard: a separate suite (tooling/lint/tests), not part of the split.
-        if: matrix.shard == 1
-        run: defender/.venv/bin/python -m pytest tooling/lint/tests -q
-
-      # The eval tooling's own tests live beside it in evaluations/tests, not in the defender
-      # suite (evaluations/ is the measurement layer; its tests are deterministic and make no
-      # model calls). The defender step's `tests/` root does not reach them, so this step is
-      # their only collection — the gap #720 found when they sat uncollected in evaluations/.
-      - name: Run eval tool tests
-        # Once, not per shard: a separate suite (evaluations/tests), not part of the split.
-        if: matrix.shard == 1
-        run: defender/.venv/bin/python -m pytest evaluations/tests -q
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
   # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
@@ -504,7 +478,7 @@ jobs:
         # import the tree).
         # --extra api: the same argument for `defender/api/`, whose FastAPI types would
         # otherwise collapse to `Any`.
-        run: uv sync --extra dev --extra runtime --extra api
+        run: uv sync --extra dev --extra runtime --extra api --locked
 
       # Hard gate — blocks CI. Keeps the baseline (pyflakes + pycodestyle E)
       # clean repo-wide; extra rule sets are reported in the code-smells job.
@@ -593,6 +567,31 @@ jobs:
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
         run: uv run pytest tests/ -m gate -n auto --dist loadfile
+
+      # The three tool suites below run here, not in the `test` job: there they ran on shard 1
+      # only (~50s), on the shard that sets CI's wall clock (#1333).
+
+      # write-tests' suite checks (check_calls, check_stub) ship with the contract-first
+      # plugin. Defender's tests and the path-scoped tooling/lint gates don't scope to the
+      # plugin, so this step is its only test coverage. The suite drives the real scripts
+      # against throwaway git-repo fixtures; it lives outside defender/ but reuses the
+      # defender venv's pytest, so it runs from the repo root against defender/.venv (the
+      # same idiom as the code-smells lint gates).
+      - name: Run contract-first tool tests
+        run: defender/.venv/bin/python -m pytest contract-first/scripts -q
+
+      # The lints' own tests (planted trees run through each lint) live beside the lints they
+      # test, not in the defender suite: the lints are standalone programs that do not import the
+      # product. Same idiom as the step above: the defender venv's pytest, from the repo root.
+      - name: Run lint tool tests
+        run: defender/.venv/bin/python -m pytest tooling/lint/tests -q
+
+      # The eval tooling's own tests live beside it in evaluations/tests, not in the defender
+      # suite (evaluations/ is the measurement layer; its tests are deterministic and make no
+      # model calls). The defender step's `tests/` root does not reach them, so this step is
+      # their only collection — the gap #720 found when they sat uncollected in evaluations/.
+      - name: Run eval tool tests
+        run: defender/.venv/bin/python -m pytest evaluations/tests -q
 
   code-smells:
     runs-on: ubuntu-latest
