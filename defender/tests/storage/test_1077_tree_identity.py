@@ -53,9 +53,7 @@ def _replay(tmp_path: Path, run_id: str = "tree-1077") -> Path:
 
 def _baseline_exists() -> None:
     assert S.TREE_BASELINE.is_file(), (
-        "the O3 baseline does not exist. D7 step 1 captures it BEFORE step 3, on `main`, with "
-        "no implementation behind it — the existing goldens are not this observer (claim C8: "
-        "they compare one normalised investigation text and three iterdir() names)")
+        f"the tree baseline {S.TREE_BASELINE} does not exist")
 
 
 # the structural check
@@ -70,17 +68,14 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
     # The check is over the WHOLE tree: no name is excused, and the machinery offers no lever
     # to excuse one.
     assert not hasattr(S, "O3_EXEMPT"), (
-        "an exemption list came back. Decision 21 removed it: eight files differ between two "
-        "replays of UNCHANGED code, so an exemption list is a widening lever, not a contract")
+        "an exemption list (`O3_EXEMPT`) is back; unstable files get the name-only check")
     assert "exclude" not in S.snapshot.__code__.co_varnames, (
         "`snapshot` grew an `exclude` argument — the structural check admits no exemption, "
         "which is the only thing that makes 'the same set of names' worth asserting")
     names = set(S.snapshot(run_dir))
     for unstable in ("tool_trace.jsonl",):
         assert unstable in names, (
-            f"{unstable} is outside the structural check. Its BYTES are not compared (it "
-            "carries a clock or a per-run uuid); its NAME is, and that is the whole point of "
-            "splitting the two checks rather than exempting the file")
+            f"{unstable} is outside the structural (name) check")
 
 
 # the writers that share one run directory
@@ -135,8 +130,8 @@ def test_the_alias_ban_probe_fails_closed_on_a_timeout_or_a_malformed_result(tmp
             alias._probe_alias_ban(docker, "box-1077", run_dir, "runc")
         assert docker.argv, f"the {mode} arm never reached the probe"
         assert not issubclass(type(excinfo.value), S.mod("box._docker").BoxFault), (
-            "O7 is a security obligation, so the refusal must not be a `BoxFault` the generic "
-            "`except BoxFault: degrade` startup handler can swallow")
+            "the refusal is a `BoxFault`, which the startup's `except BoxFault: degrade` "
+            "swallows")
 
     # Positive control: a clean probe does NOT refuse, so the two faults above are the refusal
     # and not the probe refusing unconditionally.

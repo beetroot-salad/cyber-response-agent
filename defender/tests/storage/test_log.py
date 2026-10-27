@@ -285,7 +285,6 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
     """The wiring: everything `run.main` does after the run dir exists — the lifecycle
     included — logs under this run's id and its tenant."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     base, src = location_path(T.runs_base)(tmp_path)
     seen: dict = {}
 
@@ -307,7 +306,6 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
     """A lifecycle that raises: the failure propagates, and its CRITICAL record — traceback
     included — names the run and its tenant."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     base, src = location_path(T.runs_base)(tmp_path)
 
     def lifecycle(**kw):

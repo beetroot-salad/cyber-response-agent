@@ -72,8 +72,7 @@ def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
             f"{acc.kind}: RunPaths.{acc.attr} resolved {got.relative_to(run_dir)}, and the "
             f"kinds table says {want}")
     assert missing == [], (
-        "claim G5: the owner owns exactly 7 accessors today and D1 takes it to roughly twenty; "
-        f"these names have no accessor: {missing}")
+        f"these names have no accessor on the owner: {missing}")
     # The sessions directory and the database, whose root is a SIBLING of the runs base.
     assert location_path(S.RunPaths(run_dir).sessions_dir(fixture_runs_base(base))) == base.parent / "sessions"
     assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID).name == f"{S.LINEAGE_ID}.db"
@@ -92,15 +91,13 @@ def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admi
     rel = record_query.persist_payload(_writer_run_1165(run_dir), S.LEAD_ID, S.SEQ, '{"rows": []}')
     absolute = S.RunPaths(run_dir).payload(S.LEAD_ID, S.SEQ)
     assert run_dir / rel == absolute, (
-        "gather's note composes `run_dir / record['payload_path']` (tools_gather.py:70); O8 "
-        "names BOTH forms and requires both to be the owner's")
+        "the note's `run_dir / payload_path` is not the owner's absolute payload path")
 
     policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=run_dir, defender_dir=DEFENDER)
     decision = permission.decide_read(
         absolute, run_dir=run_dir, defender_dir=DEFENDER, policy=policy)
     assert decision.allow, (
-        f"gather's own read gate refused the path it is told to `cat`: {decision.reason} — the "
-        "GATHER_RAW_SHAPE admits it, and that admission is what makes O8's note usable")
+        f"gather's own read gate refused the path it is told to `cat`: {decision.reason}")
 
 
 # one rule for every composing accessor
@@ -203,9 +200,7 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
     does."""
     from defender.records.session_store._write import CASE_ID_RE, InvalidCaseId, store_path_for
     for lineage in ("-leading-dash", "has space", "a/b", "héllo", "..", "_under"):
-        assert not CASE_ID_RE.match(lineage), (
-            "the pattern is pinned BY REFERENCE at defender/records/_run_id.py (`CASE_ID_RE`) (RG-4); "
-            "this test reads it, it does not re-spell it")
+        assert not CASE_ID_RE.match(lineage), f"`CASE_ID_RE` admits {lineage!r}"
         _refuses(run_dir, base, lineage)
         with pytest.raises(InvalidCaseId):
             store_path_for(lineage, sessions=SessionPaths(fixture_runs_base(base)))
@@ -223,7 +218,7 @@ def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_di
     for label in ("has-dash", "a-b"):
         fault = world_label_fault(label)
         assert fault is not None, (
-            f"the label rule admitted {label!r}: N8 keeps the view-name rule's `-` refusal")
+            f"the label rule admitted {label!r}; `-` must stay refused")
         assert "-" in fault, f"the label rule's refusal does not name the delimiter: {fault!r}"
     owner = S.EpisodePaths(episode_dir)
     assert owner.served_world(S.WORLD_ID).name == f"{S.WORLD_ID}.jsonl"
@@ -238,7 +233,7 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
         base, run_dir, episode_dir):
     from defender.records._run_id import is_case_stable_id
     owner = S.EpisodePaths(episode_dir)
-    by_reference = "the rule is today's `_run_id.is_case_stable_id`, reached by reference"
+    by_reference = "`_run_id.is_case_stable_id` does not tell `plain` from `Plain`"
     assert is_case_stable_id("plain"), by_reference
     assert not is_case_stable_id("Plain"), by_reference
 
@@ -252,8 +247,7 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
     from defender.records.session_store._write import CASE_ID_RE, InvalidCaseId
     mixed = "Case-0011223344556677"
     assert CASE_ID_RE.match(mixed), (
-        "the format check admits a mixed-case id today (`_run_id.CASE_ID_RE`) — the case-"
-        "stability refusal is the NEW check beside it, not a re-spelling of the old one")
+        "`CASE_ID_RE` refuses a mixed-case id: case stability is a separate check")
     with pytest.raises(InvalidCaseId):
         S.RunPaths(run_dir).session_db(fixture_runs_base(base), mixed)
     assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID).name.endswith(".db"), (

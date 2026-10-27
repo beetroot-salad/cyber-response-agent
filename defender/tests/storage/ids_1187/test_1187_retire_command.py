@@ -4,7 +4,6 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import errno
-import importlib
 import json
 import os
 import re
@@ -16,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from defender.cli import retire_legacy_runs
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as process
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
@@ -31,9 +31,8 @@ LESSON_ROW = f"{LESSON}\td\t1\t0"
 # Drivers.
 
 def _retire(*argv: str) -> P.CliResult:
-    """Import the retirement command directly so a missing entrypoint fails the test."""
-    command = importlib.import_module(S.COMMAND_MODULE)
-    return P.drive_cli(command.main, list(argv))
+    """`retire_legacy_runs.py <argv>`, in process."""
+    return P.drive_cli(retire_legacy_runs.main, list(argv))
 
 
 def _trace(tenant_id: str, lessons: Path) -> P.CliResult:
@@ -211,7 +210,7 @@ def test_1187_o6_the_tracer_stops_on_a_pre_1187_container_naming_the_command(
     shutil.rmtree(location_path(sc.runs) / "_episodes")
 
     got = _trace(T, sc.lessons)
-    assert _refused(got), f"the tracer served a pre-#1187 container: {_shown(got)}"
+    assert _refused(got), f"the tracer served a legacy container: {_shown(got)}"
     assert got.out == "", f"the tracer printed rows before stopping: {got.out!r}"
     assert S.COMMAND in got.said, f"the refusal does not name the command: {got.said!r}"
 # The command moves old entries aside, intact, and the tenant is served after.

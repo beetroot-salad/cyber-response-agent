@@ -154,27 +154,23 @@ def test_every_role_scoped_reader_returns_empty_for_a_null_head_session(tmp_path
     landed = store.append(session_id, live, agent_id="main")
     store.append(session_id, [tool_call_response(tool_call_id="dangling")], agent_id="main")
 
+    def reads() -> dict[str, list]:
+        return {
+            "send": ss.hydrate(store, session_id, role="send"),
+            "analysis": ss.hydrate(store, session_id, role="analysis"),
+            "actor": ss.hydrate(store, session_id, role="actor"),
+            "synthesized-flags": ss.synthesized_flags(store, session_id, role="analysis"),
+        }
+
     store.connection.execute(
         "UPDATE session SET head_message_id = NULL WHERE session_id = ?", (session_id,))
-
-    empty = {
-        "send": ss.hydrate(store, session_id, role="send"),
-        "analysis": ss.hydrate(store, session_id, role="analysis"),
-        "actor": ss.hydrate(store, session_id, role="actor"),
-        "synthesized-flags": ss.synthesized_flags(store, session_id, role="analysis"),
-    }
+    empty = reads()
     assert empty == {via: [] for via in empty}, empty
     assert ss.path_row_ids(store, session_id) == []
 
     store.connection.execute(
         "UPDATE session SET head_message_id = ? WHERE session_id = ?", (landed[-1], session_id))
-    restored = {
-        "send": ss.hydrate(store, session_id, role="send"),
-        "analysis": ss.hydrate(store, session_id, role="analysis"),
-        "actor": ss.hydrate(store, session_id, role="actor"),
-        "synthesized-flags": ss.synthesized_flags(store, session_id, role="analysis"),
-    }
-    for via, rows in restored.items():
+    for via, rows in reads().items():
         assert len(rows) == len(landed), (
             f"control: {via} returns the same rows once head names one; got {rows}")
 
@@ -192,7 +188,7 @@ def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
     raw.commit()
     raw.close()
     assert 999999 in ss.path_row_ids(store, session_id), (
-        "the fixture must put the unresolvable id ON the walked path, as PR-3 measured")
+        "the fixture did not put the unresolvable id on the walked path")
 
     for role in ("send", "analysis", "actor"):
         failure = raised_by(ss.hydrate, store, session_id, role)

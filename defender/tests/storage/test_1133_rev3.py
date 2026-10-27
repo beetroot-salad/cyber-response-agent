@@ -35,9 +35,8 @@ UNENCODABLE = "a row \udcff that cannot be encoded\n"
 @pytest.fixture
 def roots(tmp_path, monkeypatch):
     """The configured roots inside `tmp_path` (environment steering, the resolvers' own seam):
-    the runs base, the episodes root and the learning state root the judge's queue lands in."""
+    the runs base and the learning state root the judge's queue lands in."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -53,17 +52,6 @@ def bare_episode(tmp_path: Path) -> Path:
     ep = tmp_path / "episodes" / EPISODE_ID
     ep.mkdir(parents=True)
     return ep
-
-
-def view_reason(ep: Path, rel: PurePosixPath) -> str:
-    """What the view says of `rel` right now (its refusal reason), read through a fresh `bind`
-    so the expectation comes from the reader itself, not a hand-copied sentence."""
-    with _io.bind(ep) as view:
-        rec = view.read(rel)
-    assert rec.text is None, f"the fixture's {rel} reads as text: {rec!r}"
-    assert not rec.absent, f"the fixture's {rel} reads as absent: {rec!r}"
-    assert rec.reason, f"the fixture's {rel} is refused with no reason: {rec!r}"
-    return rec.reason
 
 
 def plant_record(at: Path, kind: str, *, host: Path) -> S.Planted:
@@ -91,10 +79,6 @@ def link_folder(at: Path, *, reach: str, ep: Path, host: Path, keep: dict[str, b
     return target
 
 
-def mod(dotted: str) -> Any:
-    return T.mod(dotted)
-
-
 @pytest.mark.parametrize("key", ["family", "review"])
 @pytest.mark.parametrize("kind", S.LEAF_PLANTS)
 def test_r1_a_record_is_read_through_the_view_present_absent_or_refused(tmp_path, key, kind):
@@ -116,7 +100,7 @@ def test_r1_a_record_is_read_through_the_view_present_absent_or_refused(tmp_path
         getattr(getattr(episode, key), "create" if key == "family" else "write")(f"{key}: plain\n")
         assert episode.view().read(rel).text == f"{key}: plain\n"
         assert not hasattr(getattr(episode, key), "read"), (
-            f"the {key} record still answers `read`: records are write-only (R1)")
+            f"the {key} record still answers `read`: records are write-only")
 
 
 def _view_matrix():
@@ -219,21 +203,7 @@ def test_r1_a_view_read_in_flight_when_close_lands_answers_the_root_never_the_re
     view = held.view()
     [root_fd] = S.open_fds_on(root)
     state: dict[str, Any] = {}
-
-    def close_mid_read(_op: str, _args: tuple, _kwargs: dict) -> None:
-        spy.hook = None
-        state["closed_promptly"] = S.run_in_thread(held.close, timeout=1.0)
-        if not state["closed_promptly"]:
-            return
-        state["open_after_close"] = S.open_fds_on(root)
-        if root_fd not in state["open_after_close"]:
-            fd = os.open(decoy, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-            if fd != root_fd:
-                os.dup2(fd, root_fd, inheritable=False)
-                os.close(fd)
-            state["decoy_on"] = root_fd
-
-    spy.hook = close_mid_read
+    spy.hook = S.close_mid_op(spy, held, root, root_fd, decoy, state)
     try:
         got = _race_op(view, op)
         assert "closed_promptly" in state, f"the view's {op} made no relative operation"
@@ -258,20 +228,7 @@ def test_r1_a_close_landing_as_the_view_takes_its_dup_never_redirects_the_read(t
     held = S.hold(root, os_=spy)
     view = held.view()
     state: dict[str, Any] = {}
-
-    def close_at_dup(fd: int) -> None:
-        closer = threading.Thread(target=held.close, daemon=True)
-        closer.start()
-        closer.join(0.5)
-        state["closer"] = closer
-        if not closer.is_alive():
-            taken = os.open(decoy, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-            if taken != fd:
-                os.dup2(taken, fd, inheritable=False)
-                os.close(taken)
-            state["decoy_on"] = fd
-
-    spy.before_dup = close_at_dup
+    spy.before_dup = S.close_at_dup(held, decoy, state)
     try:
         got = _race_op(view, op)
         assert "closer" in state, f"the view's {op} took no dup of the root through its os_ seam"
@@ -307,7 +264,7 @@ def _world_file(ep: Path, label: str) -> Path:
 
 
 def episode_mod() -> Any:
-    return mod("learning.branch.episode")
+    return T.mod("learning.branch.episode")
 
 
 @pytest.mark.parametrize("base", ["absent", "symlink", "fifo"])
@@ -326,7 +283,7 @@ def test_r1_delta_o_with_no_archived_worlds_is_empty_before_the_base_is_read(tmp
 @pytest.mark.parametrize("kind", ["absent", "symlink", "dangling", "hardlink", "fifo",
                                   "directory"])
 def test_r1_delta_o_refuses_an_absent_or_refused_base_as_no_primed_base(tmp_path, host, kind):
-    ledger = mod("learning.branch.ledger")
+    ledger = T.mod("learning.branch.ledger")
     ep = _delta_episode(tmp_path)
     at = ep / LAYOUT.served_base
     good = at.read_bytes()
@@ -405,7 +362,7 @@ def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, hos
 @pytest.mark.parametrize("state", ["absent", "symlink", "undecodable"])
 def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, host, via,
                                                                       state):
-    fam = mod("records._family")
+    fam = T.mod("records._family")
     ep = _delta_episode(tmp_path)
     manifest = ep / LAYOUT.family
     good = manifest.read_bytes()
@@ -469,7 +426,6 @@ def test_r2_a_plant_at_the_name_is_not_plain_entry_keeping_its_errno_and_mark(
 @pytest.mark.parametrize("kind", ["folder_link_outside", "folder_link_inside", "folder_file",
                                   "folder_fifo"])
 def test_r2_a_linked_or_non_directory_folder_on_the_way_is_not_the_leaf_class(tmp_path, kind):
-    cls = S.not_plain_entry()
     root = tmp_path / "root"
     root.mkdir()
     host = tmp_path / "host"
@@ -480,7 +436,8 @@ def test_r2_a_linked_or_non_directory_folder_on_the_way_is_not_the_leaf_class(tm
         raised = S.raised_by(lambda: held.write(str(rel), "x\n", mode="replace"),
                              fifo=planted.fifo)
         assert raised is not None, f"a {kind} on the way was not refused"
-        assert not isinstance(raised, cls), f"a {kind} on the way raised the leaf class: {raised!r}"
+        assert not isinstance(raised, _io.NotPlainEntry), (
+            f"a {kind} on the way raised the leaf class: {raised!r}")
         S.assert_refusal(raised, kind, where=f"Held.write through a {kind}")
         planted.remove()
         held.write(str(rel), "x\n", mode="replace")
@@ -582,15 +539,15 @@ def _swap_served_before(ep: Path, rel: PurePosixPath, *, reach: str, host: Path,
 @pytest.mark.parametrize("reach", ["outside", "inside"])
 def test_r2_a_served_folder_linked_after_its_ensure_is_the_folder_refusal_at_the_claim(
         tmp_path, host, reach):
-    cli = mod("learning.branch.cli")
-    ledger = mod("learning.branch.ledger")
+    cli = T.mod("learning.branch.cli")
+    ledger = T.mod("learning.branch.ledger")
     ep = bare_episode(tmp_path)
     state: dict[str, Any] = {}
     ran: list[Any] = []
 
     def prime(_source: Path, _episode: Any) -> Any:
         ran.append(True)
-        return mod("learning.branch.capture").PrimeReport(primed=1)
+        return T.mod("learning.branch.capture").PrimeReport(primed=1)
 
     io = S.RecordingIo(before=_swap_served_before(ep, LAYOUT.priming_lock, reach=reach,
                                                   host=host, state=state))
@@ -620,8 +577,8 @@ def test_r2_a_served_folder_linked_after_its_ensure_is_the_folder_refusal_at_the
 @pytest.mark.parametrize("reach", ["outside", "inside"])
 def test_r2_a_served_folder_linked_after_the_listing_is_the_folder_refusal_at_the_base(
         tmp_path, host, reach):
-    capture = mod("learning.branch.capture")
-    ledger = mod("learning.branch.ledger")
+    capture = T.mod("learning.branch.capture")
+    ledger = T.mod("learning.branch.ledger")
     run_dir = _one_call_source(tmp_path)
     ep = bare_episode(tmp_path)
     (ep / "served").mkdir()
@@ -720,8 +677,8 @@ def _plant_base(ep: Path, kind: str, host: Path) -> S.Planted:
 @pytest.mark.parametrize("kind", BASE_KINDS)
 def test_r3_anything_at_the_base_is_already_primed_before_the_capture_is_read(tmp_path, host,
                                                                               kind):
-    capture = mod("learning.branch.capture")
-    ledger = mod("learning.branch.ledger")
+    capture = T.mod("learning.branch.capture")
+    ledger = T.mod("learning.branch.ledger")
     run_dir = _one_call_source(tmp_path)
     sidecar, payload = fifo_sidecar(run_dir)
     ep = bare_episode(tmp_path)
@@ -751,8 +708,8 @@ def test_r3_anything_at_the_base_is_already_primed_before_the_capture_is_read(tm
 
 
 def test_r3_zero_rows_are_refused_by_default_and_primed_empty_with_allow_empty(tmp_path):
-    capture = mod("learning.branch.capture")
-    ledger = mod("learning.branch.ledger")
+    capture = T.mod("learning.branch.capture")
+    ledger = T.mod("learning.branch.ledger")
     run_dir = _empty_source(tmp_path)
     ep = bare_episode(tmp_path)
     base = ep / LAYOUT.served_base
@@ -778,7 +735,7 @@ def test_r3_zero_rows_are_refused_by_default_and_primed_empty_with_allow_empty(t
 
 def _launcher(tmp_path: Path) -> tuple[Any, Path, Any]:
     """`(cli, the source run dir, T's runs repository)` for `cli.prepare_episode(runs, source)`."""
-    cli = mod("learning.branch.cli")
+    cli = T.mod("learning.branch.cli")
     _base, src = location_path(T.runs_base)(tmp_path)
     return cli, src, T.current_tenant().runs_repository()
 
@@ -805,7 +762,7 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
     assert S.warned(caplog, "base", "primed", "prime", "capture", "empty", "EMPTY", "rows"), (
         "an empty prime was not warned about")
     assert not hasattr(cli, "_is_empty_capture"), (
-        "the message-matched downgrade `_is_empty_capture` is still there (R3: one primer)")
+        "the message-matched downgrade `_is_empty_capture` is still there")
 
 
 @pytest.mark.parametrize("lane", ["held", "rooted_write"])
@@ -877,7 +834,7 @@ def test_patch_the_minting_check_judges_the_whole_token(tmp_path, token, minted)
 
 
 def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_path):
-    run = mod("run")
+    run = T.mod("run")
     _base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     ns = run.parse_args(["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", "b"])

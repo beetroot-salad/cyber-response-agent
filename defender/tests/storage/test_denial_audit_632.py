@@ -119,7 +119,7 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
 
     assert set(record) == {
         "event_type", "ts", "seq", "role", "system", "verb", "call_id", "params_digest",
-    }, "the record's shape is not the bounded projection §7 R12 names"
+    }, f"the record's keys are not the bounded projection: {sorted(record)}"
     assert record["role"] == "gather", "the record does not say which role was refused"
     assert record["call_id"] == "elastic.ad-hoc", "the record does not identify the call"
     assert (record["system"], record["verb"]) == ("elastic", "esql")
@@ -133,10 +133,7 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
     assert json.loads(control)["params_digest"], \
         "a well-formed call's digest is empty — the projection identifies nothing"
     assert json.loads(control)["params_digest"] != json.loads(other_value)["params_digest"], (
-        "two denials differing only in their parameter VALUES carry the same digest — the "
-        "digest is over the parameter names, so the audit stream cannot tell one probe from "
-        "another and the non-finite guard above is dead code"
-    )
+        "two denials differing only in their parameter values carry the same digest")
     assert json.loads(control)["params_digest"] == json.loads(repeat)["params_digest"], \
         "the same call digests differently twice — the digest is not a function of the call"
 

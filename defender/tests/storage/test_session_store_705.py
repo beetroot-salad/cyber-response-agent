@@ -114,8 +114,7 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
     assert known == ss.SCHEMA_VERSION, (
         "the writer must stamp the schema version it claims to write")
     assert ss.SCHEMA_VERSION != 0, (
-        "0 is the un-set sentinel (is:PO1) — a fresh, never-stamped file must not read "
-        "as a valid version")
+        "0 is the never-stamped sentinel, not a valid version")
     assert ss.hydrate(store, session_id, role="analysis"), "positive control: known version reads"
     store.connection.close()
 
@@ -306,7 +305,7 @@ def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path
     message_cols = {row[1] for row in sql(store, "PRAGMA table_info(message)")}
     for absent in ("payload", "model_name", "usage", "provider", "finish_reason"):
         assert absent not in message_cols, (
-            f"{absent} must live only in message_payload (O33/X9); found on message")
+            f"{absent} must live only in message_payload; found on message")
 
     before_boundary = sql(store, "SELECT lead_id FROM gather_boundary")
     before_path = sql(store, "SELECT id, parent_id, seq, kind FROM message ORDER BY id")
@@ -321,8 +320,7 @@ def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path
     after_boundary = sql(store, "SELECT lead_id FROM gather_boundary")
     assert before_boundary != [], "the fixture recorded no boundary row to lose"
     assert after_boundary == [], (
-        "the boundary view derives from the payload — retention taking it with the "
-        "bodies is the fact X9 pins, not a bug the test hides")
+        f"the gather boundary survived its payload's removal: {after_boundary}")
 
 
 def test_raw_gather_payloads_are_not_stored_in_the_message_payload_table(tmp_path):

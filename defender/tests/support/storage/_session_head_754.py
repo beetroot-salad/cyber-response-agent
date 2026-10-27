@@ -81,18 +81,6 @@ def linear_turns(store: Any, session_id: str, n: int, *, agent_id: str = "main",
 
 # a real, hand-built store file at the refused schema version 1
 
-#: The `session` table as #705 first shipped it: five columns, before #744 added `agent_id`
-#: and `fork_at_message_id`.
-_V1_SESSION_PRE_MIGRATION = """
-CREATE TABLE session (
-    session_id TEXT PRIMARY KEY,
-    case_id TEXT NOT NULL,
-    parent_session_id TEXT REFERENCES session(session_id),
-    truncated_by TEXT,
-    last_render_len INTEGER
-) STRICT;
-"""
-
 #: The `session` table as #744 shipped it: seven columns, `fork_at_message_id` among them,
 #: and no `head_message_id`.
 _V1_SESSION_MIGRATED = """
@@ -136,14 +124,13 @@ CREATE TABLE message_payload (
 """
 
 
-def legacy_v1_store_file(path: Path, *, migrated: bool = True) -> Path:
-    """Write a real SQLite store file carrying the shape #705/#744 shipped, stamped
+def legacy_v1_store_file(path: Path) -> Path:
+    """Write a real SQLite store file carrying the shape #744 shipped, stamped
     `PRAGMA user_version = 1`."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
-    conn.executescript(
-        (_V1_SESSION_MIGRATED if migrated else _V1_SESSION_PRE_MIGRATION) + _V1_REST)
+    conn.executescript(_V1_SESSION_MIGRATED + _V1_REST)
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()

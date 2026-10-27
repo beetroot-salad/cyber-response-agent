@@ -26,9 +26,9 @@ def run_dir(base: Path) -> Path:
 
 
 
-def _tenanted(base: Path, run_id: str = S.RUN_ID):
+def _tenanted(base: Path):
     """Build a tenant-addressed handle over its record-free runs container."""
-    return S.Run().under(fixture_runs_base(base), run_id, tenant_id=S.DEFAULT_TENANT_ID)
+    return S.Run().under(fixture_runs_base(base), S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID)
 
 
 # the constructors' refusals
@@ -44,8 +44,7 @@ def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
             S.Run().at(bad)
         said = str(excinfo.value)
         assert "existing directory" in said, (
-            f"Run.at({bad.name}) refused with {said!r}; decision 8 words the ONE refusal it "
-            "carries as 'not an existing directory', never 'not run-dir-shaped'")
+            f"Run.at({bad.name}) refused with {said!r}, not 'not an existing directory'")
     # Positive control: an existing directory — even a wholly empty one — is accepted.
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -70,11 +69,8 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
             f"the handle's refusal of {variant!r} is not the run-id rule's own: the handle said "
             f"{excinfo.value!r}, RunId.parse says {rule!r}")
         assert repr(variant) in said, (
-            f"{variant!r} was not refused by name: {said!r}. On a case-insensitive filesystem — "
-            "macOS, which this repo supports, and where the default runs base lives under a "
-            "symlinked /tmp — it and the lowercase id are ONE inode, so decision 3's resumable "
-            "setup would finish that run's directory as if it were this run's, re-stamp its "
-            "identity and clear its three sidecars (h12, h13)")
+            f"{variant!r} was not refused by name (on a case-insensitive filesystem it is the "
+            f"lowercase id's folder): {said!r}")
         assert "\n" not in said, f"the refusal of {variant!r} is not one line: {said!r}"
     # The refusal is the ID's, not the collision's: it holds with no existing directory too,
     # so the handle never has to look at the filesystem to know the id is unusable.
@@ -100,16 +96,14 @@ def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path
     aw = S.ArchivedWorld().at(world)
 
     assert set(aw.members) == set(S.ARCHIVED_WORLD_MEMBERS), (
-        "the copied set is page §5's enumeration, extended by the archive.py constants claim "
-        "C17 omitted (gather_summaries, lessons_loaded, alert); #1187 R8 retired the run_dir "
-        "pointer")
+        f"the archived world's members are not the copied set: {sorted(aw.members)}")
     for name in S.ARCHIVED_WORLD_MEMBERS:
         assert getattr(aw, name).path.is_relative_to(world)
     for absent in ("tool_trace", "budget", "wire_log", "session_db", "review_record"):
         assert not hasattr(aw, absent), (
             f"{absent} is not in the copied set — an ArchivedWorld exposing it would promise a "
             "file the archive never wrote")
-    assert not isinstance(aw, S.Run()), "N5: the archive's world dir gets a read-only projection"
+    assert not isinstance(aw, S.Run()), "the archive's world dir is a Run, not a read-only projection"
     assert not hasattr(aw, "record"), "an ArchivedWorld is not addressed by (tenant_id, run_id)"
 
 
@@ -146,15 +140,14 @@ def test_handle_over_the_learning_run_directory_that_this_issue_leaves_unowned(t
     learning_run = tmp_path / "state" / "runs" / "source-42"
     S.seed_run_tree(learning_run)
     run = S.Run().at(learning_run)
-    assert run.run_dir == learning_run, "N8: it is run-dir-shaped, so Run.at takes it"
+    assert run.run_dir == learning_run, "Run.at did not take a run-dir-shaped learning run"
     assert location_path(run.runs_base) is None, "this root is not a runs base and the handle claims none"
     # This root IS written: a trace landing here is ordinary, not a fault.
     trace_dir = learning_run / "wire_logs"
     trace_dir.mkdir()
     (trace_dir / "forward.a-lesson.2.trace.jsonl").write_text("{}\n", encoding="utf-8")
     assert S.Run().at(learning_run).run_dir == learning_run, (
-        "the handle neither refuses nor complains about a learning run dir that has just "
-        "gained a verifier trace — this issue leaves receiver kind (5) unowned and UNRESTRICTED")
+        "the handle refused a learning run dir that gained a verifier trace")
 
 
 def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent(tmp_path: Path):
@@ -169,8 +162,7 @@ def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent
     assert location_path(S.Run().at(companion.parent).runs_base) is None
     gate = S.gate()
     assert "skills" not in gate.SWEEP_DIRS, (
-        "claim G3 / brief red flag R3: `defender/skills/` is outside the sweep, which is why "
-        "this live name use is unaddressed rather than a finding")
+        "`defender/skills/` is in the gate's sweep")
 
 
 # `RunRecord`: absent, unparseable, wrong-shaped
@@ -182,8 +174,7 @@ def test_a_field_whose_record_is_unparseable_reads_none_and_records_the_fault(ba
     assert record.commit is None
     assert record.tenant_id is None
     assert record.faults, (
-        "an unparseable record read as None with NO fault is indistinguishable from an absent "
-        "one — decision 4's second arm keeps them apart")
+        "an unparseable record read as None with no fault, like an absent one")
     assert any("provenance" in str(f) for f in record.faults), (
         f"the recorded fault does not name the record it came from: {record.faults}")
 
@@ -195,7 +186,7 @@ def test_a_field_whose_record_is_wrong_shaped_reads_none_and_records_the_fault(b
 
     assert record.world_id is None, "a numeric world_id is a wrong shape, not a value"
     assert record.disposition is None
-    assert record.faults, "decision 4's third arm records the fault as well as reading None"
+    assert record.faults, "the record read as None but recorded no fault"
     # An explicitly-NULL key is no fault: `str | None` admits it.
     S.plant_stamp(run_dir, commit="c0ffee", dirty=False, tenant_id=None, world_id=None)
     (run_dir / "report.md").write_text("disposition: benign\n", encoding="utf-8")
@@ -203,8 +194,8 @@ def test_a_field_whose_record_is_wrong_shaped_reads_none_and_records_the_fault(b
     assert quiet.tenant_id is None
     assert quiet.world_id is None
     assert quiet.faults == (), (
-        "an explicitly-null tenant_id/world_id is a value the field's declared `str | None` "
-        "type admits (D3), not a wrong shape — no fault is recorded for it")
+        f"an explicit null tenant_id/world_id (the field is `str | None`) recorded faults: "
+        f"{quiet.faults}")
 
 
 # each accessor's own root
@@ -218,7 +209,7 @@ def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base
             f"{name} resolved under {resolved.parent}, not its own root, the runs base")
         assert resolved.name.startswith(run_dir.name), "a sidecar is keyed `<run_id><suffix>`"
     assert location_path(owner.sessions_dir(fixture_runs_base(base))) == sessions, (
-        "the sessions directory is a SIBLING of the runs base (claims C10/C15)")
+        "the sessions directory is not a sibling of the runs base")
     assert owner.session_db(fixture_runs_base(base), S.LINEAGE_ID).parent == sessions
     for name in ("alert", "report", "investigation", "executed_queries", "wire_log",
                  "provenance", "tool_trace"):

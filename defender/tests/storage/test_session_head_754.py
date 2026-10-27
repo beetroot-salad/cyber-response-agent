@@ -55,7 +55,7 @@ def test_head_move_signal_contract(tmp_path):
 
     fork = store.fork(main, at_message_id=f1)
     assert ss.branch_point(store, fork) == f1
-    assert ss.displaced_tip(store, fork) is None, "no fold of its own yet"
+    assert ss.displaced_tip(store, fork) is None, "a new fork reports a displaced tip"
 
     empty = store.new_session(agent_id="main")
     for absent in (empty, "no-such-session-id"):

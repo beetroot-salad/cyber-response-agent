@@ -23,7 +23,7 @@ from defender.records import WIRE_LOG_NAMES
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.learning.branch.test_947_capture_prime import append_call, call_row, source_run
+from defender.tests.storage import test_1133_rev3 as R
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._state1135 import env_state
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -45,9 +45,8 @@ LEAF_LINKS = ("symlink", "dangling")
 @pytest.fixture
 def roots(tmp_path, monkeypatch):
     """The configured roots inside `tmp_path` (environment steering, the resolvers' own seam):
-    the runs base, the episodes root and the learning state root the judge's queue lands in."""
+    the runs base and the learning state root the judge's queue lands in."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -592,9 +591,7 @@ def test_h4_the_primed_base_alone_refuses_a_rival_base_that_lands_just_before_it
         tmp_path):
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
-    run_dir = source_run(tmp_path)
-    append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
-                json.dumps({"owner": "estate", "role": "canary"}))
+    run_dir = R._one_call_source(tmp_path)
     ep = tmp_path / "episodes" / EPISODE_ID
     ep.mkdir(parents=True)
     base = ep / "served" / "base.jsonl"

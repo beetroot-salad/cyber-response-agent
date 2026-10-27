@@ -59,19 +59,6 @@ def _index(path: Path, *rows: tuple[str, str]) -> Path:
     return path
 
 
-def _rows(text: str | None) -> list[tuple[str, str]]:
-    """The index's rows as `(slug, run_id)`, read by the TEST (plain JSON Lines). A line with no
-    `slug` is the index's knowledge-commit record, not a launch row, and is skipped."""
-    if not text:
-        return []
-    out = []
-    for line in text.splitlines():
-        if line.strip():
-            row = json.loads(line)
-            if "slug" not in row:
-                continue
-            out.append((row["slug"], row["run_id"]))
-    return out
 # The CLI, driven through `held_out.main`
 
 @dataclass

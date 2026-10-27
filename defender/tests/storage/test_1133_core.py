@@ -6,7 +6,6 @@ import os
 import stat
 import subprocess
 import sys
-import threading
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -472,22 +471,7 @@ def test_d1_a_verb_in_flight_when_close_lands_keeps_working_off_its_own_descript
     held = S.hold(root, os_=spy)
     [root_fd] = S.open_fds_on(root)
     state: dict[str, Any] = {}
-
-    def close_mid_verb(_op: str, _args: tuple, _kwargs: dict) -> None:
-        spy.hook = None
-        state["closed_promptly"] = S.run_in_thread(held.close, timeout=1.0)
-        if not state["closed_promptly"]:
-            return
-        state["open_after_close"] = S.open_fds_on(root)
-        if root_fd not in state["open_after_close"]:
-            # The lowest free number is usually the one just freed; `dup2` makes it certain.
-            fd = os.open(decoy, os.O_RDONLY | os.O_DIRECTORY)
-            if fd != root_fd:
-                os.dup2(fd, root_fd, inheritable=False)
-                os.close(fd)
-            state["decoy_on"] = root_fd
-
-    spy.hook = close_mid_verb
+    spy.hook = S.close_mid_op(spy, held, root, root_fd, decoy, state)
     try:
         got = S.held_verb(held, verb, _lifetime_name(verb), _payload(verb, "in-flight"))
 
@@ -519,11 +503,6 @@ def test_d1_a_verb_in_flight_when_close_lands_keeps_working_off_its_own_descript
             os.close(state["decoy_on"])
 
 
-#: How long the dup waits for a close started on another thread: ample for a close that is
-#: not held off by the lock, and the only wait a correct `Held` costs.
-_CLOSE_GRACE = 0.5
-
-
 @pytest.mark.parametrize("verb", _LIFETIME_VERBS)
 def test_d1_a_close_landing_as_a_verb_takes_its_dup_never_redirects_the_verb(tmp_path, verb):
     root, decoy = _lifetime_trees(tmp_path, verb)
@@ -531,21 +510,7 @@ def test_d1_a_close_landing_as_a_verb_takes_its_dup_never_redirects_the_verb(tmp
     spy = S.OsSpy()
     held = S.hold(root, os_=spy)
     state: dict[str, Any] = {}
-
-    def close_at_dup(fd: int) -> None:
-        closer = threading.Thread(target=held.close, daemon=True)
-        closer.start()
-        closer.join(_CLOSE_GRACE)
-        state["closer"] = closer
-        if not closer.is_alive():
-            # The close finished while the verb was about to dup the number it just freed.
-            taken = os.open(decoy, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-            if taken != fd:
-                os.dup2(taken, fd, inheritable=False)
-                os.close(taken)
-            state["decoy_on"] = fd
-
-    spy.before_dup = close_at_dup
+    spy.before_dup = S.close_at_dup(held, decoy, state)
     try:
         got = S.held_verb(held, verb, _lifetime_name(verb), _payload(verb, "in-flight"))
         assert "closer" in state, f"Held.{verb} took no dup through its os_ seam"

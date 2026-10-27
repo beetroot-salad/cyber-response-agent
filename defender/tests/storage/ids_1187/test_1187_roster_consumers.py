@@ -656,7 +656,7 @@ def test_a_launch_lands_its_episode_under_its_tenant_whatever_the_episodes_varia
     if decoy is not None:
         assert R.tree(decoy) == decoy_before, "the launch touched the decoy episodes base"
     assert sorted(os.listdir(src.parent)) == natural_before, (
-        f"the launch changed <T>/runs (O10): {sorted(os.listdir(src.parent))}")
+        f"the launch changed <T>/runs: {sorted(os.listdir(src.parent))}")
 
 
 def test_the_launcher_refuses_an_old_source_id_before_anything_is_spent(

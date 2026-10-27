@@ -784,4 +784,4 @@ def test_the_kinds_table_has_the_roster_row_and_drops_the_record_rows():
     assert rows["arm_roster"]["table"] == "4", rows["arm_roster"]
     assert rows["episode_runs"]["path"] == "runs/<uuid>/", rows["episode_runs"]
     gone = sorted({"tenant", "episode_runs_record"} & set(rows))
-    assert gone == [], f"rows #1187 retires are still in the table: {gone}"
+    assert gone == [], f"retired rows are still in the table: {gone}"

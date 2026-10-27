@@ -63,8 +63,7 @@ def test_gate_admits_a_quoted_name_only_under_an_inline_suppression(tmp_path: Pa
         f'    raise ValueError("no {NAME_LITERAL} here")'
         f'  # lint-run-records: ok — a diagnostic naming the record for the operator\n')
     assert suppressed == [], (
-        f"the inline suppression is the ONLY escape D6(a) admits, and it did not: "
-        f"{S.displays(suppressed)}")
+        f"the inline suppression did not admit the line: {S.displays(suppressed)}")
 
 
 def test_gate_suppression_comment_missing_reason(tmp_path: Path):
@@ -73,9 +72,7 @@ def test_gate_suppression_comment_missing_reason(tmp_path: Path):
             tmp_path / comment.replace(" ", "_").replace(":", ""), "investigation/msg.py",
             f'def explain():\n    raise ValueError("no {NAME_LITERAL}")  {comment}\n')
         assert found, (
-            f"{comment!r} carries the marker with no reason after it and must not suppress; "
-            "the UNDERLYING finding is what this asserts — no second malformed-suppression "
-            "diagnostic is demanded (§7 non-material item 6)")
+            f"{comment!r} has the marker but no reason, and it suppressed the finding")
     # Positive control: the well-formed suppression still admits the line.
     ok = S.gate_findings(
         tmp_path / "wellformed", "investigation/msg.py",
@@ -137,8 +134,7 @@ def via_an_annotated_parameter(paths: RunPaths, lead_id: str) -> Path:
     displays = S.displays(found)
     for site in ("direct", "via_a_local", "via_an_annotated_parameter"):
         assert site in displays, (
-            f"{site} joins onto an owner-derived value with NO literal, which check (a) cannot "
-            f"see; that is the whole reason (b) exists (claim G2, record_query.py:264):"
+            f"{site} (a join onto an owner-derived value, no literal) was not reported:"
             f"\n{displays}")
 
 
@@ -159,8 +155,7 @@ def from_an_unannotated_parameter(p) -> object:
 ''')
     displays = S.displays(found)
     assert "unresolvable accessor use" in displays, (
-        f"claim C2: `_astlib.origin` returns None for exactly this shape today, and D6(b)'s own "
-        f"words are 'never a skip' — the pass reported:\n{displays}")
+        f"an untraceable accessor use was skipped, not reported:\n{displays}")
     assert len(found) >= 3, f"one of the three untraceable reads was skipped:\n{displays}"
 
 
@@ -172,7 +167,6 @@ def test_the_gate_reports_a_finding_for_a_source_file_it_cannot_parse(tmp_path: 
     found = S.gate_findings(tmp_path)
     displays = S.displays(found)
     assert "broken.py" in displays, (
-        f"the unparseable file was skipped or crashed the sweep instead of being reported, "
-        f"which D6(b)'s own stated 'never a skip' forbids:\n{displays}")
+        f"the unparseable file was skipped or crashed the sweep, not reported:\n{displays}")
     assert "spells.py" in displays, (
         "the unparseable file took the rest of the sweep down with it — the sweep continues")

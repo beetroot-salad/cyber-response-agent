@@ -169,7 +169,7 @@ def mid_pair_session(store, *, agent_id: str = "main"):
     return session_id, len(complete)
 
 
-def nine_row_fixture(store, *, folded_body: str = "pre-fold chatter"):
+def nine_row_fixture(store):
     """Nine rows in a real store: a fold (frontier 5 re-parented to root 1, orphaning 2-4),
     then a fork `fork_a` at row 6 holding rows 8-9."""
     main = store.new_session(agent_id="main")
@@ -179,7 +179,7 @@ def nine_row_fixture(store, *, folded_body: str = "pre-fold chatter"):
                           agent_id="main", parent_id=ids[1])[0]
     ids[3] = store.append(main, [tool_return_request("read_file", tool_call_id="t2")],
                           agent_id="main", parent_id=ids[2])[0]
-    ids[4] = store.append(main, [text_response(folded_body)],
+    ids[4] = store.append(main, [text_response("pre-fold chatter")],
                           agent_id="main", parent_id=ids[3])[0]
     # the fold: the frontier is re-parented to the ROOT, orphaning 2,3,4. Re-parenting off the
     # head is a non-linear move, refused without a reason, so the hand-built fold passes one.

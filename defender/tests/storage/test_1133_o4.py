@@ -23,7 +23,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.filesystem._umask import umask
-from defender.tests.learning.branch.test_947_capture_prime import append_call, call_row, source_run
+from defender.tests.storage import test_1133_rev3 as R
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._state1135 import env_state
 
@@ -35,9 +35,8 @@ WORLD_C = T.fixture_world_id("c")
 @pytest.fixture
 def roots(tmp_path, monkeypatch):
     """The configured roots inside `tmp_path` (environment steering, the resolvers' own seam):
-    the runs base, the episodes root and the learning state root the judge's queue lands in."""
+    the runs base and the learning state root the judge's queue lands in."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -50,18 +49,11 @@ def bare_episode(tmp_path: Path) -> tuple[Path, Path]:
     return ep, host
 
 
-def _source_with_one_call(tmp_path: Path) -> Path:
-    run_dir = source_run(tmp_path)
-    append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
-                json.dumps({"owner": "estate", "role": "canary"}))
-    return run_dir
-
-
 def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where_it_points(
         tmp_path):
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
-    run_dir = _source_with_one_call(tmp_path)
+    run_dir = R._one_call_source(tmp_path)
     ep, host = bare_episode(tmp_path)
     elsewhere = host / "served-elsewhere"
     elsewhere.mkdir()
@@ -242,10 +234,10 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
     with umask(0o022), cli.prepare_episode(runs, _source(src), prime=prime) as view:
         episode = view.episode
         ep = Path(episode.dir)
-        assert isinstance(episode, S.Episode()), f"the view holds {episode!r}"
+        assert isinstance(episode, S.Episode), f"the view holds {episode!r}"
         assert ep.name == view.episode_id
         assert str(uuid.UUID(view.episode_id)) == view.episode_id, (
-            f"the launcher claimed {view.episode_id!r}, not a fresh UUID (declared change 3)")
+            f"the launcher claimed {view.episode_id!r}, not a fresh UUID")
         assert ep.parent == Path(location_path(T.current_tenant().episodes)), (
             f"the launcher claimed {ep}, not an episode under <T>/episodes/")
         assert prime.seen["episode"] is episode, "the primer was handed another episode"
@@ -282,10 +274,9 @@ def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_n
         # The episode lives under the data root, outside `tmp_path`: both trees are counted.
         before = (S.census(ep), S.census(tmp_path))
         with pytest.raises(T.mod("learning.branch.ledger").LedgerError,
-                           match="another launcher is priming") as refused:
+                           match="another launcher is priming"):
             cli._prime_once(view.episode, view.episode_id, src, never)
         assert (S.census(ep), S.census(tmp_path)) == before
-    assert refused.value is not None
     assert S.open_fds_on(ep) == [], "the refused claim left a descriptor open on the episode dir"
 
 

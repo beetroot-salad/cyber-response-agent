@@ -77,8 +77,7 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
     queries.append([{"seq": 1, "system": "elastic"}])
     after = queries.path.read_bytes()
     assert after.startswith(before), (
-        "the second append rewrote the table rather than appending to it — O5 says this "
-        "property MUST SURVIVE the migration")
+        "the second append rewrote the table instead of appending to it")
     assert len(_read_rows(queries.path)) == 2
     rewrite = "an append-only table exposes no whole-file rewrite through the handle"
     assert not hasattr(queries, "truncate"), rewrite
@@ -98,8 +97,7 @@ def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: P
             WHERE m.session_id = ? AND p.message_id IS NULL
         """, (session_id,))
         assert torn == [], (
-            f"a message row with no payload row is observable: {torn} — RG-3 established that "
-            "both writes commit inside one transaction")
+            f"a message row with no payload row is observable: {torn}")
         # A JOINING reader — a second connection, as a resume or fork opens — sees the same.
         with SS.store_mod().open_store_for_read(store.path) as joiner:
             rows = SS.sql(joiner, """
@@ -129,7 +127,7 @@ def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
         f"the two routes did not interleave as appends: {rows}")
     assert [r["route"] for r in rows] == ["handle", "unmigrated", "handle"]
     assert queries.read() == S.RunPaths(run_dir).executed_queries.read_text(encoding="utf-8"), (
-        "the two routes resolve two different files, which is the regression D7(3) forbids")
+        "the two routes resolve two different files")
 
 
 def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
@@ -164,9 +162,7 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     trace.append([{"row": 1}])       # must NOT raise: observability is best-effort
 
     assert handle.partial_failures, (
-        "decision 7's best-effort half still RECORDS the failure — flagged fact F9 is the line "
-        "the existing code already draws, and a silently dropped observability write is the "
-        "half of it this spec refuses")
+        "a failed best-effort observability write was dropped without being recorded")
     assert any("tool_trace" in str(f) for f in handle.partial_failures), handle.partial_failures
 
     # POSITIVE CONTROL: with the obstruction gone the same append lands and records nothing.
@@ -203,9 +199,7 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     rows = [r for r in rows if r.get("event_type") != POLICY_DENIAL_EVENT_TYPE]
     missing = [i for i, r in enumerate(rows) if not r.get("writer_id")]
     assert missing == [], (
-        f"records {missing[:5]} carry no writer id — decision 18 adds one to EVERY record, "
-        "which is what makes the main process and every concurrent gather sub-agent "
-        "individually attributable inside the one file they share (flagged fact F5)")
+        f"records {missing[:5]} carry no writer id")
     assert any(r["writer_id"] == "MAIN" or r["writer_id"].lower() == "main" for r in rows), (
         f"no record names MAIN as its writer: {sorted({r['writer_id'] for r in rows})}")
     # The trade-off: the wire log's BYTES change.
@@ -216,9 +210,7 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     import defender.presentation.visualize_data  # noqa: F401
     from defender.presentation.visualize_messages import load_messages
     assert load_messages(run_dir) == rows, (
-        "the shipped wire-log viewer no longer round-trips the records it is handed once every "
-        "one carries decision 18's `writer_id`; the issue's Done-when says existing consumers "
-        "keep working, and this is the C7-analogue the wire log's field addition never had")
+        "the wire-log viewer does not round-trip records that carry a `writer_id`")
 
 
 def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagent_appends(

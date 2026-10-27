@@ -44,7 +44,7 @@ def test_store_reader_return_shape_is_role_scoped(tmp_path):
     assert all(isinstance(m, (ModelRequest, ModelResponse)) for m in analysis), analysis
     assert len(send) == n_complete
     assert len(analysis) == n_complete + 1, (
-        "the analysis read must see the orphan terminal response R8 keeps for it")
+        "the analysis read does not see the orphan terminal response")
 
     assert actor, "the actor read returned nothing"
     assert not isinstance(actor[0], (ModelRequest, ModelResponse))
@@ -88,24 +88,6 @@ def test_a_role_argument_supplied_by_agent_authored_content_is_not_honoured(tmp_
     flat = " ".join(str(v) for row in projected for v in dict(row).values())
     assert "investigate" not in flat, (
         "content that names a role must not widen the projection it is read under")
-
-
-def _reachable_by_row_id(module, store, row_id: int) -> list[str]:
-    """Everything the reader hands back when it is DRIVEN with a raw row id."""
-    out: list[str] = []
-    for name in dir(module):
-        if name.startswith("_"):
-            continue
-        fn = getattr(module, name)
-        if not callable(fn):
-            continue
-        for args in ((store, row_id), (row_id,), (store, row_id, "analysis")):
-            try:
-                got = fn(*args)
-            except Exception:  # noqa: BLE001 — a refusal of any shape is the contract
-                continue
-            out.append(repr(got))
-    return out
 
 
 # truncation, and its negative control

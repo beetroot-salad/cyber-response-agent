@@ -14,17 +14,13 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage import test_1133_rev3 as R
-from defender.tests.learning.branch.test_947_capture_prime import append_call, call_row, source_run
 
 
 def test_a_linked_served_holding_a_base_elsewhere_is_the_folder_refusal_not_already_primed(tmp_path):
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
-    run_dir = source_run(tmp_path)
-    append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
-                json.dumps({"owner": "estate", "role": "canary"}))
-    ep = tmp_path / "episodes" / "ep-1133"
-    ep.mkdir(parents=True)
+    run_dir = R._one_call_source(tmp_path)
+    ep = R.bare_episode(tmp_path)
     elsewhere = tmp_path / "host" / "elsewhere-served"
     elsewhere.mkdir(parents=True)
     (elsewhere / "base.jsonl").write_bytes(b'{"an": "earlier prime elsewhere"}\n')
@@ -37,8 +33,8 @@ def test_a_linked_served_holding_a_base_elsewhere_is_the_folder_refusal_not_alre
 
 
 def test_the_already_primed_check_follows_the_held_root_not_the_path(tmp_path):
-    capture = S.T.mod("learning.branch.capture") if hasattr(S, "T") else R.mod("learning.branch.capture")
-    ledger = R.mod("learning.branch.ledger")
+    capture = T.mod("learning.branch.capture")
+    ledger = T.mod("learning.branch.ledger")
     run_dir = R._one_call_source(tmp_path)
     sidecar, payload = R.fifo_sidecar(run_dir)
     ep = R.bare_episode(tmp_path)

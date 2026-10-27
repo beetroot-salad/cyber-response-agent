@@ -89,8 +89,7 @@ def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
             pass
 
     assert ss.CASE_ID_RE.pattern.endswith("\\Z"), (
-        f"anchor with \\Z, not $: {ss.CASE_ID_RE.pattern!r} admits a trailing newline "
-        "(adv:PO7's one hole, reproduced here rather than re-learned)")
+        f"{ss.CASE_ID_RE.pattern!r} admits a trailing newline (anchor with \\Z, not $)")
 
     leaked = [p.name for p in base.parent.rglob("*") if "passwd" in p.name or "\n" in p.name]
     assert leaked == [], f"a rejected case_id composed a path anyway: {leaked}"
@@ -192,7 +191,7 @@ def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
     copied = "".join(p.read_bytes().decode("utf-8", "replace")
                      for p in staged.rglob("*") if p.is_file() and not p.is_symlink())
     assert SECRET not in copied, (
-        "the collector dereferenced a box-authored symlink out of run_dir (adv:PO5b)")
+        "the collector dereferenced a box-authored symlink out of run_dir")
     assert not (staged / "leak.db").is_file() or (staged / "leak.db").is_symlink(), (
         "a symlink out of run_dir must be refused or preserved as a link, never resolved")
 

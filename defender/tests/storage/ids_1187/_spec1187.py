@@ -21,7 +21,6 @@ ROSTER_NAME = "arms.json"
 MANIFEST_NAME = "family.yaml"
 #: The one-time command, as every refusal that sends the operator to it must spell it.
 COMMAND = "defender/cli/retire_legacy_runs.py"
-COMMAND_MODULE = "defender.cli.retire_legacy_runs"
 RUNS_LEGACY = "runs-legacy"
 EPISODES_LEGACY = "episodes-legacy"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
@@ -100,16 +99,14 @@ def make_run(container: Path, run_id: str | None = None, *,
     return run_dir
 
 
-def manifest_text(episode_id: str, labels: Iterable[str], *,
-                  source_run_id: str | None = None, extra: str = "") -> str:
+def manifest_text(episode_id: str, labels: Iterable[str]) -> str:
     """A complete persisted manifest, including each label's distinct world UUID."""
     from defender import _yaml
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     worlds = [T.world_doc(label, world_id=new_id(), role="A" if index == 0 else None,
                           axis=None, facts=[]) for index, label in enumerate(labels)]
-    src = source_run_id if source_run_id is not None else new_id()
-    return _yaml.safe_dump(T.family_doc(episode_id=episode_id, source_run_id=src, worlds=worlds)) + extra
+    return _yaml.safe_dump(T.family_doc(episode_id=episode_id, source_run_id=new_id(), worlds=worlds))
 
 
 def make_episode(data_root: Path, tenant_id: str, episode_id: str | None = None, *,
@@ -186,11 +183,9 @@ def roster_for_arms(episode_dir: Path, arms: Mapping[str, Path]) -> dict[str, st
 def torn(text: str) -> str:
     """`text` cut mid-way: a roster a crash or a hand edit truncated."""
     return text[: max(1, len(text) // 2)]
+
+
 # Links and old entries
-
-#: The levels below `<T>` that are opened without following links, by name.
-LINK_LEVELS = ("runs", "episodes", "episode", "arm_container", "run")
-
 
 def replace_with_link(path: Path, target: Path) -> Path:
     """Move the real `path` aside to `target` (if it exists) and leave a symlink at `path` pointing at `target`."""
@@ -225,11 +220,10 @@ def plant_old_natural_entries(data_root: Path, tenant_id: str) -> dict[str, Path
     return out
 
 
-def plant_old_episodes_root(root: Path, names: Iterable[str] = (
-        "fresh-authkeys-20260909-n124", "live-996-old-sshd-1-n233")) -> Path:
-    """Populate the retired shared episodes root with legacy episode folders."""
+def plant_old_episodes_root(root: Path) -> Path:
+    """Populate the retired shared episodes root with two legacy episode folders."""
     root = Path(root)
-    for name in names:
+    for name in ("fresh-authkeys-20260909-n124", "live-996-old-sshd-1-n233"):
         ep = root / name
         (ep / "runs").mkdir(parents=True, exist_ok=True)
         (ep / MANIFEST_NAME).write_text(f"episode_id: {name}\n", encoding="utf-8")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import json
 import os
 import re
@@ -14,7 +13,6 @@ from types import ModuleType
 import pytest
 
 from defender import _git
-from defender.records import RUN_LAYOUT
 from defender.tests.support.shared.contracts._by_path import DEFENDER, LINT_DIR, WORKTREE, import_lint_lib, load_lint_gate
 from defender.tests.support.shared.contracts._repo import seed_repo
 
@@ -32,9 +30,6 @@ SCOPE_LISTS: dict[str, tuple[str, str]] = {
     ENV_READS: ("SWEPT", "."),
 }
 
-#: The stage-frames lint's default scope (`learning/` under `defender/`).
-STAGE_FRAMES_SCOPE = "defender/learning"
-
 #: The data files `lint_run_records.main` reads (its kinds registry and the page it renders).
 RUN_RECORDS_DATA = ("defender/docs/run-records-kinds.tsv", "defender/docs/run-records.md")
 
@@ -46,20 +41,8 @@ PLANTED = "planted_1191.py"
 IGNORES = "zz_ign_1191/\n*_ignored_1191.py\n"
 INERT = '"""Planted by #1191\'s mini repo; nothing to find here."""\n'
 
-#: A link-following admit check: a tree-read finding in a listed module.
-TREE_READ_PROBE = "def _probe_1191(p):\n    return p.is_file()\n"
 #: A raw write: a tree-write finding, hard-gated in a listed module.
 TREE_WRITE_PROBE = "def _probe_1191(p):\n    p.write_text('x', encoding='utf-8')\n"
-#: A module-level interpolated boundary: a stage-frames finding.
-STAGE_FRAMES_PROBE = 'GREETING_1191 = f"<{__name__}>"\n'
-#: A process-environment lookup: a tenant-env-read finding.
-ENV_READS_PROBE = "import os\n\n\ndef _probe_1191():\n    return os.environ.get('X_1191')\n"
-
-
-def record_name_probe() -> str:
-    """A whole run-record name held as a literal: a run-records finding. Taken from the owner, not
-    spelled here."""
-    return f"NAME_1191 = {RUN_LAYOUT.report.name!r}\n"
 
 
 def _fresh(stem: str, suffix: str = "") -> ModuleType:
@@ -107,23 +90,6 @@ def _run(lint_file: Path, *args: str,
 def _said(result: subprocess.CompletedProcess[str]) -> str:
     return (f"rc={result.returncode}\n--- stdout ---\n{result.stdout[-1500:]}"
             f"\n--- stderr ---\n{result.stderr[-1500:]}")
-
-
-def _rebind(lint_file: Path, name: str, expr: str) -> None:
-    """Rebind module constant `name` to `expr` in the COPY, right after its own assignment, so
-    everything below it in the copy (every def, every default) sees the new value."""
-    text = lint_file.read_text(encoding="utf-8")
-    end = None
-    for stmt in ast.parse(text).body:
-        targets = stmt.targets if isinstance(stmt, ast.Assign) else (
-            [stmt.target] if isinstance(stmt, ast.AnnAssign) else [])
-        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
-            end = stmt.end_lineno
-            break
-    assert end is not None, f"{lint_file.name} has no module-level assignment to {name}"
-    lines = text.splitlines(keepends=True)
-    lines.insert(end, f"{name} = {expr}\n")
-    lint_file.write_text("".join(lines), encoding="utf-8")
 
 
 def _named(text: str, entries: Iterable[str]) -> list[str]:
@@ -178,33 +144,11 @@ def _expect(result: subprocess.CompletedProcess[str], rc: int, named: str, *, on
     assert named in getattr(result, on), f"{why}: {named!r} is not named on {on}\n{said}"
 
 
-def _selects(entry: str, rel: str) -> bool:
-    """The selection rule as the test's own oracle (independent of `_astlib.selects`): equal,
-    or `entry` ends in `/` and `rel` is under it."""
-    return rel == entry or (entry.endswith("/") and rel.startswith(entry))
-
-
-def _real_rels(base: Path, excluded: Iterable[str]) -> list[str]:
-    """Every `.py` under `base` (root-relative POSIX), directory names in `excluded` pruned."""
-    skip = set(excluded)
-    rels: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in skip]
-        rels += [(Path(dirpath) / f).relative_to(base).as_posix()
-                 for f in filenames if f.endswith(".py")]
-    return sorted(rels)
-
-
 def _lay_out(base: Path, entries: Iterable[str]) -> None:
     """Each entry made real under `base`: a `/` entry as a package holding one inert module, any
     other entry as the inert file it names."""
     for entry in entries:
         _write(base / entry / PLANTED if entry.endswith("/") else base / entry)
-
-
-def _file_entries(entries: Iterable[str]) -> list[str]:
-    """The entries naming one module (`.py`), sorted."""
-    return sorted(e for e in entries if e.endswith(".py"))
 
 
 def _surface(root: Path, stem: str) -> tuple[Path, list[str], Path]:
@@ -351,13 +295,6 @@ def test_o1_run_records_missing_sweep_dir_is_blind(tmp_path):
         f"them:\n" + "\n".join(f"== {e}\n{w}" for e, w in wrong.items()))
 
 
-def _stage_frames_mini(root: Path) -> tuple[Path, str]:
-    lint_file = _mini_repo(root, STAGE_FRAMES)
-    scope = STAGE_FRAMES_SCOPE
-    _write(root / scope / PLANTED)
-    return lint_file, scope
-
-
 def test_o2_unlisted_package_is_blind(tmp_path):
     lint_file, _sweep = _run_records_mini(tmp_path)
     _assert_clean(lint_file, RUN_RECORDS)
@@ -370,16 +307,6 @@ def test_o2_unlisted_package_is_blind(tmp_path):
     result = _run(lint_file)
     _expect(result, 2, "otherpkg", on="stderr",
             why="an unlisted defender/otherpkg/ holding only nested .py did not blind the scan")
-
-
-#: An entry no checkout holds.
-PHANTOM = "nope_1191"
-
-
-def _main(lint: ModuleType, capsys: pytest.CaptureFixture[str], argv: list[str],
-          **kw: object) -> tuple[int, str]:
-    rc = lint.main(argv, **kw)
-    return rc, capsys.readouterr().err
 
 
 @pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE])
@@ -401,73 +328,6 @@ def test_o1_update_baseline_over_a_blind_scan_keeps_the_baseline(tmp_path, stem)
     control = _run(lint_file, "--update-baseline")
     assert control.returncode == 0, f"control: --update-baseline failed\n{_said(control)}"
     assert baseline.read_bytes() != before, "control: --update-baseline wrote nothing"
-
-
-#: Each lint's probe and the stream its finding lands on (tree-write's listed modules are
-#: hard-gated, reported on stderr).
-PROBES: dict[str, tuple[str, str]] = {
-    TREE_READ: (TREE_READ_PROBE, "stdout"),
-    TREE_WRITE: (TREE_WRITE_PROBE, "stderr"),
-    ENV_READS: (ENV_READS_PROBE, "stdout"),
-    RUN_RECORDS: (record_name_probe(), "stdout"),
-    STAGE_FRAMES: (STAGE_FRAMES_PROBE, "stdout"),
-}
-
-
-def _listed(root: Path, stem: str) -> tuple[Path, list[str], Path]:
-    """`_surface`, with run-records' swept dirs spelled as the package entries they are."""
-    if stem == RUN_RECORDS:
-        lint_file, sweep = _run_records_mini(root)
-        return lint_file, [f"{d}/" for d in sweep], root / "defender"
-    return _surface(root, stem)
-
-
-def _plantable(root: Path, stem: str) -> tuple[Path, Path, str]:
-    """A mini repo for `stem` and a module it scans: (copied lint file, that module, the name its
-    finding is reported under)."""
-    if stem == STAGE_FRAMES:
-        lint_file, scope = _stage_frames_mini(root)
-        return lint_file, root / scope / PLANTED, PLANTED
-    lint_file, entries, base = _listed(root, stem)
-    if stem == RUN_RECORDS:
-        rel = f"{entries[0]}{PLANTED}"
-        return lint_file, base / rel, rel
-    rel = _file_entries(entries)[0]
-    return lint_file, base / rel, rel
-
-
-#: Per list-scoped lint, two entries that EXIST in the real checkout and select nothing: a
-#: package dir named without its `/` (it holds `.py`), and a dir holding no `.py` at all.
-REAL_IDLE: dict[str, tuple[str, str]] = {
-    TREE_READ: ("investigation/branch", "docs/"),
-    TREE_WRITE: ("investigation/driver", "docs/"),
-    ENV_READS: ("defender/investigation/lead_zero", "defender/docs/"),
-}
-
-
-#: Prints the copied run-records lint's SCOPE_STATEMENT (argv[1]: the copy's directory).
-_READ_STATEMENT = ("import sys; sys.path.insert(0, sys.argv[1]); "
-                   "import lint_run_records as m; print(m.SCOPE_STATEMENT)")
-
-
-def _statement_of_copy(root: Path, sweep_expr: str, unscanned_expr: str) -> str:
-    """The `SCOPE_STATEMENT` of a copy of the run-records lint whose `SWEEP_DIRS` and
-    `UNSCANNED_TREES` are rebound to the given expressions, read off the copy in a child."""
-    lint_file = _mini_repo(root, RUN_RECORDS, data=RUN_RECORDS_DATA)
-    _rebind(lint_file, "SWEEP_DIRS", sweep_expr)
-    _rebind(lint_file, "UNSCANNED_TREES", unscanned_expr)
-    result = subprocess.run(  # noqa: S603 — fixed argv built by the test
-        [sys.executable, "-c", _READ_STATEMENT, str(lint_file.parent)], cwd=root,
-        capture_output=True, encoding="utf-8", errors="replace", env=_child_env(), timeout=120,
-        check=False)
-    assert result.returncode == 0, f"the copied lint did not load\n{_said(result)}"
-    return result.stdout
-
-
-def _spelled(text: str, path: str) -> bool:
-    """`path` appears in `text` as a whole path, exactly as spelled (no prefix allowance: bare
-    `scripts` is not spelled by `defender/scripts`)."""
-    return re.search(rf"(?<![\w./-]){re.escape(path)}(?![\w./-])", text) is not None
 
 
 def test_source_files_follows_the_repos_own_ignore_rules(tmp_path, monkeypatch):
@@ -642,20 +502,6 @@ def test_o11_a_lint_over_a_tree_inside_an_ignored_directory_reports_its_plant(tm
     out = capsys.readouterr().out
     assert rc == 1, f"the plant under an ignored enclosing dir went unreported: rc={rc}\n{out}"
     assert "pkg_1191/m.py" in out, f"the finding does not name the plant:\n{out}"
-
-
-#: A module that does not parse.
-UNPARSEABLE = "def broken_1191(:\n"
-#: Test-module shapes outside `tests/` (the lints' own notion: `test_*.py`, `*_test.py`,
-#: `conftest.py`).
-TEST_MODULE_NAMES = ("test_broken_1191.py", "broken_1191_test.py", "conftest.py")
-
-
-#: Runs the copied stage-frames lint's `main([], scope=argv[2], baseline_path=argv[3])` (argv[1]:
-#: the copy's directory) and exits with its status.
-_STAGE_FRAMES_MAIN = ("import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
-                      "import lint_stage_prompt_frames as m; "
-                      "sys.exit(m.main([], scope=Path(sys.argv[2]), baseline_path=Path(sys.argv[3])))")
 
 
 def _ignored_tree(repo: Path) -> Path:

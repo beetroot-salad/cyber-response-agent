@@ -109,9 +109,7 @@ def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeyp
     seen = tokens(main_seen, gather_seen)
     assert seen, "no run-scoped delimiter was emitted at all — the sweep is vacuous"
     assert len(seen) > 1, (
-        "every frame in the run shares one delimiter — the #875 F-1 shape is back: a framed "
-        f"party that sees one frame can close another. tokens={sorted(seen)}"
-    )
+        f"every frame in the run shares one delimiter: tokens={sorted(seen)}")
     for token in seen:
         assert re.fullmatch(r"[0-9a-f]+", token), f"a delimiter is not lowercase hex: {token!r}"
 
@@ -143,9 +141,7 @@ def test_the_gather_subagent_is_bound_with_no_salt_at_all(tmp_path, monkeypatch)
     assert gather_tokens, "the subagent's own surfaces carry no delimiter at all"
     assert main_tokens, "MAIN's surfaces carry no delimiter at all"
     assert not (gather_tokens & main_tokens), (
-        "a delimiter is shared between the gather subagent and MAIN — gather can close the "
-        f"frame its own summary returns inside (#875 F-1): {sorted(gather_tokens & main_tokens)}"
-    )
+        f"gather and MAIN share a delimiter: {sorted(gather_tokens & main_tokens)}")
 
     src = (DEFENDER / "investigation" / "tools_gather.py").read_text(encoding="utf-8")
     assert not re.search(r"bind\(\s*GATHER_DEF[^)]*salt\s*=", src), \
@@ -190,10 +186,7 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
     """The production builder and the harness's `materialize` present the same file set, for a
     fixture without a sibling `ground_truth.yaml`."""
     assert not (GOLDEN / "ground_truth.yaml").exists(), (
-        "this parity claim is scoped to fixtures WITHOUT a sibling ground_truth.yaml, and the "
-        "golden now carries one — the production builder would copy it and the harness would "
-        "not, so the scope condition no longer holds and the claim must be re-derived"
-    )
+        "the golden has a sibling ground_truth.yaml, which this parity check does not cover")
     prod_dir = build(tmp_path, monkeypatch)
     assert prod_dir.is_dir(), (
         "the production builder produced no run dir to compare file sets with"

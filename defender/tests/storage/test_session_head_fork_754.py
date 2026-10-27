@@ -108,7 +108,7 @@ def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
 
     shas = [row[0] for row in sql(store, "SELECT payload_sha FROM message_payload")]
     assert len(shas) == len(set(shas)), (
-        f"PR-24's byte-identical duplicates must not appear anywhere; got {shas}")
+        f"byte-identical duplicates appeared: {shas}")
 
 
 # the log readers
@@ -158,7 +158,7 @@ def test_branch_point_ignores_a_log_row_with_a_non_null_from_message_id(tmp_path
     assert len(entries) == 1, entries
     assert entries[0].reason == "fork", entries
     assert entries[0].from_message_id == u2, (
-        "the fixture must reproduce P48: a real, logged, fork-reasoned, NON-NULL-origin row")
+        "the fixture's logged fork row does not carry its non-NULL origin")
 
     assert ss.branch_point(store, unearned) is None, (
         "only a NULL origin marks a genuine branch point")
@@ -167,8 +167,7 @@ def test_branch_point_ignores_a_log_row_with_a_non_null_from_message_id(tmp_path
         "INSERT INTO session_head_log (session_id, from_message_id, to_message_id, reason) "
         "VALUES (?, NULL, ?, 'fold')", (unearned, u1))
     assert ss.branch_point(store, unearned) is None, (
-        "nor does a NULL-origin row that is not fork-reasoned: neither decoy in this session "
-        "makes a branch point, and the reader needs both halves of the predicate to say so")
+        "a NULL-origin row that is not fork-reasoned made a branch point")
 
     genuine = store.fork(unearned, at_message_id=u1)
     assert ss.branch_point(store, genuine) == u1, (
@@ -239,9 +238,8 @@ def test_head_and_log_move_in_one_transaction(tmp_path):
         "control: rows, head and the entry commit together or not at all")
 
     assert not inspect.iscoroutinefunction(store.append), (
-        "P11/F3: the head UPDATE and the log INSERT go inside the EXISTING synchronous "
-        "BEGIN IMMEDIATE block — an await there reintroduces interleaved-transaction "
-        "corruption across concurrently dispatched gather sessions on one connection")
+        "`store.append` is a coroutine: an await inside its BEGIN IMMEDIATE block lets "
+        "gather sessions interleave transactions on one connection")
 
 
 def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(tmp_path):

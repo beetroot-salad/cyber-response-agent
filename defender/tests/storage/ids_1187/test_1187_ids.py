@@ -424,10 +424,10 @@ class Hit:
 # The census: no production call hands a run id to run setup or `RunsRepository.create`;
 # only run.py makes an arm, from the roster's id, and hands its handle to setup.
 
-def run_id_handouts(root: Path, *, skip_tests: bool = True) -> list[Hit]:
+def run_id_handouts(root: Path) -> list[Hit]:
     """Production calls that pass an id to setup or `create`, and every arm `create`."""
     root = Path(root)
-    excluded = (".venv", "__pycache__", "node_modules") + (("tests",) if skip_tests else ())
+    excluded = (".venv", "__pycache__", "node_modules", "tests")
     hits: list[Hit] = []
     for rel in _astlib.source_files(root, excluded):
         _text, tree = _astlib.read_and_parse(root / rel, rel)
@@ -477,7 +477,7 @@ def test_1279_a3_census_no_production_call_hands_a_run_id_to_setup_or_create():
     handed = [h for h in hits if h.kind != "arm-create"]
     assert handed == [], f"production hands an id around:\n  {listing}"
     assert [(h.rel, h.kind) for h in hits] == [("run.py", "arm-create")], (
-        f"only run.py makes an arm, from the roster's arm id (#1279 rev 6):\n  {listing}")
+        f"only run.py makes an arm, from the roster's arm id:\n  {listing}")
 
 
 # Each syntax partition has an exact oracle, including import aliases and negative controls.

@@ -61,11 +61,6 @@ class PlantBeforeRunDirIo(PlantAfterRunDirIo):
         return hold_new
 
 
-#: What can sit at a sidecar's (or a run dir's) name besides a plain file; `plant_entry` makes each.
-OBSTRUCTIONS = ("regular-file", "directory", "dangling-link", "link-to-file",
-                "link-to-dir")
-
-
 def plant_entry(kind: str, at: Path, elsewhere: Path) -> None:
     """Put an entry of `kind` at `at`; `link-to-file` points at a real file under `elsewhere`."""
     if kind == "regular-file":
