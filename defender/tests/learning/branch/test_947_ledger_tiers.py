@@ -1,4 +1,4 @@
-"""#947 Part B — the ledger's two family tiers, and the file each of them lives in."""
+"""#947: the ledger's two family tiers, and the file each of them lives in."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -78,7 +78,8 @@ def test_a_ledger_without_a_primed_base_does_not_construct(tmp_path):
 
 @pytest.mark.parametrize("shape", ["absent", "directory"])
 def test_a_base_path_that_is_not_a_file_is_refused_at_construction(tmp_path, shape):
-    """A `base_path` that is not a file is a `LedgerError` at construction."""
+    """`for_world` over an episode never primed (no `served/base.jsonl`), or with a directory in
+    its place, is a `LedgerError`."""
     root = tmp_path / "episode"
     (root / SERVED_DIRNAME).mkdir(parents=True)
     base = base_file(root)
@@ -135,21 +136,9 @@ def test_a_key_spelled_in_another_order_is_the_same_primed_key(tmp_path):
         assert ledger.base_payload("elastic", "query", {"limit": 5, "native_query": "x"}) is not None
 
 
-def test_a_worlds_own_live_read_is_answered_from_its_own_file(tmp_path):
-    """A key the capture never held, read live and recorded as `base`, answers from the world's own rows on the next ask."""
-    root = episode(tmp_path)
-    with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
-
-        ledger.record(ServedCall(
-            system="cmdb", verb="get-host", params={"host": "new-9"},
-            payload_text='{"owner": "live"}', source=BASE, world_id=None))
-
-        assert ledger.base_payload("cmdb", "get-host", {"host": "new-9"}) == '{"owner": "live"}'
-
-
 def test_one_siblings_live_read_is_not_served_to_another(tmp_path):
-    """World B does not read World A's own rows — only the shared capture crosses between them."""
+    """A live read recorded as `base` answers its own world on the next ask; World B does not read
+    World A's own rows — only the shared capture crosses between them."""
     root = episode(tmp_path)
     with Episode.open(root) as ep:
         a = Ledger.for_world(ep, T.fixture_world_id('a'))
@@ -159,7 +148,7 @@ def test_one_siblings_live_read_is_not_served_to_another(tmp_path):
             system="cmdb", verb="get-host", params={"host": "new-9"},
             payload_text='{"owner": "read-by-a"}', source=BASE, world_id=None))
 
-        assert a.base_payload("cmdb", "get-host", {"host": "new-9"}) is not None
+        assert a.base_payload("cmdb", "get-host", {"host": "new-9"}) == '{"owner": "read-by-a"}'
         assert b.base_payload("cmdb", "get-host", {"host": "new-9"}) is None, (
             "world b was served world a's own live read as though it were the family's capture")
 
@@ -276,15 +265,6 @@ def test_for_world_opens_this_worlds_file_beside_the_shared_capture(tmp_path):
             system="cmdb", verb="get-host", params={"host": "canary-1"},
             payload_text='{"owner": "estate"}', source=PASSTHROUGH, world_id=T.fixture_world_id('w1')))
         assert [r["world_id"] for r in read_jsonl_rows(root / SERVED_DIRNAME / f"{T.fixture_world_id('w1')}.jsonl")] == [T.fixture_world_id('w1')]
-
-
-def test_for_world_refuses_an_episode_that_was_never_primed(tmp_path):
-    """`for_world` over an episode with no `served/base.jsonl` is refused."""
-    root = tmp_path / "episode"
-    (root / SERVED_DIRNAME).mkdir(parents=True)
-
-    with Episode.open(root) as ep, pytest.raises(LedgerError):
-        Ledger.for_world(ep, T.fixture_world_id('w1'))
 
 
 @pytest.mark.parametrize("world_id", ["", ".", "..", "a/b", "../base", "sub/w1", "w1/"])

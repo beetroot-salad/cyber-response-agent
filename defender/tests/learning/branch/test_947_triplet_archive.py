@@ -1,4 +1,4 @@
-"""#947 — the archive, its two derived readers, and where a sibling's artifacts may live (M8, O4, O7"""
+"""#947: the archive, its two derived readers, and where a sibling's artifacts may live."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -22,7 +22,7 @@ def _archive():
 
 
 def _tenant_paths():
-    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    """The tenant `T.runs_base` (or `d9_tenant`) already created."""
     return T.current_tenant()
 
 
@@ -32,13 +32,12 @@ def _episode():
 
 def _accepted(tmp_path, *, outcome="accepted", reason="every fact world calibrated"):
     """An episode pre-flight recorded (`outcome.yaml`, through its production writer): the
-    readers compare only an `accepted` family (#1224 M05=A) carrying the family stamp (PR #1232
-    round 7), so every reader scenario that is not about those gates starts from one."""
+    readers compare only an `accepted` family carrying the family stamp, so every reader
+    scenario that is not about those gates starts from one."""
     ep = T.episode(tmp_path)
     with Episode.open(ep) as episode:
         T.mod("learning.branch.outcome").write_outcome(episode, outcome, reason=reason)
     if outcome == "accepted":
-        # PR #1232 round 7: the readers compare only a family `verify_family` stamped.
         from defender.tests.support.learning.judge._judge_921 import comparable_family_stamp
 
         comparable_family_stamp(ep)
@@ -52,7 +51,7 @@ def _archived(tmp_path, worlds=T.WORLDS, **kw):
     return ep
 
 
-# M8 — what lands in the archive, and how it got there
+# what lands in the archive, and how it got there
 
 
 def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
@@ -87,7 +86,8 @@ def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_pa
 
 
 def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
-    """The archive reads each sibling's scrub verdict at the sidecar path beside the run dir, through the same regular-file screen every other artifact..."""
+    """The archive reads each sibling's scrub verdict from the sidecar beside its run dir, through
+    the same regular-file screen as every other artifact."""
     base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(base, "b", scrub_ran=True)
@@ -98,11 +98,11 @@ def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
     assert copied["ran"] is True
 
 
-def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
-    """No run-dir pointer is archived (R8): nothing is written at `worlds/<label>/run_dir`, and
-    both derived readers answer identically when the arms they were archived from are gone.
-    #1187 declared change 12
-    """
+def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path):
+    """No run-dir pointer is archived, and both derived readers answer identically once the arms
+    they were archived from are gone."""
+    import shutil
+
     base, src = location_path(T.runs_base)(tmp_path)
     ep = _accepted(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
@@ -110,22 +110,6 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
         _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     pointer = ep / "worlds" / T.world_id(ep, "b") / "run_dir"
     assert not os.path.lexists(pointer), "the archive wrote the run_dir pointer"
-    before = J.through_view(ep, _episode().verdicts)
-    import shutil
-
-    for d in dirs.values():
-        shutil.rmtree(d)
-    assert J.through_view(ep, _episode().verdicts) == before
-
-
-def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path):
-    import shutil
-
-    base, src = location_path(T.runs_base)(tmp_path)
-    ep = _accepted(tmp_path)
-    dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
-    with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     T.base_capture(ep, [T.captured_row(key="k1")])
     (ep / "served" / f"{T.fixture_world_id('b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "planted"}]})) + "\n",
@@ -137,8 +121,8 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
 
 
 def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
-    """Neither derived reader opens a sibling's run dir on any path: a run dir replaced by a
-    directory that raises on every read is never touched, and both readers still answer."""
+    """Neither derived reader's source names the runs base, and both answer from the episode
+    dir alone."""
     base, src = location_path(T.runs_base)(tmp_path)
     ep = _archived(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1")])
@@ -204,7 +188,8 @@ def test_947_readers_over_an_episode_with_no_archived_worlds_return_empty(tmp_pa
 
 @pytest.mark.parametrize("outcome", ["unusable", "refused", None])
 def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_path, outcome):
-    """The derived readers refuse to compare an episode whose recorded outcome is anything but `accepted` — `unusable`, `refused`, or no record at all..."""
+    """The derived readers refuse an episode whose recorded outcome is not `accepted`, naming the
+    outcome (or its absence)."""
     if outcome is None:
         ep = T.episode(tmp_path)
     else:
@@ -217,7 +202,7 @@ def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_pat
         assert (outcome or "no outcome record") in str(bad.value), reader.__name__
 
 
-# §7 FORK-13 + §7 round 2 (F5-EPISODE-ROOT) — containment, and where the episodes root lives
+# containment, and where the episodes root lives
 
 
 def _clean_checkout(tmp_path):
@@ -236,10 +221,9 @@ def _clean_checkout(tmp_path):
 
 
 def _relocated(tmp_path, monkeypatch):
-    """The relocated layout, built through the production resolver: a runs base holding only the
-    source run, and an episode `runs.create_episode()` claims under the tenant's own
-    `<T>/episodes/`, with this episode's three sibling arms in its own container at the ids its
-    roster names (`view.start_runs`) — the container the child processes are handed."""
+    """The relocated layout, through the production resolver: a runs base holding only the source
+    run, and an episode claimed under the tenant's own `<T>/episodes/` with its three sibling
+    arms in its own container at the ids its roster names."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
@@ -273,8 +257,7 @@ def test_947_no_sibling_artifact_is_reachable_by_a_runs_base_walk(tmp_path, monk
 
 def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch):
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
-    # The source's tenant, by its tenant location `<root>/<T>/runs/<id>` (#1105 PR 2: the
-    # run-folder-to-tenant derivation `tenant_of_run_dir` is gone, F-13).
+    # The source's tenant, read off its location `<root>/<T>/runs/<id>`.
     tenant_id = src.parent.parent.name
     ordinary = T.mod("run_common").materialize_run(
         RunPaths(src).alert,
@@ -294,7 +277,7 @@ def test_947_the_episode_dir_is_outside_the_runs_base(tmp_path, monkeypatch):
     tenant = _tenant_paths()
     episodes = S.episodes_dir(location_path(tenant.data_root), str(tenant.id))
     repo_root = T.mod("run_common").REPO_ROOT
-    # configured_layout now returns the REAL tenant episodes root, so use a distinct decoy.
+    # `configured_layout` returns the REAL tenant episodes root, so the decoys are distinct.
     for bad in (tmp_path / "retired-episodes-root", base / "episodes", repo_root / "episodes"):
         existed = os.path.lexists(bad)
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(bad))
@@ -307,16 +290,9 @@ def test_947_the_episode_dir_is_outside_the_runs_base(tmp_path, monkeypatch):
 
 
 def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_path, monkeypatch):
-    """The episodes root is NEVER derived from the runs base: with the tenant held fixed,
-    re-pointing the runs base does not move where an episode is claimed, and the episode lands
-    beside the runs base, never inside it.
-
-    #1187 declared change 5: the root is no longer read from configuration either. It is the
-    accepted tenant's own `<T>/episodes/`, claimed by `runs.create_episode()`, and
-    `DEFENDER_EPISODES_BASE` is ignored — so the configured root stays empty and an unset
-    variable is no refusal (the `episode_dir` resolver and its refusals are retired; pinned by
-    `ids_1187/test_1187_layout_isolation.py::test_the_episodes_variable_changes_nothing_and_no_episodes_root_refusal_fires`).
-    (Name kept.)
+    """The episodes root is the tenant's own `<T>/episodes/`: re-pointing the runs base or unsetting
+    the retired episodes variable does not move where an episode is claimed, and the configured
+    root stays empty. (The name is historical: nothing is read from configuration.)
     """
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
@@ -331,7 +307,7 @@ def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_
     assert base not in (episodes / before).parents, "the episode was claimed inside the runs base"
     elsewhere = tmp_path / "somewhere-else"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(elsewhere))
-    monkeypatch.delenv(T.EPISODES_BASE_ENV, raising=False)  # review-3 F35: nothing need set it (#1187 O9)
+    monkeypatch.delenv(T.EPISODES_BASE_ENV, raising=False)  # nothing need set it
     with tenant.runs_repository().create_episode() as view:
         after = view.episode_id
     assert sorted(os.listdir(episodes)) == sorted([before, after]), (
@@ -342,10 +318,8 @@ def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_
 
 
 def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path, monkeypatch):
-    """An episode's own placement never dirties a sibling's provenance stamp: with the runs base
-    inside a checkout — the shape the devcontainer documents — the episode dir, its manifest and
-    its sibling run dirs all land outside that checkout, so a stamp captured over it still reads
-    a clean tree and the family completes without the dirty override."""
+    """With the runs base inside a checkout (the devcontainer's shape), the episode, its manifest
+    and its arms all land outside it, so a stamp captured over the checkout still reads clean."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     checkout = _clean_checkout(tmp_path)
@@ -372,19 +346,14 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
 
 
 def test_947_a_sibling_run_dir_lives_under_the_episode_not_the_runs_base(tmp_path, monkeypatch):
-    """A sibling's run dir lives under its own episode rather than beside the source run: the
-    child process is handed its EPISODE by id (#1105 PR 2, declared change 6: `--episode <ep>`),
-    which it opens under the configured episodes root and whose container (`<episode>/runs`, made
-    with the tenant's record before the first sibling) is its runs base.
-
-    #1078 D2 (brief R2, settled s104): the launcher sets NO `DEFENDER_RUNS_BASE` of its own. A
-    child's value is the parent's, inherited unchanged (J46) — the stale configured base here —
-    never one the launcher composed."""
+    """The child process is handed its EPISODE by id (`--episode <ep>`), whose `runs/` container
+    is its runs base. The launcher sets no `DEFENDER_RUNS_BASE` of its own: a child inherits the
+    parent's value unchanged (here the stale configured base)."""
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     spawn = T.FakeSpawn()
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
     with Episode.open(ep) as episode:
-        # The launcher makes the container before the first sibling (#1105 PR 2).
+        # The launcher makes the container before the first sibling.
         T.episode_view(episode)
         T.mod("learning.branch.cli").start_family(
             episode, [T.world_id(ep, label) for label in T.WORLDS], spawn=spawn, tenant_id=T.SOURCE_TENANT)
@@ -404,7 +373,7 @@ def test_947_the_lesson_tracer_counts_no_sibling_as_an_in_context_case(tmp_path,
     T.lesson_row(src)
     for w in T.WORLDS:
         T.lesson_row(_arm(ep, w))
-    # #1105 PR 2 (declared change 10, J8): the tracer walks the tenant's own runs, by id.
+    # The tracer walks the tenant's own runs, by id.
     runs = trace.tenant_runs(base.parent.name)
     assert [hit.case_id for hit in trace.in_context_cases("L1", None, runs)] == [T.SOURCE_RUN_ID]
 

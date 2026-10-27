@@ -14,21 +14,20 @@ MARK = "[a run id]"
 #: An operator-pinned source run id and the episode forked from it: no UTC stamp anywhere.
 PINNED_SOURCE = "live-lever-up-20260930-sudo"
 PINNED_EPISODE = T.EPISODE_ID
-#: The brief's probe: the world ledger's filename and the arm's run id, as a fault relays them.
+#: A probe: a world ledger's filename and an arm's run id, as a fault relays them.
 PROBE = ("ledger live.lever.up.20260930.sudo.n5.a.jsonl missing; "
          "run live-lever-up-20260930-sudo-n5-a")
 
-#: #1187's shape: a random UUID as the episode id, and as its source run's id.
+#: A random UUID as the episode id, and as its source run's id.
 UUID_EPISODE = "3f2b8c1e-9d4a-4f6b-8e2a-1c5d7e9f0a3b"
 UUID_SOURCE = "6a1d3f5b-2c4e-4d8a-9b0c-7e5f3a1d2c64"
 
-#: #1187: each declared world's arm id, as the host-written arm roster (`<ep>/arms.json`) holds
-#: it — a random UUID, never composed from the episode id and the label (declared change 15).
+#: Each declared world's arm id, as the host-written arm roster (`<ep>/arms.json`) holds it: a
+#: random UUID, never composed from the episode id and the label.
 ROSTER = {"a": "0b5c7e2a-4d1f-4a8e-9c3b-2f6d8e1a7c40",
           "b": "7e3a9c1f-5b2d-4e8a-a6c4-3d1f9b7e5a20",
           "c": "c4d2e6f8-1a3b-4c5d-9e7f-8a0b2c4d6e81"}
-#: The probe as a fault relays it after #1187: the world ledger's filename and an arm's
-#: roster id.
+#: The probe as a fault relays it: the world ledger's filename and an arm's roster id.
 ROSTER_PROBE = f"ledger {T.fixture_world_id('a')}.jsonl missing; run {ROSTER['a']}"
 
 
@@ -38,15 +37,14 @@ def _family(episode_id: str):
 
 
 def _arm_ids() -> dict:
-    """The roster's ids, as `family_identities` takes them (#1187: `{label: RunId}`)."""
+    """The roster's ids, as `family_identities` takes them (`{world id: RunId}`)."""
     from defender.records import RunId
 
     return {T.fixture_world_id(label): RunId.parse(text) for label, text in ROSTER.items()}
 
 
 def _known(episode_id: str) -> frozenset[str]:
-    """The family's set over the roster (#1187 declared change 15: `family_identities(family,
-    arm_ids)`)."""
+    """The family's set over the roster (`family_identities(family, arm_ids)`)."""
     return T.sym("records._family", "family_identities")(_family(episode_id), _arm_ids())
 
 
@@ -60,12 +58,9 @@ def _redact(detail, known):
 
 
 def test_family_identities_are_every_arms_run_id_and_token_plus_the_episodes_own():
-    """The set is the episode id, its token, every declared world's token — read off
-    `resume_world_from`, the sibling's own derivation, so the two cannot drift — and every
-    arm's run id AS THE ROSTER HOLDS IT, and nothing else: no `<episode_id>-<label>` is
-    composed (#1187 deletes `arm_run_id_for`).
-    #1187 declared change 15
-    """
+    """The set is the episode id, every declared world's token (read off `resume_world_from`, the
+    sibling's own derivation, so the two cannot drift) and every arm's run id AS THE ROSTER HOLDS
+    IT — nothing else: no `<episode_id>-<label>` is composed."""
     fam = T.mod("records._family")
     family = _family(PINNED_EPISODE)
     expected = {PINNED_EPISODE, *ROSTER.values()}
@@ -84,21 +79,15 @@ def test_family_identities_are_every_arms_run_id_and_token_plus_the_episodes_own
 
 
 def test_a_pinned_source_episodes_tokens_are_redacted_whole_when_known():
-    """The probe that leaked: a world token inside a ledger filename and an arm's run id — the
-    ROSTER's id after #1187. Both are removed whole — the world token before the episode token
-    it extends, so no `.a` tail survives — and the sentence around them is untouched.
-    #1187 declared change 15
-    """
+    """A world token inside a ledger filename and an arm's roster id are both removed whole, and
+    the sentence around them is untouched."""
     assert _redact(ROSTER_PROBE, _known(PINNED_EPISODE)) == (
         f"ledger {MARK}.jsonl missing; run {MARK}")
 
 
 def test_a_uuid_episode_and_its_arms_are_redacted_when_known_in_any_case():
-    """No shape rule can see a UUID; the known set does. An arm's run id (the roster's, in
-    either case), a sibling's world token, the bare episode id, and a token in another case
-    all go.
-    #1187 declared change 15
-    """
+    """No shape rule can see a UUID; the known set does: arm ids, world tokens and the bare
+    episode id all go, in either case."""
     detail = (f"run {ROSTER['b']} refused; sibling {T.fixture_world_id('c')} served; "
               f"episode {UUID_EPISODE} at {T.fixture_world_id('a').upper()}; arm {ROSTER['c'].upper()}")
     assert _redact(detail, _known(UUID_EPISODE)) == (
@@ -144,21 +133,23 @@ def test_an_empty_or_non_text_member_neither_raises_nor_shreds_the_detail():
     assert _redact(404, frozenset()) == "404"
 
 
-def test_the_known_set_is_a_required_argument():
+@pytest.mark.parametrize(("module", "name"), [
+    ("_redaction", "redact_model_visible"),
+    ("investigation.query_tool", "QueryCapture"),
+    # The comparator's set is the family's whole set, the same for both payloads, so it cannot
+    # tell the comparator which side is the base: the blindness argument still holds.
+    ("learning.branch.comparator", "build_prompt"),
+    ("learning.branch.comparator", "compare"),
+], ids=["filter", "query-capture", "comparator-prompt", "comparator-compare"])
+def test_the_known_set_is_a_required_argument(module, name):
     """A caller cannot forget it: there is no default meaning "none"."""
-    params = inspect.signature(
-        T.sym("_redaction", "redact_model_visible")).parameters
+    params = inspect.signature(T.sym(module, name)).parameters
     assert params["known_ids"].default is inspect.Parameter.empty
 
 
 # ---------------------------------------------------------------------------------------
 # where the query tool's set is bound: the registry that serves the world
 # ---------------------------------------------------------------------------------------
-
-
-def test_the_query_capture_requires_the_known_set():
-    params = inspect.signature(T.sym("investigation.query_tool", "QueryCapture")).parameters
-    assert params["known_ids"].default is inspect.Parameter.empty
 
 
 def test_a_natural_registry_knows_no_branch_identity():
@@ -186,14 +177,9 @@ def test_lead_zeros_narrowed_registry_answers_with_the_registry_it_narrows():
 
 
 def test_a_world_registry_knows_its_whole_family(tmp_path):
-    """The sibling's registry holds the manifest it was resumed from, so it answers with every
-    arm of the family — a sibling's arm id in a relayed fault is as much a leak as its own. After
-    #1187 those arm ids are the ROSTER's (`<ep>/arms.json`, random UUIDs), never
-    `<episode_id>-<label>`: the registry's identities are exactly the episode id, its token,
-    every world token and every roster arm id (the token is the id with its hyphens rendered as
-    dots, R2-03).
-    #1187 declared change 15
-    """
+    """The sibling's registry answers with every arm of its family — a sibling's arm id in a
+    relayed fault is as much a leak as its own: exactly the episode id, every world token and
+    every roster arm id."""
     from defender.tests.storage.ids_1187 import _spec1187 as R
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
@@ -228,24 +214,10 @@ def test_the_comparator_prompt_redacts_known_identities_in_both_payloads_and_the
     assert "saw the login" in prompt
 
 
-def test_the_comparator_known_set_is_required_and_symmetric():
-    """`known_ids` is the family's whole set, the same for both payloads, so it cannot tell the
-    comparator which side is the base: the blindness argument still holds. Required on both the
-    prompt builder and `compare`."""
-    comparator = T.mod("learning.branch.comparator")
-    for fn in (comparator.build_prompt, comparator.compare):
-        assert inspect.signature(fn).parameters["known_ids"].default is inspect.Parameter.empty
-
-
 def test_delta_o_hands_the_comparator_the_familys_identities(data_root):
-    """Driven through the episode reader over the WALKED view (#1187, review F7:
-    `delta_o(view, *, invoke=)` reads the episode through `runs.episode(<ep>)` and takes the arm
-    ids from that view's roster; no path re-binds the folder and no caller hands them in): world
-    `b` served a payload naming a sibling's run id — the ROSTER's id, which nothing but the
-    roster spells. The prompt the comparator sent names none of the family, and the payload did
-    reach it (its other text survives).
-    #1187 declared change 15
-    """
+    """Driven through the episode reader over the WALKED view, which takes the arm ids from its
+    own roster: world `b` served a payload naming a sibling's roster id. The comparator's prompt
+    names none of the family, and the payload did reach it (its other text survives)."""
     from defender.tests.support.learning.judge._judge_921 import comparable_family_stamp
     from defender.tests.storage.ids_1187 import _spec1187 as R
 

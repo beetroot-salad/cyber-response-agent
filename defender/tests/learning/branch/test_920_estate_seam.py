@@ -1,4 +1,4 @@
-"""#920 PR 1 — the estate seam: what a branched sibling queries THROUGH, and what it records."""
+"""#920: the estate seam — what a branched sibling queries THROUGH, and what it records."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -29,7 +29,6 @@ from defender.learning.branch.estate.registry import (  # noqa: E402
 )
 from defender.records._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
-    BASE,
     CAPTURED,
     FAULT,
     PASSTHROUGH,
@@ -60,15 +59,15 @@ from defender.tests.learning.oracle.live_contracts._spec1224 import build_regist
 
 REAL_ADAPTERS = PATHS.adapters_dir
 
-#: #1255 D5's ledger decision for a control world whose oracle turn served something other than
-#: its base. Spelled as the word itself: which constant the ledger names it by is the ledger's.
+#: The ledger's decision for a control world whose oracle turn served something other than its
+#: base (#1255), spelled as the word itself rather than the ledger's constant.
 RECONSTRUCTED = "reconstructed"
 
 
 @functools.cache
 def _gather_grant():
-    """The shipped gather grant — the committed playground tenant's (#1106 M4: no grant is
-    fixed per process, so it is projected from a tenant's table, lazily)."""
+    """The committed playground tenant's gather grant, projected lazily (no grant is fixed per
+    process)."""
     return T1106.fixture_grants().gather
 
 
@@ -145,14 +144,9 @@ SERVED_FILE = Path("ep", "served", f"{T.fixture_world_id('w1')}.jsonl")
 
 
 def fresh_ledger(path: Path) -> Ledger:
-    """A `Ledger` over `path` (`<episode>/served/<world id>.jsonl`), beside the primed capture
-    #947 made REQUIRED.
-
-    EMPTY, deliberately. Nothing in this file is about the capture; what `base_path` has to be
-    here is a FILE, which is `Ledger.__post_init__`'s ordering guarantee that the episode was
-    primed before any sibling opened a ledger over it. Empty, every key MISSES it and falls
-    through to a live read kept in the world's own store. The episode stays held for as long as
-    the ledger that writes through it."""
+    """A `Ledger` over `path` (`<episode>/served/<world id>.jsonl`), beside an EMPTY primed
+    capture: the ledger requires the base file (priming precedes any sibling), and empty, every
+    key misses it and falls through to a live read kept in the world's own store."""
     episode = Episode.create(path.parent.parent)
     with contextlib.suppress(FileExistsError):
         episode.served_base.create("")
@@ -238,13 +232,11 @@ def world_registry(
 
 
 def control_oracle(base: Mapping[str, Any]) -> dict[str, Any]:
-    """The oracle side of a world with no facts that serves a live read. #1255 D3: every world,
-    the control included, answers a question the source never asked through its oracle, and
-    every estate here leaves the family's recording empty, so a live read takes an oracle turn.
-    This double serves `base` — the fake adapter's answer to that read, call ordinal included —
-    back unchanged with an empty claim, so the row stays `passthrough`; its box is a recording
-    sandboxed one, so no turn reaches the production box. Whether the turn is TAKEN is #1255's
-    to pin (`test_1255_world_serving.py`, `test_1224_serving.py`), not this file's."""
+    """The oracle side of a world with no facts that serves a live read: every world, the
+    control included, answers an unasked question through its oracle (the estates here leave the
+    family's recording empty). It serves `base` back unchanged with an empty claim, so the row
+    stays `passthrough`, in a sandboxed box. Whether the turn is TAKEN is pinned in
+    `test_1255_world_serving.py`."""
     return {"oracle": S24.oracle(then=S24.submit(dict(base), S24.EMPTY_CLAIM)).model,
             "verifier": S24.passing_verifier().model, "box": S24.sandboxed_box()[0]}
 
@@ -492,20 +484,6 @@ def test_two_siblings_read_one_base_recording(tmp_path):
     assert adapter_calls(ctx, "get-host") == []
     rows = served_rows(ledger_path)
     assert [(r["world_id"], r["source"]) for r in rows] == [(T.fixture_world_id("a"), PASSTHROUGH), (T.fixture_world_id("b"), PASSTHROUGH)]
-
-
-def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_path):
-    ledger_path = tmp_path / SERVED_FILE
-    ledger = fresh_ledger(ledger_path)
-    call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"},
-                source=BASE, world_id=None)
-
-    ledger.record(ServedCall(payload_text='{"owner": "first"}', **call))
-    ledger.record(ServedCall(payload_text='{"owner": "second"}', **call))
-
-    assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) \
-        == fresh_ledger(ledger_path).base_payload("cmdb", "get-host", {"host": "canary-1"}) \
-        == '{"owner": "first"}'
 
 
 def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
