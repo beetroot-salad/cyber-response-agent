@@ -500,7 +500,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
 ) -> dict:
     """End a run whose cause of death arrived BEFORE MAIN's first request (a run-level kill
     while the correlation lead ran): the same exit MAIN's own kill takes — the session and the
-    run-end record name the class, the trace is written, the log is released — with the agent
+    run-end record name the class, the trace is written — with the agent
     never started, so no output and no forced close."""
     _flush_run_end(None, store, session_id, truncated_by)
     end = run_end.RunEnd(truncated_by, closed_before_cut=False)
@@ -516,7 +516,6 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
             write_guarded(RunPaths(run_dir).tool_trace, "")
         except OSError as fallback_err:
             _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
-    logger.close()
     return _run_summary(
         output=None, model_name=model_name, requests=logger.n_requests, end=end,
         exit_reason=exit_reason, case_id=case_id, store_path=store.path,
@@ -534,7 +533,7 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
 
     A run-level kill or a store fault while the lead runs ends the run the way MAIN's own would,
     with the agent never started. An interrupt, a cancellation or a run folder that refuses the
-    lead's summary releases the wire log, then propagates (the store is closed by its opener)."""
+    lead's summary propagates (the run's block releases the wire log and the store)."""
     from .. import lead_zero as lead_zero_mod
 
     def stop(truncated_by: str, exit_reason: str) -> dict:
@@ -563,20 +562,9 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")
             return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
-        logger.close()
         raise
     return lead_zero_mod.render_correlation_section(
         outcome, grant_home=tenant.table_pointer), None
-
-
-async def _drive_releasing_log(logger: Any, *args: Any, **kwargs: Any) -> Any:
-    """`_drive_agent`, releasing the wire log when the run ends by an escaping exception (a
-    world that went unservable, #1224), so a resume into the same run dir can open it again."""
-    try:
-        return await _drive_agent(*args, **kwargs)
-    except BaseException:
-        logger.close()
-        raise
 
 
 def _branch_snapshot(store: Any, resume: Any, source_run: Run | None) -> branch.ForkSnapshot | None:
@@ -716,33 +704,29 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # read shape.
     logger = observe.RequestLogger.from_record(run.observability.wire_log)
 
-    # The live review bundle is built here, after the logger, so review calls are logged and
-    # priced with the run's own `RequestLogger`.
-    #
-    # `model_override` is the operator's raw `--model`, not the resolved `model_name`, so the
-    # review's own pinned default stays reachable.
-    #
-    # A missing prompt asset raises here; close the logger so its path is not left registered
-    # in `observe._ACTIVE_PATHS` (which would block a later run in this process).
-    try:
+    # The wire log and the store are released by this block, on every exit however the run ends:
+    # a path left in `observe._ACTIVE_PATHS` would refuse a later run on this run dir, and a
+    # store left open is closed at a random moment by the garbage collector (#1324). A caller
+    # that wants the rows afterwards reopens the summary's `store_path`.
+    with contextlib.ExitStack() as owns_the_run:
+        owns_the_run.callback(logger.close)
+        # The live review bundle is built here, after the logger, so review calls are logged and
+        # priced with the run's own `RequestLogger`.
+        #
+        # `model_override` is the operator's raw `--model`, not the resolved `model_name`, so the
+        # review's own pinned default stays reachable.
         stages = (
             review_stages if review_stages is not None
             else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
                 run_dir, defender_dir, logger=logger, model_override=model_override,
             )
         )
-    except BaseException:
-        logger.close()
-        raise
 
-    case_id = uuid.uuid4().hex
-    # Default and resume precedence live in `_resolve_store_factory`.
-    # The store is open for this block only, so it closes on every exit below however the run
-    # ends (#1324). A caller that wants the rows afterwards reopens the summary's `store_path`.
-    with contextlib.ExitStack() as owns_the_store:
+        case_id = uuid.uuid4().hex
+        # Default and resume precedence live in `_resolve_store_factory`.
         try:
             factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
-            store = owns_the_store.enter_context(factory(case_id, run_dir))
+            store = owns_the_run.enter_context(factory(case_id, run_dir))
             # A resume joins the source run's case, so the case pointer comes from the store,
             # not the uuid minted above (they match on a fresh run). `run_dir` is passed because
             # a resumed MAIN inherits the investigation document as well as the message history.
@@ -757,7 +741,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             # Setup is outside `_drive_agent`'s handler; end the run through the
             # `truncated_by="store"` exit without driving a turn.
             _logger.error(f"store setup failed ({e!r}); ending the run")
-            logger.close()
             return _run_summary(
                 output=None, model_name=model_name, requests=logger.n_requests,
                 end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
@@ -816,8 +799,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             run=run,
         )
 
-        agent_run, end, exit_reason = await _drive_releasing_log(
-            logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
+        agent_run, end, exit_reason = await _drive_agent(
+            agent, prompt, deps, store, session_id, gate_bounds, resume_history,
             usage=usage, snapshots=_snapshot_writer(snapshot, deps, store, session_id, limits,
                                                     gate_bounds),
         )
@@ -825,7 +808,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
         result = agent_run.result if agent_run is not None else None
         _write_trace_or_empty(run_dir, store, session_id, wall_ms)
-        logger.close()
         output = result.output if result is not None else None
         return _run_summary(
             output=output, model_name=model_name, requests=logger.n_requests,

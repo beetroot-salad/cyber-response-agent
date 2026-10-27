@@ -5,7 +5,6 @@ from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
-import gc
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -217,9 +216,6 @@ def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(
 
     pointer_file.write_text(json.dumps({**pointer, "case_id": None}), encoding="utf-8")
     before = _tree(root)
-    # A connection left open earlier and closed by the collector mid-test deletes the store's
-    # `-wal`/`-shm` files between the snapshots (#1324); collect here so a leak fails every time.
-    gc.collect()
     with pytest.raises(branch.BranchError) as info, branch.open_source_store(
             run_dir, source_run=_run_handle_1165(run_dir)):
         pass

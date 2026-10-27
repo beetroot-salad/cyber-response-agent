@@ -243,9 +243,6 @@ class StoreHandle:
         return row[0] if row is not None else None
 
 
-
-
-
 def _session_has_rows(conn: sqlite3.Connection, session_id: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM message WHERE session_id = ? LIMIT 1", (session_id,)).fetchone()

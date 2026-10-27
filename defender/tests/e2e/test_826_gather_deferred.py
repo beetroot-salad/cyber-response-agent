@@ -76,12 +76,12 @@ class _Res:
     def sessions(self) -> dict[str, str | None]:
         """`agent_id -> truncated_by` for every session this run opened, read straight out of
         the real SQLite file rather than through any reader under test."""
-        store = reread(self.stores[-1])
-        return {
-            agent_id: truncated
-            for agent_id, truncated in sql(
-                store, "SELECT agent_id, truncated_by FROM session ORDER BY rowid")
-        }
+        with session_store.open_store_for_read(self.stores[-1].path) as store:
+            return {
+                agent_id: truncated
+                for agent_id, truncated in sql(
+                    store, "SELECT agent_id, truncated_by FROM session ORDER BY rowid")
+            }
 
 
 def _dispatch(lead: str, system: str = "elastic") -> tuple[str, dict]:

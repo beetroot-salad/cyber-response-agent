@@ -91,7 +91,7 @@ def _field_types() -> dict[str, type]:
 _FIELD_TYPES = _field_types()
 
 
-def open_source_store(run_dir: Path, *, source_run: Run) -> Any:
+def open_source_store(run_dir: Path, *, source_run: Run) -> AbstractContextManager[Any]:
     """The finished run's own store, for writing: its pointer is checked now, and the store
     opens when the returned context manager's `with` block starts (`session_store.open_store`).
 
@@ -124,6 +124,8 @@ def open_source_store(run_dir: Path, *, source_run: Run) -> Any:
             f"{run_dir} records its store at {recorded}, but its case {case_id!r} resolves "
             f"to {derived} beside the run — opening the derived path would create an empty "
             "database and lose the branch point")
+    # lint-parse: ok — the returned value is `open_store`'s own context manager, not parser
+    # output; the parsed `case_id` is only its argument, already checked by `store_path_for`.
     return session_store.open_store(case_id=case_id, sessions=sessions)
 
 

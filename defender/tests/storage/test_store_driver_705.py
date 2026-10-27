@@ -4,7 +4,6 @@ from __future__ import annotations
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -28,6 +27,7 @@ from defender.tests.support.storage._session_store_705 import (
     CLOSED_LOOP_INVLANG,
     FaultStore,
     StoreFault,
+    is_open,
     sql,
     store_factory,
     store_mod,
@@ -314,15 +314,6 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
         "the store append alone")
 
 
-def _still_open(store) -> bool:
-    """Asked of SQLite itself, not of any flag the handle keeps."""
-    try:
-        store.connection.execute("SELECT 1")
-    except sqlite3.ProgrammingError:
-        return False
-    return True
-
-
 def _exploding_gather(messages, info) -> ModelResponse:
     raise RuntimeError("an exit type nobody enumerated")
 
@@ -352,7 +343,7 @@ def test_the_run_closes_the_store_it_opened_on_every_exit(tmp_path, monkeypatch,
                 "what_to_summarize": ["x"]})])]),
                   gather=_exploding_gather, store_factory=factory)
     assert len(opened) == 1, f"the run opened {len(opened)} stores"
-    assert not _still_open(opened[0]), f"the run ended ({ending}) with its store still open"
+    assert not is_open(opened[0]), f"the run ended ({ending}) with its store still open"
 
 
 def test_a_refused_branch_point_ends_the_run_through_the_store_exit_and_frees_its_log(tmp_path):
@@ -369,6 +360,26 @@ def test_a_refused_branch_point_ends_the_run_through_the_store_exit_and_frees_it
     summary = drive(rd, run_id="refused-branch", main=ReplayFn([Turn(text="unreached")]),
                     store_factory=refusing)
     assert (summary["truncated_by"], summary["exit_reason"]) == ("store", "BranchError"), summary
+    observe.RequestLogger.from_record(_run_handle_1165(rd).observability.wire_log).close()
+
+
+def test_a_run_whose_opening_message_will_not_build_closes_its_store_and_frees_its_log(tmp_path):
+    """A failure after setup and before MAIN's first turn (the orient step that builds the
+    opening message raises) escapes the run, and still leaves the store closed and the wire log
+    free, so the same run dir can be driven again (#1324)."""
+    from defender.investigation import observe
+
+    opened: list = []
+    rd = materialize(tmp_path, GOLDEN, run_id="prompt-fails")
+
+    def broken_orient(argv, env):
+        raise RuntimeError("the orient step broke")
+
+    with pytest.raises(RuntimeError, match="orient step broke"):
+        drive(rd, run_id="prompt-fails", main=ReplayFn([Turn(text="unreached")]),
+              store_factory=store_factory(tmp_path, sink=opened), orient_shim=broken_orient)
+    assert len(opened) == 1, f"the run opened {len(opened)} stores"
+    assert not is_open(opened[0]), "the failed prompt left its store open"
     observe.RequestLogger.from_record(_run_handle_1165(rd).observability.wire_log).close()
 
 
@@ -400,7 +411,7 @@ def test_a_main_session_that_will_not_open_ends_the_run_and_closes_the_store(tmp
                     store_factory=refusing)
     assert (summary["truncated_by"], summary["exit_reason"]) == ("store", "StoreError"), summary
     assert len(opened) == 1, f"the run opened {len(opened)} stores"
-    assert not _still_open(opened[0]), "the refused setup left its store open"
+    assert not is_open(opened[0]), "the refused setup left its store open"
 
 
 #: The request-limit run's base ceiling: a few rounds, far under the shipped
@@ -463,10 +474,6 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
     # (4) an uncaught type — the case a per-except-arm flush loses entirely
     rd = materialize(tmp_path / "uncaught", GOLDEN, run_id="flush-uncaught")
     opened = []
-
-    def _exploding_gather(messages, info) -> ModelResponse:
-        raise RuntimeError("an exit type nobody enumerated")
-
     with pytest.raises(RuntimeError):
         drive(rd, run_id="flush-uncaught",
               main=ReplayFn([Turn(tool_calls=[("gather", {

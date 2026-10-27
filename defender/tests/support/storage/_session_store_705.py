@@ -143,6 +143,16 @@ def sql(store, query: str, params: tuple = ()) -> list[tuple]:
     return list(store.connection.execute(query, params).fetchall())
 
 
+def is_open(store) -> bool:
+    """Whether `store`'s connection still answers — asked of SQLite itself, not of any flag the
+    handle keeps."""
+    try:
+        store.connection.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return False
+    return True
+
+
 def mid_pair_session(store, *, agent_id: str = "main"):
     """A session whose last row is an unanswered `ModelResponse` carrying a tool call
     — the shape every truncation demand turns on.

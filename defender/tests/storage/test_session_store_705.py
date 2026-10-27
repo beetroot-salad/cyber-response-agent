@@ -20,6 +20,7 @@ from pydantic_ai.messages import (  # noqa: E402
 
 from defender.tests.support.storage._session_store_705 import (
     complete_pair,
+    is_open,
     make_store,
     nine_row_fixture,
     part_kind_zoo,
@@ -78,15 +79,6 @@ def test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary(tmp_path
         f"a coerced coordinate must never reach the table; got {stored}")
 
 
-def _closed(store) -> bool:
-    """Asked of SQLite itself, not of anything the handle keeps."""
-    try:
-        store.connection.execute("SELECT 1")
-    except sqlite3.ProgrammingError:
-        return True
-    return False
-
-
 def test_a_store_is_open_exactly_for_its_with_block(tmp_path):
     """The store opens when its `with` block starts and closes when the block ends, however it
     ends (#1324). Called without `with`, the opener touches nothing: there is no connection to
@@ -100,17 +92,17 @@ def test_a_store_is_open_exactly_for_its_with_block(tmp_path):
 
     with ss.open_store(case_id="case-alpha", sessions=sessions) as store:
         assert path.is_file(), "control: entering the block creates the store"
-        assert not _closed(store), "control: inside the block it is open"
-    assert _closed(store), "the store outlived its block"
+        assert is_open(store), "control: inside the block it is open"
+    assert not is_open(store), "the store outlived its block"
 
     with pytest.raises(RuntimeError), ss.open_store(case_id="case-alpha", sessions=sessions) as raised:
         raise RuntimeError("the block ends by an exception")
-    assert _closed(raised), "a block that raised left its store open"
+    assert not is_open(raised), "a block that raised left its store open"
 
     ss.open_store_for_read(path)
     with ss.open_store_for_read(path) as reader:
-        assert not _closed(reader)
-    assert _closed(reader), "the reader outlived its block"
+        assert is_open(reader)
+    assert not is_open(reader), "the reader outlived its block"
 
 
 def test_reader_refuses_an_unknown_user_version(tmp_path):
