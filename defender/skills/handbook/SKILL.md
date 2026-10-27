@@ -89,7 +89,7 @@ canonical sources each content file points back to:
 
 - Runtime loop shape and phase discipline → `defender/SKILL.md`
 - The two-table read/join surface → `defender/learning/lead_repository.py`
-- Learning-loop orchestration → `defender/learning/branch/cli.py` (the episode)
+- Learning-loop orchestration → `defender/cli/learning/branch.py` (the episode; its steps are in `learning/branch/cli.py`)
   and `defender/learning/loop.py` (the two authoring drains), plus the role
   prompts beside each stage under `defender/learning/`
 - Design rationale → `defender/docs/` (notably `learning-loop.md`)

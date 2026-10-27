@@ -21,7 +21,9 @@ from defender.learning.author import drain
 from defender.learning.core import quarantine
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import FINDINGS, PITFALLS, QUESTIONER_FINDINGS, Channel, LearningState
-from defender.learning.frontend import build, serialize_queues
+from defender.cli.learning import lessons_page as build
+from defender.learning.frontend import serialize_queues
+from defender.presentation import lessons_page as queues_page
 from defender.learning.leads import pitfalls_curator
 
 #: A queued row's own content, carrying the one character the embedded JSON must not emit
@@ -332,7 +334,7 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
     _write_json(location_path(paths.state_root) / "_pending_delivery" / "odd.json", {"batch_id": "b", "at": 3})
 
     view = _build(paths)
-    page = build.render_queues(view)
+    page = queues_page.render_queues(view)
 
     assert _channel(view, "findings")["deadletter"] == [
         {"id": None, "reason": "", "when": None, "row": {"k": "v"}},
@@ -548,19 +550,19 @@ def test_held_is_the_writers_count_of_archives_not_of_readable_manifests(paths):
     assert len(tainted["rows"]) == 2
     assert tainted["held"] == 4
     assert tainted["held"] == quarantine.held_archives(qdir)
-    assert "4 / 10" in _rendered(build.render_queues(_build(paths)))
+    assert "4 / 10" in _rendered(queues_page.render_queues(_build(paths)))
 
 
 def test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root(view, paths):
     assert view["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
     assert not str(paths.quarantine_dir).startswith(str(location_path(paths.state_root)))
-    assert html.escape(str(paths.quarantine_dir), quote=True) in _rendered(build.render_queues(view))
+    assert html.escape(str(paths.quarantine_dir), quote=True) in _rendered(queues_page.render_queues(view))
 
 
 def test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_directory(paths, monkeypatch):
     def page_for(cap: int) -> str:
         monkeypatch.setenv("LEARNING_TAINT_QUARANTINE_MAX", str(cap))
-        return _rendered(build.render_queues(_build(paths)))
+        return _rendered(queues_page.render_queues(_build(paths)))
 
     assert 'class="cap">2 / 10</span>' in page_for(10)         # eight slots left
     assert 'class="cap near">2 / 4</span>' in page_for(4)      # two left
@@ -568,7 +570,7 @@ def test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_dire
     for stem in ("a-earlier", "b-later"):
         (paths.quarantine_dir / f"{stem}.tar.gz").unlink()
     assert 'class="cap">0 / 2</span>' in page_for(2)           # empty is never near
-    assert ".q-group h3 .cap.near" in build.QUEUES_CSS
+    assert ".q-group h3 .cap.near" in queues_page.QUEUES_CSS
 
 
 def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
@@ -578,7 +580,7 @@ def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
     paths.quarantine_dir.chmod(0)
     try:
         view = _build(paths)
-        page = build.render_queues(view)
+        page = queues_page.render_queues(view)
     finally:
         paths.quarantine_dir.chmod(0o700)
         _graveyard_file(paths, FINDINGS).chmod(0o600)
@@ -655,8 +657,8 @@ def test_a_row_that_looks_like_a_script_tag_opens_no_script_tag(view):
     assert SCRIPT_PAYLOAD in json.dumps(view), "the fixture lost its payload"
     assert SCRIPT_PAYLOAD not in json.dumps(quiet)
 
-    loud_page = build.render_queues(view)
-    quiet_page = build.render_queues(quiet)
+    loud_page = queues_page.render_queues(view)
+    quiet_page = queues_page.render_queues(quiet)
 
     assert loud_page.count("<script") == quiet_page.count("<script")
     assert loud_page.count("</script") == quiet_page.count("</script")
@@ -672,7 +674,7 @@ def _rendered(page: str) -> str:
 
 
 def test_the_page_renders_every_dead_letter_and_hold_it_carries(view):
-    body = _rendered(build.render_queues(view))
+    body = _rendered(queues_page.render_queues(view))
     for ch in view["channels"]:
         assert ch["name"] in body
         for entry in ch["deadletter"]:
@@ -691,7 +693,7 @@ def test_the_page_renders_every_dead_letter_and_hold_it_carries(view):
 
 
 def test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart(view):
-    body = _rendered(build.render_queues(view))
+    body = _rendered(queues_page.render_queues(view))
     q = view["quarantine"]
     for m in q["markers"]["rows"]:
         assert m["identity"] in body
@@ -714,7 +716,7 @@ def test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart(view
 
 
 def test_every_attacker_influenced_string_reaches_the_page_escaped(view):
-    body = _rendered(build.render_queues(view))
+    body = _rendered(queues_page.render_queues(view))
     for hostile in (SCRIPT_PAYLOAD, "GitProbeError<b>", "<index.lock>"):
         assert hostile not in body, hostile
         assert html.escape(hostile, quote=True) in body, hostile
@@ -733,7 +735,7 @@ def test_content_that_spells_a_placeholder_is_content(view):
     _channel(loud, "findings")["stuck"]["reason"] = "${cards} __CARDS__"
     _channel(loud, "findings")["deadletter"][0]["row"]["k"] = "${queues_json} __QUEUES_JSON__"
 
-    page = build.render_queues(loud)
+    page = queues_page.render_queues(loud)
     body = _rendered(page)
 
     assert body.count('<details class="q-card') == len(view["channels"]) + 1

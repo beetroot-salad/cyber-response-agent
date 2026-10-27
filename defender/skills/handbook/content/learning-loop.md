@@ -5,7 +5,7 @@ does **not** run in-process after an investigation: a finished run is a
 starting point an operator picks up later, deliberately, by naming it.
 
 ```
-python3 defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>
+python3 defender/cli/learning/branch.py --tenant <T> <run_id> <branch_message_id>
 ```
 
 For the *why* — the RL / ablation-study framing — read

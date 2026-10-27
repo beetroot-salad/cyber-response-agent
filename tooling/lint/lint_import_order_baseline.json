@@ -6,12 +6,6 @@
     "imports-adapters:skills/connect/examples/example_adapter.py:defender.integrations._stub_transport": "#1172: the connect skill's example adapter uses the shared transport",
     "knowledge/_scaffold_rules.py:defender.systems.verb_grant": "#1309 (d): Python in model-facing folders",
     "knowledge/_scaffold_rules.py:defender.systems.verbs": "#1309 (d): Python in model-facing folders",
-    "learning/_pydantic_stage.py:defender.agents": "#1309 (f): learning imports rendering and entry points",
-    "learning/branch/cli.py:defender.presentation.visualize_episode": "#1309 (f): learning imports rendering and entry points",
-    "learning/branch/cli.py:defender.run": "#1309 (f): learning imports rendering and entry points",
-    "learning/frontend/build.py:defender.presentation.publisher": "#1309 (f): learning imports rendering and entry points",
-    "learning/frontend/build.py:defender.presentation.visualize_primitives": "#1309 (f): learning imports rendering and entry points",
-    "learning/frontend/build.py:defender.presentation.visualize_run": "#1309 (f): learning imports rendering and entry points",
     "records/_artifact_schema.py:defender.skills.invlang.validate": "#1309 (d): Python in model-facing folders"
   }
 }

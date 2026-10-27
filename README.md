@@ -161,7 +161,7 @@ Notes:
 
 - run dirs are created under `$DEFENDER_DATA_ROOT/<tenant>/runs/{run_id}/` (`<T>/runs`), outside the repo
 - pass `--no-learn` to skip the catalog-curation enqueue, the one automatic post-step, while iterating on the runtime loop only
-- the learning loop runs off-process and is operator-initiated: fork a finished run with `python3 defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>`, then fold the queued findings with `python3 defender/learning/loop.py --tenant <T> --author-drain` (`--lead-author-drain` serves the catalog-curation queue)
+- the learning loop runs off-process and is operator-initiated: fork a finished run with `python3 defender/cli/learning/branch.py --tenant <T> <run_id> <branch_message_id>`, then fold the queued findings with `python3 defender/learning/loop.py --tenant <T> --author-drain` (`--lead-author-drain` serves the catalog-curation queue)
 
 Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `executed_queries.jsonl`, `tool_trace.jsonl`, `runtime.html`, an `wire_logs/` directory holding the run's wire log (`llm_requests.jsonl`), and a `gather_raw/` directory of lead sidecars + per-query payloads.
 
@@ -170,7 +170,7 @@ Each run dir contains at least `alert.json`, `investigation.md`, `report.md`, `e
 A read-only posture view of the loop's current output:
 
 ```bash
-python3 defender/learning/frontend/build.py --tenant <T>
+python3 defender/cli/learning/lessons_page.py --tenant <T>
 ```
 
 Nicer reading experience.

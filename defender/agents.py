@@ -5,6 +5,7 @@ from defender.learning.branch.estate.oracle import ORACLE_CHECK_DEF, ORACLE_DEF
 from defender.learning.branch.questioner import QUESTIONER_DEF
 from defender.learning.judge_role import JUDGE_DEF
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
+from defender.learning.roles import LEARNING_AGENTS
 from defender.investigation.agent_definition import AgentDefinition, build_registry
 from defender._agent_role import AgentRole
 from defender.investigation.driver import GATHER_DEF, MAIN_DEF
@@ -16,8 +17,7 @@ from defender.investigation.review_roles import COMPOSER_DEF, SUPPORT_DEF
 # one definition per package, even when the policies are near-identical, so a grant added to one
 # never silently reaches the other.
 AGENTS: dict[AgentRole, AgentDefinition] = build_registry(
-    (MAIN_DEF, GATHER_DEF, LEAD_AUTHOR_DEF, CORPUS_AUTHOR_DEF, SUPPORT_DEF, COMPOSER_DEF,
-     QUESTIONER_DEF, JUDGE_DEF, ORACLE_DEF, ORACLE_CHECK_DEF)
+    (MAIN_DEF, GATHER_DEF, SUPPORT_DEF, COMPOSER_DEF, *LEARNING_AGENTS.values())
 )
 
 __all__ = [

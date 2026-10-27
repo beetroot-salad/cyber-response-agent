@@ -19,7 +19,7 @@ from defender.tests.support.shared.contracts._frontend_outputs import frontend_o
 
 from defender.tenancy import _tenant
 from defender import run as run_py
-from defender.learning.branch import cli as branch_cli
+from defender.cli.learning import branch as branch_entry
 from defender import box as box_mod
 from defender.execution import box_codec
 from defender.cli import policy_cli
@@ -235,7 +235,7 @@ def _launch(source: Path) -> BaseException | int:
     preflight neutralised and the spawn recorded."""
     spawn = _SpawnRecorder()
     try:
-        return branch_cli.main(
+        return branch_entry.main(
             ["--tenant", source.parent.parent.name, source.name,
              str(T947.BRANCH_MESSAGE_ID), *T947.retired_continuation_argv()],
             spawn=spawn, preflight=T947.no_preflight)
@@ -423,7 +423,7 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     ("defender/learning/loop.py", ["--lead-author-drain"]),
     ("defender/learning/author/lessons/run.py", []),
     ("defender/learning/author/questioner/run.py", []),
-    ("defender/learning/frontend/build.py", []),
+    ("defender/cli/learning/lessons_page.py", []),
     ("defender/cli/learning/revert_lesson.py", ["example-lesson"]),
     ("defender/cli/learning/trace_lesson.py", ["--all"]),
 ])

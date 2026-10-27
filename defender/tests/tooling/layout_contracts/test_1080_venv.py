@@ -21,7 +21,7 @@ _COPY_SKIP_TOP = frozenset({"tests", "evals", "docs", "fixtures-e2e", "lessons"}
 
 USERS_FIXED = {
     "api server": "defender/api/serve.py",
-    "frontend build": "defender/learning/frontend/build.py",
+    "frontend build": "defender/cli/learning/lessons_page.py",
     "frontend serializer": "defender/learning/frontend/serialize.py",
 }
 
