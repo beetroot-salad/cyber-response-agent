@@ -105,7 +105,7 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
 
 def _assert_every_layer(run: _Branch, *, systems: tuple[str, ...], system: str,
                         bucket: str = "lead-set") -> None:
-    """The stages O1 names, each observed where it leaves its trace."""
+    """Every stage of the branch, each observed where it leaves its trace."""
     # The launcher accepted the tenant and the question-writer ran against its systems.
     assert "elastic" not in run.launch.message
     assert run.questioner.calls >= 1
@@ -172,7 +172,7 @@ def test_1224_a_tenant_with_no_lab_systems_branches_and_serves_a_world_change(tm
 def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
     est = S.estate(tmp_path)
     if elastic == "fails-to-resolve":
-        # #1108 P4 (OD5): the estate's tenant is published for real, with this config.
+        # The estate's tenant is published for real, with this config.
         est.place(configs={"elastic": "ELASTIC_TRANSPORT=carrier-pigeon\n"})
         assert "elastic" in est.run_tenant().systems
     else:
@@ -181,8 +181,8 @@ def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
 
     doc = _family(S.SYSTEMS, S.fact("f1"), S.fact("f2", "bob reset carol's password from "
                                                         "10.0.0.9", ("bob", "carol", "10.0.0.9")))
-    # Check 2's reference is the column set of some real idp row at this path (M14 re-ruled
-    # 2026-10-10), so the forged row carries exactly the sibling base row's columns.
+    # Check 2's reference is the column set of some real idp row at this path, so the forged
+    # row carries exactly the sibling base row's columns.
     idp_row = {"action": "logon", "event_id": "e-100", "user": "alice", "entity": "alice",
                "kind": "seen"}
     run = _branch_end_to_end(tmp_path, est, doc=doc, calls=_default_calls(), system="idp",

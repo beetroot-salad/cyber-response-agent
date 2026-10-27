@@ -201,8 +201,8 @@ def _parts_by_side(model: S.ScriptedModel, i: int) -> tuple[str, list[str]]:
 
 
 def _assert_one_source(model: S.ScriptedModel, what: str) -> None:
-    """O-01: no template arrives both as the system side and rendered into a user part; no
-    `{slot}` survives anywhere outside a frame."""
+    """No template arrives both as the system side and rendered into a user part; no `{slot}`
+    survives anywhere outside a frame."""
     assert model.seen, f"{what}: the oracle was never asked"
     for i in range(model.requests):
         system, user = _parts_by_side(model, i)
@@ -226,8 +226,8 @@ def _argvs(log: Any) -> list[str]:
 
 def _host_box() -> tuple[Any, S.BoxLog]:
     """The executor `start_box` hands out under the opt-out: a REAL host transport
-    (`_HostTransport`, GD-16: `sandboxed` False), recording each frame before it RUNS IT ON THE
-    HOST. A frame reaching it is exactly the failure the scenarios look for."""
+    (`_HostTransport`, `sandboxed` False), recording each frame before it RUNS IT ON THE HOST.
+    A frame reaching it is exactly the failure the scenarios look for."""
     spec_mod = S.mod("box._spec")
     log = S.BoxLog()
 
@@ -250,7 +250,7 @@ def _host_box() -> tuple[Any, S.BoxLog]:
 
 def _dead_runtime_box() -> tuple[Any, S.BoxLog]:
     """A box factory whose container runtime is down: `BoxFault`, the class `start_box` raises
-    when docker cannot start or name the box (GD-16's observed shape)."""
+    when docker cannot start or name the box."""
     log = S.BoxLog()
 
     def factory() -> Any:
@@ -277,11 +277,10 @@ class _TeardownLog:
 
 
 def _torn_down_box(*, delay: float = 0.0, out: bytes = b"") -> tuple[Any, _TeardownLog]:
-    """A sandboxed box factory (`_DockerTransport`, GD-16) whose executors CARRY the docker
-    they were created through (#1195: every lifecycle call on a box, its removal included, goes
-    through that callable). The callable records the call and reports success, so a teardown
-    is observable as a `docker rm -f <name>` it received. `delay` is real latency inside the
-    box (a long-running Python call)."""
+    """A sandboxed box factory (`_DockerTransport`) whose executors CARRY the docker they were
+    created through (every lifecycle call on a box, its removal included, goes through it). The
+    callable records the call and reports success, so a teardown is observable as a
+    `docker rm -f <name>` it received. `delay` is real latency inside the box."""
     spec_mod = S.mod("box._spec")
     codec = S.mod("execution.box_codec")
     log = _TeardownLog()
@@ -602,7 +601,7 @@ def test_1224_verifier_gets_call_base_served_facts_and_frozen_telemetry(tmp_path
         assert set(_tool_calls(msgs)) <= {"run_query", "verdict"}, _tool_calls(msgs)
     # The same grant door: the withheld verb reached the tenant from neither model ...
     assert est.calls("edr", "lookup") == []
-    # ... and the granted one did, bounded by the branch point (D3: the stub logs as_of) ...
+    # ... and the granted one did, bounded by the branch point (the stub logs as_of) ...
     lookups = [r for r in est.calls("idp", "lookup") if r["params"] == {"entity": "alice"}]
     assert lookups, lookups
     assert all(r["as_of"] == S.AS_OF_DT.isoformat() for r in lookups), lookups
@@ -956,7 +955,7 @@ def test_python_box_cannot_be_started(tmp_path, monkeypatch):
     try:
         _drive(where, reg, est, params=Q_ALICE, holder=holder)
     except S.unservable_cls():
-        pass  # the sibling's abort; whether it leaves the driver is not this demand's
+        pass  # the sibling's abort; whether it leaves the driver is not this test's question
     assert o.seen, "the investigator's call never reached the oracle"
     assert not marker.exists()
     assert log.frames == []
@@ -1042,7 +1041,7 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
     params = list(inspect.signature(start_box).parameters)
     assert params == ["env"], f"the oracle box factory takes more than its env: {params}"
 
-    # 3 (world c's half): world c serves first and freezes its own row.
+    # World c serves first and freezes its own row.
     est.answer("idp", "query", Q_BOB, _answer(_row("e-200", user="bob")))
     edr_base = _events(_edr_event(note="EDRBASE-1380"))
     est.answer("edr", "query", Q_EDR, edr_base)
@@ -1056,7 +1055,7 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
     assert [r["forged_id"] for r in S.oracle_rows(ep, "c", "forged")] == ["fg-c"]
     assert "CWORLDMARK-1381" in json.dumps(S.oracle_rows(ep, "c", "forged"))
 
-    # 2: a whole investigation, the investigator's box beside the oracle's.
+    # A whole investigation, the investigator's box beside the oracle's.
     inv_factory, inv_log = S.sandboxed_box()
     o_box, o_log = S.sandboxed_box(out=b"wrote scratch\n")
     b_row = _forged(msg="BFROZEN-1382 kerberos TGT issued")
@@ -1083,7 +1082,7 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
     assert not any("INVBASH-1383" in arg for arg in _argvs(o_log)), (
         "the investigator's command ran in the oracle's box")
 
-    # 3: frozen rows stay frozen; world c's store reaches none of world b's models.
+    # Frozen rows stay frozen; world c's store reaches none of world b's models.
     frozen = S.oracle_rows(ep, "b", "forged")
     assert [r["forged_id"] for r in frozen] == ["fg-1"]
     later = vb.requests
@@ -1388,7 +1387,7 @@ def test_overflow_cleanup_crossing_deadline_is_settled_before_attempt_can_retry(
                 release_cleanup.set()  # the deadline has requested shutdown too
         if argv[1:3] == ["rm", "-f"]:
             removed_before_settlement.append(not worker_finished.is_set())
-            release_cleanup.set()  # also allow the old, abandoning implementation to finish
+            release_cleanup.set()  # so an implementation that abandons the worker cannot hang here
         return subprocess.CompletedProcess(argv, 0, "exited", "")
 
     class OverflowTransport(box_mod._DockerTransport):

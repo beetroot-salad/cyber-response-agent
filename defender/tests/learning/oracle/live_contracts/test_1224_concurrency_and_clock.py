@@ -51,7 +51,7 @@ def _as_text(value: Any) -> str:
 
 
 class _Call(threading.Thread):
-    """One investigator call on its own thread (the query tool's worker thread, GD-33)."""
+    """One investigator call on its own thread (the query tool's worker thread)."""
 
     def __init__(self, fn: Callable[[], Any], barrier: threading.Barrier | None = None) -> None:
         super().__init__(daemon=True)
@@ -111,7 +111,7 @@ def _spans(*models: S.ScriptedModel) -> list[tuple[float, float, str]]:
 
 
 def _assert_never_overlap(*models: S.ScriptedModel) -> None:
-    """S11: within one world no oracle or verifier request is open while another is."""
+    """Within one world no oracle or verifier request is open while another is."""
     spans = _spans(*models)
     for (_s0, f0, n0), (s1, _f1, n1) in zip(spans, spans[1:], strict=False):
         assert s1 >= f0 - 1e-3, (
@@ -271,13 +271,13 @@ def _own_rows(run_dir: Path) -> list[dict]:
 
 def _budget(summary: dict) -> dict:
     """The run's budget counters, read off the run's one `RunState`, which the driver hands back
-    as `summary["run_state"]` (#1235: no file in the run dir holds them)."""
+    as `summary["run_state"]` (no file in the run dir holds them)."""
     return summary["run_state"].budget_snapshot()
 
 
 def _slow_adapter(est: S.Estate, system: str, seconds: float) -> None:
     """Make the planted adapter for `system` slow: a REAL adapter module whose answer takes
-    `seconds` (real-system latency, the investigator's own on a real run — GD-10)."""
+    `seconds` (real-system latency, the investigator's own on a real run)."""
     path = est.adapters / f"{system.replace('-', '_')}_adapter.py"
     head = "def _answer(ctx: VerbContext, name: str, params: dict):\n"
     src = path.read_text(encoding="utf-8")
@@ -782,7 +782,7 @@ def test_1224_forged_store_has_one_writer_and_commits_rows_with_the_verified_ans
     assert oracle.submissions() == 2
 
     # The project's JSONL reader skips a line that is not a row: a torn trailing record reads
-    # as not written, which is exactly the reading O-08 asks of every reader.
+    # as not written, as every reader must read it.
     complete = S.read_jsonl(store / "forged.jsonl")
     ids = [r["forged_id"] for r in complete]
     assert "fg-1" not in ids, "the failed attempt's forged row was committed"
@@ -823,7 +823,7 @@ class _SnapshotSpawn(S.FakeSpawn):
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
         label = T._world_of(argv)
-        ep = S.episode_of(list(argv))  # #1187: the episode the launcher minted, from the argv
+        ep = S.episode_of(list(argv))  # the episode the launcher minted, from the argv
         if label is not None and ep is not None:
             snap = _snapshot(S.oracle_dir(ep, label))
             if snap:

@@ -38,8 +38,7 @@ def _episode(where: Path, doc: dict | None = None, *, text: str | None = None) -
 
 def _load(ep: Path) -> Any:
     """The runtime loader over the episode's manifest on disk (`load_family` through a view),
-    handed the episode's own folder name as the expected id (#1187 R5: a required keyword, the
-    one the episode handle supplies; review-4 F36)."""
+    handed the episode's own folder name as the required `expected_episode_id`."""
     with _episode_cls().open(Path(ep)) as handle:
         return S.sym(S.FAMILY, "load_family")(handle.view(), expected_episode_id=Path(ep).name)
 
@@ -64,9 +63,8 @@ def _judge_read(ep: Path) -> dict:
 
 
 def _page(ep: Path, capsys: Any) -> tuple[int, str]:
-    """The episode page as the operator runs it: its exit code and what it printed on stderr
-    (#1105 PR 2, declared change 4: `--tenant T <episode_id>` under the episodes base holding
-    `ep`, `_episode_1025.cli_on`)."""
+    """The episode page as the operator runs it (`_episode_1025.cli_on`): its exit code and
+    what it printed on stderr."""
     capsys.readouterr()
     rc, _out, err = E.cli_on(Path(ep), capsys, module=S.mod(S.VISUALIZE))
     return rc, err
@@ -77,8 +75,8 @@ def _page_file(ep: Path) -> Path:
 
 
 def _grade(ep: Path, judge: Any, where: Path) -> Any:
-    """`grade_episode` over the episode at `ep`, by id (#1105 PR 2, `_judge_921.grade_at`): the
-    judge reads only the episode it is handed (J3), so `where` threads nothing in."""
+    """`grade_episode` over the episode at `ep` (`J.grade_at`): the judge reads only the
+    episode it is handed, so `where` threads nothing in."""
     from defender.tests.support.learning.core._state1135 import env_state
 
     del where
@@ -99,7 +97,7 @@ _PREDICATE = "did the analyst look at idp after the branch"
 
 
 def _doc(*seats: tuple[str, list], **over: Any) -> dict:
-    """A v2 manifest: the control world `a` (an explicit `facts: []`, M07=A), then one seat per
+    """A v2 manifest: the control world `a` (an explicit `facts: []`), then one seat per
     `(label, facts)`, each with its OWN role — two arms sharing a role are refused by the
     launcher's identity gate, which would mask the rule a scenario is about."""
     seats = seats or (("b", [_F1]), ("c", [_F2]))
@@ -191,7 +189,7 @@ def _serving(where: Path, doc: dict, label: str, *, oracle: Any = None, verifier
 
 
 def _samples(*, siem_x: list[str] | None = None) -> dict:
-    """A samples record with a section for EVERY served system (O16: a served system with no
+    """A samples record with a section for EVERY served system (a served system with no
     section is itself a failure), `siem-x` carrying `siem_x` as its lookup examples."""
     out: dict[str, Any] = {s: {"unavailable": "no capture"} for s in S.SYSTEMS}
     if siem_x is not None:
@@ -597,7 +595,7 @@ def _beside_new(key: str) -> dict:
     return doc
 
 
-#: Old fields present as empty or null (b_p023), and beside the new fields (s_p025).
+#: Old fields present as empty or null, and beside the new fields.
 _OLD_AT_EVERY_READER: list[tuple[str, Any]] = [
     ("overlay-empty", lambda: _old_doc("overlay", {})),
     ("overlay-null", lambda: _old_doc("overlay", None)),

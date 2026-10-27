@@ -44,7 +44,7 @@ DROPPED = "CMDB_URL_BASE"
 
 
 def _plant_tenant() -> tuple[Path, Any]:
-    """A complete tenant under this test's data root (K6: every system configured), its table
+    """A complete tenant under this test's data root (every system configured), its table
     granting gather cmdb.get-host: (knowledge folder, accepted Tenant)."""
     root = current_data_root()
     knowledge = T6.place_tenant(root, TENANT_ID, table=T6.TABLE_A)
@@ -210,7 +210,7 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
         f"the run-wide failure count was charged: {down['state'].breaker_snapshot()!r}")
 
 
-# --- O-8 x O-9: every granted system down at the sibling's start -----------------------------------
+# --- every granted system down at the sibling's start ------------------------------------------------
 
 #: Every system the playground tenant's table (`TABLE_A`) grants gather, with a key its adapter's
 #: settings check requires; dropping one makes that system not configured.
