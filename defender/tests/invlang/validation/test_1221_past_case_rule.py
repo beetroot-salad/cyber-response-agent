@@ -87,7 +87,8 @@ def _row_errors(doc: str) -> list[str]:
 
 @pytest.mark.parametrize("grounding", PAST_CASE_SPELLINGS + OTHER_GROUNDINGS)
 def test_1221_a_benign_close_resting_on_past_cases_alone_is_refused(grounding):
-    """NEGATIVE, with its controls on the same address."""
+    """The citation, not the grounding word, makes a row a past case; controls on the same
+    address."""
     cited = _grounded(grounding, cites=PRIOR_RUN)
     uncited_authority = _grounded("org-authority", cites="")
 
@@ -109,21 +110,10 @@ def test_1221_a_benign_close_resting_on_past_cases_alone_is_refused(grounding):
     )
 
 
-def test_1221_the_rule_keys_on_the_citation_not_on_the_grounding():
-    assert _refusals_of_ac1(_grounded("org-authority", cites=PRIOR_RUN)), (
-        "an org-authority row citing a prior run discharged ac1 — the citation, not the "
-        "grounding word, decides whether a row is a past case"
-    )
-    assert _errors(_grounded("org-authority", cites="")) == [], (
-        "the control failed: the uncited org-authority row was refused"
-    )
-
-
 @pytest.mark.parametrize(
     "disposition", [d for d in DISPOSITION_VALUES if d != "benign"],
 )
 def test_1221_the_past_case_rule_is_benign_only(disposition):
-    """The complementary condition."""
     baseline = _errors(_with_disposition(_grounded("org-authority", cites=""), disposition))
     for grounding in ("past-case", "org-authority"):
         cited = _errors(_with_disposition(_grounded(grounding, cites=PRIOR_RUN), disposition))
@@ -185,18 +175,6 @@ def test_1221_a_citation_that_is_not_a_run_id_is_an_error(cite):
 
     good = _with_disposition(_grounded("past-case", cites=PRIOR_RUN), "malicious")
     assert _errors(good) == [], f"the control failed: a valid run id draws {_errors(good)}"
-
-
-def test_1221_a_valid_citation_under_org_authority_is_still_a_past_case():
-    doc = _grounded("org-authority", cites=PRIOR_RUN)
-    assert _errors(_with_disposition(doc, "malicious")) == [], (
-        f"a valid citation under org-authority draws "
-        f"{_errors(_with_disposition(doc, 'malicious'))} under malicious"
-    )
-    assert _refusals_of_ac1(doc), (
-        f"an org-authority row citing {PRIOR_RUN} discharged ac1 on a benign close: "
-        f"{_errors(doc)}"
-    )
 
 
 AC1_DECL = 'ac1|e-001|iam-policy|"metrics-shipper is provisioned and authorized for this source→target SSH path"|escalate|escalate'

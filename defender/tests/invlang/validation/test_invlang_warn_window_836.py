@@ -23,12 +23,13 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (
 )
 
 
-#: EXECUTED at c0dca747 — two warn-family diagnostics, no others.
+#: Two warn-family diagnostics, no others.
 TWO_WARN_DOC = PROLOGUE + attr_block(WARN_ROW, SECOND_WARN_ROW)
 
 
 def _pay_inconclusive_price(deps) -> None:
-    """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a source or capability), unrelated to anything this module tests — the warn-severity repair window."""
+    """Pay `inconclusive`'s entry price (#923), which is unrelated to the repair window; skipped
+    while a row is flagged, so it never masks the gate."""
     from pathlib import Path
 
     from defender.investigation.tools import flagged_diagnostics
@@ -70,10 +71,11 @@ class _NullStore:
         return None
 
 
-# M3 — the window is DERIVED
+# the window is DERIVED
 
 def test_window_is_derived_from_the_on_disk_document(tmp_path):
-    """The window is a pure function of the document's current bytes:"""
+    """The window is a pure function of the document's current bytes: change them and it
+    follows, with nothing recording that a row was ever flagged."""
     _deps, run = main_deps(tmp_path)
     inv = seed_investigation(run, WARN_DOC)
 
@@ -87,7 +89,8 @@ def test_window_is_derived_from_the_on_disk_document(tmp_path):
 
 
 def test_prepare_read_before_investigation_md_exists(tmp_path):
-    """`prepare=` runs on EVERY model request, including turn 1 — before any write verb has created `investigation.md` at all."""
+    """`prepare=` runs on EVERY model request, including turn 1, before any write verb has
+    created `investigation.md`."""
     deps, run = main_deps(tmp_path)
 
     assert not (run / "investigation.md").exists()
@@ -129,8 +132,8 @@ def test_every_gate_flags_the_same_row_set(tmp_path):
 
 
 def test_window_is_recomputed_after_each_fix_row(tmp_path):
-    """The window is re-derived from disk after every repair — there is no cached set to
-    invalidate, which is M3's whole reason for being derived."""
+    """The window is re-derived from disk after every repair: there is no cached set to
+    invalidate."""
     from defender.investigation.tools import _tool_fix_row
 
     deps, run = main_deps(tmp_path)
@@ -178,7 +181,7 @@ def test_window_reopens_after_a_later_unrelated_defect(tmp_path):
 
 
 def test_window_derivation_failure_does_not_wedge_the_run(tmp_path):
-    """H7: when the window CANNOT be derived, every one of the three paths fails OPEN."""
+    """When the window CANNOT be derived, every one of the three paths fails OPEN."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.tools import _tool_append_block
@@ -205,10 +208,11 @@ def test_window_derivation_failure_does_not_wedge_the_run(tmp_path):
     assert not (run2 / "report.md").exists()
 
 
-# O1 / F-E — the accept path
+# the accept path
 
 def test_a_warn_family_defect_lands_and_returns_a_warning(tmp_path):
-    """O1, the cost lever: a block whose only defect is warn-family LANDS, and the model is handed the warning instead of having to re-emit the whole block."""
+    """A block whose only defect is warn-family LANDS, and the model is handed the warning
+    instead of having to re-emit the whole block."""
     from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
@@ -221,7 +225,8 @@ def test_a_warn_family_defect_lands_and_returns_a_warning(tmp_path):
 
 
 def test_the_accept_path_derives_its_warning_after_the_gate_returned_none(tmp_path):
-    """F-E option (i), and the two-passes-per-accepted-append correction to the Scale note."""
+    """The gate returns no text when it accepts, so the warning comes from a second derivation
+    over the bytes just written."""
     from defender.records._artifact_schema import validate_investigation
     from defender.investigation.tools import _tool_append_block
 
@@ -234,10 +239,11 @@ def test_the_accept_path_derives_its_warning_after_the_gate_returned_none(tmp_pa
     assert "refinement key" in result, "the rendered warning itself never reached the model"
 
 
-# M5 — the gate
+# the gate
 
 def test_append_block_refused_while_a_row_is_flagged(tmp_path):
-    """M5 on the write side:"""
+    """With a row flagged, the next `append_block` is refused even if its own text is clean,
+    and the refusal names the repair verb."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.tools import _tool_append_block
@@ -253,22 +259,9 @@ def test_append_block_refused_while_a_row_is_flagged(tmp_path):
     assert (run / "investigation.md").read_text(encoding="utf-8") == WARN_DOC
 
 
-def test_close_investigation_refused_while_a_row_is_flagged(tmp_path):
-    """O4 on the close side:"""
-    from pydantic_ai.exceptions import ModelRetry
-
-    deps, run = main_deps(tmp_path)
-    seed_investigation(run, WARN_DOC)
-
-    with pytest.raises(ModelRetry) as exc:
-        _close(deps, "inconclusive")
-
-    assert WARN_ROW in str(exc.value)
-    assert not (run / "report.md").exists()
-
-
 def test_close_gate_precedes_every_disposition_branch(tmp_path):
-    """H5: the gate sits at the TOP of the close — after the disposition-enum and terminal-closed checks, and before ANY disposition branch."""
+    """While a row is flagged the close is refused for every disposition: the gate sits at the
+    TOP of the close, after the disposition-enum and terminal-closed checks."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -287,7 +280,6 @@ def test_close_gate_precedes_every_disposition_branch(tmp_path):
 
 
 def test_close_gate_precedes_the_review_spend(tmp_path):
-    """H5's other half: a close refused for a flagged row never spends a review."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -330,7 +322,7 @@ def test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives(tmp_path
 
 
 def test_a_gated_refusal_leaves_both_artifacts_byte_identical(tmp_path):
-    """The negative the refusal's own prose is claiming:"""
+    """A gated refusal writes NOTHING on either artifact, investigation.md or report.md."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.tools import _tool_append_block
@@ -357,7 +349,8 @@ def test_a_gated_refusal_leaves_both_artifacts_byte_identical(tmp_path):
 
 
 def test_a_landed_warn_row_refires_on_the_next_append(tmp_path):
-    """The gate is FORCED, not chosen:"""
+    """The gate is FORCED: validation walks the FULL proposed document, so a committed bad row
+    re-fires on every append and the model cannot append its way past it."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.tools import _tool_append_block
@@ -371,10 +364,12 @@ def test_a_landed_warn_row_refires_on_the_next_append(tmp_path):
         assert WARN_ROW in str(exc.value), f"attempt {attempt}"
 
 
-# H1 — the framework's forced close
+# the framework's forced close
 
 def _drive_to_retry_exhaustion(deps):
-    """Run the REAL agent loop with a model that never stops retrying a refused call, so pydantic-ai exhausts `DEFAULT_TOOL_RETRIES` (10, well inside the 62-request ceiling) and the driver's own forced-close limb runs."""
+    """Run the REAL agent loop with a model that never stops retrying a refused call, so
+    pydantic-ai exhausts `DEFAULT_TOOL_RETRIES` (well inside the request ceiling) and the
+    driver's own forced-close limb runs."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     from defender.investigation import challenge_gate, driver
@@ -395,7 +390,7 @@ def _drive_to_retry_exhaustion(deps):
 
 
 def test_close_gate_distinguishes_model_invoked_from_framework_invoked(tmp_path):
-    """H1, the one written-down exception to O4's negative universal."""
+    """The one exception to the close gate: the framework's own forced close is not gated."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -416,7 +411,6 @@ def test_close_gate_distinguishes_model_invoked_from_framework_invoked(tmp_path)
 
 
 def test_forced_close_failure_is_distinguishable_from_a_committed_close(tmp_path):
-    """Renamed from `test_forced_close_handler_surfaces_a_gate_refusal` (HD-1 repairs) to state the property this body actually asserts."""
     deps_ok, run_ok = main_deps(tmp_path / "commits")
     seed_investigation(run_ok, PROLOGUE)
     _run, _t_ok, exit_ok = _drive_to_retry_exhaustion(deps_ok)
