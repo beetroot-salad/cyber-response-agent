@@ -1,4 +1,4 @@
-"""Substrate for the issue-719 executable spec (`spec_graph_719.yaml`)."""
+"""Shared scene for the #719 drain tests: a real repo, queue files, lock holders and agent fakes."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -13,16 +13,13 @@ import threading
 import time
 from pathlib import Path
 
-try:  # NOT YET WRITTEN — D3's `author/drain.py` is what this spec is the contract for
+try:  # a missing module fails each test on use rather than aborting collection
     from defender.learning.author import drain  # type: ignore[import-not-found]
 except ImportError as _missing_target:  # pragma: no cover — the pre-implementation state
 
     class _NotYetWritten:
-        """Stands in for the target module until it exists.
-
-        NOT a skip and NOT a soften: every attribute access raises, so each test fails
-        loudly on its own. The indirection exists only so a missing target does not abort
-        pytest's whole collection and take the rest of the tree's suite down with it."""
+        """Stands in for a missing target module: every attribute access raises, so each test
+        fails loudly on its own (not a skip) while the rest of the tree still collects."""
 
         def __init__(self, dotted: str, err: BaseException) -> None:
             self._dotted, self._err = dotted, err
@@ -42,32 +39,16 @@ from defender.learning.core.state import (  # type: ignore[import-not-found]
 )
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
-#: The channels one folded drain body serves. `pitfalls` is the other queue but is drained by
-#: the lead-author tick, not by a corpus author, so it is named separately.
-#:
-#: ONE SINCE #922. The three observation channels were written by the old pipeline's judge and
-#: read by two curators under `author/`; producer and consumers were deleted together, so the
-#: fold's own properties (one lock per channel, one gate per tick, a stuck row per channel) are
-#: now exercised on the one channel that still has both ends. The tuple stays a tuple because
-#: what it parametrises is "per channel", not "for findings".
-#: MULTI-CHANNEL DEMANDS LEFT THIS FAMILY WITH #922, recorded rather than dropped in silence.
-#:
-#: Thirteen tests here compared TWO channels' behaviour against each other — that retirement is
-#: identical for observations and findings, that a stuck appender on one channel does not hold
-#: the repo lock for another, that each direction's gate keeps its own policy through the shared
-#: drain, that every channel declares its own id key and lock path. All of them needed two live
-#: channels, and the three observation channels retired with the old pipeline's judge, which was
-#: their only producer. One channel cannot witness a between-channels property.
-#:
-#: What survives is every single-channel property, driven on `findings` — the channel that still
-#: has both a producer and a consumer. Restore the comparisons when a second channel returns.
+#: The channels the folded drain body serves (`pitfalls` is drained by the lead-author tick, so
+#: it is named separately). Only `findings` has both a producer and a consumer since #922; it
+#: stays a tuple because tests loop "per channel". Between-channel properties (shared
+#: retirement, per-channel locks and gates) need a second channel and return with one.
 AUTHOR_CHANNELS = (
     "findings",
 )
 ALL_CHANNELS = AUTHOR_CHANNELS + ("pitfalls",)
 
-#: channel name -> the direction module's real config builder. The fold keeps these as
-#: per-direction config builders (D3); it deletes their batch-driver bodies, not them.
+#: channel name -> the channel's real config builder.
 def _findings_cfg(paths: LoopPaths):
     """The real findings config over `paths`."""
     from defender.tests.support.learning.curation._curator1134 import author_trees
@@ -80,8 +61,8 @@ BUILDERS = {
     "findings": _findings_cfg,
 }
 
-#: The append-lock file names as they stand at the base commit, per channel. D1 keeps these
-#: identities so in-flight appenders need no coordination.
+#: The append-lock file name per channel, kept stable so in-flight appenders need no
+#: coordination.
 APPEND_LOCK_NAMES_TODAY = {
     "findings": ".findings.lock",
     "pitfalls": ".pitfalls.lock",
@@ -113,21 +94,17 @@ def make_repo(tmp_path: Path) -> Path:
 
 
 def _make_repo(tmp_path: Path) -> Path:
-    """A committed-clean git repo carrying the live lesson corpora the author channels write
-    (#1108 P4 U5: `lessons-actor`/`lessons-environment` are deleted), with the mutable
-    learning state gitignored."""
+    """A committed-clean git repo carrying the lesson corpora the author channels write, with the
+    mutable learning state gitignored."""
     repo = tmp_path / "repo"
-    for corpus in ("lessons", "lessons-questioner"):  # #1108 P4 U5: the retired corpora are deleted
+    for corpus in ("lessons", "lessons-questioner"):
         d = repo / "defender" / corpus
         d.mkdir(parents=True)
         (d / ".gitkeep").write_text("")
     elastic = repo / "defender" / "skills" / "elastic"
     elastic.mkdir(parents=True)
-    # A system dir is a system dir because it carries a `SKILL.md` — the pitfalls curator
-    # folds into `<system>/execution.md` only for systems that already exist, and a bare
-    # directory is not one (#855 F-06). Committed, so the corpus this harness claims to carry
-    # is actually in HEAD: git tracks no empty directory, so before this the skills corpus was
-    # the one of the four that `git add -A` silently dropped.
+    # A `SKILL.md` makes `elastic` a system: the pitfalls curator writes `<system>/execution.md`
+    # only for existing systems (#855), and git tracks no empty directory.
     (elastic / "SKILL.md").write_text("---\nname: defender-elastic\n---\n# elastic\n")
     (repo / "defender" / "skills" / "gather" / "queries").mkdir(parents=True)
     adapters = repo / "defender" / "integrations"
@@ -157,9 +134,8 @@ def channel_of(name: str) -> Channel:
 
 
 def cfg_for(paths: LoopPaths, name: str, **overrides):
-    """The real direction builder for `name`, with test overrides applied through the
-    injection seams. `max_attempts` defaults to 3 here so a test that cares about the
-    ceiling states it, and one that does not gets the shipped default."""
+    """The real builder for `name`, with `overrides` replaced in. A test that cares about the
+    ceiling states `max_attempts`; others get the shipped default (3)."""
     cfg = BUILDERS[name](paths)
     return dataclasses.replace(cfg, **overrides)
 
@@ -168,16 +144,14 @@ def cfg_for(paths: LoopPaths, name: str, **overrides):
 
 
 def obs_row(oid: str, *, outcome: str = "caught", **extra) -> dict:
-    """One observation row. `caught`/`incoherent` are the finding-bearing outcomes for the
-    actor and actor-env directions; `survived` is the benign direction's. An empty
-    `source_run_dir` short-circuits the gate's source-bundle check."""
+    """One observation-channel row (those channels retired with #922): `caught`/`incoherent`
+    bear findings, `survived` is benign. An empty `source_run_dir` skips the source-bundle check."""
     return {"observation_id": oid, "judge_outcome": outcome, "source_run_dir": "", **extra}
 
 
 def finding_row(fid: str, *, run_id: str, direction: str = "family", **extra) -> dict:
-    """A defender row the lessons gate admits: `direction: family` carrying the three fields
-    `_gate_family` reads as its ground truth (#1234). Since #1166 it is the only direction the
-    gate authors; any other is held `retired_direction(...)`."""
+    """A defender row the lessons gate admits: `direction: family` with the three fields
+    `_gate_family` reads (#1234). The gate holds any other direction as `retired_direction(...)`."""
     return {
         "schema_version": 1,
         "finding_id": fid,
@@ -210,9 +184,8 @@ def row_for(name: str, rid: str, **extra) -> dict:
             "query_id": "elastic.esql",
             "goal": "g",
             "executed_query": "bad pipe",
-            # Per-row, because #840 collapses rows sharing a digest into ONE record and the
-            # curation threshold counts records. A row here stands for one queued unit of
-            # work, so each has to be a distinct mistake.
+            # Distinct per row: rows sharing a digest collapse into one record (#840), and the
+            # curation threshold counts records.
             "stderr_digest": f"exit=1; mismatched input ({rid})",
             "error_class": "agent-fixable",
             **extra,
@@ -264,9 +237,8 @@ def attempts_of(paths: LoopPaths, channel: Channel, rid: str) -> int | None:
 
 
 def raising(exc: BaseException):
-    """An agent call that raises `exc`. The fake decides nothing: the class it raises is
-    the whole fault content, and every use in this spec cites the ledger claim that
-    observed that class on the real dependency."""
+    """An agent call that raises `exc`; the class it raises is the whole fault, and the fake
+    decides nothing."""
 
     def fake(rows, batch_id, cfg):
         raise exc
@@ -282,9 +254,8 @@ def committing(stem: str = "lesson", *, also=None):
     def fake(rows, batch_id, cfg):
         key = cfg.channel.id_key
         ids = [r[key] for r in rows]
-        # `source_<id_key>s` is the frontmatter key the pre-author idempotency gate reads back
-        # off the corpus (`existing_observation_ids` / `existing_finding_ids`), so a lesson
-        # written here is one a LATER tick recognises as already authored.
+        # `source_<id_key>s` is the key the pre-author idempotency gate reads back off the
+        # corpus, so a later tick recognises this lesson as already authored.
         (cfg.corpus_dir / f"{stem}-{batch_id}.md").write_text(
             f"---\nsource_{key}s:\n" + "".join(f"- {i}\n" for i in ids) + "---\n\nbody\n"
         )
@@ -323,9 +294,8 @@ def returning(result: dict):
 
 
 def recording(inner):
-    """Wraps a fake so the test can see whether the agent was reached at all, and with
-    what config — the observation that separates "the drain never got there" from "the
-    drain got there and the step after it failed"."""
+    """Wraps a fake to record whether the agent was reached, and with what config: "the drain
+    never got there" versus "a step after it failed"."""
     calls: list[dict] = []
 
     def fake(rows, batch_id, cfg):
@@ -337,9 +307,8 @@ def recording(inner):
 
 
 def blocking(gate: threading.Event, released: threading.Event, inner=None):
-    """An agent call that parks until `gate` is set — the in-flight batch every O2 / O7
-    oracle needs. `released` fires the moment the call is entered, so the test can wait
-    for the batch to actually be inside the agent phase rather than sleeping."""
+    """An agent call that parks until `gate` is set: an in-flight batch. `released` fires on
+    entry, so a test waits for the agent phase instead of sleeping."""
 
     def fake(rows, batch_id, cfg):
         released.set()
@@ -353,13 +322,9 @@ def blocking(gate: threading.Event, released: threading.Event, inner=None):
 
 
 class Holder:
-    """Holds a real `fcntl` lock on `path` from a worker thread until released.
-
-    A thread, not a subprocess, because PJ2a probed that `flock(LOCK_EX)` excludes two OS
-    threads of one process from each other — so the exclusion under test is the real one.
-    Where a test needs a genuinely separate actor (a second process's own path set), it
-    spawns a subprocess instead: `DEFAULT_PATHS` is frozen at import (F7), so an in-process
-    env change would not reach it."""
+    """Holds a real `fcntl` lock on `path` from a worker thread until released. A thread is
+    enough: `flock(LOCK_EX)` on a separately opened file excludes other threads of the same
+    process, so the exclusion under test is the real one."""
 
     def __init__(self, path: Path, *, blocking_discipline: bool = True) -> None:
         self.path = path
@@ -442,14 +407,11 @@ def elapsed(fn) -> tuple[object, float]:
 
 
 def run_in_subprocess(script: str, *, repo: Path, env_extra: dict[str, str] | None = None):
-    """Run `script` in a genuinely fresh interpreter rooted at this checkout.
-
-    C14/P44 is a phase-E constraint, not a fork: `DEFAULT_PATHS` is frozen at import, so a
-    test that needs a second actor gets a second process, never an in-process env poke."""
-    # This checkout's root, from this file's own place in it (`defender/tests/support/learning/
-    # curation/`): never `defender.__path__[0]`, which for the namespace package can name another
-    # `defender/` folder a test put on the path first (a scratch repo's), so the fresh process
-    # would import from the wrong tree.
+    """Run `script` (with `repo` as `argv[1]`) in a fresh interpreter rooted at this checkout:
+    a genuinely separate actor."""
+    # This checkout's root from this file's place in it, never `defender.__path__[0]`: for the
+    # namespace package that can name another `defender/` a test put on the path first (a
+    # scratch repo's), and the fresh process would import from the wrong tree.
     root = Path(__file__).resolve().parents[5]
     env = dict(os.environ)
     env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")

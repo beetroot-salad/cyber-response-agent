@@ -1,4 +1,4 @@
-"""#923 — where a disposition can be AUTHORED, and what each surface refuses (O4, O6, M5, M6)."""
+"""#923: where a disposition can be authored, and what each surface refuses."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T

@@ -1,6 +1,6 @@
-"""Pre-flight gates: lock, ground-truth filter, idempotency.
+"""Pre-flight gates: the drain and repo locks, the idempotency filter, an empty queue.
 
-#1108 P4 (O7): the author works on a batch draft (clean-scope is the draft's construction, P3)."""
+The author works on a batch draft, which is clean by construction."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -15,9 +15,8 @@ from defender.learning.core.state import FINDINGS, REPO_LOCK, TRY_ONCE
 from defender.tests.support.learning.curation import _curator1134 as C
 
 
-# #1108 P4 (O7, OD7): the lessons author over a git-free draft, not `tmp_repo`'s product-shaped
-# repo. The config is built with the assumed `batch=` seam (`_curator1134.draft_author_cfg`) on
-# first use, so a test reaches its own body before that seam's absence fails it.
+# The lessons author over a batch's git-free draft; its config (`_curator1134.draft_author_cfg`)
+# is built on first use of `cfg`.
 class _DraftRepo:
     def __init__(self, lane):
         from defender.learning.author.lessons import run as author_mod
@@ -44,7 +43,7 @@ def draft_repo(tmp_path):
 
 
 def test_lock_refuses_concurrent_run(draft_repo, helpers):
-    """A second author tick exits cleanly while the first holds the queue lock."""
+    """The drain role's lock admits one `TRY_ONCE` holder at a time and frees on release."""
     role = draft_repo.cfg.channel.drain_role
     state = draft_repo.state
     with state.lock(role, wait=TRY_ONCE) as first:
@@ -91,15 +90,8 @@ def test_repo_lock_held_returns_zero(draft_repo, helpers):
     assert [p["finding_id"] for p in pending] == ["run-A/0"]
 
 
-# #1108 P4 OD12(i): `test_clean_scope_check_refuses_dirty_lessons` / `test_clean_scope_passes_when_clean`
-# pinned `shared.assert_clean_corpus_dir`, a `git status` check over the worktree corpus. A batch's
-# draft is built fresh from the export commit and re-synced by the per-claim reset, so no prior
-# drift can reach a claim: P3 tenant_1108_delivery/test_batches.py::test_start_batch_makes_a_git_free_draft_of_the_export_commit_and_no_checkout
-# and test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links.
-
-
 def test_idempotency_filter_skips_already_authored(tmp_path, helpers, monkeypatch):
-    # The covering lesson is published in the export commit the draft is built from (#1108 P4).
+    # The covering lesson is published in the export commit the draft is built from.
     draft_repo = _DraftRepo(C.draft_lane(tmp_path, files={"lessons/preexisting.md": (
         "---\n"
         "name: preexisting\n"

@@ -24,14 +24,13 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 
 
 def _bash_roles() -> set[AgentRole]:
-    """The generic bash census predicate #0 collapses to: ``d.tools.bash`` (NO ``d.bindable`` gate)."""
+    """The generic bash census: ``d.tools.bash``, with no ``bindable`` gate."""
     return {d.role for d in AGENTS.values() if d.tools.bash}
 
 
 def _misconfigured_writer_def() -> AgentDefinition:
-    """A def that is a writer (``write=True``) but declares NO ``write_shapes`` — the write
-    co-constraint (``compile_policy``/``build_registry``) must reject it at bind. This is the
-    positive control that proves the census is a real bind, not a field-existence assertion."""
+    """A writer (``write=True``) declaring no ``write_shapes``, which the write co-constraint
+    must reject at bind: the control showing the census is a real bind, not a field check."""
     return AgentDefinition(
         role=AgentRole.MAIN, model=lambda: "x", effort=None,
         tools=ToolSet(bash=True, write=True), write_shapes=(), deps_cls=CuratorDeps,
@@ -39,11 +38,11 @@ def _misconfigured_writer_def() -> AgentDefinition:
 
 
 def test_the_generic_bash_census_enumerates_the_curator(tmp_path):
-    """The generic census predicate ``d.tools.bash`` enumerates every bash-enabled role INCLUDING
-    the curator, with no special case — six roles, not five."""
+    """``d.tools.bash`` enumerates the curator with no special case, and binding it yields a
+    corpus-rooted write scope."""
     assert AgentRole.CORPUS_AUTHOR in _bash_roles()
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = bind_curator(wt, rd, "lessons")  # RED today: bindable=False raises
+    deps = bind_curator(wt, rd, "lessons")
     assert any(pat.fullmatch(str((wt / "defender" / "lessons" / "x.md").resolve()))
                for pat in deps.policy.write_allow)
     with pytest.raises(ValueError):  # noqa: PT011 - the co-constraint fires at bind, not at a census assertion
@@ -51,9 +50,9 @@ def test_the_generic_bash_census_enumerates_the_curator(tmp_path):
 
 
 def test_the_registry_validates_the_curator_at_import_time(tmp_path):
-    assert CORPUS_AUTHOR_DEF.write_shapes != ()  # RED today (empty)
+    assert CORPUS_AUTHOR_DEF.write_shapes != ()
     with pytest.raises(ValueError):  # noqa: PT011
-        build_registry((_misconfigured_writer_def(),))  # the un-skipped validation bites
+        build_registry((_misconfigured_writer_def(),))  # the registry's validation runs
     assert CORPUS_AUTHOR_DEF in AGENTS.values()
 
 
@@ -69,8 +68,8 @@ def test_every_role_in_the_registry_binds_through_the_one_seam(tmp_path):
 
 
 def test_policy_cli_prints_a_compiled_curator_policy(tmp_path):
-    """M9: ``defender-policy show corpus_author --corpus-name lessons`` prints a COMPILED curator
-    policy instead of the old ``SystemExit`` ('builds its policy per-spawn, bindable=False')."""
+    """``defender-policy show corpus_author --corpus-name lessons`` compiles a real curator
+    policy."""
     from defender.cli import policy_cli
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     pol = policy_cli._policy(CORPUS_AUTHOR_DEF, rd, wt / "defender", "lessons")
@@ -78,8 +77,8 @@ def test_policy_cli_prints_a_compiled_curator_policy(tmp_path):
 
 
 def test_binding_a_corpus_requiring_role_without_a_name_raises_legibly(tmp_path):
-    """M8: binding a corpus-REQUIRING role (the curator) with NO corpus name raises a LEGIBLE
-    ValueError naming the role and the missing input — never an IndexError."""
+    """Binding the curator with no corpus name raises a legible ValueError naming the missing
+    input, never an IndexError."""
     from defender.investigation.agent_definition import RunScope
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=r"(?i)corpus[_ ]?name|corpus name"):

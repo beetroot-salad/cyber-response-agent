@@ -13,11 +13,9 @@ from defender.learning.leads import lead_neighbors as ln
 
 _DEFENDER = Path(__file__).resolve().parents[3]
 _ROOT = _DEFENDER.parent
-#: The query catalog the placeholder<->param invariant sweeps. #1108 P4 (O1) moved the catalog out of
-#: the product tree into each tenant's `agent/skills/gather/queries/`; the shipped pre-P4 catalog is the
-#: committed fixture below (the fullest one, 30 templates over adapters that stay in the product tree),
-#: so the sweep checks real templates instead of iterating a deleted folder — and every committed tenant
-#: catalog (`knowledge/<tenant>/agent/...`) beside it.
+#: The catalogs the placeholder<->param invariant sweeps: the pre-P4 shipped catalog, kept as a
+#: fixture since catalogs moved into each tenant's `agent/skills/gather/queries/` (the fullest,
+#: over adapters that stay in the product tree), and every committed tenant catalog.
 _QUERIES = _DEFENDER / "tests" / "fixtures" / "pre-p4-shipped" / "agent" / "skills" / "gather" / "queries"
 _CATALOGS = (_QUERIES, *sorted(_ROOT.glob("knowledge/*/agent/skills/gather/queries")))
 _EXAMPLES = _DEFENDER / "skills" / "connect" / "examples"
@@ -73,7 +71,8 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution(tmp_path):
 
 
 def test_lead_neighbors_scores_the_new_param_only_fence():
-    """demand."""
+    """A structured, param-only query fence keeps its verb and value tokens, and real params
+    (`start`, `end`, `limit`) are not dropped as plumbing."""
     fence_a = "```query\nverb: get-host\nparams:\n  host: web-1\n```"
     fence_b = "```query\nverb: list-hosts\nparams:\n  role: bastion\n```"
 
@@ -101,7 +100,8 @@ def _load_example(name: str):
 
 
 def test_connect_examples_compile_against_the_live_tree():
-    """demand."""
+    """Every connect example compiles; `example_adapter` declares a health-check verb that returns
+    a value, and no example defines a retired CLI-shim symbol."""
     for py in sorted(_EXAMPLES.glob("*.py")):
         py_compile.compile(str(py), doraise=True)
 

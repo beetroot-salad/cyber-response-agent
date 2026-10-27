@@ -1,7 +1,7 @@
-"""#773 — the drain computes everything from ONE truth, the settled corpus tree.
+"""#773: the drain computes everything from one truth, the settled corpus tree.
 
-#1108 P4 (O7): the tree is a batch's git-free draft; what landed is read from the batch branch,
-and "clean after the tick" is the draft re-synced to that branch (`DraftScene.draft_drift`)."""
+The tree is a batch's git-free draft; "clean after the tick" is the draft re-synced to the batch
+branch (`DraftScene.draft_drift`)."""
 from __future__ import annotations
 
 import dataclasses
@@ -48,11 +48,9 @@ def _rewriting_scene(tmp_path, edit):
 
 
 def test_the_citations_are_read_from_the_bytes_the_commit_carries(tmp_path):
-    """One truth by construction (PR #1288 review): a lesson's citations are read from the very
-    bytes its commit carries (the claim's change set), never by re-reading the file. So no
-    writer moving the file between reads can make the commit and its citations disagree, and
-    there is no read of it through the corpus to race at all. Were one made, this writer would
-    strip the citations from the file on disk."""
+    """A lesson's citations are read from the bytes its commit carries (the claim's change set),
+    never by re-reading the file, so no writer moving the file can make the two disagree. Were
+    the file re-read, this writer would strip its citations on disk."""
     stripped = S.lesson(body="no citations any more")
     sc = _rewriting_scene(tmp_path, lambda n: (sc.corpus / "l1.md").write_text(
         stripped, encoding="utf-8"))
@@ -65,8 +63,8 @@ def test_the_citations_are_read_from_the_bytes_the_commit_carries(tmp_path):
 
 
 def test_a_mode_only_change_is_put_back_and_the_tree_is_clean_after_the_tick(tmp_path):
-    """A box's mode flip never lands (every tenant commit is 100644) and the draft's bytes end
-    equal to the tip; only the cited lesson lands. #773 one truth, O-C."""
+    """A box's mode flip never lands (every tenant commit is 100644), the draft ends equal to
+    the tip, and only the cited lesson lands."""
     old = S.lesson("older", body="the old lesson")
 
     def flip_the_mode(rows, batch_id, cfg):
@@ -103,7 +101,8 @@ def test_a_finding_the_curator_did_not_report_but_an_approved_file_cites_is_comm
 
 
 def test_a_finding_the_curator_filed_as_skipped_but_wrote_a_lesson_for_takes_the_trees_fate(tmp_path):
-    """The curator says "skip x" and also writes a lesson citing x."""
+    """The curator files x as skipped but writes a lesson citing it: the tree wins, and x is
+    consumed once, as committed."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("x", run_id="x"), S.finding_row("y", run_id="y")],

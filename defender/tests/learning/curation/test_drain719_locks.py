@@ -8,28 +8,17 @@ from pathlib import Path
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
+from defender.tests.support.learning.curation._drain719 import drain  # through the harness's guarded import
 from defender.learning.core.state import (
     AUTHOR_DRAIN_LOCK, FINDINGS, REPO_LOCK, TRY_ONCE, LearningState,
 )
 from defender.learning.core import drains  # type: ignore[import-not-found]
 
 
-# D1 — a channel carries its own lock topology
-
-
-# D2 — merge_concurrent deleted; rotation always merges (O1)
-
-
-# O2 — appending does not block on an author batch
-
-
-# O7 — rotation and retirement are mutually exclusive with appends
+# Rotation and retirement exclude appends
 
 
 def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
-    """O7 is the oracle O1 and O2 were standing in for and could not provide: an implementation that
-    simply deleted the lock from the rotation passes both of those and fails this."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -84,8 +73,7 @@ def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path)
 def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_through_run_batch(
     tmp_path: Path,
 ):
-    """Design hole 2's SOLE discharge, REPLACED at §7 round 2 (F2)."""
-    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    # The real lessons tick over a batch's git-free draft.
     lane = C.draft_lane(tmp_path)
     paths = lane.paths
     ch = h.channel_of("findings")
@@ -109,8 +97,6 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
 
 
 def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(tmp_path: Path):
-    """Design hole 1, the WEAKEST-SUPPORTED resolution in the set — an analogy, not a probe, a claim
-    or a design sentence — and flagged for override."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -135,12 +121,12 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
     assert observed[2] - observed[1] >= 0.6, f"the wait did not follow the deadline: {observed}"
 
 
-# The locks the fold must not change
+# Lock order and the drain gates
 
 
 def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path):
-    """C4 (P66 + P12): the acquisition order is pinned by construction in one place rather than
-    trusted from an actor census, and enumerated by a test rather than read off the code."""
+    """`LOCK_ORDER` declares the acquisition order in one place; a tick skipped at the drain lock
+    never took the repo lock."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -156,8 +142,8 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
 
 
 def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: Path):
-    """C8/P51: a direct module invocation bypasses the outer `.author-drain.lock` gate, so the per-
-    channel drain lock is what stops it — and it SKIPS rather than waiting."""
+    """A direct module invocation bypasses the outer `.author-drain.lock` gate, so the per-channel
+    drain lock stops it, and it skips rather than waits."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -177,7 +163,7 @@ def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: P
 
 
 def test_second_author_drain_invocation_returns_without_blocking(tmp_path: Path):
-    """P61: the fold does not touch `author_drain`'s OUTER gate."""
+    """The outer `author_drain` gate: a second drainer exits at once, reaching no channel."""
     paths = h.make_paths(tmp_path)
     triggered: list[str] = []
 

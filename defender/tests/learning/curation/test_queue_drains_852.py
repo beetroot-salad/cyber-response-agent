@@ -34,12 +34,10 @@ from defender.tests.support.shared.contracts._data_root_1078 import current_data
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
-# F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
+# F-02 — attribution bounds what a mixed batch commits
 #
-# #1108 P4 (OD12 class ii): each tick runs over a batch's git-free draft (`_curator1134.draft_lane`,
-# the REAL lessons config over it through `draft_author_cfg`); "committed" is read on the batch
-# branch (`agent/lessons/...`), "nothing committed" is no commit on it, "restored away" is the
-# draft back at the batch base.
+# Each tick runs the real lessons config over a batch's git-free draft: "committed" is read on the
+# batch branch (`agent/lessons/...`), "restored away" is the draft back at the batch base.
 
 
 def _write_corpus_file(corpus_dir: Path, stem: str, field: str, cited: list[str]) -> Path:
@@ -72,7 +70,8 @@ def _commits(lane: C.DraftLane) -> int:
 
 
 def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp_path: Path):
-    """F-02."""
+    """An unattributable lesson faults the whole mixed batch: nothing lands, both files are reset
+    away, both rows stay queued."""
     lane = _f02_lane(tmp_path)
     paths = lane.paths
     ch = h.channel_of("findings")
@@ -103,7 +102,8 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
 def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     tmp_path: Path,
 ):
-    """F-02's control, and its second half."""
+    """The control: without the unattributable file the batch commits, and the row the tick
+    never mentioned stays queued with no hold stamped."""
     lane = _f02_lane(tmp_path)
     paths = lane.paths
     ch = h.channel_of("findings")
@@ -131,7 +131,9 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
 def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     tmp_path: Path,
 ):
-    """The exemption's edge."""
+    """A base lesson edited to fold in a held-back row (`run-B/0`) does not land with its
+    batch-mate. Only the stray `held_forward_bad` bucket refuses this tick now: a batch id
+    citation is itself the voucher."""
     # An earlier batch's lesson, published in the export the batch starts from.
     earlier = tmp_path / "earlier"
     earlier.mkdir()
@@ -145,8 +147,7 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
-        # The forward check said run-B/0's fold flips a green case; the curator was told to
-        # re-edit the target back and did not.
+        # The curator folds the held-back run-B/0 into the earlier lesson anyway.
         _write_corpus_file(
             cfg.corpus_dir, "old-fact", "source_finding_ids", ["run-A/0", "run-B/0"]
         )
@@ -168,8 +169,8 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
 
 
 def _enqueue(paths, case_id: str, run_dir: Path) -> None:
-    """The curation request the investigation's tail files (`run_common.enqueue_curation`'s own
-    body: the run's address, #1105 PR 2), through the handle."""
+    """The curation request the investigation's tail files (`run_common.enqueue_curation`'s
+    body: the run's address), through the handle."""
     _state1135.state_for_paths(paths).enqueue_curation(
         case_id, _state1135.curation_row(case_id, run_dir))
 
@@ -183,23 +184,22 @@ def _queued_run(case_id: str, name: str, paths) -> Path:
 
 
 def _address(row: dict) -> tuple[str, str]:
-    """The run a curation row names: its `(tenant_id, run_id)` (#1105 PR 2 declared change 8)."""
+    """The run a curation row names: its `(tenant_id, run_id)`."""
     return row["tenant_id"], row["run_id"]
 
 
 @pytest.fixture
 def tenant(tmp_path: Path, data_root: Path):
-    """#1108 P4: the lane drains into the fixture tenant's repo (D9's id), published for real
-    and bound to its forge."""
+    """The fixture tenant, published for real and bound to its forge; the lane drains into its
+    repo."""
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
         yield t
 
 
 def _drain(t, paths, **overrides):
-    """One lead-author tick through the P4 seams (`client=`/`identity=` over the tenant's forge
-    and issuer fakes, the box via `BoxSpy`); `branch=`/`scrub=` are gone with the product-repo
-    delivery."""
+    """One lead-author tick through its seams: `client=`/`identity=` over the tenant's forge and
+    issuer fakes, the box via `BoxSpy`."""
     box = BoxSpy()
     overrides.setdefault("run_pitfalls", lambda *_a, **_kw: 0)
     return drains.lead_author_drain(
@@ -209,7 +209,7 @@ def _drain(t, paths, **overrides):
 
 
 def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_path, monkeypatch, tenant):
-    """O4: a valid foreign Run address in A's queue cannot grant access to tenant B."""
+    """A valid foreign run address in A's queue cannot grant access to tenant B."""
     from defender.records import RunAddress
     from defender.tenancy import _tenant
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
@@ -249,7 +249,8 @@ def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_p
 
 
 def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path, tenant):
-    """F-03 (over the P4 tenant lane, #1108): nothing claimed, nothing delivered."""
+    """A held queue lock skips the pass: nothing is claimed, charged, dead-lettered or
+    delivered, and the queue still reads as work."""
     paths = drain_paths(tenant, product_repo(tmp_path))
     _queued_run("case-1", "run-1", paths)
     _queued_run("case-2", "run-2", paths)
@@ -280,7 +281,8 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path,
 
 
 def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
-    """F-03's seam, stated directly: the value `run` returns for "another tick holds the"""
+    """`lead_author.run` answers a held queue lock with `QUEUE_LOCK_SKIP_RC`, distinct from a
+    serve (0) and a fault (2)."""
     run_dir = _state1135.curation_run_dir("run-1")
     paths = loop_paths(tmp_path)
 
@@ -303,7 +305,6 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
 
 
 def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: Path, tenant):
-    """F-04 (over the P4 tenant lane, #1108)."""
     paths = drain_paths(tenant, product_repo(tmp_path))
     first = _queued_run("case-A", "run-1", paths)
     second = _state1135.curation_run_dir("run-2")
@@ -336,7 +337,6 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
 
 
 def test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file(tmp_path: Path):
-    """F-04's primitive."""
     state = _state1135.state_over(tmp_path / "state")
     run_dir = _state1135.curation_run_dir("run-1")
     state.enqueue_curation("case-A", _state1135.curation_row("case-A", run_dir))

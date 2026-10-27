@@ -1,4 +1,5 @@
-"""Drain retire ceiling: new queue paths live under state_root, ceiling bound at config build, and the pitfalls channel retires at the ceiling."""
+"""Drain config: queue, lock and graveyard paths under the state root, the ceiling bound at config
+build, pitfalls retirement, and tenant-scoped state (#1186)."""
 from __future__ import annotations
 
 import dataclasses
@@ -11,7 +12,7 @@ import pytest
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
+from defender.tests.support.learning.curation._drain719 import drain  # through the harness's guarded import
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core import drains, persist  # type: ignore[import-not-found]
 from defender.learning.core import config as learning_config
@@ -37,7 +38,7 @@ def _pitfalls_rows(n: int) -> list[dict]:
     return [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(n)]
 
 
-# Where the new paths live
+# Where the state paths live
 
 
 def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Path):
@@ -55,9 +56,6 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
             assert state in p.parents, f"{name}: {p} is not under the state root"
             assert paths.repo_root not in p.parents
 
-    # The corpus is no longer repo-rooted (#1108 P4: it is the batch draft's lane, tenant
-    # repo; covered by tenant_1108_p4/test_writers.py::test_o7_each_author_lane_writer_...).
-
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
     fault = h.cfg_for(
@@ -72,7 +70,7 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
 
 
 def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path):
-    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    # The real lessons tick over a batch's git-free draft.
     lane = C.draft_lane(tmp_path)
     paths = lane.paths
     ch = h.channel_of("findings")
@@ -95,18 +93,13 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     clean = C.draft_author_cfg(lane, max_attempts=1, invoke_agent=h.committing("ok"))
     assert drain.run_batch(cfg=clean) == 0, "the new state files aborted the next batch"
     assert [p.rsplit("/", 1)[0] for p in lane.landed()] == ["agent/lessons"], lane.landed()
-    # #1108 P4 OD12(i): the legacy third leg (a write under the checkout's `defender/learning/`
-    # outside the gitignored state prefix is seen as a stray) pinned only the checkout's ignore
-    # rules; the learning state is not in the draft at all, and a write outside the lanes refuses
-    # the claim whole (tests/tenancy/tenant_1108_delivery/test_changes.py::
-    # test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole).
 
 
 # When the ceiling is bound
 
 
 def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_path: Path):
-    """B3/B4: a malformed ceiling is a loop-level value error, not a queue-level one."""
+    """A malformed ceiling fails the config build (`FatalConfigError`) before any row is touched."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -131,8 +124,7 @@ def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_p
 
 
 def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
-    """B5, which is load-bearing for B4, B6 and A6: the ceiling is bound once, at config build,
-    rather than re-read inside the failure handler."""
+    """The ceiling is bound once, at config build, not re-read inside the failure handler."""
     import os
 
     paths = h.make_paths(tmp_path)
@@ -154,18 +146,18 @@ def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
     assert h.graveyard(paths, ch) == []
 
 
-# The pitfalls channel — O8's discriminating case
+# The pitfalls channel
 
 
 def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
     tmp_path: Path, monkeypatch
 ):
-    """Decision 1 path 1, which flipped demand #0."""
+    """A failing pitfalls agent (rc 7) surfaces as a `RETIRE_SET` member, so each tick bumps both
+    rows and the ceiling retires them."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
-    # #1108 P4 (OD12 class ii, OD16): the pitfalls lane over a batch's git-free draft (lane
-    # `skills`), the batch handed to its run; the product checkout declares `elastic` (its
-    # adapter), as the legacy scratch repo did.
+    # The pitfalls lane over a batch's git-free draft (lane `skills`); the product checkout
+    # declares `elastic` through its adapter.
     product = tmp_path / "product"
     C.put(product / "defender" / "integrations" / "elastic_adapter.py", "VERBS = {}\n")
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product)
@@ -201,8 +193,8 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
 
 
 def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
-    """O8 on the channel that has no retirement mechanism at all today (C22) — no attempt counter,
-    no graveyard, a callback that only logs."""
+    """A pitfalls leg that keeps raising is bumped each tick and retired at the default ceiling
+    (3); the graveyard reason keeps the fault's class and message."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = h.make_paths(tmp_path)
     h.seed(paths, PITFALLS, _pitfalls_rows(2))
@@ -229,7 +221,8 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
 
 
 def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Path, monkeypatch):
-    """A15/P75: "the batch" on pitfalls is `batch_ids`, the set fixed at the drain's own read."""
+    """"The batch" is the ids fixed at the drain's read: a row appended mid-tick survives
+    untouched."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
     paths = h.make_paths(tmp_path)
@@ -257,8 +250,6 @@ def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Pat
 
 
 def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
-    """P56, which the flip makes load-bearing: pre-flip this consensus described an unreachable
-    branch, because the dominant pitfalls failure never reached the retire path at all."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("pitfalls")
     assert (location_path(paths.state_root) / ch.append_lock).name == ".pitfalls.lock"
@@ -279,11 +270,11 @@ def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
     assert [r["pitfall_id"] for r in h.graveyard(paths, ch)] == ["r:l-000:0"]
 
 
-# #1186 — production paths require an accepted tenant, independently of code checkout.
+# #1186: production paths require an accepted tenant, whatever the code checkout.
 
 
 def test_1186_no_global_learning_paths_or_ambient_factory_remain():
-    """O1: the removed public defaults cannot remain an accidental production entry path."""
+    """The removed tenant-free defaults stay removed, so none can become a production entry."""
     for name in ("DEFAULT_PATHS", "LEARNING_DIR", "loop_paths"):
         assert not hasattr(learning_config, name), f"{name} still supplies tenant-free paths"
 
@@ -293,7 +284,7 @@ def test_1186_no_global_learning_paths_or_ambient_factory_remain():
 def test_1186_tenant_state_requires_a_real_learning_directory(
     data_root, tmp_path, shape, selection,
 ):
-    """O1/O4/O6: opening tenant state refuses root links, including with stored paths."""
+    """Opening tenant state refuses a linked learning root, including through stored paths."""
     from defender.learning.core.state import StateRefused
     from defender.records._tenant_id import TenantRefused
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
@@ -338,7 +329,7 @@ def test_1186_tenant_state_requires_a_real_learning_directory(
 def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
     data_root: Path, tmp_path: Path, monkeypatch,
 ):
-    """O1/O4: queues, record children and locks belong to a tenant, across worktrees."""
+    """Queues, record children and locks belong to a tenant, whichever worktree opens them."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 

@@ -1,10 +1,9 @@
 """Pitfalls curation mode (leads/pitfalls_curator.py): commit-gate verification, threshold/rotation, and the systemless-batch drop.
 
-#1108 P4 (O7, amendments 2-3): the lane works over a git-free draft of a P3 batch, never a product
-worktree. Every gate case drives the REAL tick (`run_pitfalls`) with the spawn faked as an edit of
-the draft's `agent/skills/`, and reads what landed from the batch branch (`agent/...`, OD6).
-ASSUMED SEAM (S-H, `_curator1134`): `pitfalls_curator.run_pitfalls(*, paths, state, trees, batch)`.
-`paths.repo_root` is the product checkout holding the adapters only (#1172).
+The lane works over a batch's git-free draft, never a product worktree. Every gate case drives
+the real tick, `run_pitfalls(paths=, state=, trees=, batch=)`, with the spawn faked as an edit of
+the draft's `agent/skills/`, and reads what landed off the batch branch (`agent/...`).
+`paths.repo_root` is the product checkout, holding only the adapters (#1172).
 """
 from __future__ import annotations
 
@@ -51,9 +50,8 @@ def _lane(tmp_path: Path, files: dict[str, str] | None = None, *,
 
 
 def _seed_pitfalls(state, n: int, *, system: str = "elastic", start: int = 0) -> None:
-    """``n`` queued pitfalls, each a DISTINCT mistake — one `stderr_digest` per row, since
-    #840 collapses repeats of one digest into a single record and the threshold counts
-    records. These cases are about the gate and the rotation, not the collapse."""
+    """``n`` queued pitfalls, each a distinct mistake: #840 collapses rows sharing a
+    `stderr_digest` into one record, and the threshold counts records."""
     persist.append_pitfalls(
         [
             {
@@ -71,7 +69,7 @@ def _seed_pitfalls(state, n: int, *, system: str = "elastic", start: int = 0) ->
 
 def _tick(lane: C.DraftLane, edit, monkeypatch, *, systems: tuple[str, ...] = ("elastic",),
           invoke=None) -> tuple[int, object]:
-    """One REAL pitfalls tick at threshold 2 over the draft: two distinct queued mistakes per
+    """One real pitfalls tick at threshold 2 over the draft: two distinct queued mistakes per
     system in `systems`, the spawn faked as `edit(<the draft's agent/skills>)` (it runs no git)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     state = open_state(lane.paths)
@@ -104,14 +102,14 @@ def test_verify_pitfalls_state_accepts_execution_md(tmp_path: Path, monkeypatch)
 
 
 def test_verify_pitfalls_state_rejects_non_execution_md(tmp_path: Path, monkeypatch):
-    """A SKILL.md edit is in lead-author scope but NOT pitfalls scope — rejected."""
+    """A SKILL.md edit is in lead-author scope but not pitfalls scope: rejected."""
     _refused(_lane(tmp_path), lambda sk: (sk / "elastic" / "SKILL.md").write_text(
         (sk / "elastic" / "SKILL.md").read_text() + "\nedit\n"), "non-execution.md", monkeypatch)
 
 
 def _stray_errors():
-    """An edit outside the lane's `skills/`: after P4 the ChangeSet's lane check may be the
-    refuser before the lane's own gate (either refusal, both naming it outside)."""
+    """An edit outside the lane's `skills/` is refused by the ChangeSet's lane check or by the
+    lane's own gate, whichever runs first; both name it outside."""
     from defender.learning.author.version_control import DeliveryRefused
 
     return (LeadAuthorError, DeliveryRefused)
@@ -139,7 +137,7 @@ def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_path: Path, mon
 
 
 def test_verify_pitfalls_state_returns_sorted_changed(tmp_path: Path, monkeypatch):
-    """Two execution.md edits that interleave across git's status-class boundary land, sorted."""
+    """A modified and a new execution.md both land, sorted."""
     lane = _lane(tmp_path, {"skills/cmdb/SKILL.md": "---\nname: defender-cmdb\n---\n# cmdb\n",
                             "skills/elastic/execution.md": "# e\n"}, adapters=("cmdb",))
 
@@ -171,9 +169,8 @@ def test_run_pitfalls_below_threshold_is_noop(tmp_path: Path, monkeypatch):
 
 def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_path: Path, monkeypatch):
     """At threshold the curator is handed the system's execution.md, its fold lands on the batch
-    branch through the commit-maker, and the rows rotate (#1108 P4 O7: closes F-LEAD's pitfalls
-    row). The handoff path's exact prefix is the open handoff-spelling gap; only its tail and the
-    absence of the product spelling are pinned."""
+    branch, and the rows rotate. The handoff path's prefix is still unsettled, so only its tail
+    and the absence of the product spelling are pinned."""
     lane = _lane(tmp_path)
 
     def fake_invoke(handoffs, **_kw):
@@ -203,8 +200,8 @@ def test_run_pitfalls_no_edit_tick_still_rotates(tmp_path: Path, monkeypatch):
 
 
 def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path():
-    """#855 F-06, the offline half. The handoff path's prefix is the open handoff-spelling gap
-    (#1108 P4): its tail is pinned, and it never names the product tree."""
+    """Only a declared system becomes a handoff (#855); the path's tail is pinned, and it never
+    names the product tree."""
     rows = [
         {"system": s, "query_id": f"{s}.esql", "goal": "g", "executed_query": "x",
          "stderr_digest": f"exit=64; boom {s}"}
@@ -219,7 +216,8 @@ def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path():
 def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(
     tmp_path: Path, monkeypatch,
 ):
-    """The last gate on the same class (#855 F-06), and it asks about the DIRECTORY's"""
+    """The commit gate asks whether the directory is a declared system, not merely whether the
+    file is an execution.md (#855)."""
     _refused(_lane(tmp_path), lambda sk: C.put(sk / "ghost" / "execution.md",
                                                 "# ghost\n## Common pitfalls\n- invented\n"),
              "undeclared system", monkeypatch)
@@ -254,17 +252,16 @@ def _state(tmp_path: Path):
 
 
 def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
-    """Patch the in-process engine seam the shared spawn spine calls. ``_spawn_author_agent`` looks
-    up ``run_author_stage`` on the engine module at call time, so patching the module attr is seen regardless of where the
-    spine lands. Captures the kwargs the pitfalls spawn forwards + returns a canned rc / raises."""
+    """Patch ``run_author_stage`` on the engine module (``_spawn_author_agent`` looks it up at
+    call time), capturing the kwargs the pitfalls spawn forwards; returns ``rc`` or raises."""
     from defender.learning.leads import lead_author_engine
 
     cap: dict = {}
 
     def _fake(**kwargs):
         cap.update(kwargs)
-        # #713: the spawn now forwards a StageWiring/StageContext pair. Flatten the fields
-        # the cases assert on back onto `cap`, so each case still names one knob.
+        # The spawn forwards a StageWiring/StageContext pair; flatten the fields onto `cap` so a
+        # case names one knob.
         if (w := kwargs.get("wiring")) is not None:
             cap.update(system_prompt_file=w.prompt_path, model=w.model,
                        effort=w.effort, trace_name=w.trace_name, label=w.label)
@@ -283,8 +280,8 @@ def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
 
 
 def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypatch):
-    """F1: a systemic config fault from the engine PROPAGATES through the pitfalls spawn too —
-    not swallowed into an rc."""
+    """A systemic config fault from the engine propagates through the pitfalls spawn, not
+    swallowed into an rc."""
     from defender.learning.core.config import FatalConfigError
     _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
     with pytest.raises(FatalConfigError):

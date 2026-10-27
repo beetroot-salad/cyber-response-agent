@@ -1,5 +1,5 @@
-"""#797 — the retirement's own negatives, and the fail-closed posture it leaves behind.
-"""
+"""#797: the fail-closed posture the review retirement leaves — a close with no stage bound
+commits `inconclusive`."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -18,7 +18,7 @@ GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
 
 
 def _main_deps(tmp_path: Path):
-    """MAIN's deps through the REAL `bind` seam — the real compiled policy, the real gate."""
+    """MAIN's deps through the real `bind`: the real compiled policy and gate."""
     from defender.agents import MAIN_DEF
     from defender.investigation.agent_definition import bind
 

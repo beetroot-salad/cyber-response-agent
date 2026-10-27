@@ -1,4 +1,4 @@
-"""Shared harness for the #680 systemic-stage-frame suite (split out by #720)."""
+"""Shared harness for the #680 stage-frame tests: real prompt producers and bound tool scenes."""
 from __future__ import annotations
 
 import importlib.util
@@ -88,12 +88,8 @@ def _shape(observation: PromptObservation):
 
 
 def _assert_frame_envelope(observation: PromptObservation, tags, salts, gaps) -> None:
-    """The three properties that make a frame set a frame set at all.
-
-    Every one of the thirty-five shape assertions in this suite's two test modules
-    restates these, so they are stated once. Each carries its own message: a helper that
-    hides WHICH invariant broke would trade thirty-four copies for a worse failure.
-    """
+    """The three properties every frame set has; each assert carries its own message, so a
+    failure names the invariant that broke."""
     assert tags == observation.expected_tags, (
         f"{observation.producer}: framed sections are {tags}, expected "
         f"{observation.expected_tags}"
@@ -109,12 +105,9 @@ def _assert_frame_envelope(observation: PromptObservation, tags, salts, gaps) ->
 
 
 def assert_body_survives(observation: PromptObservation, hostile: str) -> None:
-    """A hostile body reached the model as EXACT body data inside one real frame.
-
-    This is the whole adversarial contract, and its point is negative: whatever the
-    hostile string tried to impersonate — a sibling section, a closing delimiter, the
-    reader contract itself — the frame set the model sees is unchanged, and the string is
-    still sitting inside a body rather than having become structure.
+    """A hostile body reached the model verbatim inside a real frame: whatever it impersonates
+    (a sibling section, a closing delimiter, the reader contract), the frame set is unchanged
+    and the string stays body, never structure.
     """
     tags, bodies, salts, gaps = _shape(observation)
     _assert_frame_envelope(observation, tags, salts, gaps)
@@ -125,12 +118,9 @@ def assert_body_survives(observation: PromptObservation, hostile: str) -> None:
 
 
 def assert_producer_shape(observation: PromptObservation) -> None:
-    """A real producer emitted its ordered frames with every template slot substituted.
-
-    The two placeholder checks are not decoration. `{salt}` or `{content}` surviving into
-    the prompt means the producer shipped its TEMPLATE to the model — a frame whose salt
-    is the literal four characters `{salt}` matches nothing and confines nothing, while
-    still looking framed to a reader.
+    """A real producer emitted its ordered frames with every template slot substituted: a
+    surviving `{salt}`/`{content}` means the template itself shipped, and a frame salted with
+    the literal `{salt}` confines nothing while still looking framed.
     """
     tags, bodies, salts, gaps = _shape(observation)
     _assert_frame_envelope(observation, tags, salts, gaps)
@@ -147,7 +137,7 @@ def assert_producer_shape(observation: PromptObservation) -> None:
 
 
 def _with_salt(fn, /, *args, salt: str, **kwargs):
-    """Call the real producer, threading the target salt when its revised seam exists."""
+    """Call the real producer, passing `salt` when its signature takes one."""
     if "salt" in inspect.signature(fn).parameters:
         kwargs["salt"] = salt
     return fn(*args, **kwargs)
@@ -271,26 +261,25 @@ def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
     run = tmp_path / "run"
     skills.mkdir(parents=True)
     run.mkdir(parents=True)
-    # `system` in the rm spelling below has to BE one since #772 — the grant is compiled per
-    # system the tree declares an adapter for, not over an anonymous `<name>/_draft/` shape.
+    # `system` must be a declared system (#772): the rm grant is compiled per system the tree
+    # has an adapter for, not over an anonymous `<name>/_draft/` shape.
     seed_adapter_stubs(defender_dir, ("system",))
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result))
     return deps, skills, "rm defender/skills/system/_draft/lesson.md"
 
 
 def _lead_author_draft_scene(tmp_path: Path, result: BoxResult):
-    """A real LEAD_AUTHOR binding over a batch draft's agent root (#1108 P4, O7/OD6: the lane
-    writes `<draft>/agent/skills/`, compiled under `RunScope(tenant_agent=)` as
-    `test_hardening_772` binds it). Returns `(deps, the draft's skills dir, an admitted rm)` —
-    the rm `_lead_author_deps_scene` spelled under the product tree, which P4 no longer grants."""
+    """A real LEAD_AUTHOR binding over a batch draft's agent root (`RunScope(tenant_agent=)`),
+    where the lane writes `<draft>/agent/skills/`. Returns `(deps, the draft's skills dir, an
+    admitted rm)`: the rm targets the draft, not the product tree `_lead_author_deps_scene`
+    spells."""
     defender_dir = tmp_path / "tree" / "defender"
     agent = tmp_path / "draft" / "agent"
     skills = agent / "skills"
     run = tmp_path / "run"
     (skills / "system").mkdir(parents=True)
     run.mkdir(parents=True)
-    # `system` has to BE one since #772: the grant is compiled per system the product declares
-    # an adapter for, not over an anonymous `<name>/_draft/` shape.
+    # As above: `system` must be a system the product has an adapter for (#772).
     seed_adapter_stubs(defender_dir, ("system",))
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result),
                 scope=RunScope(tenant_agent=agent))
@@ -299,13 +288,9 @@ def _lead_author_draft_scene(tmp_path: Path, result: BoxResult):
 
 
 def _learning_read_deps(tmp_path: Path, *, box=None):
-    """A bound learning-stage scene with a real cross-stage add-dir — the shape `_drive_learning_read`
-    and `_drive_learning_bash` need.
-
-    Replaces `_judge_deps`, which bound the deleted pipeline judge. The corpus author is the
-    surviving learning role that holds both `read_file` and `bash`, so the framing property
-    these two drives are about is observed on it. Returns `(deps, add_dir)` — the same pair
-    shape the judge scene returned, so both callers are unchanged past the constructor.
+    """A bound corpus-author scene with a real cross-stage add-dir, for `_drive_learning_read`
+    and `_drive_learning_bash`: the corpus author is the learning role holding both
+    `read_file` and `bash`. Returns `(deps, add_dir)`.
     """
     add_dir = tmp_path / "cross-stage"
     add_dir.mkdir(parents=True, exist_ok=True)
@@ -313,17 +298,15 @@ def _learning_read_deps(tmp_path: Path, *, box=None):
     dfn = tmp_path / "deps" / "tree" / "defender"
     run.mkdir(parents=True, exist_ok=True)
     (dfn / "lessons").mkdir(parents=True, exist_ok=True)
-    # `corpus_name` is REQUIRED of this role — `bind` refuses without it, because a curator's
-    # corpus is per-spawn and there is no default to fall back on. Spelled here rather than
-    # threaded through `_deps` so the generic binder keeps having no role-specific knowledge.
+    # `bind` refuses this role without `corpus_name` (its corpus is per-spawn); spelled here so
+    # `_deps` stays role-agnostic.
     deps = bind(
         CORPUS_AUTHOR_DEF, run, defender_dir=dfn,
         scope=RunScope(
             add_dirs=(add_dir,), corpus_name="lessons",
             model_roots=((PurePosixPath("/inputs/shared"), add_dir),),
-            # NON-EMPTY BY REFUSAL, not by taste: `bind` rejects an empty confine for this role
-            # because an empty one widens its reads to the whole defender dir (#512). The
-            # corpus it curates is the confine production gives it.
+            # `bind` rejects an empty confine for this role: it would widen reads to the whole
+            # defender dir (#512). The curated corpus is the confine production gives it.
             read_confine=(dfn / "lessons",),
         ), box=box,
     )
@@ -354,12 +337,12 @@ def _main_bash(tmp_path, payload):
     deps = _deps(tmp_path, MAIN_DEF, box=fake)
     artifact = deps.run_dir / "report.md"
     artifact.write_text("admitted main read")
-    # #1255 C9/C11: MAIN's deps from `bind` carry the model view, so the operand is the path the
-    # model holds (`/runs/current/report.md`) — d15's spelling; the host path is refused.
+    # MAIN's deps from `bind` carry the model view, so the operand is the path the model holds
+    # (`/runs/current/report.md`); the host path is refused (#1255).
     return _tool_bash(deps, f"cat {model_path(artifact, run_dir=deps.run_dir)}")
 
 
-# Original demand owners, consolidated so every producer driver is ownership-local.
+# Frame primitives
 
 
 def _shared_wrap():
@@ -378,23 +361,17 @@ def _expected_frame(body: str, tag: str, salt: str = STAGE_SALT) -> str:
 
 
 def frame_salt_of(text: str, tag: str = "untrusted") -> str:
-    """The salt of the first `tag` frame in `text` — recovered by READING it, never predicted.
-
-    `wrap_fresh` (#875) mints a tool-return frame's salt AFTER the content is in hand, so a
-    caller cannot know it in advance. That is the property, not an inconvenience: a test that
-    could predict the delimiter would be asserting the very thing the design removed. The
-    message-assembly frames (a stage's prompt sections) still share one caller-owned salt, and
-    `_expected_frame` above stays correct for those."""
+    """The salt of the first `tag` frame in `text`, read rather than predicted: `wrap_fresh`
+    (#875) mints a tool-return frame's salt after the content is in hand, so no caller can know
+    it. Prompt-section frames still share one caller-owned salt (`_expected_frame`)."""
     m = re.search(rf"<run-([0-9a-f]+)-{re.escape(tag)}>", text)
     assert m is not None, f"no <run-…-{tag}> frame in: {text[:400]!r}"
     return m.group(1)
 
 
 def assert_one_frame(text: str, body: str, tag: str = "untrusted") -> str:
-    """`text` is EXACTLY one `tag` frame around `body`, verbatim, with nothing outside it.
-
-    The post-#875 spelling of `assert out == _expected_frame(body, tag)` for a TOOL RETURN.
-    Returns the salt, for callers that go on to assert about it."""
+    """`text` is exactly one `tag` frame around `body`, verbatim, with nothing outside it:
+    `_expected_frame` for a tool return, whose salt is fresh. Returns the salt."""
     salt = frame_salt_of(text, tag)
     assert text == f"<run-{salt}-{tag}>\n{body}\n</run-{salt}-{tag}>", (
         f"not exactly one verbatim {tag} frame:\n{text[:600]!r}"
@@ -448,9 +425,8 @@ def _drive_learning_bash(
 ) -> str:
     fake = RecordingBox(BashResultSpec(rc=rc, out=stdout, err=stderr))
     deps, _add_dir = _learning_read_deps(tmp_path, box=fake)
-    # INSIDE THE CORPUS, which is where the curator's `cat` grant reaches. The deleted judge's
-    # grant spanned its run dir and add-dirs; the surviving role's does not, and a command it
-    # cannot claim is refused before the framing this drive is about ever happens.
+    # Inside the corpus: the curator's `cat` grant reaches only there, and a refused command
+    # never reaches the framing under test.
     artifact = deps.corpus_dir / "lead.md"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("the executor boundary is injected", encoding="utf-8")
