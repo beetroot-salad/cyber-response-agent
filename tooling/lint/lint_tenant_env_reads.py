@@ -11,7 +11,8 @@ that rule: in the four swept trees an environment LOOKUP is a finding.
 
 THE FOUR TREES (repo-relative): `defender/integrations/`, `defender/learning/branch/estate/`,
 `defender/investigation/ticket_writer.py` with `defender/tenancy/case_ticket.py`, and
-`defender/investigation/lead_zero/` with `defender/systems/lead_zero_config.py`. The allow-list is EMPTY
+`defender/investigation/lead_zero/` with `defender/systems/lead_zero_config.py` and
+`defender/systems/correlation.py`. The allow-list is EMPTY
 — there is no baseline file and no suppression comment; a read that is genuinely not a setting
 moves out of the tree or is handed in by the caller.
 
@@ -73,6 +74,7 @@ SWEPT: tuple[str, ...] = (
     "defender/tenancy/case_ticket.py",
     "defender/investigation/lead_zero/",
     "defender/systems/lead_zero_config.py",
+    "defender/systems/correlation.py",
 )
 
 #: The platform's typed environment accessors — a lookup by another name.

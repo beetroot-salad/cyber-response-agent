@@ -71,6 +71,7 @@ def test_o7_lint_flags_each_form(tmp_path):
         "defender/integrations/planted_1107.py",
         "defender/investigation/lead_zero/planted_1107.py",
         "defender/systems/lead_zero_config.py",
+        "defender/systems/correlation.py",
     ]
     for rel in planted:
         S.plant_module(tmp_path, rel, _EACH_FORM)
