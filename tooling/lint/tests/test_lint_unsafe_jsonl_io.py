@@ -5,6 +5,7 @@ import json
 
 from pathlib import Path
 
+import pytest
 
 from _by_path import load_lint_gate
 
@@ -71,13 +72,22 @@ def test_scan_and_ratchet_contract(tmp_path):
     assert gate.main([], scope=tmp_path / "nope") == 2
 
 
-def test_flags_the_spelled_reader(tmp_path):
-    assert _flags(tmp_path, _reader("import json", "json.loads"))
+@pytest.mark.parametrize(("imp", "call"), [
+    pytest.param("import json", "json.loads", id="dotted"),
+    pytest.param("import json as j", "j.loads", id="aliased"),
+    pytest.param("from json import loads", "loads", id="from_import"),
+])
+def test_flags_the_spelled_reader(tmp_path, imp, call):
+    assert _flags(tmp_path, _reader(imp, call))
 
 
-def test_flags_the_spelled_appender(tmp_path):
+@pytest.mark.parametrize(("imp", "call"), [
+    pytest.param("import json", "json.dumps", id="dotted"),
+    pytest.param("import json as j", "j.dumps", id="aliased"),
+])
+def test_flags_the_spelled_appender(tmp_path, imp, call):
     tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _appender("import json", "json.dumps"))
+    _pyfile(tree, "prod.py", _appender(imp, call))
     assert any(f.fingerprint.endswith(":append") for f in _GATE._scan(tree))
 
 
@@ -101,20 +111,6 @@ def test_suppression(tmp_path):
         "            rows.append(json.loads(line))\n"
         "    return rows\n"
     ))
-
-
-def test_aliased_json_reader_is_flagged(tmp_path):
-    assert _flags(tmp_path, _reader("import json as j", "j.loads"))
-
-
-def test_from_import_json_reader_is_flagged(tmp_path):
-    assert _flags(tmp_path, _reader("from json import loads", "loads"))
-
-
-def test_aliased_json_appender_is_flagged(tmp_path):
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _appender("import json as j", "j.dumps"))
-    assert any(f.fingerprint.endswith(":append") for f in _GATE._scan(tree))
 
 
 def test_append_handle_from_a_module_opener_is_flagged(tmp_path):

@@ -37,6 +37,8 @@ def _first_call(src: str):
         ("import os.path\nos.path.join(a, b)\n", "os.path.join"),
         ("import os.path as osp\nosp.join(a, b)\n", "os.path.join"),
         ("open(p)\n", "builtins.open"),
+        # A function-local import: reading only module-level imports would be the blind spot.
+        ("def f(t):\n    import re as regex\n    return regex.search(p, t)\n", "re.search"),
     ],
 )
 def test_callee_resolves_every_spelling(src, expected):
@@ -51,6 +53,9 @@ def test_callee_resolves_every_spelling(src, expected):
         "def f(p):\n    return p.read_text()\n",
         "def f(zf, n):\n    return zf.open(n)\n",
         "def f(self):\n    return self.run(c)\n",
+        "import json\ndef f(json):\n    return json.loads(x)\n",  # the parameter shadows the import
+        # `defines` carries params and locals, so a parameter named `open` shadows the builtin.
+        "def f(open, p):\n    return open(p)\n",
     ],
 )
 def test_callee_is_none_for_a_value_receiver(src):
@@ -90,18 +95,9 @@ def test_relative_import_never_collides_with_a_stdlib_origin():
     assert got.startswith(".")
 
 
-def test_function_local_import_is_seen():
-    """A resolver that only read module-level imports would reproduce the exact blind
-    spot it exists to close."""
-    call, env, astlib = _first_call(
-        "def f(t):\n    import re as regex\n    return regex.search(p, t)\n"
-    )
-    assert astlib.callee(call, env) == "re.search"
-
-
 def test_a_function_local_import_does_not_leak_into_a_sibling_function():
-    """The other half of #607. Collecting a local import must not BIND it module-wide —
-    in a sibling function that name is whatever that function makes it."""
+    """Collecting a local import must not BIND it module-wide: in a sibling function that
+    name is whatever that function makes it (#607)."""
     astlib = _load()
     tree = ast.parse(
         "def a():\n"
@@ -119,20 +115,6 @@ def test_a_function_local_import_does_not_leak_into_a_sibling_function():
     inside, sibling = calls[0], calls[1]
     assert astlib.callee(inside, env) == "json.loads"
     assert astlib.callee(sibling, env) is None
-
-
-def test_a_parameter_shadows_a_module_import():
-    call, env, astlib = _first_call(
-        "import json\ndef f(json):\n    return json.loads(x)\n"
-    )
-    assert astlib.callee(call, env) is None
-
-
-def test_a_parameter_cannot_fabricate_a_builtin_origin():
-    """`defines` now carries params and locals, so a parameter named `open` shadows the
-    builtin the way Python does."""
-    call, env, astlib = _first_call("def f(open, p):\n    return open(p)\n")
-    assert astlib.callee(call, env) is None
 
 
 def test_a_module_import_still_reaches_into_every_function():

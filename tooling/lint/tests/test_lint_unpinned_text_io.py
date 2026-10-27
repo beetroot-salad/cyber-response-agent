@@ -5,6 +5,7 @@ import json
 
 from pathlib import Path
 
+import pytest
 
 from _by_path import load_lint_gate
 
@@ -69,40 +70,6 @@ def test_flags_each_idiom(tmp_path):
     assert kinds == {"read", "write", "open", "subprocess"}
 
 
-def test_pinned_and_binary_are_clean(tmp_path):
-    assert not _flags(tmp_path, (
-        "import subprocess\n"
-        "def f_read(p):    return p.read_text(encoding='utf-8')\n"
-        "def f_write(p,s): return p.write_text(s, encoding='utf-8')\n"
-        "def f_open(p):    return open(p, encoding='utf-8')\n"
-        "def f_bin(p):     return open(p, 'rb')\n"
-        "def f_proc(cmd):  return subprocess.run(cmd, text=True, encoding='utf-8')\n"
-        "def f_bytes(cmd): return subprocess.run(cmd)\n"
-    ))
-
-
-def test_duck_typed_path_open_is_flagged(tmp_path):
-    assert _flags(tmp_path, 'def f(p):\n    return p.open("r")\n')
-    assert _flags(tmp_path, "def f(p):\n    return p.open()\n")
-
-
-def test_os_and_tarfile_open_are_clean(tmp_path):
-    """Genuinely encoding-less openers. `os.open` returns an fd (its third arg is
-    the PERMISSION bits, not a text mode); `tarfile.open` has no `encoding` param."""
-    assert not _flags(tmp_path, (
-        "import os, tarfile\n"
-        "def f_fd(p):  return os.open(p, os.O_RDONLY)\n"
-        "def f_tar(p): return tarfile.open(p)\n"
-    ))
-
-
-def test_suppression(tmp_path):
-    assert not _flags(
-        tmp_path,
-        "def f(p):\n    return p.read_text()  # lint-text-io: ok — deliberate\n",
-    )
-
-
 def test_fingerprint_dedups_within_a_function(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", "def f(p, q):\n    return p.read_text(), q.read_text()\n")
@@ -122,88 +89,60 @@ def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
     assert gate._prefixed_scan(a, "") == gate._scan(a)
 
 
-def test_from_import_subprocess_is_flagged(tmp_path):
-    assert _flags(tmp_path, (
-        "from subprocess import run\n"
-        "def f(cmd):\n    return run(cmd, text=True)\n"
-    ))
-
-
-def test_local_run_wrapper_is_not_flagged(tmp_path):
-    """The other half of the same bug: the gate matches ANY `.run(..., text=True)`,
-    so a local wrapper that has nothing to do with subprocess is a false positive."""
-    assert not _flags(tmp_path, (
-        "def f(runner, cmd):\n    return runner.run(cmd, text=True)\n"
-    ))
-
-
-def test_codecs_open_text_is_flagged(tmp_path):
-    assert _flags(tmp_path, (
-        "import codecs\n"
-        'def f(p):\n    return codecs.open(p, "r")\n'
-    ))
-
-
-def test_io_open_is_flagged(tmp_path):
-    assert _flags(tmp_path, "import io\ndef f(p):\n    return io.open(p)\n")
-
-
-def test_gzip_open_text_mode_is_flagged(tmp_path):
-    assert _flags(tmp_path, (
-        "import gzip\n"
-        'def f(p):\n    return gzip.open(p, "rt")\n'
-    ))
-
-
-def test_gzip_open_binary_default_is_clean(tmp_path):
-    assert not _flags(tmp_path, "import gzip\ndef f(p):\n    return gzip.open(p)\n")
-
-
-def test_codecs_open_binary_literal_is_not_flagged_for_the_right_reason(tmp_path):
-    assert not _flags(tmp_path, (
-        "import codecs\n"
-        'def f():\n    return codecs.open("data.txt", "rb")\n'
-    ))
-
-
-def test_tempfile_text_mode_is_flagged(tmp_path):
-    assert _flags(tmp_path, (
-        "import tempfile\n"
-        'def f():\n    return tempfile.NamedTemporaryFile(mode="w")\n'
-    ))
-
-
-def test_hoisted_mode_constant_is_resolved(tmp_path):
-    assert _flags(tmp_path, 'MODE = "r"\ndef f(p):\n    return open(p, MODE)\n')
-
-
-def test_spooled_tempfile_text_mode_is_flagged(tmp_path):
-    assert _flags(tmp_path, (
-        "import tempfile\n"
-        'def f():\n    return tempfile.SpooledTemporaryFile(1024, "w")\n'
-    ))
-    assert _flags(tmp_path, (
-        "import tempfile\n"
-        'def f():\n    return tempfile.SpooledTemporaryFile(1024, mode="w")\n'
-    ))
-
-
-def test_spooled_tempfile_binary_is_clean(tmp_path):
-    assert not _flags(tmp_path, (
-        "import tempfile\n"
-        'def f():\n    return tempfile.SpooledTemporaryFile(1024, "w+b")\n'
-    ))
-
-
-def test_open_on_an_imported_object_is_flagged(tmp_path):
-    assert _flags(tmp_path, (
-        "from defender._paths import PATHS\n"
-        "def f():\n    return PATHS.lessons_dir.open()\n"
-    ))
-
-
-def test_aliased_subprocess_is_flagged(tmp_path):
-    assert _flags(tmp_path, (
-        "import subprocess as sp\n"
-        "def f(cmd):\n    return sp.run(cmd, text=True)\n"
-    ))
+@pytest.mark.parametrize(("src", "flagged"), [
+    pytest.param(
+        "import subprocess\n"
+        "def f_read(p):    return p.read_text(encoding='utf-8')\n"
+        "def f_write(p,s): return p.write_text(s, encoding='utf-8')\n"
+        "def f_open(p):    return open(p, encoding='utf-8')\n"
+        "def f_bin(p):     return open(p, 'rb')\n"
+        "def f_proc(cmd):  return subprocess.run(cmd, text=True, encoding='utf-8')\n"
+        "def f_bytes(cmd): return subprocess.run(cmd)\n",
+        False, id="pinned_and_binary_are_clean"),
+    pytest.param('def f(p):\n    return p.open("r")\n', True,
+                 id="duck_typed_path_open_is_flagged"),
+    pytest.param("def f(p):\n    return p.open()\n", True,
+                 id="duck_typed_path_open_default_mode_is_flagged"),
+    # Genuinely encoding-less openers: `os.open` returns an fd (its third arg is the PERMISSION
+    # bits, not a text mode); `tarfile.open` has no `encoding` param.
+    pytest.param(
+        "import os, tarfile\n"
+        "def f_fd(p):  return os.open(p, os.O_RDONLY)\n"
+        "def f_tar(p): return tarfile.open(p)\n",
+        False, id="os_and_tarfile_open_are_clean"),
+    pytest.param("def f(p):\n    return p.read_text()  # lint-text-io: ok — deliberate\n", False,
+                 id="suppression"),
+    pytest.param("from subprocess import run\ndef f(cmd):\n    return run(cmd, text=True)\n", True,
+                 id="from_import_subprocess_is_flagged"),
+    # The other half of that bug: matching ANY `.run(..., text=True)` makes a local wrapper
+    # that has nothing to do with subprocess a false positive.
+    pytest.param("def f(runner, cmd):\n    return runner.run(cmd, text=True)\n", False,
+                 id="local_run_wrapper_is_not_flagged"),
+    pytest.param('import codecs\ndef f(p):\n    return codecs.open(p, "r")\n', True,
+                 id="codecs_open_text_is_flagged"),
+    pytest.param("import io\ndef f(p):\n    return io.open(p)\n", True, id="io_open_is_flagged"),
+    pytest.param('import gzip\ndef f(p):\n    return gzip.open(p, "rt")\n', True,
+                 id="gzip_open_text_mode_is_flagged"),
+    pytest.param("import gzip\ndef f(p):\n    return gzip.open(p)\n", False,
+                 id="gzip_open_binary_default_is_clean"),
+    pytest.param('import codecs\ndef f():\n    return codecs.open("data.txt", "rb")\n', False,
+                 id="codecs_open_binary_literal_is_not_flagged_for_the_right_reason"),
+    pytest.param('import tempfile\ndef f():\n    return tempfile.NamedTemporaryFile(mode="w")\n',
+                 True, id="tempfile_text_mode_is_flagged"),
+    pytest.param('MODE = "r"\ndef f(p):\n    return open(p, MODE)\n', True,
+                 id="hoisted_mode_constant_is_resolved"),
+    pytest.param('import tempfile\ndef f():\n    return tempfile.SpooledTemporaryFile(1024, "w")\n',
+                 True, id="spooled_tempfile_text_mode_is_flagged"),
+    pytest.param(
+        'import tempfile\ndef f():\n    return tempfile.SpooledTemporaryFile(1024, mode="w")\n',
+        True, id="spooled_tempfile_text_mode_keyword_is_flagged"),
+    pytest.param(
+        'import tempfile\ndef f():\n    return tempfile.SpooledTemporaryFile(1024, "w+b")\n',
+        False, id="spooled_tempfile_binary_is_clean"),
+    pytest.param("from defender._paths import PATHS\ndef f():\n    return PATHS.lessons_dir.open()\n",
+                 True, id="open_on_an_imported_object_is_flagged"),
+    pytest.param("import subprocess as sp\ndef f(cmd):\n    return sp.run(cmd, text=True)\n", True,
+                 id="aliased_subprocess_is_flagged"),
+])
+def test_each_spelling(tmp_path, src, flagged):
+    assert _flags(tmp_path, src) is flagged
