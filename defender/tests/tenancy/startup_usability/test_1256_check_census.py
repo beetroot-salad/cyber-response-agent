@@ -94,7 +94,7 @@ def test_o5_the_check_raises_exactly_where_a_verb_raises(
     assert _landed(record, system, family), (
         f"precondition: the {family.label} mutation reached the record: "
         f"{record.systems.get(system)!r}")
-    # The disk is complete again; the record is not (K1, DP1: the check reads the record).
+    # The disk is complete again; the record is not (the check reads the record).
     S.write_config(folder, system, S.config_texts(MARKER)[system])
 
     shim = S.DockerShim(tmp_path / "shim")

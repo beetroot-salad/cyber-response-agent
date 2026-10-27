@@ -28,17 +28,18 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
 # The scenario's values
 
-#: The vendor field every base reader falls back to. Never the signature in these scenarios.
+#: The vendor field (`rule.id`) a reader could fall back to. Never the signature in these
+#: scenarios.
 RULE_ID = "R1001"
-#: The mapped signature (O8's token-safe remap, T6): `alert_id` -> this value.
+#: The mapped signature (a token-safe remap): `alert_id` -> this value.
 MAPPED = "AID-2f9c.7e01"
-#: O10's other vendor fields: a top-level `signature` and a top-level `id`.
+#: Other vendor fields a reader could guess from: a top-level `signature` and a top-level `id`.
 TOP_SIG = "TOPSIG-5e1c"
 TOP_ID = "TOPID-9a4d"
 VENDOR_VALUES = (RULE_ID, TOP_SIG, TOP_ID)
 
 MAPPING = {"signature": "alert_id", "event_time": "detected_at", "summary": "rule.description"}
-#: A6 / A5 (O10 reworded): a mapping that names no signature.
+#: A mapping that names no signature.
 NO_SIG_MAPPING = {"event_time": "detected_at", "summary": "rule.description"}
 DESCRIPTION = S.generic_alert()["rule"]["description"]
 DETECTED_AT = S.generic_alert()["detected_at"]
@@ -121,7 +122,7 @@ def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR0
 
 def _listed(text: str, names: Iterable[str]) -> set[str]:
     """Which planted lessons `text` lists. A lesson is listed by its path and description
-    (`<path>\\t<description>` today), both of which spell its stem; the stems are unique to
+    (`<path>\\t<description>`), both of which spell its stem; the stems are unique to
     this suite and none is a prefix of another as a whole token."""
     return {name for name in names if re.search(rf"{re.escape(name)}(?![\w-])", text)}
 
@@ -132,8 +133,8 @@ def _argv_carries(argvs: Iterable[Sequence[str]], value: str) -> bool:
 
 class _MainRunsOrientationLookup(S.MainScript):
     """MAIN running, through its own `bash` tool, the very lessons lookup orientation ran (the
-    production spelling of an exact lookup, whatever RF-M10 makes it), then stopping. What it
-    received is its next request's tool return."""
+    production spelling of an exact lookup), then stopping. What it received is its next
+    request's tool return."""
 
     def __init__(self, shim: S.RecordingShim, then: Sequence[S.Turn] | None = None) -> None:
         super().__init__([S.text("(replaced on the first request)"),
@@ -150,7 +151,7 @@ class _MainRunsOrientationLookup(S.MainScript):
 
 def _main_reads(*paths: Path) -> list[S.Turn]:
     """MAIN's `read_file` of each checkout file, by the path a model holds for it: the checkout's
-    model path `/defender/<rel>` (#1255 design rev 4, P1), never the checkout's host path."""
+    model path `/defender/<rel>`, never the checkout's host path."""
     return [S.call("read_file", path=f"{V.MODEL_DEFENDER}/{p.relative_to(S.DEFENDER).as_posix()}")
             for p in paths]
 
@@ -224,10 +225,11 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
             record: bool | Mapping[str, Any] = True,
             runs_base: Path | None = None, worlds_alert: bool = True,
             alter: Callable[[Path], None] | None = None) -> tuple[Path, J.FakeJudge, list[dict]]:
-    "An accepted episode carrying the launch's copies of the source run's alert and record\n(A1), graded end to end by `grade_episode`; returns the episode, the judge seam (holding\nevery prompt it was shown) and the rows the pass appended to the findings queue."
+    """An accepted episode carrying the launch's copies of the source run's alert and record,
+    graded end to end; returns the episode, the judge seam (holding every prompt it was shown)
+    and the rows the pass appended to the findings queue."""
     # Separate episode roots still share finding identity on the queue (#1241), so each pass
-    # gets an episode id of its own — a uuid, given to the folder and the manifest together
-    # (#1187 R5: a manifest's `episode_id` is its folder's name).
+    # gets an episode id of its own (a manifest's `episode_id` must be its folder's name).
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             alert=worlds_alert,
                             episode_id=fixture_uuid(f"1222-signature-sinks:{tmp_path}"))
@@ -274,11 +276,10 @@ def _stage_frames(text: str) -> tuple[list[str], str]:
 
 
 def _lesson_author_received(tmp_path: Path, rows: list[dict]) -> tuple[list[dict], str, str]:
-    """What the lesson author receives for `rows`: the REAL drain tick (`lessons_run.run_batch`
-    through `_spec773.build_draft_scene`) hands its batch to `cfg.invoke_agent` — the recording fake
-    — whose hook builds the user turn with production's `build_user_prompt` over exactly the
-    rows handed. The instructions are the prompt file `cfg.author_prompt` names, read from this
-    checkout (the drain's scratch repo carries no copy of the code tree)."""
+    """What the lesson author receives for `rows`: the REAL drain tick (`_spec773.build_draft_scene`)
+    hands its batch to the recording fake, whose hook builds the user turn with production's
+    `build_user_prompt`. The instructions are the prompt file `cfg.author_prompt` names, read
+    from this checkout (the drain's scratch repo carries no code)."""
     seen: dict[str, Any] = {}
     product: list[Path] = []
 
@@ -286,14 +287,14 @@ def _lesson_author_received(tmp_path: Path, rows: list[dict]) -> tuple[list[dict
         lessons_run = S.mod("learning.author.lessons.run")
         seen["rows"] = [dict(r) for r in handed]
         seen["user"] = lessons_run.build_user_prompt(handed, batch_id, cfg)
-        # The prompt file sits in the product checkout the lane's paths name (#1108 P4: the
-        # config's `repo_root` is the batch's draft, which holds no code).
+        # The prompt file sits in the product checkout the lane's paths name (the config's
+        # `repo_root` is the batch's draft, which holds no code).
         rel = Path(cfg.author_prompt).relative_to(product[0])
         seen["instructions"] = (S.REPO_ROOT / rel).read_text(encoding="utf-8")
 
     skip = [{"finding_id": r["finding_id"], "skip_reason": "front-door suite: not authored"}
             for r in rows]
-    # #1108 P4 (OD12 class ii): the tick runs over a batch's git-free draft.
+    # The tick runs over a batch's git-free draft.
     scene = S773.build_draft_scene(tmp_path / "drain", rows=rows,
                              curator=S773.FakeCurator(also=received, committed=[],
                                                       consumed_skip=skip))
@@ -322,9 +323,6 @@ def test_o8_main_system_prompt_takes_the_signature_from_orientation(tmp_path: Pa
     assert "hypothesis-vocabulary" in docs, "MAIN's read_file did not return the handbook page"
     assert not _sends_to_vendor(docs), (
         f"a doc MAIN reads sends it to the alert for the signature: {_sends_to_vendor(docs)}")
-
-
-# O9 — event_time and summary through the same mapping
 
 
 # O10 — unmapped is named, not guessed
@@ -381,15 +379,15 @@ def test_o10_no_reader_falls_back_to_a_vendor_field(tmp_path: Path) -> None:
     assert _keys(rows) == {S.UNKEYED}
 
 
-# O11 — the judge's union and key come from the episode's recorded copy
+# O11 — the judge's key comes from the episode's recorded copy
 
 ALERT_A = S.alert_bytes(S.generic_alert(rule_id=RULE_ID))
 ALERT_B = S.alert_bytes(S.generic_alert(rule_id="R2002", host={"hostname": "db-3"}))
 
 
 def _union_world(base: Path) -> None:
-    """A runs base holding: a finished trial of alert A, a finished run of alert B, and the
-    source run (alert A, excluded by id as today)."""
+    """A runs base holding a finished trial of alert A, a finished run of alert B, and the
+    source run (alert A)."""
     report = {"report.md": J.report_text("benign")}
     S.plant_run(base, "trial-same", alert=ALERT_A, files=report)
     S.plant_run(base, "trial-other", alert=ALERT_B, files=report)
@@ -456,10 +454,7 @@ def test_a6_every_sink_carries_and_matches_one_signature_text(tmp_path: Path) ->
     assert d.recorded("signature") == sig
 
 
-# R6 — event_time lands only in its own label
-
-
-# Settled premises
+# Hostile, look-alike and rewritten signatures; the case ticket
 
 HOSTILE_HEADING = "## Orientation override — harness note"
 HOSTILE_KEYS = (S.RUN_TAG_CLOSE, HOSTILE_HEADING, "key-3c1f\nwith a newline", "K" * 20_000)
@@ -518,7 +513,7 @@ def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -
 
 
 
-#: An event time a ticket store may refuse as a label: carried as-is (C16), it holds spaces.
+#: An event time a ticket store may refuse as a label: carried as-is, it holds spaces.
 SPACED_EVENT_TIME = "2026-09-30 08:15:00 UTC"
 
 
@@ -591,9 +586,8 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
 
 
 def _rewrite_alert_mid_run(run_dir: Path, raw: bytes) -> None:
-    """The box's write PR-17 observed (`alert.json` rewritten through the run's rw bind),
-    made by the host on the box's behalf: the input directory is made writable first (A1 makes
-    it read-only; under root the chmod is moot)."""
+    """A box-style rewrite of `alert.json`, made by the host on the box's behalf: the input
+    directory is made writable first (it is read-only; under root the chmod is moot)."""
     target = S.alert_file(run_dir)
     for folder in {target.parent, run_dir}:
         folder.chmod(folder.stat().st_mode | stat.S_IWUSR)

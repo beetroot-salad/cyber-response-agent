@@ -90,7 +90,7 @@ def test_setup_refuses_a_path_shaped_id_before_looking_under_the_data_root(tmp_p
     assert "not a valid tenant id" in said, said
     assert "secret-name" not in said, f"the refusal listed a directory outside the root: {said}"
     assert not root.exists() or list(root.iterdir()) == []
-    H.place_knowledge(root, H.VALID_ID)  # #1120 DC2: the operator's clone precedes setup
+    H.place_knowledge(root, H.VALID_ID)  # the operator's clone precedes setup
     assert H.run_setup(root, H.VALID_ID).returncode == 0
 
 
@@ -98,7 +98,7 @@ def test_setup_reports_a_corrupt_row_instead_of_already_exists(tmp_path):
     """A row that is already there but corrupt is reported as what is wrong with it — the
     owner's `require_tenant` refusal, verbatim — not folded into "already exists"."""
     root = tmp_path / "data"
-    H.place_knowledge(root, H.VALID_ID)  # #1120 DC2: the operator's clone precedes setup
+    H.place_knowledge(root, H.VALID_ID)  # the operator's clone precedes setup
     assert H.run_setup(root, H.VALID_ID).returncode == 0
     location_path(H.row_path)(root, H.VALID_ID).write_text("{torn", encoding="utf-8")
     proc = H.run_setup(root, H.VALID_ID)
@@ -112,7 +112,7 @@ def test_o10_rerun_no_second_row(tmp_path):
     """A re-run of setup with the same id, where the root's only entry is <id>/ holding a valid
     row, succeeds and leaves that row byte-identical."""
     root = tmp_path / "data"
-    H.place_knowledge(root, TID)  # #1120 DC2: the operator's clone precedes setup
+    H.place_knowledge(root, TID)  # the operator's clone precedes setup
     first = H.run_setup(root, TID)
     H.assert_setup_ran(first)
     assert first.returncode == 0, H.setup_output(first)
@@ -126,14 +126,14 @@ def test_o10_rerun_no_second_row(tmp_path):
 
 def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
     root = tmp_path / "data"
-    H.place_knowledge(root, TID)  # #1120 DC2: the operator's clone precedes setup
+    H.place_knowledge(root, TID)  # the operator's clone precedes setup
     first = H.run_setup(root, TID)
     H.assert_setup_ran(first)
     assert first.returncode == 0, H.setup_output(first)
     base = H.runs_dir(root, TID)
     (base / "r1").mkdir(parents=True)
     (base / "r1" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
-    # #1187 R1 (review-4 F42): no runs-base record — a used tenant's runs/ holds runs only.
+    # No runs-base record: a used tenant's runs/ holds runs only.
     H.sessions_dir(root, TID).mkdir()
     (H.sessions_dir(root, TID) / "case-1.db").write_bytes(b"SQLite format 3\x00")
     before = H.census(root)
@@ -144,8 +144,8 @@ def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
 
 
 def test_data_root_holds_a_dangling_symlink_entry(tmp_path):
-    """A data root whose only entry is a dangling symlink: setup is refused by O10, naming the
-    entry, and writes nothing."""
+    """A data root whose only entry is a dangling symlink: setup's non-empty-root refusal names
+    the entry, and it writes nothing."""
     root = tmp_path / "data"
     root.mkdir()
     (root / "ghost").symlink_to(tmp_path / "nowhere")

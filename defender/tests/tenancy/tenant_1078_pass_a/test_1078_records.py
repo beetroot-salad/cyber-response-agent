@@ -1,4 +1,4 @@
-"""The runs-base record _tenant.json: grammar on read, ensure/mint semantics, complete-or-absent create lane, torn reads, mismatch backstop."""
+"""The create lane (`create_tenant`'s tenant row, `_io.write_guarded(mode="create")`): complete or absent under racing readers and crashes, and its fallback where no unnamed file can be made."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root
@@ -26,8 +26,7 @@ T_ID = H.VALID_ID
 
 
 def _race(n: int, fn) -> tuple[list, list]:
-    """Release `n` callers of `fn` together behind one Barrier (C-P2's shape). Returns
-    (results, exceptions)."""
+    """Release `n` callers of `fn` together behind one Barrier. Returns (results, exceptions)."""
     gate = threading.Barrier(n)
     results: list = []
     errors: list = []
@@ -107,16 +106,14 @@ class _Bystander:
         self._look()
 
 
-#: Why a create-lane record's mode is pinned at all: the first staged-name sketch of J16's lane
-#: (`tempfile.mkstemp`) regressed it to 0600 whatever the umask.
+#: Why the create lane's mode is pinned at all: a staged-name sketch (`tempfile.mkstemp`)
+#: regressed it to 0600 whatever the umask.
 _WHY_0644 = "C-R6 found the naive staged shape regressing to 0600"
 
 
 #: The crash child: it loops over ONE real create lane in fresh directories until it is
-#: killed. Measured on the old one-open lane, a kill landed inside the runs-base record's create
-#: window in 8/40 (record-only loop) but 0/40 for the row (create_tenant's own listing and mkdir
-#: dominate its loop) — so the row lane left here is a stray-entry check with weak odds of a torn
-#: hit (red-flagged in the author digest). #1187 R1 retired the record lane with the record.
+#: killed. `create_tenant`'s own listing and mkdir dominate its loop, so a kill seldom lands
+#: inside the row's write (0/40 measured): this is mostly a stray-entry check.
 _CRASH_CHILD = {
     "row": r"""
 import sys
@@ -157,23 +154,16 @@ def _crash_leftovers(root: Path) -> list[str]:
 
 
 # ======================================================================================
-# The create lane (J16/J63). #1187 R1 (declared change 6) retired the runs-base record, and
-# with it `ensure_runs_base_record`'s semantics (D1), its create race (O6), the record's read
-# grammar (O3), its torn read, and `Run.for_tenant`'s mismatch backstop (J34) and rekey
-# coherence (G-R7) — replaced by `ids_1187/test_1187_layout_isolation.py`
-# (`test_create_makes_the_runs_folder_and_writes_no_tenant_record`,
-# `test_a_container_with_no_record_opens_lists_and_hands_out_every_run`,
-# `test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`).
+# The create lane. (The retired runs-base record's cases live in
+# `storage/ids_1187/test_1187_layout_isolation.py`.)
 # ======================================================================================
 
 def test_s7_j16_create_lane_complete_or_absent(tmp_path):
-    """A reader that catches a create-lane writer (create_tenant's tenant row) mid-write sees
-    the name absent or the file complete, never empty or partial; the file has exactly one name
-    throughout (no two-named alias window), mode 0644 under umask 022 (and the writing
-    process's owner), and a crash before the write completes leaves no stray entry in the
-    directory."""
+    """A reader racing `create_tenant`'s row write sees the name absent or the file complete,
+    never empty or partial, with one name throughout (no two-named alias window); the row is
+    mode 0644 under umask 022; a crash mid-write leaves no stray entry."""
     with umask(0o022):
-        # (2) + (3) the tenant row
+        # Six writers race one row under a polling reader.
         row_fields = ("tenant_id", "created_at")
         for trial in range(20):
             root = tmp_path / "rows" / f"d{trial}"
@@ -188,7 +178,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
             assert os.listdir(root / T_ID) == [H.ROW_NAME], f"trial {trial}: stray beside the row"
             assert_single_plain(root / T_ID / H.ROW_NAME, 0o644, why=_WHY_0644)
 
-    # (4) the crash
+    # A crash mid-write.
     crash_root = tmp_path / "crash"
     env = H.setup_env(None)
     def crash_one(lane: str, kill: int) -> list[str]:
@@ -212,7 +202,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
             child.stderr.close()
         return [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
 
-    # The 32 kills are independent (own dir, own child), so they run a few at a time: each is
+    # The kills are independent (own dir, own child), so they run a few at a time: each is
     # mostly interpreter start-up and a sleep.
     jobs = [(lane, kill) for lane, kills in (("row", 8),) for kill in range(kills)]
     with ThreadPoolExecutor(max_workers=4) as pool:

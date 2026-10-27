@@ -67,13 +67,13 @@ SCORED = "# Held-out eval"
 
 def _preflight_context(ep: Path, source: Any, tenant: Any) -> Any:
     """The context pre-flight's host-side reads run in (`cli._preflight_context`), for the
-    opened source `Run` (#1105 PR 2: the env's runs base is the source's own hand-out)."""
+    opened source `Run` (the env's runs base is the source's own)."""
     return H.branch_cli()._preflight_context(ep, source, tenant, _AS_OF)
 
 
 def _tenant_source(root: Path) -> Any:
     """T's finished source run at `<root>/T/runs/<id>`, opened by id through T's repository —
-    what the launcher hands pre-flight (#1105 PR 2)."""
+    what the launcher hands pre-flight."""
     _base, src = H.tenant_source(root, TENANT, row=False)
     return T.open_source(src)
 
@@ -124,7 +124,7 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
 
 
 def test_s7_j50_held_out_positional_ignores_data_root(tmp_path, monkeypatch, capsys):
-    'held_out <runs_dir> scores the directory it is given under DEFENDER_DATA_ROOT=rel/ (and\nwith it unset): the positional branch never resolves the data root or a tenant.'
+    """`held_out <runs_dir>` scores the given directory with DEFENDER_DATA_ROOT relative or unset: it never resolves the data root or a tenant."""
     monkeypatch.chdir(tmp_path)
     fixtures = _fixtures(tmp_path)
     run_id = str(uuid.uuid4())

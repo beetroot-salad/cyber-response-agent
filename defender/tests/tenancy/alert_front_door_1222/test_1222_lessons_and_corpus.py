@@ -34,9 +34,9 @@ _SOURCE_SIGNATURE_LINE = re.compile(r"^source_signature:\s*\[(.*)\]\s*$", re.M)
 
 
 def _background_corpus() -> Path:
-    """Background lessons a lookup must NOT match: the committed fixture tenant's made-up runtime
-    corpus (`knowledge/tenant-fixture/agent/lessons/`, #1108 P4 decision 4). Never the lab's
-    corpus, and never the product tree (O1: it holds none)."""
+    """Background lessons a lookup must NOT match: the committed fixture tenant's made-up corpus
+    (`knowledge/tenant-fixture/agent/lessons/`), never the lab's or the product tree's (which
+    holds none)."""
     corpus = Path(S.mod("tests.tenancy.tenant_1108_p4._support").FIXTURE_AGENT) / "lessons"
     assert corpus.is_dir(), f"the fixture corpus {corpus} is missing"
     assert any(corpus.glob("*.md")), f"the fixture corpus {corpus} is empty"
@@ -149,9 +149,6 @@ def _same_text(section: str | None, d: S.Drive) -> str | None:
     return S.normalize(section, run_dir=d.run_dir, run_id=d.run_dir.name if d.run_dir else None)
 
 
-# MAIN running the lessons lookup its instructions teach
-
-
 # Past runs
 
 _GOLDEN_HYPOTHESIS = "?scanner-or-noise-probe"
@@ -168,9 +165,8 @@ def _investigation(tag: str) -> str:
 def _with_record(runs_base: Path, run_id: str, *, alert: Mapping[str, Any] | bytes,
                  facts: Mapping[str, str | None] | None = None,
                  record: Mapping[str, Any] | None = None, digest: str | None = None) -> bool:
-    """Give an already-planted folder its record (`S.plant_run`). False when the coined record
-    accessor is absent (base): the folder then stays recordless, and the caller asserts the
-    record was planted only after its behavioural observation."""
+    """Give an already-planted folder its record (`S.plant_run`); returns whether it landed (the
+    caller asserts that after its behavioural observation)."""
     try:
         S.plant_run(runs_base, run_id, alert=alert,
                     record=dict(record) if record is not None else True,
@@ -232,7 +228,7 @@ def _judged(tmp_path: Path, *, signature: str | None, world_rule: str | None = N
             sub: str = "judged") -> tuple[list[dict], bool]:
     """Grade an accepted episode whose record copy holds `signature` (None: no signature) and
     return the finding rows the REAL enqueue appended. `world_rule` rewrites every world copy's
-    `alert.json` to that id first — what a box that rewrote its alert leaves (PR-17)."""
+    `alert.json` to that id first — what a box that rewrote its alert leaves."""
     ep = J.accepted_episode(tmp_path / sub)
     if world_rule is not None:
         for alert in (ep / "worlds").glob("*/alert.json"):
@@ -252,10 +248,9 @@ def _judged(tmp_path: Path, *, signature: str | None, world_rule: str | None = N
 def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = (),
            corpus: Mapping[str, str] | None = None) -> Any:
     """One REAL drain tick (`drain.run_batch`) over the learning state the judge appended to,
-    the curator at `invoke_agent=`, over a real batch of the fixture tenant (#1108 P4 O7, OD12
-    class ii: a curator commits only into a tenant batch's draft — `_curator1134.draft_lane` /
-    `draft_author_cfg`); `corpus` lessons are published in the tenant's agent half first (lessons
-    a fold lands in). Returns the draft lane, whose batch branch holds what the tick committed."""
+    the curator at `invoke_agent=`, over a real batch of the fixture tenant (a curator commits
+    only into a tenant batch's draft); `corpus` lessons are published in the tenant's agent half
+    first. Returns the draft lane, whose batch branch holds what the tick committed."""
     lane = C.draft_lane(
         tmp_path, files={f"lessons/{name}.md": text for name, text in (corpus or {}).items()},
         state_dir=tmp_path / "learning-state")
@@ -290,18 +285,16 @@ def _keys_handed(curator: _Curator) -> dict[str, Any]:
 
 
 def _signatures_handed(curator: _Curator) -> dict[str, Any]:
-    """Each handed row's recorded signature as the row carries it in its own field (B2); None
-    when the row carries none there (an unsigned run's row, a row queued before the change)."""
+    """Each handed row's recorded signature as the row carries it in its own field; None when
+    the row carries none there (an unsigned run's row, a row queued before the field existed)."""
     return {r["finding_id"]: r.get(S.QUEUE_SIGNATURE_FIELD) for r in curator.rows()}
 
 
 def _queued_row(finding_id: str, key: str, *, pre_change: bool = False, **over: Any) -> dict:
     """A defender finding row in the shape the judge appends (a family finding that survived).
-    `key` is its `alert_rule_key`: after the change the recorded signature verbatim, `unkeyed`
-    when there is none (C27); before it, the old `rule-<id>` form (the eval's `rule-5710`). A
-    post-change row with a signature also carries it in `S.QUEUE_SIGNATURE_FIELD` (B2, coined); a
-    `pre_change` row and an unkeyed one carry no such field — rows queued before the change lack
-    it."""
+    `key` is its `alert_rule_key`: the recorded signature verbatim, or `unkeyed` when there is
+    none. A row with a signature also carries it in `S.QUEUE_SIGNATURE_FIELD`; an unkeyed row and
+    a `pre_change` one (queued before that field existed) carry no such field."""
     row = {
         "schema_version": 1, "finding_id": finding_id, "run_id": finding_id.split("/")[0],
         "alert_rule_key": key, "direction": "family", "subject": "defender", "type": "lead-set",
@@ -320,7 +313,7 @@ def _queued_row(finding_id: str, key: str, *, pre_change: bool = False, **over: 
 
 def _author_lesson(name: str, entries: Sequence[str] | None, finding_ids: Iterable[str]) -> str:
     """The lesson file the curator is told to write: the shipped frontmatter shape, entries
-    unquoted (C42), no `source_signature` key at all when `entries` is None (C28)."""
+    unquoted, no `source_signature` key at all when `entries` is None."""
     text = S.lesson_text(name, source_signature=entries)
     ids = list(finding_ids)
     return text.replace(f"  - front-door/{name}/0", "\n".join(f"  - {i}" for i in ids) or "  []")
@@ -336,7 +329,7 @@ def _lesson_alert(sig: str, **rule: Any) -> dict[str, Any]:
                                               "description": "front door lesson lookup", **rule})
 
 
-# o8 / r6 / r7 / r8 — the gate's lesson demands
+# o8 / o2 / r6 / r7 — lesson lookups
 
 def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
     alert = S.fixture_alert("v2-sshd-success-after-failures")
@@ -362,12 +355,10 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
 
 
 def test_o2_tenant_lesson_is_discovered_and_read_by_main_at_its_agent_path(tmp_path):
-    """#1108 P4 O2 (and O1): a lesson in the TENANT's corpus — where a curator's merged PR puts
-    it (O7; the authoring half is the drain suites') — is listed by orientation and read by
-    MAIN, typed and bash alike, at `/agent/lessons/<name>.md`: the model's spelling of the run
-    copy's `agent/` (#1255 model view; the box mounts the run copy's `agent/` there). The
-    product checkout the run uses holds no corpus (O1), so `/defender/lessons/...` names
-    nothing — the control on the same tool channel."""
+    """A lesson in the tenant's corpus is listed by orientation and read by MAIN, typed and bash
+    alike, at `/agent/lessons/<name>.md` (the box mounts the run copy's `agent/` there). The
+    product checkout holds no corpus, so `/defender/lessons/...` names nothing: the control on
+    the same tool channel."""
     sig, name = "R-FEEDBACK", "fd-feedback"
     marker = "CURATOR-FEEDBACK-BODY-1222"
     planted = S.plant_tenant()
@@ -395,7 +386,8 @@ def test_o2_tenant_lesson_is_discovered_and_read_by_main_at_its_agent_path(tmp_p
 
 _GOOD_ENTRY = "R-good-1"
 #: Entries outside the allow-list a model or a hand could write into `source_signature`: a line
-#: break, an ANSI escape, heading text, a key-looking value, YAML-significant punctuation, 129
+#: break, an ANSI escape, heading text, a key-looking value, YAML-significant punctuation, and
+#: 129 characters (one past the bound).
 _HOSTILE_ENTRIES = {
     "fd-r6-newline": '"evil\\nsource_signature: [forged]"',
     "fd-r6-ansi": '"\\e[31mred\\e[0m"',
@@ -456,8 +448,8 @@ def test_r6_a_hostile_source_signature_entry_is_inert_in_every_lesson_listing(tm
         assert ch not in section, f"a raw control character {ch!r} reached MAIN's lessons section"
 
 
-#: Unquoted entries YAML 1.1 retypes (PA-21): 000123 -> 83, yes -> True, a date, 0x1F -> 31,
-#: null -> None. Every one is inside C43's allow-list.
+#: Unquoted entries YAML 1.1 retypes: 000123 -> 83, yes -> True, a date, 0x1F -> 31,
+#: null -> None. Every one is a valid signature.
 _RETYPED = ["000123", "yes", "2026-05-01", "0x1F", "null"]
 
 
@@ -504,10 +496,10 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
             f"iter_lessons skipped the {spelling} lesson")
 
     runs = location_path(S.plant_tenant().accept().runs)
-    # #1187 (R1): the natural container holds run folders only — no `_tenant.json` is written.
+    # The runs folder holds run folders only: no `_tenant.json` is written there.
     runs.mkdir(parents=True, exist_ok=True)
     alert = S.generic_alert(rule_id="R-R7-TRACE")
-    traced_run = fixture_uuid("1222-r7-traced")  # #1187 declared change 1: a run id is a uuid
+    traced_run = fixture_uuid("1222-r7-traced")  # a run id is a uuid
     S.plant_run(runs, traced_run, alert=alert, record=False,
                 files={"lessons_loaded.jsonl": _loaded_row(name)})
     recorded = _with_record(runs, traced_run, alert=alert, facts={"signature": "R-R7-TRACE"})
@@ -646,8 +638,8 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
 
 
 def _raw_record(run_dir: Path, data: bytes) -> bool:
-    """Write `data` verbatim where the run's record goes (an unreadable record, p143). False
-    when the coined record accessor is absent (base)."""
+    """Write `data` verbatim where the run's record goes (an unreadable record); returns
+    whether it was written."""
     try:
         target = S.record_file(run_dir)
     except AssertionError:
@@ -700,7 +692,7 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
     def naming(name: str) -> list[str]:
         return sorted({ln.replace(name, "<run>") for ln in lines if name in ln})
 
-    # J3 retired the sibling union: neither served priors nor skip notes reach the judge.
+    # Neither served priors nor skip notes reach the judge (the sibling union is retired).
     for name in (*unreadable, none, served):
         assert not naming(name), f"a prior run entered the judge prompt: {name!r}"
     assert all(planted), "the records could not be planted (S.COINED accessors)"
@@ -776,7 +768,7 @@ def _later_hits(tmp_path: Path, planted: S.Planted, sig: str) -> list[str]:
 
 def _adopt(planted: S.Planted, lane: Any, *names: str) -> dict[str, Any]:
     """Put the lessons the drain committed on its batch branch into `planted`'s own corpus, as
-    written (as a merged PR on the tenant repo delivers them, #1108 P4 O7/O2); return them."""
+    written (as a merged PR on the tenant repo delivers them); return them."""
     committed = _committed(lane)
     for name in names:
         assert name in committed, f"the drain did not commit {name!r}: {sorted(committed)}"

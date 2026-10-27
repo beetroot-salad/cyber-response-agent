@@ -44,7 +44,7 @@ def _after_escape(main: RH.ReplayFn, gather: RH.ReplayFn) -> str:
 def _roster_adapters(given: Path, resolved: Path) -> dict[str, str]:
     """cmdb, usable at start, whose `get-host` raises a ConfigFault naming its own file in the
     roster (both spellings); elastic, whose check raises a non-ConfigFault naming its own file
-    (Down(AdapterBroken) at start, O-5a)."""
+    (Down(AdapterBroken) at start)."""
     spelled = f"{given}/{{name}} ({resolved}/{{name}})"
     cmdb = f'''\
 """#1256 planted: a cmdb adapter in a roster outside the defender tree."""
@@ -98,7 +98,7 @@ VERBS = {{"health-check": health_check, "query": _search, "alerts": _search, "es
 
 def test_an_escaped_fault_naming_an_out_of_tree_roster_reaches_the_model_with_that_path_hidden(
         tmp_path: Path) -> None:
-    """r4 "one maker": the run reads its adapters from a roster outside the defender tree, reached through a link. cmdb passes its start check; its `get-host` then raises a ConfigFault whose text names its own file in that roster, as linked and as resolved (O-5b). That reason reaches the gather model (the refusal of a system down since carries it) with neither spelling of the roster — as the start-time reason of elastic, whose check crashes naming its own file in the same roster, reaches MAIN's opening message and gather's index beside elastic with neither. Red at base, which hides only the settings folder."""
+    """With the adapters roster outside the defender tree (reached through a link), cmdb's escaped call-time ConfigFault naming its own roster file reaches the gather model with neither spelling of the roster path — as elastic's start-time reason does in MAIN's opening and gather's index."""
     real = tmp_path / "lab-checkout" / "adapters"
     real.mkdir(parents=True)
     link = tmp_path / "lab-roster"
@@ -142,7 +142,7 @@ SIBLING_SUFFIXES = ("-old", ".bak", "_x", "2", "base")
 @pytest.mark.parametrize("suffix", SIBLING_SUFFIXES)
 def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str) -> None:
-    """r4 "one maker", the boundary half: an escaped call-time ConfigFault (O-5b) names three paths that SHARE A PREFIX with a path a reason hides — the data root's sibling `<root><suffix>/…`, the tenant folder's `<tenant><suffix>/…`, the settings folder's `<settings><suffix>/…`, for each suffix shape (`-old`, `.bak`, `_x`, `2`, `base`) — none of them inside the folder whose name it extends. Each reaches the model whole, or hidden whole (with its ancestors, up to a separator), never with the shared prefix rewritten and its rest left dangling (`<data root>base/…`, `the tenant's settings-old/…`). Red at base, whose settings redaction rewrites `<settings><suffix>/…` into `the tenant's settings<suffix>/…` (a #1107 CX5 replace that is not boundary-aware, reached by the escaped fault's reason)."""
+    """An escaped fault names paths that merely SHARE A PREFIX with a hidden one (`<root><suffix>/…`, `<tenant><suffix>/…`, `<settings><suffix>/…`): each reaches the model whole or hidden whole, never with the prefix rewritten and its rest left dangling (`the tenant's settings-old/…`)."""
     shim = S7.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     root = tmp_path / "tenants-bnd1256"
@@ -181,7 +181,7 @@ def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
 
 def test_an_escaped_fault_naming_a_data_root_path_reaches_the_model_with_no_host_path(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """r4 "one maker": the escaped call-time fault's reason (O-5b) is made by the function that makes a start-time reason, so it obeys the start-time rule that a reason the model sees carries no host path (#1106; O-5a: "including a path under the data root outside the tenant's own folder"). cmdb's `get-host` raises a ConfigFault naming a file under the data root, in the tenant's folder but neither its settings folder nor adapter code (`<root>/<tenant>/agent/…conf`). The reason reaches the model; neither that file's path nor any line carrying the reason names the data root, the tenant's folder, or their resolved spellings. A reason built by hiding only the settings folder and code paths leaves it whole: red. Red at base, whose escaped reason hides only the settings folder."""
+    """An escaped fault's reason obeys the start-time rule that a reason the model sees carries no host path (#1106): a file in the tenant's folder outside its settings (`<root>/<tenant>/agent/…conf`) is hidden, and no line carrying the reason names the data root or tenant folder, as given or resolved."""
     shim = S7.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     root = tmp_path / "tenants-host1256"

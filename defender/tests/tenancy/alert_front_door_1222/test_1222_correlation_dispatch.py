@@ -25,10 +25,9 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S7
 
-# Local helpers (work-arounds requested as shared machinery in 82-writer-correlation_dispatch.md)
+# Local helpers
 
-#: A document every elastic search of `_resolving_backend` answers. At base it is what item 1
-#: renders into the ancestor section (and what makes base dispatch `l-00c` at all on a Kibana
+#: A document every elastic search of `_resolving_backend` answers.
 ANCESTOR_DOC_MARK = "ANCESTOR-DOC-S04-9c1e"
 
 
@@ -51,7 +50,7 @@ def _resolving_backend() -> S.Backend:
 class _AtFirstRequest(S.MainScript):
     """MAIN's double, plus what the run held at the moment MAIN's FIRST request arrived: the
     queries table, the backend calls, the leads rows and the gather summaries. `bind` is the
-    `before=` hook that names the run folder (requested as a shared hook, see the frontier)."""
+    `before=` hook that names the run folder."""
 
     def __init__(self, turns: Sequence[S.Turn], backend: S.Backend) -> None:
         super().__init__(list(turns))
@@ -153,15 +152,10 @@ def _run_with_turns(d: S.Drive) -> None:
 
 def _tenant_elastic_configs(tenant_id: str, *, events: str, alerts: str,
                             url: str | None = None) -> dict[str, str]:
-    """The tenant's COMPLETE config files (`T6.config_texts`: access method, docker context and
-    both containers included), its elastic one carrying the index patterns given. `url=""`
-    blanks `ELASTICSEARCH_URL` (a faulted SIEM config: elastic's own settings check fails, so
-    since #1256 elastic is down from run start).
-
-    Until #1256 this omitted `ELASTIC_ES_CONTAINER` so that a call the confinement gate admitted
-    ended in the adapter's own call-time `ConfigFault`. Under #1256 that omission makes elastic
-    down at start and no call reaches the gate, so the real adapter is now stopped short of real
-    docker by `_docker_shim` instead."""
+    """The tenant's complete config files (`T6.config_texts`), its elastic one carrying the index
+    patterns given. `url=""` blanks `ELASTICSEARCH_URL`, so elastic's settings check fails and
+    elastic is down from run start. Any other missing key would also make elastic down at start,
+    so the real adapter is stopped short of real docker by `_docker_shim` instead."""
     texts = T6.config_texts(tenant_id, events_index=events, alerts_index=alerts)
     if url is not None:
         texts["elastic"] = re.sub(r'(?m)^ELASTICSEARCH_URL=.*$', f'ELASTICSEARCH_URL="{url}"',
@@ -216,7 +210,7 @@ def _payloads(store: Any, session_id: str) -> list[str]:
         WHERE m.session_id = ? ORDER BY m.id""", (session_id,))]
 
 
-# correlation_outcome_reaches_main / slim heading / o3 opening prompt
+# The correlation outcome reaches MAIN's opening message
 
 def test_opening_message_holds_one_correlation_section(tmp_path):
     marker = "CORR-SUMMARY-S04-ONE"
@@ -252,7 +246,7 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
 
 
 
-# O1, the timestamp gate, tenants without elastic, O2
+# O1 — tenants without elastic; alerts without a usable timestamp
 
 def test_o1_non_elastic_tenant_gets_correlation_without_kibana_fields(tmp_path):
     marker = "CORR-O1-CMDB-5a"
@@ -381,7 +375,7 @@ def test_p013_mains_first_turn_dispatches_leads_while_correlat(tmp_path):
 
 
 
-# l-000, O4 and the confinement survivals
+# O4, and a SIEM config faulted at run start
 
 
 def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
@@ -437,8 +431,7 @@ dispositions:
 
 def _names_down_as_not_configured(text: str, system: str) -> list[str]:
     """Each line of `text` saying "not configured" (any case) whose own line or the one before
-    it names `system` — how #1256 tells an agent a granted system is down from run start, read
-    loosely on layout (the note may put the system on its own bullet line above the reason)."""
+    it names `system` (the note may put the system on its own bullet line above the reason)."""
     lines = text.lower().splitlines()
     return [ln for i, ln in enumerate(lines) if "not configured" in ln
             and any(system in near for near in lines[max(i - 1, 0):i + 1])]
@@ -456,7 +449,7 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
                        S.text("L1-P134: the SIEM answered.")]}
     main = [S.gather("l-001", "elastic", "measure the host"), S.text(S.DONE)]
     # An alert that names no signal index: the tenant's own SIEM config is the only place an
-    # index could come from (base's item 1 read it here, and named its fault).
+    # index could come from.
     alert = S.fixture_alert()
     alert.pop("signal_index")
     runs: dict[str, S.Drive] = {}
@@ -476,7 +469,7 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
         _run_with_turns(runs[tenant_id])
     faulted, healthy = runs[fixture_uuid("tenant:tfault1222")], runs[fixture_uuid("tenant:tgood1222")]
 
-    # O-3: MAIN's opening names elastic as not configured, with the check's reason (the key).
+    # MAIN's opening names elastic as not configured, with the check's reason (the blank key).
     opening = _opening(faulted, fixture_uuid("tenant:tfault1222"))
     assert _names_down_as_not_configured(opening, "elastic"), (
         "MAIN's opening message does not name elastic as not configured on a tenant whose "
@@ -496,8 +489,8 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
     assert faulted.rows_for("l-001") == [], (
         f"the refused elastic lead wrote query rows — its call ran: {faulted.rows_for('l-001')}")
     assert not [r for r in faulted.rows if r.get("system") == "elastic"], faulted.rows
-    # O-2: nothing is charged, per system or run-wide (read as failure counts, not as the
-    # breaker's layout — where a not-configured status is kept is the implementer's).
+    # Nothing is charged, per system or run-wide (read as failure counts, not the breaker's
+    # layout).
     assert faulted.run_state.breaker_failures("elastic") == 0, faulted.breaker
     assert faulted.breaker.get("total_failures", 0) == 0, faulted.breaker
 
@@ -584,8 +577,7 @@ def test_r1_every_harness_slot_of_mains_opening_message_is_bound(tmp_path):
     assert "R-1001" in S.harness_text(parts["vocabulary"]), (
         "the vocabulary section does not name the signature it was looked up by")
     assert d.run_dir is not None
-    # #1255 (design rev 4, P1 Outbound; O3): the workspace map names the run folder by its model
-    # path, and never by its host folder.
+    # The workspace map names the run folder by its model path, never by its host folder.
     workspace = S.harness_text(parts["workspace"])
     assert V.MODEL_RUN in workspace, (
         f"the workspace section does not name this run's folder ({V.MODEL_RUN})")
@@ -640,10 +632,7 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
 
 
 
-# The harness default (C01): p001, p186
-
-
-# p012, p033, p173 — the outcome is in the opening message, whenever the run ends
+# The outcome is in the opening message, whenever the run ends
 
 def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
     marker = "CORR-P012-31"
@@ -692,11 +681,11 @@ def test_p033_mains_first_request_retried_before_correlation_i(tmp_path):
 
 
 
-# The resume trio: p034, p037, p040
+# Resumed siblings
 
 def _plant_sibling(source_dir: Path, sibling_dir: Path) -> Path:
-    """A sibling's run folder holding the source run's alert (and its record once it has one) — the
-    case input a resumed run starts from (`_branch_947.ALERT_DOC`'s reasoning)."""
+    """A sibling's run folder holding the source run's alert and record: the case input a
+    resumed run starts from."""
     sibling_dir.mkdir(parents=True)
     for attr in ("alert", S.COINED["runpaths.record"]):
         src = getattr(RunPaths(source_dir), attr, None)
@@ -713,12 +702,9 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
                          before: Callable[[Path], None] | None = None,
                          ) -> tuple[S.Drive, S.Drive]:
     """A source run through `run.main` (production's default store), branched at MAIN's `echo`
-    CALL after the document landed and the capturing lead returned, and a sibling resumed
-    there. Before #1255 this branched at the append's tool RETURN, which D1 refuses; the
-    `echo` is a tool-calling MAIN response (D1) that is not the gather turn (an arm re-runs a
-    gather at its branch turn against its own backend), and it sits after `l-009`'s capture so
-    the branch point holds a capture however the capture rule reads the source's table (cut at
-    the snapshot or whole — the design does not say)."""
+    call, and a sibling resumed there. A branch point must be a tool-calling MAIN response that
+    is not the gather turn (an arm re-runs a gather against its own backend); the `echo` follows
+    `l-009`'s capture, so the branch point holds a capture however the source's table is cut."""
     golden = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
     system, verb, params = capture
     src = S.run_alert(

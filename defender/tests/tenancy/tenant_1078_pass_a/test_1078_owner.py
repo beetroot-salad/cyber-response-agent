@@ -118,7 +118,7 @@ def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
     assert H.require_tenant(fixture_data_root(root), tenant_id).tenant_id == tenant_id
     assert location_path(H.TenantPaths(fixture_data_root(root), tenant_id).runs) == root / tenant_id / "runs"
     base = H.runs_dir(root, tenant_id)
-    # #1187 R1 (review-4 F42): no container record — the run's tenant is where it sits.
+    # No container record: the run's tenant is where it sits.
     run_dir = base / RUN_ID
     run_dir.mkdir(parents=True)
     assert _opened_tenant(root, tenant_id, RUN_ID) == tenant_id
@@ -127,8 +127,7 @@ def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
 
 def _opened_tenant(root: Path, tenant_id: str, run_id: str) -> str:
     """The tenant the run `run_id` is addressed to, opened through `tenant_id`'s runs repository
-    under `root` once its operator-placed knowledge is there (#1120 DC2) — the replacement for
-    `tenant_of_run_dir` (#1105 PR 2, F-13)."""
+    under `root` once its operator-placed knowledge is there."""
     from defender.records import RunId
 
     H.place_knowledge_for_rows()
@@ -174,8 +173,8 @@ def test_o11a_uuid_tenant_linked_into_the_checkout_is_refused(tmp_path):
 
 
 def test_checkout_path_itself_reached_through_a_symlink(tmp_path):
-    """O11a's refusal holds when the checkout path is reached through a symlink: the
-    comparison is between resolved paths."""
+    """The inside-the-checkout refusal holds when the checkout path is reached through a
+    symlink: the comparison is between resolved paths."""
     checkout = H.mod("_paths").PATHS.defender_dir.parent
     link = tmp_path / "checkout-link"
     link.symlink_to(checkout, target_is_directory=True)
@@ -301,8 +300,8 @@ def test_d2_data_root_default(tmp_path, monkeypatch, value):
 
 
 def test_data_root_itself_is_a_symlink(tmp_path, monkeypatch):
-    """A symlinked data root: resolve_data_root returns the resolved target, so O10's scan
-    lists the target's entries and any refusal names resolved paths."""
+    """A symlinked data root: resolve_data_root returns the resolved target, so setup's scan of
+    the root lists the target's entries and any refusal names resolved paths."""
     target = tmp_path / "target-root"
     target.mkdir()
     (target / "stray").write_text("x", encoding="utf-8")

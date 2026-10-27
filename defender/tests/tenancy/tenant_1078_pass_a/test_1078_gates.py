@@ -59,8 +59,8 @@ def test_d1_row_constant_not_exempt(tmp_path):
 
 
 def test_rename_proof_with_a_new_row_constant(tmp_path):
-    """The #1077 rename proof keeps passing with the new tenancy/_tenant.py constants in its renamed
-    set; DEFAULT_TENANT_ID's _SKIP_NAMES entry goes with the constant."""
+    """The #1077 rename proof keeps passing with tenancy/_tenant.py's constants in its renamed
+    set, and keeps no `_SKIP_NAMES` entry for the deleted DEFAULT_TENANT_ID."""
     proof = load_module(DEFENDER / "tests" / "storage" / "test_1077_rename_proof.py",
                         name=f"rename_proof_1078_{uuid.uuid4().hex}")
     assert "DEFAULT_TENANT_ID" not in proof._SKIP_NAMES, (

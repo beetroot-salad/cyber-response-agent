@@ -62,7 +62,7 @@ _VERB_PARAMS: dict[str, dict[str, tuple[str, ...]]] = {
 }
 
 #: The real adapter verbs (`REAL` runs them). Over an unconfigured system each raises the
-#: `ConfigFault` naming what its settings lack, before any docker child (C3).
+#: `ConfigFault` naming what its settings lack, before any docker child.
 _REAL: dict[tuple[str, str], Callable[..., Any]] = {
     ("cmdb", "get-host"): cmdb_adapter.get_host,
     ("cmdb", "health-check"): cmdb_adapter.health_check,
@@ -79,7 +79,7 @@ OK = "ok"
 
 def _no_docker_context(folder: Path) -> None:
     # `access_context`'s key: read on every docker call, never by `load_config` — a check that
-    # covers only `load_config` judges cmdb usable (O-5 / DP3).
+    # covers only `load_config` judges cmdb usable.
     S.drop_key(folder, "cmdb", "CMDB_DOCKER_CONTEXT")
 
 
@@ -95,7 +95,7 @@ def _no_settings_folder(folder: Path) -> None:
 
 
 #: How each system is made unusable, and the distinctive token of the reason its adapter gives
-#: (three different `ConfigFault` sites, C3). Each token is matched case-insensitively.
+#: (three different `ConfigFault` sites). Each token is matched case-insensitively.
 UNCONFIGURE: dict[str, tuple[Callable[[Path], None], str]] = {
     "cmdb": (_no_docker_context, "CMDB_DOCKER_CONTEXT"),
     "identity": (_no_url_base, "IDENTITY_URL_BASE"),
@@ -182,7 +182,7 @@ class _Run:
 
     @property
     def state(self) -> Any:
-        """The run's `RunState` (#1235), as `drive` hands it back."""
+        """The run's `RunState`, as `drive` hands it back."""
         return self.summary["run_state"]
 
     @property
@@ -297,7 +297,7 @@ def _sections_holding(text: str, lines: list[str]) -> list[str]:
 
 
 def _told_not_to_dispatch(section: str) -> bool:
-    """O-3's instruction, read for its POLARITY, not its vocabulary: `section` prohibits
+    """The don't-dispatch instruction, read for its POLARITY, not its vocabulary: `section` prohibits
     dispatching (the prohibition's object is `dispatch`), and some sentence of it calls the down
     system a visibility gap without denying it, with the instruction to name it in that sentence
     or the next — never "nothing to name"."""
@@ -322,8 +322,8 @@ _TELLS: tuple[str, ...] = (
     "Never dispatch a system listed here. Treat each as a visibility gap.\nName the missing "
     "evidence in a ceiling_test row.",
 )
-#: ... and must refuse: the opposite instruction in the same vocabulary (adversary A5's own
-#: sentence), and each half of the instruction inverted on its own.
+#: ... and must refuse: the opposite instruction in the same vocabulary, and each half of the
+#: instruction inverted on its own.
 _INVERTED: tuple[str, ...] = (
     "Do not hesitate to dispatch these systems as you would any other: a refusal from one is not "
     "a visibility gap, so there is nothing to name — retry it later in the run.",
@@ -344,7 +344,7 @@ def test_the_dispatch_instruction_matcher_reads_polarity():
 
 
 def _assert_not_configured_refusal(text: str, token: str, what: str) -> None:
-    """O-4: the refusal names the system as not configured with its reason — never as a breaker
+    """The refusal names the system as not configured with its reason — never as a breaker
     trip, a count of infra failures, or the breaker's own vocabulary."""
     assert _NOT_CONFIGURED.search(text), f"{what}: the refusal never says 'not configured': {text!r}"
     assert token.lower() in text.lower(), \

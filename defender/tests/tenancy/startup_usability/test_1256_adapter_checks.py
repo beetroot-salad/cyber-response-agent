@@ -17,7 +17,7 @@ from defender.kit.faults import ConfigFault
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-#: The declaration K1 names.
+#: The settings check every adapter declares.
 CHECK = "check_settings"
 
 
@@ -302,7 +302,7 @@ _PLANTED: dict[str, dict[str, str]] = {
              "token": ""},
     "identity": {"verb": "get-user", "fn": "get_user", "param": "user", "arg": "dev.dana",
                  "token": "defender_planted_absent_module_1256"},
-    # Declares no check: the reason names the missing declaration, K1's `check_settings`.
+    # Declares no check: the reason names the missing `check_settings` declaration.
     "threat-intel": {"verb": "lookup", "fn": "lookup", "param": "value", "arg": "203.0.113.7",
                      "token": CHECK},
     # Its check raises something that is not a ConfigFault (a crash).
@@ -315,7 +315,7 @@ _PLANTED: dict[str, dict[str, str]] = {
 _BROKEN = ("identity", "threat-intel", "change-mgmt", "host-state")
 _LOG_CONTROL = "log-channel control for #1256 O-5a (names no system)"
 #: What the well-formed planted verb logs at ERROR when it runs: proves a record emitted INSIDE
-#: the run reaches the same capture the K3 assertion reads. Names no system.
+#: the run reaches the same capture the ERROR-record assertions read. Names no system.
 _IN_RUN_LOG_CONTROL = "in-run log-channel control for #1256 O-5a"
 
 
@@ -325,8 +325,8 @@ _OUTSIDE_TENANT = Path("shared-1256", "credentials")
 def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
                     at_import: list[str] | None = None, check: list[str] | None = None) -> str:
     """`system`'s planted adapter (`_PLANTED[system]`'s verb, recording to `probe`), broken the
-    way `_PLANTED` says — or, given `at_import` / `check`, with those module lines instead (the
-    seams O-5a names: what runs at import, and the declared check)."""
+    way `_PLANTED` says — or, given `at_import` / `check`, with those module lines instead (what
+    runs at import, and the declared check)."""
     spec = _PLANTED[system]
     head = [f'"""Planted by #1256\'s contract (O-5a) as the {system} adapter."""',
             "import json", "import logging", "from pathlib import Path"]
@@ -366,7 +366,7 @@ def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
 
 def planted_tree(root: Path, probe: Path, sources: dict[str, str] | None = None, *,
                  outside: Path | None = None) -> Path:
-    """A defender tree whose adapters are the planted ones (K2): every top-level entry of this
+    """A defender tree whose adapters are the planted ones: every top-level entry of this
     checkout symlinked except `integrations/`,
     a real folder holding only the planted files — `sources` (system -> source), else every
     `_PLANTED` system's. `<root>/repo/defender`, as the catalog's repo-relative locators expect.
@@ -497,7 +497,7 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
                 violations.append(
                     f"{system}: its {where} reply must name it down and the reason "
                     f"({token!r}) (O-5a, DP4): {text[-300:]!r}")
-            # DP4: one notion of down, the message naming the ACTUAL cause — a broken adapter is
+            # One notion of down, the message naming the ACTUAL cause — a broken adapter is
             # neither a breaker trip nor a system whose settings do not configure it.
             for wrong_cause in ("tripped", "not configured"):
                 if wrong_cause in low:
@@ -533,7 +533,7 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
         + repr([(r.levelname, r.getMessage()[:160]) for r in at_start]))
 
 
-# --- O-5a at both seams, whatever the adapter raises (#678: a catch-all discharged at one seam) --
+# --- O-5a at both seams (import, check), whatever the adapter raises (#678) ---------------------
 
 _ANY_BREAK: tuple[tuple[str, str, list[str], list[str] | None, str], ...] = (
     ("import", "NameError", ["planted_undefined_name_1256  # noqa: F821"], None,

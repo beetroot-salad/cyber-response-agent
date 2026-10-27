@@ -1,4 +1,4 @@
-"""run_common.materialize_run: the runs base follows from the tenant; record mismatch, torn record, missing row and sibling-base refusals."""
+"""`run_common.materialize_run`: the runs base follows from the accepted tenant; a missing row refuses; a sibling lands in its episode."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -23,10 +23,9 @@ X = fixture_uuid("case-x")
 
 
 def _materialize(alert: Path, tenant_id: str, **kw):
-    """The entry's pipeline (#1120 D1): resolve the data root and accept `tenant_id` there
-    (`accept_tenant` — the row check pass (A) made materialize's step 1 now runs here, at the
-    entry), then `materialize_run(tenant=...)` over the accepted `Tenant`. #1279 (A3, rev 6): setup takes no id; it mints one, or is handed
-    the arm's run (`run=`, made from its roster id by the episode view)."""
+    """The entry's pipeline: resolve the data root and accept `tenant_id` there (the row check),
+    then `materialize_run(tenant=...)`. Setup takes no run id: it mints one, or is handed the
+    arm's run (`run=`, made from its roster id by the episode view)."""
     tenant = H.accept(H.resolve_data_root(), tenant_id)
     return H.run_common().materialize_run(alert, tenant=tenant, **kw).run_dir
 
@@ -84,10 +83,9 @@ def _golden_alert(tmp_path: Path) -> Path:
 
 
 def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
-    """An episode at `<root>/<T>/episodes/<uuid>` (#1187 Layout A) whose manifest names a
-    source at T's tenant location, and the `ResumeWorld` a sibling resolves from it. `family`
-    passes through to `H.family_for` (#1187 R2: the episode as RUNS leaves it — `runs/` and the
-    arm roster — unless `roster=False`). No container record (R1)."""
+    """An episode at `<root>/<T>/episodes/<uuid>` whose manifest names a source at T's tenant
+    location, and the `ResumeWorld` a sibling resolves from it. `family` passes through to
+    `H.family_for`."""
     del tmp_path
     _base, src = H.tenant_source(root, T_ID, row=False)
     manifest = H.family_for(src, **family)
@@ -101,7 +99,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
 def test_o4_materialize_layout(tmp_path, tenant_root):
     run_dir = _materialize(H.plant_alert(tmp_path / "in"), T_ID)
     expected = Path(run_dir)
-    # #1279 (A3, conflict updated): the run id is the mint's, so the layout is judged by its parent.
+    # The run id is minted, so the layout is judged by its parent.
     assert expected.parent == tenant_root / T_ID / "runs"
     assert H.mod("records").RunId.parse(expected.name)
     assert expected.is_dir()
@@ -124,17 +122,15 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
     row_bytes = location_path(H.row_path)(tenant_root, T_ID).read_bytes()
-    # #1108 P4 (O11): a run reads a PUBLISHED export, and the replay harness publishes the
-    # tenant (unchanged folder: the same commit, into the same remote) before it drives. What
-    # publishing leaves in the tenant folder is the publish's (P3), not the run's: it is taken
-    # here, up front, as the baseline, so the listings below still pin that materialize and
-    # the driver add nothing beside `runs/` but `sessions/`.
+    # A run reads a PUBLISHED export, and the replay harness publishes the tenant before it
+    # drives. What publishing leaves in the tenant folder is taken up front as the baseline, so
+    # the listings below pin that materialize and the driver add only `runs/` and `sessions/`.
     publish_once(forge_scratch(tenant_root), root=tenant_root, tenant_id=T_ID)
     published = set(H.entries(tenant_root / T_ID))
     assert {H.ROW_NAME, "knowledge"} <= published, published
     assert not published & {"runs", "sessions"}, published
     run_dir = Path(_materialize(_golden_alert(tmp_path), T_ID))
-    # `knowledge/` is the operator's (#1120 DC2: placed before setup), never materialize's.
+    # `knowledge/` is the operator's (placed before setup), never materialize's.
     assert H.entries(tenant_root / T_ID) == sorted(published | {"runs"}), (
         "materialize wrote beside runs/")
     _replay(run_dir)
@@ -209,8 +205,7 @@ def test_1186_sibling_ignores_legacy_state_override(
     alert = RunPaths(src).alert
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
     with Episode.open(ep) as episode:
-        # #1187 (O4b): the sibling's form requires its UUID roster (`require_roster=True`, replacing
-        # PR 2's `container_required`).
+        # The sibling's form requires its UUID roster.
         view = H.accept(tenant_root, T_ID).runs_repository().episode(
             ep.name, held=episode, require_roster=True)
         learning = {"root": tenant_root, "inside": tenant_root / T_ID / "learning",
@@ -234,7 +229,7 @@ def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(old))
     before = H.census(old)
     run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), T_ID))
-    # #1279 (A3): the id is minted, so it cannot be the old run's id; the old run is still untouched.
+    # The id is minted, so it cannot be the old run's; the old run stays untouched.
     assert run_dir.parent == tenant_root / T_ID / "runs"
     assert run_dir.name != X
     paths = H.mod("records._layout").RunPaths(run_dir)
