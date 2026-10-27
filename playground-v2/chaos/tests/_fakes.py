@@ -171,13 +171,13 @@ class FakeChaosCtl:
         return {"ledger_ref": ref, "status": "reverted", "reverted_at": "2026-09-20T00:01:00+00:00"}
 
 
-def write_profile(profiles_dir, profile_id: str, mode: str, params: dict, seed: int = 42) -> str:
+def write_profile(profiles_dir, profile_id: str, mode: str, params: dict) -> str:
     """Write one `chaos/profiles/<id>.yaml` (M2's committed-YAML schema)."""
     body = {
         "id": profile_id,
         "description": f"spec fixture for {mode}",
         "mode": mode,
-        "seed": seed,
+        "seed": 42,
         "params": params,
         "cover": "ordinary environmental decay; documentation only",
     }

@@ -25,13 +25,12 @@ from chaos import ctl
 from chaos.ledger import read_records
 from chaos.seam import SeamError
 
-AUTH = "logs-system.auth@custom"
 SYSLOG = "logs-system.syslog@custom"
 
 
-def _activate(profile_id, profiles_dir, rules_dir, ledger_dir, execer, seed=42):
+def _activate(profile_id, profiles_dir, rules_dir, ledger_dir, execer):
     return ctl.activate(
-        profile_id, seed=seed, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
+        profile_id, seed=42, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
     )
 
 

@@ -5,7 +5,6 @@ import importlib
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -75,37 +74,19 @@ def _pricing_rows(usage_cost) -> list:
             for model, usage in PRICING_ROWS]
 
 
-def _main_deps_over_run_copy(tmp_path: Path) -> tuple[Any, Path]:
-    """MAIN deps from the real `bind`, a run copy's `agent/` (`<T>/run-knowledge/<run_id>/agent/`)
-    as `RunScope(tenant_agent=...)`, over a code tree holding no corpus."""
-    from dataclasses import replace
-
-    from defender.agents import MAIN_DEF
-    from defender.records import Run
-    from defender.investigation.agent_definition import RunScope, bind
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
-    from defender.tests.support.shared._locations_1210 import fixture_runs_base
-
-    run = tmp_path / fixture_uuid("run")
-    run.mkdir()
-    dfn = tmp_path / "defender"
-    dfn.mkdir()
-    agent = tmp_path / "tenant" / "run-knowledge" / run.name / "agent"
-    agent.mkdir(parents=True)
-    deps = bind(MAIN_DEF, run, defender_dir=dfn, scope=RunScope(tenant_agent=agent))
-    return replace(deps, run=Run.under(fixture_runs_base(run.parent), run.name)), agent
-
-
 def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_not(tmp_path):
     """Both consumers of the moved frontier engine (the fold push and the document tool's
     recall) read the run copy's corpus, `RunScope.tenant_agent`'s `lessons/` rather than
     `defender_dir/lessons`, and show the model the lesson at `/agent/lessons/<name>` (#1108)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.support.shared.contracts import _fold_936 as F
-    from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson
+    from defender.tests.support.learning.retrieval._lessons_corpus import (
+        _run_copy_main_deps,
+        _write_lesson,
+    )
 
     engine = S.dotted(S.home_of("FOLD_LEAD"))
-    deps, agent = _main_deps_over_run_copy(tmp_path)
+    deps, _run, agent, _dfn = _run_copy_main_deps(tmp_path)
     corpus = agent / "lessons"
     corpus.mkdir()
     lesson = _write_lesson(corpus, F.CLASS_LESSON, nodes=F.CLASS_SELECTOR)

@@ -17,7 +17,7 @@ def test_health_no_longer_counts_the_overlay(cmdb_client):
     body = cmdb_client.get("/health").json()
     assert body["status"] == "ok"
     assert body["host_count"] > 0
-    assert "overlay_count" not in body, "the overlay count is an agent-reachable harness tell (O6)"
+    assert "overlay_count" not in body, "the overlay count is an agent-reachable harness tell"
 
 
 def test_health_does_not_grow_a_tell_when_an_overlay_is_set(cmdb_client):

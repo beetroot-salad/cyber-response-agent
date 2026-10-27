@@ -19,21 +19,20 @@ from chaos.profiles import load_profile
 
 # A fixed table, not a sampled one: every assertion below is deterministic.
 SEEDS = (1, 2, 3, 7, 13, 42, 99, 4242)
-FLIPPABLE_FIELDS = ("owner", "criticality", "role")
 
 
 def _values_in_inventory(inventory: dict, field: str) -> set:
     return {h[field] for h in inventory["hosts"] if field in h}
 
 
-def _cmdb_stale_profile(profiles_dir, field: str = "owner"):
+def _cmdb_stale_profile(profiles_dir):
     write_profile(
         profiles_dir,
-        f"cmdb-stale-{field}",
+        "cmdb-stale-owner",
         "cmdb-stale",
-        {"variant": "field-flip", "field": field, "hosts": 1},
+        {"variant": "field-flip", "field": "owner", "hosts": 1},
     )
-    return load_profile(f"cmdb-stale-{field}", profiles_dir=profiles_dir)
+    return load_profile("cmdb-stale-owner", profiles_dir=profiles_dir)
 
 
 def test_cmdb_stale_replays_identically_for_each_seed(profiles_dir, inventory):

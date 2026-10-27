@@ -264,8 +264,8 @@ def test_the_corpus_speaks_the_SAME_esql_encoding_production_does():
         f"swept {CASES_DIR} and found no ES|QL payload at all — this guard would pass "
         f"over an empty tree, which is not the same fact as a uniform one")
     assert offenders == [], (
-        f"{len(offenders)} file(s) under hidden/ still carry pre-#842 dict rows, so a "
-        f"judge prompt built from them mixes two encodings: {offenders[:5]}"
+        f"{len(offenders)} file(s) under hidden/ still carry dict rows, not positional ones: "
+        f"{offenders[:5]}"
         + (f" (+{len(offenders) - 5} more)" if len(offenders) > 5 else ""))
 
 

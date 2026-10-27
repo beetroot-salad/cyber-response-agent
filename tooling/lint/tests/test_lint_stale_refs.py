@@ -95,22 +95,14 @@ def _clone(tmp_path: Path, up: Path, *, depth: int | None = None) -> Path:
     return work
 
 
-def _baseline(tmp_path: Path, entries: dict[str, str] | None = None) -> Path:
+def _baseline(tmp_path: Path) -> Path:
     path = tmp_path / "baseline.json"
-    path.write_text(
-        json.dumps({"//": "test", "entries": entries or {}}), encoding="utf-8"
-    )
+    path.write_text(json.dumps({"//": "test", "entries": {}}), encoding="utf-8")
     return path
 
 
-def _run_gate(work: Path, tmp_path: Path, *, argv: list[str] | None = None,
-              base_ref: str = "origin/main", entries: dict[str, str] | None = None) -> int:
-    return GATE.main(
-        argv or [],
-        repo_root=work,
-        base_ref=base_ref,
-        baseline_path=_baseline(tmp_path, entries),
-    )
+def _run_gate(work: Path, tmp_path: Path, *, base_ref: str = "origin/main") -> int:
+    return GATE.main([], repo_root=work, base_ref=base_ref, baseline_path=_baseline(tmp_path))
 
 
 def test_unresolvable_base_ref_exits_2(tmp_path, capsys):

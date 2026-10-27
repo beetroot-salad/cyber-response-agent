@@ -87,4 +87,4 @@ def test_lazy_import_repointed_to_a_path_that_does_not_exist(tmp_path, monkeypat
         assert not got["real"], (
             f"{name}: the real-output check still passes with the lazily imported module gone, "
             f"so it cannot catch a stale repoint: {got}")
-        assert got["fallback"], f"{name}: the site did not fail open as today: {got}"
+        assert got["fallback"], f"{name}: the site did not fail open: {got}"

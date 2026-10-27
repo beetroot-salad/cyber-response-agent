@@ -168,15 +168,7 @@ def test_labeled_fixture_with_no_alert_is_excluded_loudly(tmp_path: Path, capsys
 
 def test_un_run_fixtures_are_surfaced_not_scored(tmp_path: Path):
     """The denominator counts only what was actually investigated."""
-    fixtures_dir = tmp_path / "held-out"
-    for slug, disposition in (("b01-case", "benign"), ("m01-case", "malicious")):
-        member = fixtures_dir / slug
-        member.mkdir(parents=True)
-        (member / "alert.json").write_text("{}", encoding="utf-8")
-        (member / "ground_truth.yaml").write_text(
-            f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8"
-        )
-
+    fixtures_dir = _fixture_set(tmp_path / "held-out", {"b01-case": "benign", "m01-case": "malicious"})
     fixtures = load_held_out_fixtures(fixtures_dir)
     assert len(fixtures) == 2, "both labeled members must load"
     scored = score(fixtures, tmp_path / "empty-runs", {})

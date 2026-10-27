@@ -361,9 +361,9 @@ _BAD = (f'FROM logs-zeek.ssh-* | LIMIT 1 | WHERE @timestamp >= "{_WINDOW[0]}" '
         f'AND @timestamp < "{_WINDOW[1]}"')
 
 
-def _two_bad_records(root, name="case-x"):
+def _two_bad_records(root):
     """One case whose lead has two queries, BOTH controlled by a misplaced window."""
-    d = _case(root, name)
+    d = _case(root, "case-x")
     (d / "oracle_visible" / "leads.jsonl").write_text(
         json.dumps({"lead_id": "l-001", "queries": [
             {"query_id": "elastic.ad-hoc", "params": {"query": _UNBOUNDED}, "seq": s}

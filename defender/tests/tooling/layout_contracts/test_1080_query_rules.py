@@ -7,7 +7,6 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run as _wr
 
 import datetime as _dt
 import hashlib
-import importlib
 import json
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
@@ -28,22 +27,7 @@ def _g() -> Any:
     return S.golden(GOLDEN)
 
 
-def _flat_rule(base_name: str) -> tuple[str, str]:
-    """`(module relpath, name in that module)` of a flat-tier query rule, looked up in
-    `S.QUERY_RULES` under the spelling `S.QUERY_RULE_PUBLIC` gives it. Under `S.AT_BASE` the
-    base definition answers, so the same assertions prove the goldens against the base."""
-    public = S.QUERY_RULE_PUBLIC.get(base_name, base_name)
-    if S.AT_BASE and public != base_name:
-        try:
-            return S.home_of(public, home=S.QUERY_RULES), public
-        except AssertionError:
-            return S.home_of(base_name), base_name
-    return S.home_of(public, home=S.QUERY_RULES), public
-
-
-def _flat(base_name: str) -> Any:
-    home, name = _flat_rule(base_name)
-    return getattr(importlib.import_module(S.dotted(home)), name)
+_flat = S.query_rule
 
 
 #: A golden value whose canonical JSON is longer than this is stored as its digest.

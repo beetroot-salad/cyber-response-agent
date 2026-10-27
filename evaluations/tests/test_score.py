@@ -36,16 +36,15 @@ def _scripted(*, label: str = LABEL_OK, verdict: str = VERDICT_OK):
     return call
 
 
-def _case(tmp_path, *, kind="observed", leads=("l-001",), systems=("elastic",),
-          extra_manifest=None, calibration=None):
+def _case(tmp_path, *, kind="observed", leads=("l-001",), extra_manifest=None,
+          calibration=None):
     """A case with just enough on disk for `judge.load_lead_inputs` to assemble a lead."""
     d = tmp_path / "case-x"
     (d / "oracle_visible").mkdir(parents=True)
     (d / "oracle_visible" / "story.md").write_text("An operation ran.", encoding="utf-8")
     (d / "oracle_visible" / "leads.jsonl").write_text("".join(
         json.dumps({"lead_id": lid, "goal": "g",
-                    "queries": [{"query_id": f"{sys_}.some-template", "params": {}}
-                                for sys_ in systems]}) + "\n"
+                    "queries": [{"query_id": "elastic.some-template", "params": {}}]}) + "\n"
         for lid in leads), encoding="utf-8")
     (d / "environment.yaml").write_text(
         yaml.safe_dump({"unstable_identifiers": {"columns": []}}), encoding="utf-8")
@@ -476,15 +475,14 @@ def _write_text(case_dir, rel: str, text: str):
     return p
 
 
-def _projection_text(case_dir, event_lines: str, *, lead_id="l-001",
-                     name="glm-5.2_effort-none.yaml"):
+def _projection_text(case_dir, event_lines: str, *, name="glm-5.2_effort-none.yaml"):
     """A one-lead, one-event projection written as the LITERAL YAML the oracle would have
     produced. `event_lines` are the event's `key: value` lines, verbatim — nothing here is
     re-serialised, so an unquoted scalar stays unquoted."""
     lines = event_lines.strip("\n").splitlines()
     event = "      - " + lines[0] + "".join("\n        " + line for line in lines[1:])
     return _write_text(case_dir, f"projections/{name}",
-                       f"projections:\n  - lead_id: {lead_id}\n    events:\n{event}\n")
+                       f"projections:\n  - lead_id: l-001\n    events:\n{event}\n")
 
 
 def _manifest_text(case_dir, *, kind: str, body: str):

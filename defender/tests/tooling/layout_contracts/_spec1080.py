@@ -8,10 +8,12 @@ import importlib.metadata
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -24,29 +26,17 @@ from typing import Any
 SUITE = Path(__file__).resolve().parent
 REPO_ROOT = SUITE.parents[3]
 DEFENDER = REPO_ROOT / "defender"
-CLI = DEFENDER / "cli"
 IMAGE_CLI = DEFENDER / "box" / "image_cli.py"
 BIN = DEFENDER / "bin"
-LESSONS_CONTENT = DEFENDER / "lessons"
 GOLDENS = SUITE / "goldens"
-
-
-#: `SPEC1080_AT_BASE=1`: the authoring self-check that captured the goldens at the base tree
-#: (before `defender/scripts/` was split); the locator then also answers with base definitions.
-#: Never set in CI. Read once, at import.
-AT_BASE = os.environ.get("SPEC1080_AT_BASE") == "1"
 
 # ======================================================================================
 # Pinned homes (repo-relative). `under=` takes one of these, or any repo-relative dir/file.
 # ======================================================================================
 
-REPORTS = "defender/reports"
 #: Pinned by demand text.
 RUNTIME = "defender/investigation"
 TENANCY = "defender/tenancy"
-VERBS = "defender/systems/verbs.py"
-#: The flat tier: a module directly under `defender/` whose name starts with `_`.
-FLAT_TIER = "defender/_*.py"
 #: The price table and process bootstrap keep dependency-free package initializers; neither
 #: needs to import provider objects or load the LLM stack merely to read configuration.
 PRICING = "defender/configuration/_pricing.py"
@@ -80,9 +70,9 @@ JUNK_DIRS = frozenset({
 })
 
 
-def rel(path: Path, root: Path = REPO_ROOT) -> str:
-    """`path` relative to `root`, POSIX-spelled."""
-    return path.resolve().relative_to(root.resolve()).as_posix() if path.is_absolute() \
+def rel(path: Path) -> str:
+    """`path` relative to this checkout's root, POSIX-spelled."""
+    return path.resolve().relative_to(REPO_ROOT.resolve()).as_posix() if path.is_absolute() \
         else path.as_posix()
 
 
@@ -95,42 +85,30 @@ def is_test_path(relpath: str) -> bool:
 
 def under(relpath: str, home: str) -> bool:
     """Whether `relpath` sits in `home` — a directory (boundary-matched, never a string prefix:
-    `defender/integrations_old/x.py` is not under `defender/integrations`), a file, or the
-    `FLAT_TIER` pattern."""
-    if home == FLAT_TIER:
-        parts = relpath.split("/")
-        return len(parts) == 2 and parts[0] == "defender" and parts[1].startswith("_") \
-            and parts[1].endswith(".py")
+    `defender/integrations_old/x.py` is not under `defender/integrations`) or a file."""
     home = home.rstrip("/")
     return relpath == home or relpath.startswith(home + "/")
 
 
-def py_files(root: Path = REPO_ROOT, tops: Sequence[str] = ("defender",), *,
-             include_tests: bool = False) -> list[str]:
-    """Every `.py` under `root/<top>` for each top, repo-relative and sorted — walked from the
-    filesystem (not `git ls-files`), skipping `JUNK_DIRS`, nested checkouts and, unless asked,
-    the test exemption. Walking the disk is what lets a planted copy of the tree be scanned."""
+def py_files(root: Path) -> list[str]:
+    """Every non-test `.py` under `root/defender`, relative to `root` and sorted — walked from
+    the filesystem (not `git ls-files`), skipping `JUNK_DIRS` and nested checkouts."""
     out: list[str] = []
-    for top in tops:
-        base = root / top
-        if not base.is_dir():
-            continue
-        for dirpath, dirnames, filenames in os.walk(base):
-            d = Path(dirpath)
-            keep = []
-            for name in dirnames:
-                if name in JUNK_DIRS:
-                    continue
-                if (d / name / ".git").exists():  # a nested checkout: not this tree's source
-                    continue
-                keep.append(name)
-            dirnames[:] = sorted(keep)
-            for fn in filenames:
-                if not fn.endswith(".py"):
-                    continue
-                r = (d / fn).relative_to(root).as_posix()
-                if not include_tests and is_test_path(r):
-                    continue
+    for dirpath, dirnames, filenames in os.walk(root / "defender"):
+        d = Path(dirpath)
+        keep = []
+        for name in dirnames:
+            if name in JUNK_DIRS:
+                continue
+            if (d / name / ".git").exists():  # a nested checkout: not this tree's source
+                continue
+            keep.append(name)
+        dirnames[:] = sorted(keep)
+        for fn in filenames:
+            if not fn.endswith(".py"):
+                continue
+            r = (d / fn).relative_to(root).as_posix()
+            if not is_test_path(r):
                 out.append(r)
     return sorted(out)
 
@@ -187,15 +165,14 @@ def _nested_blocks(n: ast.stmt) -> list[Sequence[ast.stmt]]:
     return []
 
 
-@functools.lru_cache(maxsize=8)
-def _definition_index(root: str) -> Mapping[str, tuple[str, ...]]:
-    """name → every non-test module under `<root>/defender` that defines it at module level.
-    One AST pass per root per process; tests never write into the real tree."""
+@functools.cache
+def _definition_index() -> Mapping[str, tuple[str, ...]]:
+    """name → every non-test module under `defender/` that defines it at module level. One AST
+    pass per process; tests never write into the real tree."""
     index: dict[str, list[str]] = {}
-    base = Path(root)
-    for r in py_files(base, ("defender",)):
+    for r in py_files(REPO_ROOT):
         try:
-            names = module_level_names((base / r).read_bytes(), r)
+            names = module_level_names((REPO_ROOT / r).read_bytes(), r)
         except (SyntaxError, ValueError) as e:  # a file the locator cannot read is a finding
             raise AssertionError(f"the locator cannot parse {r}: {e}") from e
         for n in names:
@@ -203,37 +180,20 @@ def _definition_index(root: str) -> Mapping[str, tuple[str, ...]]:
     return {k: tuple(v) for k, v in index.items()}
 
 
-def definitions(name: str, root: Path = REPO_ROOT) -> tuple[str, ...]:
+def definitions(name: str) -> tuple[str, ...]:
     """Every module (repo-relative, tests excluded) that defines `name` at module level."""
-    return _definition_index(str(root.resolve())).get(name, ())
+    return _definition_index().get(name, ())
 
 
-#: Base homes outside `defender/scripts/` of symbols the locator is asked about (the exit-code
-#: vocabulary moved out of the circuit breaker). Only `AT_BASE` accepts these.
-_BASE_HOMES_OUTSIDE_SCRIPTS = ("defender/systems/circuit_breaker.py",)
-
-
-def home_of(name: str, *, home: str | None = None, root: Path = REPO_ROOT) -> str:
-    """The ONE module outside `defender/scripts/` that defines `name` (optionally inside
-    `home`), repo-relative. Fails with an `AssertionError` naming the symbol when it has no
-    such home or more than one (a duplicate definition: the one-home rule). See `AT_BASE`."""
-    defs = definitions(name, root)
-    if AT_BASE:
-        moved_defs = [d for d in defs if not under(d, "defender/scripts")]
-        cands = [d for d in moved_defs if home is None or under(d, home)]
-        if not cands:
-            cands = [d for d in defs if under(d, "defender/scripts")
-                     or d in _BASE_HOMES_OUTSIDE_SCRIPTS]
-    else:
-        cands = [d for d in defs if not under(d, "defender/scripts")
-                 and (home is None or under(d, home))]
+def home_of(name: str, *, home: str | None = None) -> str:
+    """The ONE module that defines `name` (optionally inside `home`), repo-relative. Fails with
+    an `AssertionError` naming the symbol when it has no such home or more than one (a
+    duplicate definition: the one-home rule)."""
+    defs = definitions(name)
+    cands = [d for d in defs if home is None or under(d, home)]
     where = f" under {home}" if home else ""
-    assert cands, (
-        f"`{name}` is defined nowhere outside defender/scripts/{where} — the move that gives it "
-        f"its new home has not happened (definitions today: {list(defs) or 'none'})")
-    assert len(cands) == 1, (
-        f"`{name}` has {len(cands)} homes{where}: {cands} — one definition per moved name "
-        f"(the one-home rule), never a copy beside the original")
+    assert cands, f"`{name}` is defined nowhere{where} (definitions: {list(defs) or 'none'})"
+    assert len(cands) == 1, f"`{name}` has {len(cands)} homes{where}: {cands}"
     return cands[0]
 
 
@@ -249,13 +209,8 @@ def moved(name: str, *, home: str | None = None) -> Any:
 
 def query_rule(base_name: str) -> Any:
     """A flat-tier query rule by its base spelling (`_json_safe_params`, ...), under the spelling
-    `QUERY_RULE_PUBLIC` gives it. Under `AT_BASE` the base definition answers, so a behavioural
-    test proves its golden at the base."""
-    public = QUERY_RULE_PUBLIC.get(base_name, base_name)
-    if AT_BASE and public != base_name and not [
-            d for d in definitions(public) if under(d, QUERY_RULES)]:
-        return moved(base_name)
-    return moved(public, home=QUERY_RULES)
+    `QUERY_RULE_PUBLIC` gives it."""
+    return moved(QUERY_RULE_PUBLIC.get(base_name, base_name), home=QUERY_RULES)
 
 
 def module_at(relpath: str) -> ModuleType:
@@ -327,14 +282,15 @@ def outcome(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> dict[str, A
 # ======================================================================================
 
 
-def child_env(*, pythonpath: bool = True, inherit: Sequence[str] = ("PATH", "HOME", "LANG",
-                                                                     "LC_ALL", "TZ"),
-              **extra: str) -> dict[str, str]:
-    """A minimal environment for a child: the few inherited keys named, `PYTHONPATH` set to
-    this checkout's root when `pythonpath` (never another checkout a developer's shell
-    names), then `extra`. `pythonpath=False` is the bare-environment shape (the operator
-    shell)."""
-    env = {k: os.environ[k] for k in inherit if k in os.environ}
+#: The only keys a child inherits from this process's environment.
+_INHERITED = ("PATH", "HOME", "LANG", "LC_ALL", "TZ")
+
+
+def child_env(*, pythonpath: bool = True, **extra: str) -> dict[str, str]:
+    """A minimal environment for a child: the few `_INHERITED` keys, `PYTHONPATH` set to this
+    checkout's root when `pythonpath` (never another checkout a developer's shell names), then
+    `extra`. `pythonpath=False` is the bare-environment shape (the operator shell)."""
+    env = {k: os.environ[k] for k in _INHERITED if k in os.environ}
     env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     if pythonpath:
         env["PYTHONPATH"] = str(REPO_ROOT)
@@ -355,6 +311,61 @@ def run(argv: Sequence[str | os.PathLike[str]], *, cwd: Path | str = REPO_ROOT,
 def python(*args: str | os.PathLike[str], **kw: Any) -> subprocess.CompletedProcess[bytes]:
     """This interpreter as a child: `run([sys.executable, *args], **kw)`."""
     return run([sys.executable, *args], **kw)
+
+
+def child_outcome(proc: subprocess.CompletedProcess[bytes],
+                  norm: Callable[[str], str]) -> dict[str, Any]:
+    """A child's verdict: exit status and stdout/stderr through `norm`, a traceback reduced to
+    its last line, since its frames name the engine's file and line, which the move changes."""
+    err: Any = norm(proc.stderr.decode("utf-8", "replace"))
+    if "Traceback (most recent call last):" in err:
+        err = {"traceback_last": err.rstrip("\n").splitlines()[-1]}
+    return {"rc": proc.returncode, "out": norm(proc.stdout.decode("utf-8", "replace")),
+            "err": err}
+
+
+def run_all(jobs: Mapping[str, Callable[[], Any]]) -> dict[str, Any]:
+    """Run independent children four at a time; results keyed as given."""
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {k: pool.submit(fn) for k, fn in jobs.items()}
+        return {k: f.result() for k, f in futures.items()}
+
+
+# ======================================================================================
+# Code copies of this checkout
+# ======================================================================================
+
+#: Top-level `defender/` entries a code copy leaves out: the suite, the eval corpora, the docs
+#: and the e2e fixtures (no engine imports them), and any lesson corpus.
+_COPY_SKIP_TOP = frozenset({"tests", "evals", "docs", "fixtures-e2e", "lessons"})
+
+
+def copy_defender(root: Path) -> Path:
+    """`root/defender`: a copy of this checkout's `defender/` code without `JUNK_DIRS` and
+    `_COPY_SKIP_TOP`, walked from the disk, so it holds whatever the tree holds now. Returns
+    `root`, the copy's checkout root."""
+    src = DEFENDER.resolve()
+
+    def _ignore(d: str, names: list[str]) -> set[str]:
+        skip = {n for n in names if n in JUNK_DIRS}
+        if Path(d).resolve() == src:
+            skip |= {n for n in names if n in _COPY_SKIP_TOP}
+        return skip
+
+    shutil.copytree(src, root / "defender", ignore=_ignore, symlinks=True)
+    return root
+
+
+def agent_root(root: Path) -> Path:
+    """The agent root beside a code copy at `root` (`root/agent`, shaped like a run copy's
+    `agent/`): what `DEFENDER_AGENT_DIR` names for that copy's lessons shim. The code tree holds
+    no corpus; the engine reads `$DEFENDER_AGENT_DIR/lessons` (#1108)."""
+    return root / "agent"
+
+
+def venv_home() -> Path:
+    """The venv running this suite — what a linked worktree's `.venv` points at."""
+    return Path(sys.executable).parents[1]
 
 
 # ======================================================================================
@@ -455,11 +466,11 @@ def has_main_block(source: bytes | str) -> bool:
     return False
 
 
-def shim_exec_module(shim: str, root: Path | None = None) -> str:
+def shim_exec_module(shim: str) -> str:
     """The dotted module a `bin/` shim runs, read off its `exec "$PY" -P -m <module>` line (each
     shim puts its own checkout root first on `PYTHONPATH` and runs its engine as a module).
     Fails when the shim names no such line."""
-    text = ((root or REPO_ROOT) / "defender" / "bin" / shim).read_text(encoding="utf-8")
+    text = (BIN / shim).read_text(encoding="utf-8")
     for line in text.splitlines():
         toks = [t.strip('"') for t in line.split()]
         if "exec" in toks and "-m" in toks:
@@ -467,9 +478,8 @@ def shim_exec_module(shim: str, root: Path | None = None) -> str:
     raise AssertionError(f"bin/{shim} names no `exec ... -m <module>` line")
 
 
-def shim_exec_target(shim: str, root: Path | None = None) -> Path:
-    """The engine's source file the module a `bin/` shim runs resolves to in the tree at `root`
-    (default: this checkout)."""
-    return (root or REPO_ROOT) / (shim_exec_module(shim, root).replace(".", "/") + ".py")
+def shim_exec_target(shim: str) -> Path:
+    """The engine's source file the module a `bin/` shim runs resolves to in this checkout."""
+    return REPO_ROOT / (shim_exec_module(shim).replace(".", "/") + ".py")
 
 

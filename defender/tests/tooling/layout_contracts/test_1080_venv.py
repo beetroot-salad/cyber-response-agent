@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +14,6 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 from defender.tests.sandbox import test_1096_entrypoint_closure as T1096
 
 GOLDEN = "venv"
-
-_COPY_SKIP_TOP = frozenset({"tests", "evals", "docs", "fixtures-e2e", "lessons"})
 
 USERS_FIXED = {
     "api server": "defender/api/serve.py",
@@ -33,10 +29,6 @@ BOX_SPELLINGS: dict[str, str | None] = {
 ONE_LESSON = (
     "---\nname: one\ndescription: one lesson\nsource_signature: [sig-one]\n"
     "telemetry_source: [sensor-one]\nattack_phase: [phase-one]\n---\n\nbody\n")
-
-
-def venv_home() -> Path:
-    return Path(sys.executable).parents[1]
 
 
 def base_interpreter() -> Path:
@@ -58,29 +50,13 @@ def helper_home() -> str:
 
 
 def code_tree(root: Path) -> Path:
-    """`root/defender`: a copy of this checkout's `defender/` code, no venv, no lesson corpus;
-    `ONE_LESSON` is planted in the agent root beside it (`agent_root(root)`: the lessons shim
-    reads `$DEFENDER_AGENT_DIR/lessons`, never the code tree, #1108). Returns the copy's
-    checkout root."""
-    src = S.DEFENDER.resolve()
-
-    def _ignore(d: str, names: list[str]) -> set[str]:
-        skip = {n for n in names if n in S.JUNK_DIRS}
-        if Path(d).resolve() == src:
-            skip |= {n for n in names if n in _COPY_SKIP_TOP}
-        return skip
-
-    shutil.copytree(src, root / "defender", ignore=_ignore, symlinks=True)
-    corpus = agent_root(root) / "lessons"
+    """`S.copy_defender(root)` (no venv), with `ONE_LESSON` planted in the agent root beside it.
+    Returns the copy's checkout root."""
+    S.copy_defender(root)
+    corpus = S.agent_root(root) / "lessons"
     corpus.mkdir(parents=True)
     (corpus / "one.md").write_text(ONE_LESSON, encoding="utf-8")
     return root
-
-
-def agent_root(root: Path) -> Path:
-    """The agent root beside a code copy at `root` (`root/agent`): what `DEFENDER_AGENT_DIR`
-    names for that copy's lessons shim (as `test_1080_lessons_engine.agent_root`)."""
-    return root / "agent"
 
 
 def recorder(path: Path, label: str, *, mode: int = 0o755) -> Path:
@@ -99,7 +75,7 @@ def recorder(path: Path, label: str, *, mode: int = 0o755) -> Path:
 def link_venv(defender_dir: Path) -> Path:
     """`<defender>/.venv` as a link to the venv running this suite (a linked worktree)."""
     venv = defender_dir / ".venv"
-    venv.symlink_to(venv_home(), target_is_directory=True)
+    venv.symlink_to(S.venv_home(), target_is_directory=True)
     return venv / "bin" / "python3"
 
 
@@ -108,12 +84,12 @@ def real_dir_venv(defender_dir: Path) -> Path:
     `pyvenv.cfg`, `bin/python3` linking the base interpreter, and the suite venv's packages."""
     venv = defender_dir / ".venv"
     (venv / "bin").mkdir(parents=True)
-    cfg = venv_home() / "pyvenv.cfg"
+    cfg = S.venv_home() / "pyvenv.cfg"
     (venv / "pyvenv.cfg").write_text(
         cfg.read_text(encoding="utf-8") if cfg.is_file()
         else f"home = {base_interpreter().parent}\ninclude-system-site-packages = false\n",
         encoding="utf-8")
-    (venv / "lib").symlink_to(venv_home() / "lib", target_is_directory=True)
+    (venv / "lib").symlink_to(S.venv_home() / "lib", target_is_directory=True)
     (venv / "bin" / "python3").symlink_to(base_interpreter())
     return venv / "bin" / "python3"
 
@@ -129,11 +105,7 @@ def norm(text: str, tmp: Path) -> str:
 
 
 def outcome(proc: subprocess.CompletedProcess[bytes], tmp: Path) -> dict[str, Any]:
-    err: Any = norm(proc.stderr.decode("utf-8", "replace"), tmp)
-    if "Traceback (most recent call last):" in err:
-        err = {"traceback_last": err.rstrip("\n").splitlines()[-1]}
-    return {"rc": proc.returncode, "out": norm(proc.stdout.decode("utf-8", "replace"), tmp),
-            "err": err}
+    return S.child_outcome(proc, lambda text: norm(text, tmp))
 
 
 def exec_lines(proc: subprocess.CompletedProcess[bytes], tmp: Path) -> list[str]:
@@ -150,12 +122,6 @@ def bare_env(**extra: str | None) -> dict[str, str]:
         else:
             env[k] = v
     return env
-
-
-def run_all(jobs: Mapping[str, Callable[[], Any]]) -> dict[str, Any]:
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {k: pool.submit(fn) for k, fn in jobs.items()}
-        return {k: f.result() for k, f in futures.items()}
 
 
 def golden(name: str) -> Any:
@@ -194,7 +160,7 @@ def observe_targets(tmp: Path) -> dict[str, Any]:
     recorder(root / "defender" / ".venv" / "bin" / "python3", "defender-venv")
     recorder(root / ".venv" / "bin" / "python3", "repo-venv")
     recorder(tmp / ".venv" / "bin" / "python3", "repo-parent-venv")
-    return run_all({
+    return S.run_all({
         "unmarked": lambda: call_helper(root, tmp),
         "marked": lambda: call_helper(root, tmp, DEFENDER_BOX="1"),
     })
@@ -206,7 +172,7 @@ def observe_s054(tmp: Path) -> dict[str, Any]:
     recorder(present / "defender" / ".venv" / "bin" / "python3", "defender-venv")
     repo_only = tree(tmp, "repo-only")
     recorder(repo_only / ".venv" / "bin" / "python3", "repo-venv")
-    return run_all({
+    return S.run_all({
         "venv folder absent": lambda: call_helper(absent, tmp),
         "venv present": lambda: call_helper(present, tmp),
         "only the repository root has a venv": lambda: call_helper(repo_only, tmp),
@@ -242,7 +208,7 @@ def observe_s055(tmp: Path) -> dict[str, Any]:
     for i, shape in enumerate(INTERPRETER_SHAPES):
         roots[shape] = tree(tmp, f"tree-{i}")
         _plant_interpreter(roots[shape], tmp, shape)
-    return run_all({shape: (lambda r=r: call_helper(r, tmp)) for shape, r in roots.items()})
+    return S.run_all({shape: (lambda r=r: call_helper(r, tmp)) for shape, r in roots.items()})
 
 
 USER_ARGS = ("--alpha", "two words")
@@ -256,7 +222,7 @@ def observe_s056(tmp: Path) -> dict[str, Any]:
     recorder(root / "defender" / ".venv" / "bin" / "python3", "defender-venv")
     away = tmp / "elsewhere"
     away.mkdir()
-    return run_all({
+    return S.run_all({
         name: (lambda rel=rel: outcome(S.run([sys.executable, "-S", root / rel, *USER_ARGS],
                                              cwd=away, env=bare_env(), timeout=60), tmp))
         for name, rel in users().items()})
@@ -274,7 +240,7 @@ def observe_s058(tmp: Path) -> dict[str, Any]:
     (image_bin / "python3").write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
                                        encoding="utf-8")
     (image_bin / "python3").chmod(0o755)
-    box_env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(agent_root(root))}, root))
+    box_env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(S.agent_root(root))}, root))
     head, _, tail = box_env["PATH"].partition(os.pathsep)
     box_env["PATH"] = os.pathsep.join((head, str(image_bin), tail))
     host_env = {k: v for k, v in box_env.items() if k != "DEFENDER_BOX"}
@@ -284,7 +250,7 @@ def observe_s058(tmp: Path) -> dict[str, Any]:
     def shim(env: Mapping[str, str]) -> dict[str, Any]:
         return outcome(S.run(["defender-lessons", "--tags"], cwd=run_dir, env=env), tmp)
 
-    return run_all({
+    return S.run_all({
         "helper, marked": lambda: call_helper(root, tmp, DEFENDER_BOX="1"),
         "helper, unmarked": lambda: call_helper(root, tmp),
         "shim on the box lane, marked": lambda: shim(box_env),
@@ -357,7 +323,7 @@ def observe_s124(tmp: Path) -> dict[str, Any]:
         jobs[f"lessons shim, {shape}"] = (
             lambda root=root, label=f"lessons shim {s}": started(
                 None, root / LESSONS_SHIM, SETTLE_ARGS["lessons shim"], tmp, label,
-                agent=agent_root(root)))
+                agent=S.agent_root(root)))
     root = tree(tmp, "tree-spellings")
     venv_py = link_venv(root / "defender")
     (tmp / "tree-spellings-link").symlink_to(root, target_is_directory=True)
@@ -374,7 +340,7 @@ def observe_s124(tmp: Path) -> dict[str, Any]:
             lambda interp=interp, label=label: started(
                 interp, program, SETTLE_ARGS["frontend serializer"], tmp,
                 f"frontend serializer {label}"))
-    return run_all(jobs)
+    return S.run_all(jobs)
 
 
 def observe_s179(tmp: Path) -> dict[str, Any]:
@@ -396,7 +362,7 @@ def observe_s179(tmp: Path) -> dict[str, Any]:
         for shim in ("defender-lessons", "defender-sql"):
             jobs[f"bin/{shim}, {spelling}"] = lambda root=root, shim=shim, value=value: (
                 exec_lines(shim_with_stubs(root, tmp, bare, shim, value), tmp))
-    out.update(run_all(jobs))
+    out.update(S.run_all(jobs))
     out.update(sql_no_runtime(tmp))
     return out
 
@@ -425,7 +391,7 @@ def sql_no_runtime(tmp: Path) -> dict[str, Any]:
                        PYTHONPATH=f"{shadow}{os.pathsep}{S.REPO_ROOT}")
         jobs[f"sql engine without duckdb, {spelling}"] = lambda env=env: outcome(
             S.run([sys.executable, wrapper, "SELECT 1"], cwd=tmp, env=env, stdin=b"{}"), tmp)
-    return run_all(jobs)
+    return S.run_all(jobs)
 
 
 def observe_s206(tmp: Path) -> dict[str, Any]:
@@ -438,9 +404,9 @@ def observe_s206(tmp: Path) -> dict[str, Any]:
     recorder(root / ".venv" / "bin" / "python3", "repo-venv")
     recorder(tmp / ".venv" / "bin" / "python3", "repo-parent-venv")
     u = users()
-    return run_all({
+    return S.run_all({
         "lessons shim": lambda: started(None, root / LESSONS_SHIM, ("--tags",), tmp,
-                                        "lessons shim", agent=agent_root(root)),
+                                        "lessons shim", agent=S.agent_root(root)),
         "frontend serializer": lambda: started(base_interpreter(),
                                                root / u["frontend serializer"], ("--stdout",),
                                                tmp, "frontend serializer"),
@@ -452,7 +418,7 @@ def test_1080_reexec_into_venv_from_the_flat_tier_still_targets_defenders_own_ve
     home = helper_home()
     mod = S.moved_module("reexec_into_venv", home=S.VENV)
     assert Path(mod._DEFENDER_DIR).resolve() == S.DEFENDER.resolve(), (
-        f"{home} anchors defender/ at {mod._DEFENDER_DIR} — the K13 depth slip")
+        f"{home} anchors defender/ at {mod._DEFENDER_DIR}")
     assert observe_targets(tmp_path) == golden("targets")
 
 

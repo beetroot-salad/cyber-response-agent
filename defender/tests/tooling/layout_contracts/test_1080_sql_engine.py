@@ -3,55 +3,28 @@ box-image import closure. Goldens: `goldens/sql.json`."""
 from __future__ import annotations
 
 import ast
-import contextlib
-import functools
 import importlib
-import importlib.metadata
 import itertools
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
-import sysconfig
-import tomllib
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
-
-import pytest
 
 from defender.tests.support.shared.contracts._import_blocker import run_blocked
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 GOLDEN = "sql"
 SQL = "defender-sql"
-LESSONS = "defender-lessons"
 
 
 def _sql_engine() -> str:
     """The moved sql engine, repo-relative: the one module under `defender/investigation/` defining the
     engine's exit-code vocabulary."""
     return S.home_of("EXIT_NO_RUNTIME", home=S.RUNTIME)
-
-
-def _lessons_engine() -> str:
-    """The moved lessons engine, repo-relative: the one module defining `cmd_tags`, which must not
-    sit in the lesson content folder."""
-    home = S.home_of("cmd_tags")
-    assert not S.under(home, S.rel(S.LESSONS_CONTENT)), (
-        f"the lessons engine {home} sits in the lesson content folder")
-    return home
-
-
-def _engine(shim: str) -> str:
-    return _sql_engine() if shim == SQL else _lessons_engine()
-
-
-def _wrapper_rel(shim: str) -> str:
-    """The file the (unchanged) shim execs, repo-relative."""
-    return S.rel(S.shim_exec_target(shim))
 
 
 def _packages(relpath: str) -> list[str]:
@@ -70,21 +43,6 @@ _POSITIONAL = (b'{"columns": ["host.name", "count"], "values": [["a", 1], ["b", 
 _DECLARED = ("--rows", "values", "--names", "columns",
              'SELECT "host.name", "count" FROM data ORDER BY 1')
 
-#: The fixed lesson corpus every tree copy carries in place of the real one, so a lessons
-#: engine's answer is the same on every machine and at every later commit.
-_CORPUS = {
-    "spec1080-alpha.md": (
-        "---\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\n"
-        "source_signature: [rule-alpha]\ntelemetry_source: [auditd]\n"
-        "attack_phase: [persistence]\n---\n\nalpha body\n"),
-    "spec1080-beta.md": (
-        "---\nname: spec1080-beta\ndescription: beta lesson of the 1080 sql group\n"
-        "source_signature: [rule-beta]\ntelemetry_source: [auditd, falco]\n"
-        "attack_phase: [execution]\n---\n\nbeta body\n"),
-}
-#: Each engine's one real invocation for the closure and tree-derivation runs.
-_REAL_RUN = {SQL: ((_QUERY,), _PAYLOAD), LESSONS: (("--tags",), b"")}
-
 
 _SCRATCH = re.compile(r"[^\s\"']*defender-sql-[A-Za-z0-9_]{8}")
 _TRACEBACK = "Traceback (most recent call last):"
@@ -96,7 +54,7 @@ _PREFIX_WARNING = re.compile(
 def _norm(text: str, subs: Sequence[tuple[Path | str, str]] = ()) -> str:
     """Tokens for every machine- or run-specific spelling: each `(path, token)` in `subs` (both
     the spelling given and its resolved form) and the checkout root (`<ROOT>`), longest first;
-    duckdb's scratch folder (`<SCRATCH>`); an untrusted frame's salt (`<SALT>`); a traceback reduced to its final `Type: message`
+    duckdb's scratch folder (`<SCRATCH>`); a traceback reduced to its final `Type: message`
     line, since its frames name the file and line that the move changes; and the interpreter's
     prefix warnings (`_PREFIX_WARNING`) dropped."""
     text = _PREFIX_WARNING.sub("", text)
@@ -108,8 +66,6 @@ def _norm(text: str, subs: Sequence[tuple[Path | str, str]] = ()) -> str:
     for real in sorted(pairs, key=len, reverse=True):
         text = text.replace(real, pairs[real])
     text = _SCRATCH.sub("<SCRATCH>", text)
-    # `defender-lessons --show` frames each lesson with a fresh salt (#1206).
-    text = re.sub(r"<(/?)run-[0-9a-f]{16}-untrusted>", r"<\1run-<SALT>-untrusted>", text)
     if _TRACEBACK in text:
         head, _, tail = text.partition(_TRACEBACK)
         last = [ln for ln in tail.splitlines() if ln.strip()][-1]
@@ -130,7 +86,7 @@ def _rec(proc: subprocess.CompletedProcess[bytes],
 
 def _check(key: str, actual: Any) -> None:
     golden = S.golden(GOLDEN)
-    assert key in golden, f"goldens/sql.json carries no `{key}`: re-run the base capture"
+    assert key in golden, f"goldens/sql.json has no `{key}`"
     assert S.canon(actual) == golden[key], (
         f"`{key}` differs from the base\n  base: {golden[key]!r}\n  now:  {S.canon(actual)!r}")
 
@@ -140,59 +96,18 @@ def _check_all(records: dict[str, Any]) -> None:
         _check(key, value)
 
 
-_SKIP = S.JUNK_DIRS | {"tests"}
-
-
-def _copy_tree(root: Path) -> Path:
-    """`defender/` copied to `<root>/defender` (tests, caches and any leftover `lessons*/` left
-    out, no `.venv`), and a run-copy-shaped agent root `<root>/agent` whose `lessons/` holds
-    `_CORPUS`: the lessons engine reads `$DEFENDER_AGENT_DIR/lessons` (#1108). Returns `root`,
-    the copy's checkout root."""
-    root.mkdir(parents=True, exist_ok=True)
-    dst = root / "defender"
-    shutil.copytree(S.DEFENDER, dst, symlinks=True,
-                    ignore=lambda d, names: [n for n in names if n in _SKIP or (
-                        Path(d) == S.DEFENDER and n.startswith("lessons"))])
-    corpus = _agent_root(root) / "lessons"
-    corpus.mkdir(parents=True)
-    for name, text in _CORPUS.items():
-        (corpus / name).write_text(text, encoding="utf-8")
-    return root
-
-
-def _agent_root(root: Path) -> Path:
-    """The agent root beside a tree copy: what `DEFENDER_AGENT_DIR` names for its lessons shim."""
-    return root / "agent"
-
-
-@contextlib.contextmanager
-def _planted(path: Path, edit: Callable[[Path], None]) -> Iterator[None]:
-    """`edit` applied to `path` (created if absent) for the body of the block, then undone."""
-    before = path.read_bytes() if path.exists() else None
-    try:
-        edit(path)
-        yield
-    finally:
-        if before is None:
-            path.unlink(missing_ok=True)
-        else:
-            path.write_bytes(before)
-
-
-def _at_module_scope(line: str) -> Callable[[Path], None]:
-    """An edit inserting `line` at module scope, after the module's imports and bootstrap and
-    before its first `def` or `class`."""
-    def edit(path: Path) -> None:
-        src = path.read_text(encoding="utf-8")
-        tree = ast.parse(src)
-        first = next((n for n in tree.body if isinstance(
-            n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))), None)
-        lines = src.splitlines(keepends=True)
-        at = len(lines) if first is None else min(
-            [first.lineno, *(d.lineno for d in first.decorator_list)]) - 1
-        lines.insert(at, line + "\n")
-        path.write_text("".join(lines), encoding="utf-8")
-    return edit
+def _plant_at_module_scope(path: Path, line: str) -> None:
+    """Insert `line` into the module at `path` at module scope, after its imports and before
+    its first `def` or `class`."""
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    first = next((n for n in tree.body if isinstance(
+        n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))), None)
+    lines = src.splitlines(keepends=True)
+    at = len(lines) if first is None else min(
+        [first.lineno, *(d.lineno for d in first.decorator_list)]) - 1
+    lines.insert(at, line + "\n")
+    path.write_text("".join(lines), encoding="utf-8")
 
 
 #: `python3 <file> <args>` as a shim runs it, recording every code file executed.
@@ -284,24 +199,19 @@ def _env(tmp: Path, *, box: bool, defender_dir: Path | str | None, pythonpath: s
     return env
 
 
-def _run_shim(tmp: Path, shim: str, args: Sequence[str], *, lane: str = "box",  # noqa: PLR0913
-              tree: Path = S.REPO_ROOT, defender_dir: Path | str | None | bool = True,
-              pythonpath: str | None | bool = True, stdin: bytes | None = b"",
-              cwd: Path | str | None = None,
-              subs: Sequence[tuple[Path | str, str]] = (), **extra: str,
+def _run_shim(tmp: Path, shim: str, args: Sequence[str], *, lane: str = "box",
+              stdin: bytes | None = b"", subs: Sequence[tuple[Path | str, str]] = (),
               ) -> tuple[dict[str, Any], list[str] | None]:
-    """`<tree>/defender/bin/<shim> <args>` on the box lane (the mark set) or the host lane (no
-    mark), with `DEFENDER_DIR` naming the tree's `defender/` unless told otherwise and the
-    checkout root on the import path unless told otherwise. Returns the golden record and the
-    trace (None when the interpreter never started or was not the stub)."""
+    """This checkout's `defender/bin/<shim> <args>` on the box lane (the mark set) or the host
+    lane (no mark), with `DEFENDER_DIR` naming its `defender/` and its root on the import path.
+    Returns the golden record and the trace (None when the interpreter never started or was not
+    the stub)."""
     trace = _trace_file(tmp)
-    dfn = tree / "defender" if defender_dir is True else (defender_dir or None)
-    path = str(tree) if pythonpath is True else (pythonpath or None)
-    env = _env(tmp, box=lane == "box", defender_dir=dfn, pythonpath=path, trace=trace, **extra)
-    argv = [str(tree / "defender" / "bin" / shim), *args]
-    run_dir = Path(cwd) if cwd is not None else tmp / "run"
+    env = _env(tmp, box=lane == "box", defender_dir=S.DEFENDER, pythonpath=str(S.REPO_ROOT),
+               trace=trace)
+    run_dir = tmp / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    proc = S.run(argv, cwd=run_dir, env=env, stdin=stdin)
+    proc = S.run([str(S.BIN / shim), *args], cwd=run_dir, env=env, stdin=stdin)
     return _rec(proc, subs), _read_trace(trace)
 
 
@@ -312,29 +222,6 @@ def _assert_answered_by(ran: list[str] | None, engine: Path, what: str) -> None:
     assert os.path.realpath(engine) in seen, (
         f"{what}: the engine at {engine} never ran; the files of that tree that did: "
         f"{sorted(f for f in seen if f.startswith(os.path.realpath(engine.parents[2])))}")
-
-
-@functools.lru_cache(maxsize=1)
-def _box_allowlist() -> tuple[str, ...]:
-    """`S.box_import_allowlist()` plus the closure's top-level extension modules (`_duckdb`) and
-    the interpreter's sysconfig data module. The shared list now derives both itself, so the two
-    are equal."""
-    from defender.box import _image
-
-    lock = tomllib.loads((S.DEFENDER / "uv.lock").read_text(encoding="utf-8"))
-    dists = {_image.normalized_name(e["name"]) for e in _image.box_closure(lock, "defender")}
-    extensions = set()
-    for dist in importlib.metadata.distributions():
-        name = dist.metadata.get("Name")
-        if not name or _image.normalized_name(name) not in dists:
-            continue
-        for f in dist.files or ():
-            if len(f.parts) == 1 and f.name.endswith((".so", ".pyd")):
-                top = f.name.split(".")[0]
-                if top.isidentifier():
-                    extensions.add(top)
-    stdlib_data = {sysconfig._get_sysconfigdata_name()}  # noqa: SLF001 — the stdlib's own name for it
-    return tuple(sorted(set(S.box_import_allowlist()) | extensions | stdlib_data))
 
 
 _CLOSURE_BODY = '''
@@ -403,36 +290,32 @@ sys.exit(_status)
 '''
 
 
-def _closure(tmp: Path, shim: str, *, root: Path = S.REPO_ROOT, args: Sequence[str] | None = None,
-             stdin: bytes | None = None, hook: Path | None = None,
-             subs: Sequence[tuple[Path | str, str]] = ()) -> dict[str, Any]:
-    """Run `shim`'s wrapper in `root` as the box does, under an interpreter that refuses every
-    import outside the standard library and the box image's packages
-    (`_box_allowlist()`), then import the engine by its dotted name (the host's import,
-    which executes every package initialiser down to it). Modules a start-up hook loaded before
-    the blocker are evicted first (with any import finder they installed), so a later import of
-    one is refused rather than served from the cache. Returns the report plus `run`, the golden
-    record of the box run."""
-    engine = _engine(shim)
-    default_args, default_stdin = _REAL_RUN[shim]
+def _closure(tmp: Path, *, root: Path = S.REPO_ROOT) -> dict[str, Any]:
+    """Run the sql shim's wrapper in `root` as the box does, over `_QUERY` and `_PAYLOAD`, under
+    an interpreter that refuses every import outside the standard library and the box image's
+    packages (`S.box_import_allowlist()`), then import the engine by its dotted name (the
+    host's import, which executes every package initialiser down to it). Modules a start-up
+    hook loaded before the blocker are evicted first (with any import finder they installed),
+    so a later import of one is refused rather than served from the cache. Returns the report
+    plus `run`, the golden record of the box run."""
+    allow = S.box_import_allowlist()
     report = tmp / f"closure-{next(_RUNS)}.json"
-    header = (f"_ALLOWED = frozenset({_box_allowlist()!r})\n"
+    header = (f"_ALLOWED = frozenset({allow!r})\n"
               f"_BLOCKED = {S.BOX_BLOCKED!r}\n"
               f"_REPORT = {str(report)!r}\n"
-              f"_DOTTED = {S.dotted(engine)!r}\n"
-              f"_WRAPPER = {str(root / _wrapper_rel(shim))!r}\n"
-              f"_ARGS = {list(default_args if args is None else args)!r}\n")
-    pythonpath = os.pathsep.join(str(p) for p in (hook, root) if p is not None)
-    env = _env(tmp, box=True, defender_dir=root / "defender", pythonpath=pythonpath,
+              f"_DOTTED = {S.dotted(_sql_engine())!r}\n"
+              f"_WRAPPER = {str(root / S.rel(S.shim_exec_target(SQL)))!r}\n"
+              f"_ARGS = {[_QUERY]!r}\n")
+    env = _env(tmp, box=True, defender_dir=root / "defender", pythonpath=str(root),
                PYTHONDONTWRITEBYTECODE="1")
     run_dir = tmp / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    proc = run_blocked(header + _CLOSURE_BODY, allow_only=_box_allowlist(), cwd=run_dir,
-                       env=env, stdin=default_stdin if stdin is None else stdin)
+    proc = run_blocked(header + _CLOSURE_BODY, allow_only=allow, cwd=run_dir, env=env,
+                       stdin=_PAYLOAD)
     assert report.exists(), (
         f"the closure child died before reporting (rc {proc.returncode}):\n{_txt(proc.stderr)}")
     rep: dict[str, Any] = json.loads(report.read_text(encoding="utf-8"))
-    rep["run"] = _rec(proc, subs)
+    rep["run"] = _rec(proc)
     return rep
 
 
@@ -449,13 +332,13 @@ def _findings(rep: dict[str, Any]) -> list[str]:
     return out
 
 
-def _assert_clean(rep: dict[str, Any], root: Path, shim: str, what: str) -> None:
+def _assert_clean(rep: dict[str, Any], root: Path, what: str) -> None:
     """The check passes: nothing refused or loaded, the run and the host import succeeded, and
     every package initialiser on the engine's path was executed inside the blocked child."""
     assert not _findings(rep), f"{what}: the box closure check fails: {_findings(rep)}"
     assert rep["run"]["rc"] == 0, f"{what}: the engine failed in the box closure: {rep['run']}"
     ran = {os.path.realpath(f) for f in rep["ran"] if f.startswith("/")}
-    inits = [root / p / "__init__.py" for p in _packages(_engine(shim))]
+    inits = [root / p / "__init__.py" for p in _packages(_sql_engine())]
     unrun = [str(p) for p in inits if p.exists() and os.path.realpath(p) not in ran]
     assert not unrun, f"{what}: package initialisers on the engine's path never ran: {unrun}"
 
@@ -469,16 +352,7 @@ def _assert_caught(rep: dict[str, Any], name: str | None, what: str) -> None:
             f"{what}: the check failed but never named `{name}`: {found}")
 
 
-PRODUCERS: dict[str, Callable[[Path, Path], dict[str, Any]]] = {}
-
-
-def _producer(fn: Callable[[Path, Path], dict[str, Any]]) -> Callable[[Path, Path], dict[str, Any]]:
-    PRODUCERS[fn.__name__] = fn
-    return fn
-
-
-@_producer
-def _p_survival(tmp: Path, co: Path) -> dict[str, Any]:
+def _p_survival(tmp: Path) -> dict[str, Any]:
     out: dict[str, Any] = {}
     engine = S.REPO_ROOT / _sql_engine()
     for lane in ("box", "host"):
@@ -536,8 +410,7 @@ def _lane_env(tmp: Path, lane: str, trace: Path) -> dict[str, str]:
     return env
 
 
-@_producer
-def _p_lanes(tmp: Path, co: Path) -> dict[str, Any]:
+def _p_lanes(tmp: Path) -> dict[str, Any]:
     out: dict[str, Any] = {}
     engine = S.REPO_ROOT / _sql_engine()
     run_dir = tmp / "run"
@@ -572,14 +445,12 @@ _ARG_SHAPES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-@_producer
-def _p_arg_shapes(tmp: Path, co: Path) -> dict[str, Any]:
+def _p_arg_shapes(tmp: Path) -> dict[str, Any]:
     return {f"arg_shapes.{case}": _run_shim(tmp, SQL, list(args), stdin=_PAYLOAD)[0]
             for case, args in _ARG_SHAPES}
 
 
-@_producer
-def _p_rows_names(tmp: Path, co: Path) -> dict[str, Any]:
+def _p_rows_names(tmp: Path) -> dict[str, Any]:
     unreadable = tmp / "unreadable-file"
     unreadable.write_text('{"values": [[1]], "columns": ["a"]}', encoding="utf-8")
     unreadable.chmod(0)
@@ -599,44 +470,37 @@ def _p_rows_names(tmp: Path, co: Path) -> dict[str, Any]:
             for case, flags in cases.items()}
 
 
-@pytest.fixture(scope="module")
-def co(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """One copy of the tree with the fixed lesson corpus, shared by the tests that only read it."""
-    return _copy_tree(tmp_path_factory.mktemp("co"))
-
-
-def test_1080_defender_sql_answers_through_the_moved_engine_as_today(tmp_path, co):
+def test_1080_defender_sql_answers_through_the_moved_engine_as_today(tmp_path):
     assert S.shim_exec_target(SQL).is_file(), f"bin/{SQL} execs a file that does not exist"
-    _check_all(_p_survival(tmp_path, co))
+    _check_all(_p_survival(tmp_path))
 
 
-def test_1080_the_defender_sql_engine_imports_nothing_outside_the_box_image_closure(tmp_path, co):
-    allow = _box_allowlist()
+def test_1080_the_defender_sql_engine_imports_nothing_outside_the_box_image_closure(tmp_path):
+    allow = S.box_import_allowlist()
     assert "pydantic_ai" not in allow, allow
     assert "duckdb" in allow, allow
-    rep = _closure(tmp_path, SQL)
+    rep = _closure(tmp_path)
     _check("closure.defender-sql", rep["run"])
-    _assert_clean(rep, S.REPO_ROOT, SQL, "the sql engine")
-    root = _copy_tree(tmp_path / "planted")
-    with _planted(root / _sql_engine(), _at_module_scope("import pydantic_ai")):
-        _assert_caught(_closure(tmp_path, SQL, root=root), "pydantic_ai",
-                       "an engine importing pydantic_ai")
+    _assert_clean(rep, S.REPO_ROOT, "the sql engine")
+    root = S.copy_defender(tmp_path / "planted")
+    _plant_at_module_scope(root / _sql_engine(), "import pydantic_ai")
+    _assert_caught(_closure(tmp_path, root=root), "pydantic_ai", "an engine importing pydantic_ai")
 
 
-def test_sql_argument_shapes_the_shim_must_forward(tmp_path, co):
-    _check_all(_p_arg_shapes(tmp_path, co))
+def test_sql_argument_shapes_the_shim_must_forward(tmp_path):
+    _check_all(_p_arg_shapes(tmp_path))
     rec, ran = _run_shim(tmp_path, SQL, ["SELECT 'é' AS e, '日本' AS j, \"user\" FROM data "
                                          "ORDER BY 3 LIMIT 1"], stdin=_PAYLOAD)
     _check("arg_shapes.non-ascii", rec)
     _assert_answered_by(ran, S.REPO_ROOT / _sql_engine(), "a non-ASCII query")
 
 
-def test_rows_and_names_flags_unpaired_or_unreadable(tmp_path, co):
-    _check_all(_p_rows_names(tmp_path, co))
+def test_rows_and_names_flags_unpaired_or_unreadable(tmp_path):
+    _check_all(_p_rows_names(tmp_path))
     _rec_, ran = _run_shim(tmp_path, SQL, ["--rows", "values", "SELECT 1"], stdin=_POSITIONAL)
     _assert_answered_by(ran, S.REPO_ROOT / _sql_engine(), "an unpaired flag")
 
 
 def test_1080_the_sql_engine_gives_one_verdict_per_argv_on_the_box_lane_and_the_host_lane(
-        tmp_path, co):
-    _check_all(_p_lanes(tmp_path, co))
+        tmp_path):
+    _check_all(_p_lanes(tmp_path))

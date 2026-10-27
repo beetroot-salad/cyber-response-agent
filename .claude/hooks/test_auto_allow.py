@@ -2,7 +2,7 @@
 """Tests for auto_allow.py PostToolUse hook."""
 
 import json
-import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -160,12 +160,17 @@ class TestUpdateSettings:
         assert "Notification" in data["hooks"]
 
 
-HOOK_SCRIPT = str(Path(__file__).parent / "auto_allow.py")
+HOOK_SCRIPT = Path(__file__).parent / "auto_allow.py"
 
 
 class TestEndToEnd:
     def test_bash_command_added(self, tmp_path):
-        settings_path = tmp_path / "settings.local.json"
+        # The hook writes the `settings.local.json` beside its own `hooks/` folder: run a copy
+        # placed in a tmp project, never the checkout's own.
+        script = tmp_path / ".claude" / "hooks" / "auto_allow.py"
+        script.parent.mkdir(parents=True)
+        shutil.copy2(HOOK_SCRIPT, script)
+        settings_path = tmp_path / ".claude" / "settings.local.json"
         settings_path.write_text(json.dumps({"permissions": {"allow": []}}))
 
         hook_input = json.dumps({
@@ -176,18 +181,15 @@ class TestEndToEnd:
             "tool_use_id": "toolu_test",
         })
 
-        env = os.environ.copy()
         result = subprocess.run(
-            [sys.executable, HOOK_SCRIPT],
+            [sys.executable, str(script)],
             input=hook_input,
             capture_output=True,
             text=True,
-            env=env,
         )
-        assert result.returncode == 0
-
-        # Only the exit code is checked: the subprocess writes the script's own
-        # SETTINGS_PATH (the checkout's .claude/settings.local.json), not settings_path.
+        assert result.returncode == 0, result.stderr
+        data = json.loads(settings_path.read_text())
+        assert data["permissions"]["allow"] == ["Bash(python3 --version)"]
 
 
 if __name__ == "__main__":

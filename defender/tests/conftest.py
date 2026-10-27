@@ -1,16 +1,10 @@
-"""Suite-wide hooks and autouse fixtures for `defender/tests/`, plus learning-loop helpers.
-
-`tmp_repo` is an isolated tmp git repo with the learning author sources copied in and one
-`LoopPaths` / `AuthorConfig` over it (`ctx.paths` / `ctx.cfg`); tests thread those into
-`author.run_batch(paths=…, cfg=…)` and inject a fake curator via
-`dataclasses.replace(cfg, invoke_agent=fake)` — no module-global setattr, no `importlib.reload`.
-"""
+"""Suite-wide hooks and autouse fixtures for `defender/tests/`, plus learning-loop helpers
+(`helpers.write_finding`, the #773 scene builders)."""
 from __future__ import annotations
 
 import ctypes
 import os
 import shutil
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -51,10 +45,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     kept = [item for item in items if _shard.file_of(item.nodeid) in mine]
     config.hook.pytest_deselected(items=[item for item in items if item not in kept])
     items[:] = kept
-
-
-REAL_REPO = Path(__file__).resolve().parents[2]
-LEARNING_SRC = REAL_REPO / "defender" / "learning"
 
 
 @pytest.fixture(scope="session")
@@ -194,68 +184,6 @@ def _return_freed_arenas():
     """Hand freed allocator arenas back to the OS at every module boundary."""
     yield
     _malloc_trim()
-
-
-
-@pytest.fixture
-def tmp_repo(tmp_path: Path):
-    """An isolated git repo with the learning author sources copied in. Returns a namespace
-    with `root`, `author` (the author module), `paths` / `cfg` / `state` over the repo, and
-    `run_git` (git inside it)."""
-    repo = tmp_path / "repo"
-    (repo / "defender" / "learning").mkdir(parents=True)
-    (repo / "defender" / "lessons").mkdir(parents=True)
-    (repo / "defender" / "lessons" / ".gitkeep").write_text("")
-
-    for rel in (
-        "author/lessons/run.py",
-        "author/lessons/prompt.md",
-        "author/shared.py",
-    ):
-        dst = repo / "defender" / "learning" / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(LEARNING_SRC / rel, dst)
-
-    def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["git", *args],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=check,
-        )
-
-    (repo / ".gitignore").write_text(
-        "defender/learning/_pending/\n"
-        "defender/learning/_author.lock\n"
-        "defender/learning/runs/\n"
-    )
-
-    run_git("init", "-q", "-b", "main")
-    run_git("config", "user.email", "test@example.com")
-    run_git("config", "user.name", "Test")
-    run_git("add", "-A")
-    run_git("commit", "-q", "-m", "init")
-
-    from defender.learning.author.lessons import run as author_mod  # type: ignore[import-not-found]
-    from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
-    from defender.tests.support.learning.curation._curator1134 import author_trees
-
-    paths = LoopPaths(repo_root=repo, state_dir=repo / "defender" / "learning")
-    from defender.tests.support.learning.curation._curator1134 import open_state
-    state = open_state(paths)
-    cfg = author_mod.build_author_config(paths, state=state, trees=author_trees(paths))
-
-    class Ctx:
-        def __init__(self) -> None:
-            self.root = repo
-            self.author = author_mod
-            self.paths = paths
-            self.cfg = cfg
-            self.state = state
-            self.run_git = run_git
-
-    return Ctx()
 
 
 def write_finding(

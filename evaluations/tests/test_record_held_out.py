@@ -24,10 +24,9 @@ def _case(tmp_path, *, split="held-out", tag=None, judge_block=None):
     return d, tag
 
 
-def _ledger(tmp_path, entries=()):
+def _ledger(tmp_path):
     p = tmp_path / "ledger.yaml"
-    p.write_text("# header\n" + yaml.safe_dump({"entries": list(entries)}),
-                 encoding="utf-8")
+    p.write_text("# header\n" + yaml.safe_dump({"entries": []}), encoding="utf-8")
     return p
 
 

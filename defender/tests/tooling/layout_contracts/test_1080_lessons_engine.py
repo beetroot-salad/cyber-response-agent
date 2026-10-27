@@ -10,10 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
-import sysconfig
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -24,18 +22,14 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 GOLDEN = "lessons"
 
-#: Top-level `defender/` entries a code copy leaves out: the suite, the eval corpora, the docs and
-#: the e2e fixtures (no engine imports them), and the lesson corpus itself (each test plants its own).
-_COPY_SKIP_TOP = frozenset({"tests", "evals", "docs", "fixtures-e2e", "lessons"})
-
 #: The shim the tests drive, and where it sits in a tree.
 SHIM_REL = "defender/bin/defender-lessons"
 
 
-def _lesson(name: str, *, desc: str, sig: str, tel: str, phase: str, extra: str = "",
+def _lesson(name: str, *, desc: str, sig: str, tel: str, phase: str,
             body: str = "body text") -> str:
     return (f"---\nname: {name}\ndescription: {desc}\nsource_signature: {sig}\n"
-            f"telemetry_source: {tel}\nattack_phase: {phase}\n{extra}---\n\n{body}\n")
+            f"telemetry_source: {tel}\nattack_phase: {phase}\n---\n\n{body}\n")
 
 
 FIXED_CORPUS = {
@@ -124,11 +118,6 @@ v-002|identity|user/known-corp|jsmith|uid=1000;loginuid=-1
 """
 
 
-def venv_home() -> Path:
-    """The venv running this suite — what a linked worktree's `.venv` points at."""
-    return Path(sys.executable).parents[1]
-
-
 def interp_bin(tmp: Path) -> Path:
     """A directory whose `python3` execs this interpreter (a script, not a link: a linked venv
     python loses its venv). Stands for the box image's interpreter on the box lane."""
@@ -143,21 +132,11 @@ def interp_bin(tmp: Path) -> Path:
     return d
 
 
-def code_tree(root: Path, *, venv: bool = True) -> Path:
-    """`root/defender`: a copy of this checkout's `defender/` code (no corpus), walked from the
-    disk, so it holds whatever the tree holds now — the base layout or the moved one. Returns
-    `root`, the copy's checkout root."""
-    src = S.DEFENDER.resolve()
-
-    def _ignore(d: str, names: list[str]) -> set[str]:
-        skip = {n for n in names if n in S.JUNK_DIRS}
-        if Path(d).resolve() == src:
-            skip |= {n for n in names if n in _COPY_SKIP_TOP}
-        return skip
-
-    shutil.copytree(src, root / "defender", ignore=_ignore, symlinks=True)
-    if venv:
-        (root / "defender" / ".venv").symlink_to(venv_home(), target_is_directory=True)
+def code_tree(root: Path) -> Path:
+    """`S.copy_defender(root)` (no corpus), its `defender/.venv` linking this suite's venv.
+    Returns `root`, the copy's checkout root."""
+    S.copy_defender(root)
+    (root / "defender" / ".venv").symlink_to(S.venv_home(), target_is_directory=True)
     return root
 
 
@@ -168,15 +147,8 @@ def write_corpus(corpus: Path, lessons: Mapping[str, str]) -> Path:
     return corpus
 
 
-def agent_root(root: Path) -> Path:
-    """The agent root beside a code copy at `root` (`root/agent`, shaped like a run copy's
-    `agent/`): what `DEFENDER_AGENT_DIR` names for that copy's shim. The code tree holds no
-    corpus; the engine reads `$DEFENDER_AGENT_DIR/lessons` (#1108)."""
-    return root / "agent"
-
-
 def corpus_of(root: Path) -> Path:
-    return agent_root(root) / "lessons"
+    return S.agent_root(root) / "lessons"
 
 
 def tree_with(tmp: Path, name: str, *corpora: Mapping[str, str]) -> Path:
@@ -201,13 +173,7 @@ def norm(text: str, tmp: Path) -> str:
 
 
 def outcome(proc: subprocess.CompletedProcess[bytes], tmp: Path) -> dict[str, Any]:
-    """A child's verdict: exit status, stdout, stderr — a traceback reduced to its last line,
-    since its frames name the engine's file and line, which the move changes."""
-    err: Any = norm(proc.stderr.decode("utf-8", "replace"), tmp)
-    if "Traceback (most recent call last):" in err:
-        err = {"traceback_last": err.rstrip("\n").splitlines()[-1]}
-    return {"rc": proc.returncode, "out": norm(proc.stdout.decode("utf-8", "replace"), tmp),
-            "err": err}
+    return S.child_outcome(proc, lambda text: norm(text, tmp))
 
 
 def bare_env(tmp: Path, **extra: str) -> dict[str, str]:
@@ -227,7 +193,7 @@ def box_lane_env(root: Path, tmp: Path) -> dict[str, str]:
     the shims first on PATH, the root on PYTHONPATH, the in-box mark set."""
     from defender import box as box_mod
 
-    env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(agent_root(root))}, root))
+    env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(S.agent_root(root))}, root))
     env["PATH"] = _after_bin(env["PATH"], tmp)
     env["COLUMNS"] = "80"
     return env
@@ -237,7 +203,7 @@ def host_lane_env(root: Path, run_dir: Path, tmp: Path) -> dict[str, str]:
     """The host bash lane's environment (`box_mod.run_env`, the real one)."""
     from defender import box as box_mod
 
-    env = dict(box_mod.run_env(root / "defender", run_dir, tenant_agent=agent_root(root)))
+    env = dict(box_mod.run_env(root / "defender", run_dir, tenant_agent=S.agent_root(root)))
     env["PATH"] = _after_bin(env["PATH"], tmp)
     env["COLUMNS"] = "80"
     env["LANG"] = "C.UTF-8"
@@ -255,15 +221,8 @@ def shim(root: Path, argv: Sequence[str], *, tmp: Path, cwd: Path | None = None,
     resolves, or another path)."""
     prog = program or str(root / SHIM_REL)
     if env is None:
-        env = bare_env(tmp, DEFENDER_AGENT_DIR=str(agent_root(root)))
+        env = bare_env(tmp, DEFENDER_AGENT_DIR=str(S.agent_root(root)))
     return S.run([prog, *subst(argv, root, tmp)], cwd=cwd or tmp, env=env, timeout=60)
-
-
-def run_all(jobs: Mapping[str, Callable[[], Any]]) -> dict[str, Any]:
-    """Run independent children four at a time; results keyed as given."""
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {k: pool.submit(fn) for k, fn in jobs.items()}
-        return {k: f.result() for k, f in futures.items()}
 
 
 def key(argv: Sequence[str]) -> str:
@@ -287,10 +246,6 @@ def frontier_home() -> str:
     assert not S.under(home, "defender/lessons"), (
         f"the frontier library sits in the lesson content folder: {home}")
     return home
-
-
-def in_copy(root: Path, relpath: str) -> Path:
-    return root / relpath
 
 
 def shim_module() -> str:
@@ -336,7 +291,7 @@ def observe_survival(tmp: Path) -> dict[str, Any]:
     root = tree_with(tmp, "tree", FIXED_CORPUS)
     away = tmp / "elsewhere"
     away.mkdir()
-    return run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=away), tmp))
+    return S.run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=away), tmp))
                     for a in SURVIVAL_ARGV})
 
 
@@ -365,8 +320,7 @@ def closure_run(root: Path, tmp: Path, run_dir: Path) -> subprocess.CompletedPro
     from defender.tests.support.shared.contracts._import_blocker import run_blocked
 
     body = f"BLOCKED = {S.BOX_BLOCKED!r}\n" + _CLOSURE_BODY
-    allow = (*S.box_import_allowlist(), sysconfig._get_sysconfigdata_name())
-    return run_blocked(body, allow_only=allow,
+    return run_blocked(body, allow_only=S.box_import_allowlist(),
                        argv=[shim_module(), *CLOSURE_ARGV],
                        cwd=run_dir, env=box_lane_env(root, tmp))
 
@@ -412,7 +366,7 @@ def plant_links(root: Path, tmp: Path) -> None:
     (root / "README.md").write_text("readme\n", encoding="utf-8")
     # A sibling corpus beside the runtime one: a file there exists and is still no lesson
     # `--show` may print.
-    write_corpus(agent_root(root) / "lessons-questioner", {"_TEMPLATE.md": "---\nname: t\n---\n"})
+    write_corpus(S.agent_root(root) / "lessons-questioner", {"_TEMPLATE.md": "---\nname: t\n---\n"})
 
 
 def real_subst(argv: Sequence[str]) -> list[str]:
@@ -425,13 +379,13 @@ def observe_s021(tmp: Path) -> dict[str, Any]:
     away = tmp / "elsewhere"
     away.mkdir()
     real = S.REPO_ROOT / SHIM_REL
-    agent_env = bare_env(tmp, DEFENDER_AGENT_DIR=str(agent_root(root)))
+    agent_env = bare_env(tmp, DEFENDER_AGENT_DIR=str(S.agent_root(root)))
     jobs = {f"real {key(a)}": (lambda a=a: outcome(S.run([real, *real_subst(a)], cwd=away,
                                                           env=agent_env), tmp))
             for a in S021_REAL_ARGV}
     jobs |= {f"copy {key(a)}": (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=away), tmp))
              for a in S021_PLANTED_ARGV}
-    return run_all(jobs)
+    return S.run_all(jobs)
 
 
 def observe_s060(tmp: Path) -> dict[str, Any]:
@@ -452,7 +406,7 @@ def observe_s060(tmp: Path) -> dict[str, Any]:
         "link-outside, tree variable set": dict(
             program=str(linked_bin / "defender-lessons"),
             env=bare_env(tmp, DEFENDER_DIR=str(root / "defender"),
-                         DEFENDER_AGENT_DIR=str(agent_root(root)))),
+                         DEFENDER_AGENT_DIR=str(S.agent_root(root)))),
         "host lane, search path": dict(program="defender-lessons", cwd=run_dir,
                                        env=host_lane_env(root, run_dir, tmp)),
         "box lane, search path": dict(program="defender-lessons", cwd=run_dir,
@@ -462,7 +416,7 @@ def observe_s060(tmp: Path) -> dict[str, Any]:
     }
     jobs = {f"{label} {key(a)}": (lambda kw=kw, a=a: outcome(shim(root, a, tmp=tmp, **kw), tmp))
             for label, kw in starts.items() for a in (("--tags",), ())}
-    return run_all(jobs)
+    return S.run_all(jobs)
 
 
 CORPUS_VARIANTS = ("fixed", "missing", "empty", "linked", "malformed")
@@ -470,7 +424,7 @@ CORPUS_VARIANTS = ("fixed", "missing", "empty", "linked", "malformed")
 
 def variant_tree(tmp: Path, variant: str) -> Path:
     root = code_tree(tmp / f"tree-{variant}")
-    agent_root(root).mkdir()
+    S.agent_root(root).mkdir()
     corpus = corpus_of(root)
     if variant == "missing":
         return root
@@ -545,7 +499,7 @@ def orient_once(root: Path, tmp: Path, label: str, sig: str | None,
     alert = RunPaths(run_dir).alert
     recorder = RecordingShim({"vocab": None, **spec})
     text = orient.orientation(run_dir, root / "defender", alert, systems=[], shim=recorder,
-                              tenant_agent=agent_root(root))
+                              tenant_agent=S.agent_root(root))
     section = lessons_section(text)
     return {"section": None if section is None else norm(section, tmp),
             "calls": recorder.calls,
@@ -559,12 +513,12 @@ def observe_s062(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, Any
     trees = {v: variant_tree(tmp, v) for v in CORPUS_VARIANTS}
     away = tmp / "elsewhere"
     away.mkdir()
-    tags = run_all({v: (lambda r=r: outcome(shim(r, ("--tags",), tmp=tmp, cwd=away), tmp))
+    tags = S.run_all({v: (lambda r=r: outcome(shim(r, ("--tags",), tmp=tmp, cwd=away), tmp))
                     for v, r in trees.items()})
     stripped = code_tree(tmp / "tree-no-shim")
     write_corpus(corpus_of(stripped), FIXED_CORPUS)
     (stripped / SHIM_REL).unlink()
-    rows = run_all({
+    rows = S.run_all({
         label: (lambda label=label, v=v, sig=sig, spec=spec, gone=gone: orient_once(
             stripped if gone else trees[v], tmp, label, sig, spec))
         for label, v, sig, spec, gone in ORIENT_ROWS})
@@ -599,7 +553,7 @@ def observe_s145(tmp: Path) -> dict[str, Any]:
     (corpus / "dangling.md").symlink_to("no-target.md")
     (corpus / "subdir").mkdir()
     (corpus / "dir.md").mkdir()
-    return run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
+    return S.run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
                     for a in S145_ARGV})
 
 
@@ -612,7 +566,7 @@ def observe_s147(tmp: Path) -> dict[str, Any]:
              for a in ((), ("--show", "agent/lessons/break-tab.md",
                             "agent/lessons/break-newline.md"),
                        ("source_signature:.*tab",))}
-    return run_all(jobs)
+    return S.run_all(jobs)
 
 
 def frontier_block(corpus: Path, doc: str, *, top_k: int, fold: bool = False) -> str:
@@ -633,7 +587,7 @@ def observe_s185(tmp: Path) -> dict[str, Any]:
     sigs = [".*(?i)[a-z]+(", 'it\'s "quoted"', "a: b", "-rf", "\U0001f6a8-alert",
             _FOLD_LEAD_PREFIX]
     argvs += [(f"source_signature:.*{re.escape(s)}",) for s in sigs]
-    out = run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
+    out = S.run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
                    for a in argvs})
     out["frontier write block"] = norm(frontier_block(corpus, TWO_VERTEX_DOC, top_k=10), tmp)
     out["frontier fold block"] = norm(
@@ -679,7 +633,7 @@ def lane_trees(tmp: Path) -> tuple[Path, Path]:
     real = write_corpus(tmp / "real-corpus", FIXED_CORPUS)
     write_corpus(tmp / "corpus-sibling", {"x.md": "---\nname: x\n---\n"})
     (real / "out.md").symlink_to(tmp / "corpus-sibling" / "x.md")
-    agent_root(linked).mkdir()
+    S.agent_root(linked).mkdir()
     corpus_of(linked).symlink_to(real, target_is_directory=True)
     return root, linked
 
@@ -702,7 +656,7 @@ def observe_lanes(tmp: Path) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for tree, table in ((root, LANE_ARGV), (linked, LINKED_CORPUS_ARGV)):
         for ctx, (cwd, env) in lane_contexts(tree, tmp).items():
-            out.setdefault(ctx, {}).update(run_all({
+            out.setdefault(ctx, {}).update(S.run_all({
                 f"{tree.name} {key(a)}": (lambda a=a, cwd=cwd, env=env, tree=tree: outcome(
                     shim(tree, a, tmp=tmp, cwd=cwd, env=env, program="defender-lessons"), tmp))
                 for a in table}))
@@ -719,7 +673,7 @@ def test_1080_defender_lessons_answers_through_the_moved_engine_as_today(tmp_pat
 
     root = tree_with(tmp_path / "b", "tree", FIXED_CORPUS)
     assert _shim_answers(root, tmp_path / "b").returncode == 0
-    in_copy(root, home).unlink()
+    (root / home).unlink()
     gone = _shim_answers(root, tmp_path / "b")
     assert gone.stdout == b"", (
         f"bin/defender-lessons still answers with {home} removed — the shim does not reach the "
@@ -734,7 +688,7 @@ def test_1080_the_defender_lessons_engine_imports_nothing_outside_the_box_image_
 
     tmp = tmp_path / "b"
     root = tree_with(tmp, "tree", FIXED_CORPUS)
-    plant_import(in_copy(root, home), "import httpx  # planted by the spec")
+    plant_import(root / home, "import httpx  # planted by the spec")
     run_dir = tmp / "runs" / "r1"
     run_dir.mkdir(parents=True)
     done = closure_run(root, tmp, run_dir)
@@ -974,7 +928,7 @@ def observe_hostile(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, 
     argvs = [("--tags",), ("--tags", "source_signature"), ("--tags", "telemetry_source"),
              ("--tags", "attack_phase"), (), ("--show", "agent/lessons/hostile-block.md"),
              *((pattern,) for pattern, _ in HOSTILE_SEARCHES)]
-    out = run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
+    out = S.run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
                    for a in argvs})
     out["orient"] = orient_once(root, tmp, "hostile", "v2-cross-tier-ssh-pivot", {})
     return out
