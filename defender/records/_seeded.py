@@ -10,7 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from defender.records._layout import RUN_LAYOUT, RunPaths
-from defender.records._store_errors import BranchError
+
+
+class BranchError(Exception):
+    """A branch point that cannot carry a sibling world, or a sibling run folder that cannot
+    receive one."""
 
 
 #: The per-lead evidence directories, shared by the census, the evidence copy and its refusal.

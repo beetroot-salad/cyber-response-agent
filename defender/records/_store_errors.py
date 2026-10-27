@@ -18,8 +18,3 @@ class StoreError(Exception):
 class InvalidCaseId(StoreError, ValueError):
     """A `case_id` that is not a case-stable slug; refused, not sanitized. Also a `ValueError`
     for callers that catch that."""
-
-
-class BranchError(Exception):
-    """A branch point that cannot carry a sibling world, or a sibling run folder that cannot
-    receive one."""

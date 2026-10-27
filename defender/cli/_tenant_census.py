@@ -14,7 +14,7 @@ from defender._paths import adapters_under
 from defender.learning.leads.declared_systems import declared_systems_over, read_adapters
 from defender.learning.leads._errors import LeadAuthorError
 from defender.investigation import lead_zero as lead_zero_mod
-from defender.investigation.lead_zero._spec import correlation_grant
+from defender.systems.correlation import correlation_grant
 from defender.systems.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
 from defender.systems.run_tenant import catalog_templates, correlation_dispatch
 from defender.systems.verb_dispositions import (

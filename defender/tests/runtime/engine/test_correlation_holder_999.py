@@ -42,7 +42,7 @@ def _table(tmp_path: Path, rows: dict) -> Path:
 def test_the_shipped_correlation_grant_is_the_tables_projection():
     """The wiring: the correlation grant must be BUILT from the table, not merely agree with it
     today."""
-    from defender.investigation.lead_zero._spec import correlation_grant
+    from defender.systems.correlation import correlation_grant
 
     grants = T1106.run_grants(SETTINGS)
     rows = load_dispositions(dispositions_path(SETTINGS))
@@ -53,7 +53,7 @@ def test_the_shipped_correlation_grant_is_the_tables_projection():
 
 def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry(tmp_path):
     from defender.investigation.lead_zero._items import _NarrowedRegistry
-    from defender.investigation.lead_zero._spec import correlation_grant, correlation_system
+    from defender.systems.correlation import correlation_grant, correlation_system
 
     tree = planted_tree(tmp_path, {"alpha": "lookup"})
     adapters = adapters_under(tree / "defender")
@@ -144,7 +144,7 @@ def test_the_lead_may_not_hold_a_second_query_verb(tmp_path):
 
 
 def test_a_health_check_on_a_second_system_is_not_a_second_dispatch_target(tmp_path):
-    from defender.investigation.lead_zero._spec import correlation_grant, correlation_system
+    from defender.systems.correlation import correlation_grant, correlation_system
 
     rows = load_dispositions(_table(tmp_path / "ok", {
         ("alpha", "lookup"): BOTH, ("alpha", "health-check"): BOTH,
@@ -154,7 +154,7 @@ def test_a_health_check_on_a_second_system_is_not_a_second_dispatch_target(tmp_p
 
 
 def test_a_grant_with_no_query_verb_has_no_dispatch_target():
-    from defender.investigation.lead_zero._spec import correlation_system
+    from defender.systems.correlation import correlation_system
 
     assert correlation_system(VerbGrant(role=HOLDER, entries=())) is None
     assert correlation_system(VerbGrant(role=HOLDER, entries=(("alpha", "health-check", "r"),))) is None

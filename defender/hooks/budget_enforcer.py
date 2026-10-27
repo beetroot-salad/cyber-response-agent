@@ -15,7 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
     class _Ticks(Protocol):
         def ticks(self) -> float: ...
 
-    class RunState(Protocol):
+    class BudgetState(Protocol):
         """The slice of the run's live state (`investigation.run_state.RunState`, which sits above
         `hooks`) this module reads and writes: the budget, the oracle clock hold and the lock."""
 
@@ -80,14 +80,14 @@ def _valid_count(value: object) -> int | None:
     return value if value >= 0 else None
 
 
-def _tally(state: RunState, tool_name: str) -> None:
+def _tally(state: BudgetState, tool_name: str) -> None:
     """One call on the run's counters; `gather` is also a spawn. Call under `state.lock`."""
     state.budget["tool_calls"] += 1
     if tool_name == "gather":
         state.budget["subagent_spawns"] += 1
 
 
-def count_call(state: RunState, tool_name: str) -> dict:
+def count_call(state: BudgetState, tool_name: str) -> dict:
     """Count one call with no cap check (the unenforced posture). Returns the run's budget as
     the enforcing checks read it after the call (`enforcement_state`)."""
     with state.lock:
@@ -95,7 +95,7 @@ def count_call(state: RunState, tool_name: str) -> dict:
         return enforcement_state(state)
 
 
-def account_call(state: RunState, tool_name: str, *, limits: dict, tier: str) -> dict:
+def account_call(state: BudgetState, tool_name: str, *, limits: dict, tier: str) -> dict:
     """Count one executed call against the pool, re-checking the cap at commit time. Returns
     the run's budget as the enforcing checks read it after the call (`enforcement_state`).
 
@@ -116,7 +116,7 @@ def account_call(state: RunState, tool_name: str, *, limits: dict, tier: str) ->
 # the budget's elapsed time nor any time the model is shown.
 
 
-def oracle_turn_opened(state: RunState) -> None:
+def oracle_turn_opened(state: BudgetState) -> None:
     """Pause the run clock: an oracle turn holds the world from now until
     `oracle_turn_closed`. One turn at a time per world (`WorldRegistry._turn`), so an open
     mark is the turn's own; opening again restarts it."""
@@ -124,7 +124,7 @@ def oracle_turn_opened(state: RunState) -> None:
         state.oracle_opened = state.clock.ticks()
 
 
-def oracle_turn_closed(state: RunState) -> None:
+def oracle_turn_closed(state: BudgetState) -> None:
     """Resume the run clock, crediting the closed turn's interval to the run, once.
 
     @owns oracle_credited"""
@@ -134,7 +134,7 @@ def oracle_turn_closed(state: RunState) -> None:
             state.oracle_credited += max(0.0, state.clock.ticks() - opened)
 
 
-def oracle_held(state: RunState) -> float:
+def oracle_held(state: BudgetState) -> float:
     """The oracle time the run clock excludes: the credited total plus the turn open now, if
     any. Zero for a run no oracle served."""
     with state.lock:
@@ -145,7 +145,7 @@ def oracle_held(state: RunState) -> float:
 _ELAPSED = "elapsed_now"
 
 
-def enforcement_state(state: RunState) -> dict:
+def enforcement_state(state: BudgetState) -> dict:
     """The run's budget as every enforcing check reads it: the counters (`budget_snapshot`)
     and the run's live elapsed reader (`RunState.elapsed`, on the run clock, less the seconds
     oracle turns held the world) — read when a check runs, not when the view is built.

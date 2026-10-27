@@ -1,8 +1,6 @@
 """Lead-0 vocabulary: the correlation lead's id, provenance and endings. Imports none of its siblings."""
 from __future__ import annotations
 
-from defender.systems.correlation import correlation_grant, correlation_system  # noqa: F401 — re-exported
-
 
 L3 = "l-00c"
 RESERVED_LEAD_IDS = (L3,)

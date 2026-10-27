@@ -38,12 +38,12 @@ from ._spec import (
     L3,
     PROVENANCE_KEY,
     RESERVED_LEAD_IDS,
-    correlation_grant,
-    correlation_system,
 )
 from defender.systems.correlation import (
     CorrelationDispatch,
     CorrelationDispatchError,
+    correlation_grant,
+    correlation_system,
     resolve_correlation_dispatch,
 )
 from ._capture import _declare_l_finding

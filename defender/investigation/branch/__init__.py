@@ -34,7 +34,7 @@ from ._spec import (
 )
 from . import _snapshot
 from ._snapshot import ForkSnapshot, SnapshotWriter, snapshot_at
-from defender.investigation.branch._frontier import (
+from ._frontier import (
     _DISPATCH_TOOL,
     carried_retries,
     _appended_text,
@@ -53,9 +53,8 @@ from defender.investigation.branch._frontier import (
     session_for_run,
     source_session,
 )
-from defender.records._seeded import _lead_dirs
-from defender.records._seeded import _inherited, _holds_content, refuse_seeded_run_dir
-from defender.investigation.branch._seed import restore_run_folder, source_alert
+from defender.records._seeded import _holds_content, _inherited, _lead_dirs, refuse_seeded_run_dir
+from ._seed import restore_run_folder, source_alert
 
 
 def validate(store: Any, spec: BranchSpec, *, source_run: Run,
