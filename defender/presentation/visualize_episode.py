@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.tenancy._tenant import requested_tenant, resolve_data_root
-from defender.records._tenant_id import TenantRefused
-from defender.records._episode_handle import Episode, EpisodeRefused
+from defender.tenancy import requested_tenant, resolve_data_root
+from defender.records.formats import TenantRefused
+from defender.records.formats import Episode, EpisodeRefused
 from defender._io import Bound
-from defender.records._episode_paths import LAYOUT, EpisodePaths
+from defender.records.formats import LAYOUT, EpisodePaths
 from defender.records import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
 from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod
@@ -35,9 +35,7 @@ from defender.learning.judge.enqueue import (
     draws_on_disk_report,
 )
 from defender.learning.judge.render import episode_alert
-from defender.records._family import (
-    FamilyError, ManifestPredatesOracle,
-)
+from defender.records.formats import FamilyError, ManifestPredatesOracle
 from defender.presentation.visualize_primitives import (
     CSS,
     UsageParser,
@@ -48,7 +46,7 @@ from defender.presentation.visualize_primitives import (
 
 if TYPE_CHECKING:
     from defender.records import EpisodeRuns, Run, RunId, RunsRepository
-    from defender.tenancy._tenant import Tenant
+    from defender.tenancy import Tenant
 
 from defender.presentation.episode_verdict import (
     EPISODE_CSS as EPISODE_CSS,
@@ -130,7 +128,7 @@ def _read_outcome(bound: Bound, manifest: dict[str, Any]) -> _Record:
     """Pre-flight's outcome record with the worlds O5 counts as failed, as
     `{"record": <record or None>, "failed": {label: entry}}`. An absent or torn record is the
     "no record" state: `error` names it, and the failed worlds' own records still show."""
-    from defender.records._family import parse_family
+    from defender.records.formats import parse_family
 
     family_model = parse_family(manifest)
     try:
@@ -227,7 +225,7 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
     grade = ep.grade
     grade_rows = [r for r in (_items(grade.worlds) if grade is not None else [])
                   if isinstance(r, dict) and isinstance(r.get("world"), str)]
-    from defender.records._family import label_for_world_id
+    from defender.records.formats import label_for_world_id
 
     ep.archived_world_dirs = [
         label_for_world_id(ep.manifest, world_id)

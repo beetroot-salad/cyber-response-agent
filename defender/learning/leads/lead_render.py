@@ -9,7 +9,7 @@ from typing import Any
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.knowledge import _corpus  # noqa: E402
+from defender import knowledge as corpus  # noqa: E402
 from defender._io import Bound  # noqa: E402
 
 
@@ -20,7 +20,7 @@ _PLACEHOLDER_RE = re.compile(r"\$\{(\w+)\}|\{(\w+)\}")
 def _extract_query_body(template_text: str) -> str:
     # `## Query` for a template, `## Executed query` for a draft (the same fallback as
     # `lead_neighbors.load_catalog`); otherwise every draft would render empty in the handoff.
-    sections = _corpus.section_bodies(template_text)
+    sections = corpus.section_bodies(template_text)
     body = sections.get("Query") or sections.get("Executed query", "")
     if not body:
         return ""

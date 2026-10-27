@@ -97,7 +97,7 @@ def start_oracle_box(*, env: Mapping[str, str]) -> Any:
         merged = dict(kw.pop("env", None) or os.environ)
         if path:
             merged["PATH"] = path
-        return _lifecycle._docker(argv, env=merged, **kw)
+        return _lifecycle.run_docker(argv, env=merged, **kw)
 
     try:
         # The one entry for a `BoxRequest`; the request requires a sandbox, so a start fault

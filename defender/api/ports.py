@@ -9,7 +9,7 @@ from typing import Literal, Protocol
 
 from defender._model import model
 from defender.identity import IdentityService
-from defender.records._tenant_id import TenantId
+from defender.records.formats import TenantId
 
 from .models import (
     Alert,

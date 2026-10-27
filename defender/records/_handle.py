@@ -2,7 +2,7 @@
 per-kind `RecordHandle` every record accessor answers."""
 from __future__ import annotations
 
-from defender.records._locations import (RunsBase, _unwrap_runs_base, _unwrap_session_trust_root)
+from defender.records._locations import (RunsBase, unwrap_runs_base, unwrap_session_trust_root)
 
 import contextlib
 import dataclasses
@@ -170,7 +170,7 @@ class RecordHandle:
             with self._io.bind(root) as bound:
                 return getattr(bound, operation)(name, **kwargs)
         except OSError as error:
-            kind = _real_io._refused_by(error)
+            kind = _real_io.refusal_kind_of(error)
             result = _real_io.RecordRead("", False, str(error), None, kind)
             if operation == "read_bytes":
                 return _real_io.BytesRead("", False, str(error), None, kind)
@@ -241,7 +241,7 @@ class RecordHandle:
                 except OSError as address_error:
                     address_error.record_parent_refused = True  # type: ignore[attr-defined]  # OSError carries the same dynamic refusal metadata as write_guarded_alias
                     raise address_error from error
-                error.record_parent_refused = True  # type: ignore[attr-defined]  # dynamic refusal metadata, as in _io._mark_alias
+                error.record_parent_refused = True  # type: ignore[attr-defined]  # dynamic refusal metadata, as in _io.mark_alias
                 raise
         root, name = self._address()
         schema_name = _SCHEMA_GATED_MEMBERS.get(self._member)
@@ -403,7 +403,7 @@ class Run:
         directory, a file, a link) is a `FileExistsError` and is left as found; there is no resume.
         `gather_raw` is then made inside the folder this call made. The container is never handed
         out for it (#1105 PR 2, J15)."""
-        base = _unwrap_runs_base(self._runs_base_for("make_run_dir", "gather_raw"))
+        base = unwrap_runs_base(self._runs_base_for("make_run_dir", "gather_raw"))
         if Path(self.run_dir).parent != Path(base):
             raise ValueError(f"run.make_run_dir: {self.run_dir} is not a folder of its runs "
                              f"container {base}")
@@ -419,7 +419,7 @@ class Run:
         held no-follow — a link there is refused — and every read walks no-follow below it,
         so the caller formats no path. Held for the `with` block only. A handle built from a
         bare directory (`Run.at`) holds no container and refuses (`ValueError`)."""
-        held = self._io.hold(_unwrap_runs_base(self._runs_base_for("reader", "run folder")), follow=False)
+        held = self._io.hold(unwrap_runs_base(self._runs_base_for("reader", "run folder")), follow=False)
         try:
             yield held.view().under(self.run_dir.name)
         finally:
@@ -452,9 +452,9 @@ class Run:
 
             def trust_root() -> Path:
                 if name in _SIDECAR_MEMBERS:
-                    return _unwrap_runs_base(self._runs_base_for(group, name))
+                    return unwrap_runs_base(self._runs_base_for(group, name))
                 if name == "session_db":
-                    return _unwrap_session_trust_root(SessionPaths(self._runs_base_for(group, name)).trust_root)
+                    return unwrap_session_trust_root(SessionPaths(self._runs_base_for(group, name)).trust_root)
                 return self.run_dir
 
             def prepare_write() -> None:
@@ -483,7 +483,7 @@ class Run:
         repository has one admission rule, so no handle is built for a run whose sidecar files
         could not be named."""
         name = str(run_id if isinstance(run_id, RunId) else RunId.parse(run_id))
-        folder = _unwrap_runs_base(runs_base)
+        folder = unwrap_runs_base(runs_base)
         return cls(folder / name, runs_base=runs_base, io=io, tenant_id=tenant_id)
 
     @classmethod
@@ -568,7 +568,7 @@ class Run:
 
         assert self.runs_base is not None
         sidecar_text, _reason = self._io.rooted_read(
-            _unwrap_runs_base(self.runs_base), owner.run_end_sidecar(self.runs_base).name)
+            unwrap_runs_base(self.runs_base), owner.run_end_sidecar(self.runs_base).name)
         if sidecar_text is None:
             return None
         try:

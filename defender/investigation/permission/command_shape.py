@@ -1,11 +1,7 @@
 
 from __future__ import annotations
 
-from defender.hooks._cmd_segments import (
-    ADAPTER_RE,
-    NON_ADAPTER_SHIMS,
-    OPERATOR_TOOLS,
-)
+from defender.hooks import ADAPTER_RE, NON_ADAPTER_SHIMS, OPERATOR_TOOLS
 from defender.execution.bash_exec import Pipeline
 
 SQL_SHIM = "defender-sql"

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.knowledge._knowledge import CATALOG, CATALOG_SCHEMA_NAME, SKILLS, KnowledgePaths
+from defender.knowledge import CATALOG, CATALOG_SCHEMA_NAME, SKILLS, KnowledgePaths
 from defender._model import model
 from defender._paths import adapters_under, process_defender_dir
 from defender.learning.core import config

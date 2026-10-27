@@ -317,7 +317,7 @@ def write(path: Path, prov: RunProvenance) -> None:
     write_guarded(path, prov.as_json())
 
 
-def read(path: Path) -> RunProvenance | None:
+def read_provenance(path: Path) -> RunProvenance | None:
     """The record at `path`, or `None` if there is not a usable one — missing, unreadable,
     aliased and non-JSON alike, since no caller acts on the difference. `read_guarded` because
     the model may have planted an entry at this name."""

@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Any, Self
 
 from defender._io import read_jsonl_rows
-from defender.records._episode_handle import AppendRecord, Episode
+from defender.records.formats import AppendRecord, Episode
 from defender.records import artifact_file
 from pydantic import ValidationInfo, field_validator
 
-from defender.knowledge._query_rules import _json_safe_params, _request_key
+from defender.knowledge import json_safe_params, query_request_key
 
 #: What produced a served payload. Any other value is a writer inventing a decision class.
 BASE = "base"
@@ -92,10 +92,10 @@ def _is_json(text: str) -> bool:
 def request_key(system: str, verb: str, params: Any) -> str:
     """The canonical identity of one question.
 
-    Delegates to `_query_rules._request_key` so this table and `executed_queries.jsonl` key the
+    Delegates to `_query_rules.query_request_key` so this table and `executed_queries.jsonl` key the
     same `(system, verb, params)` identically and can be joined.
     """
-    return _request_key(system, verb, params)
+    return query_request_key(system, verb, params)
 
 
 def correlation_key_of(row: Any) -> str | None:
@@ -161,7 +161,7 @@ class ServedCall:
         Cleaned because the appenders dump with stdlib `json.dumps` defaults: otherwise a param
         reaches the file as `Infinity`/`NaN` or raises `TypeError` mid-serve. The keys do not
         move: `request_key` cleans by the same rules, and cleaning twice changes nothing."""
-        return None if value is None else _json_safe_params(value, field=info.field_name or "params")
+        return None if value is None else json_safe_params(value, field=info.field_name or "params")
 
     @property
     def key(self) -> str:

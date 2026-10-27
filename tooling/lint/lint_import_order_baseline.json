@@ -1,8 +1,8 @@
 {
   "//": "lint_import_order baseline (#1080): upward imports and per-package breaches accepted until their owner issue resolves them. Each reason names that owner (#<n>). The list only shrinks: an entry no import matches fails. Regenerate with `python tooling/lint/lint_import_order.py --update-baseline`.",
   "entries": {
-    "imports-adapters:cli/tacit_cli.py:defender.integrations.tacit_knowledge_adapter": "#1172: the tacit CLI reaches into the tacit adapter's private helpers",
-    "imports-adapters:investigation/ticket_writer.py:defender.integrations._stub_transport": "#1172: the ticket writer posts through the adapters' shared transport",
-    "imports-adapters:skills/connect/examples/example_adapter.py:defender.integrations._stub_transport": "#1172: the connect skill's example adapter uses the shared transport"
+    "imports-adapters:cli/tacit_cli.py:defender.integrations.tacit_knowledge_adapter": "#1172: the tacit CLI reaches into the tacit adapter's helpers",
+    "imports-adapters:investigation/ticket_writer.py:defender.integrations": "#1172: the ticket writer posts through the adapters' shared transport",
+    "imports-adapters:skills/connect/examples/example_adapter.py:defender.integrations": "#1172: the connect skill's example adapter uses the shared transport"
   }
 }

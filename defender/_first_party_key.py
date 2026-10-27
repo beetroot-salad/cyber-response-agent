@@ -9,7 +9,7 @@ from defender._git import REPO_ROOT, GitError, git
 from defender._io import read_text_soft
 
 
-def _read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
+def read_env_key(env_file: Path, var: str = "ANTHROPIC_API_KEY") -> str | None:
     text, _err = read_text_soft(env_file)
     if text is None:
         return None
@@ -61,7 +61,7 @@ def resolve_first_party_key(
             continue
         seen.add(path)
         if path.is_file():
-            key = _read_env_key(path, var)
+            key = read_env_key(path, var)
             if key:
                 return key, path
     return None, None

@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING
 from defender.tenancy import _tenant
 from defender._shown import escaped, quoted
 from defender.records import RunId, RunRefused
-from defender.records._episode_handle import EpisodeRefused
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import EpisodeRefused
+from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
     from defender.records import Run
-    from defender.records._locations import DataRoot
+    from defender.records.formats import DataRoot
     from defender.tenancy._tenant import Tenant
 
 

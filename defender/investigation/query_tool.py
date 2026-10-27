@@ -45,13 +45,13 @@ from defender.investigation.record_query import (
     repeat_trip_detail,
     system_fingerprint,
 )
-from defender.knowledge._query_rules import (
+from defender.knowledge import (
     ABOVE_GUARD_QUERY_ID,
     DENIED_QUERY_ID,
     REPEAT_TRIP_QUERY_ID,
     ParamsTooDeep,
     call_args_too_deep,
-    _QID_FORBIDDEN,
+    QID_FORBIDDEN,
     resolve_query_id,
 )
 
@@ -269,7 +269,7 @@ class QueryCapture(AbstractCapability[Any]):
 
     def _forbidden_reject(self, model_query_id: Any) -> str | None:
         # Names every forbidden character, not just the path ones, so the caller can act on it.
-        if model_query_id and any(t in str(model_query_id) for t in _QID_FORBIDDEN):
+        if model_query_id and any(t in str(model_query_id) for t in QID_FORBIDDEN):
             return (
                 f"invalid query_id {model_query_id!r}: no '/', '\\', '..', NUL, newline or '#' "
                 "— it becomes a catalog path segment and a markdown span the offline collectors "

@@ -63,7 +63,7 @@ def _runtime_registered() -> bool:
 def _real_box_skip_reason() -> str | None:
     if not daemon_reachable():
         return "no reachable Docker daemon"
-    if is_dood() and not box_mod._covered(DEFENDER, box_mod._shared_mounts(box_mod._docker)):
+    if is_dood() and not box_mod._covered(DEFENDER, box_mod._shared_mounts(box_mod.run_docker)):
         return ("docker-outside-of-Docker with no shared mount covering the repo tree, so no "
                 "bind source resolves (C46)")
     if not _runtime_registered():

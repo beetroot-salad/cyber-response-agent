@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from defender.execution._process_group import kill_group
+from defender.execution import kill_group
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

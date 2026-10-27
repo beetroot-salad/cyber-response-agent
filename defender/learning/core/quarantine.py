@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.configuration._env import env_int
+from defender.configuration import env_int
 
 # How many tainted trees may accumulate before the lane stops preserving them. A cap, not a
 # TTL: nothing is evicted, since an archive may be the only forensic record of a suspected

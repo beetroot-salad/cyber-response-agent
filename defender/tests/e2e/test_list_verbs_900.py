@@ -27,7 +27,7 @@ from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
     VerbRegistry,
-    _resolved_hints,
+    resolved_hints,
     is_system_name,
     validate_params,
 )
@@ -159,7 +159,7 @@ def _accepted_value(hint: Any) -> Any:
 
 
 def _binding(fn: Any, names: Any) -> dict[str, Any]:
-    hints = _resolved_hints(fn)
+    hints = resolved_hints(fn)
     return {name: _accepted_value(hints.get(name)) for name in names}
 
 
@@ -254,7 +254,7 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
             )
             artefacts = {"ctx", "return"} & set(params)
             assert not artefacts, (
-                f"{system}.{verb} published a _resolved_hints artefact ({sorted(artefacts)}) — "
+                f"{system}.{verb} published a resolved_hints artefact ({sorted(artefacts)}) — "
                 "the param surface is declared_params, not the hints"
             )
             for hidden in wrapper_only_params(fn):
@@ -403,7 +403,7 @@ def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path)
         VerbGrant(role="gather", entries=(("synthetic", "unresolved", "r"),
                                           ("synthetic", "resolved", "r"))),
     )
-    assert _resolved_hints(_unresolved_verb) == {}, (
+    assert resolved_hints(_unresolved_verb) == {}, (
         "the synthetic verb's annotations resolve after all"
     )
     assert validate_params(_unresolved_verb, {"host": 123, "window": 5}) is None, (
@@ -586,13 +586,13 @@ def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_pa
 
 
 def _resolved_verb(ctx: VerbContext, *, host: str, limit: int = 10) -> list[dict]:
-    """The control: annotations that resolve, so `_resolved_hints` reports them and
+    """The control: annotations that resolve, so `resolved_hints` reports them and
     `validate_params` really checks them."""
     return []
 
 
 def _unresolved_verb(ctx: VerbContext, *, host: str, window: _WindowSpec = "24h") -> list[dict]:
     """A verb whose annotations do not resolve: `_WindowSpec` is a TYPE_CHECKING-only import, so
-    `get_type_hints` raises NameError and `_resolved_hints` returns `{}` for the whole function,
+    `get_type_hints` raises NameError and `resolved_hints` returns `{}` for the whole function,
     `host` included (`from __future__ import annotations` keeps the def importable)."""
     return []

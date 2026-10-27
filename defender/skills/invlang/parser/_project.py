@@ -12,7 +12,7 @@ from .._cells import (
     _has_unbalanced_quote,
     _row_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _row_dict,
-    _split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
+    split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_quoted,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_subcells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _unquote,

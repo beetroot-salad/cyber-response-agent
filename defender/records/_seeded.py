@@ -18,17 +18,17 @@ class BranchError(Exception):
 
 
 #: The per-lead evidence directories, shared by the census, the evidence copy and its refusal.
-def _lead_dirs() -> tuple[str, ...]:
+def lead_dirs() -> tuple[str, ...]:
     """The two per-lead directories a sibling inherits, read from the run layout."""
     return (RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.gather_summaries.name)
 
 
-#: Derived from `_lead_dirs()` so the census, the copy and the seeded-dir refusal cannot name
+#: Derived from `lead_dirs()` so the census, the copy and the seeded-dir refusal cannot name
 #: different sets.
-def _inherited() -> tuple[str, ...]:
+def inherited_artifact_names() -> tuple[str, ...]:
     """The run-dir entries a sibling inherits from its source: the queries table plus the two
     per-lead directories."""
-    return (RUN_LAYOUT.executed_queries.name, *_lead_dirs())
+    return (RUN_LAYOUT.executed_queries.name, *lead_dirs())
 
 
 def refuse_seeded_run_dir(run_dir: Path) -> None:
@@ -38,8 +38,8 @@ def refuse_seeded_run_dir(run_dir: Path) -> None:
     leave an orphan session each time.
     """
     run_dir = Path(run_dir)
-    present = [name for name in (RunPaths(run_dir).investigation.name, *_inherited())
-               if _holds_content(run_dir / name)]
+    present = [name for name in (RunPaths(run_dir).investigation.name, *inherited_artifact_names())
+               if holds_content(run_dir / name)]
     if present:
         raise BranchError(
             f"{run_dir} already holds {present} — a resumed run inherits those from its "
@@ -47,7 +47,7 @@ def refuse_seeded_run_dir(run_dir: Path) -> None:
             "over them would interleave two runs' evidence in artifacts that are append-only")
 
 
-def _holds_content(path: Path) -> bool:
+def holds_content(path: Path) -> bool:
     """Does `path` hold anything a run put there?
 
     Not mere existence: scaffolding creates empty dirs like `gather_raw/` for every run.

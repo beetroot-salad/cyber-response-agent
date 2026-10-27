@@ -281,3 +281,19 @@ def test_root_name_walks_through_calls_unlike_origin():
     tree = ast.parse("line.strip().lower()\n")
     call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
     assert astlib.root_name(call.func) == "line"
+
+
+@pytest.mark.parametrize(("spelled", "canonical"), [
+    # A name a lazy door other than the runs repository's serves is spelled at its home (#1315),
+    # so the owner tables, which name homes, still recognise it through the door.
+    ("defender.records.formats.Episode", "defender.records._episode_handle.Episode"),
+    ("defender.records.formats.EpisodePaths.world", "defender.records._episode_paths.EpisodePaths.world"),
+    ("defender.tenancy.Tenant", "defender.tenancy._tenant.Tenant"),
+    # The runs repository's names keep the door's spelling, from either side.
+    ("defender.records._layout.RunPaths", "defender.records.RunPaths"),
+    ("defender.records.RunPaths", "defender.records.RunPaths"),
+    # A name no door serves is unchanged.
+    ("defender.records.formats.NotServed", "defender.records.formats.NotServed"),
+])
+def test_door_spelling_names_one_spelling_per_name(spelled, canonical):
+    assert _load().door_spelling(spelled) == canonical

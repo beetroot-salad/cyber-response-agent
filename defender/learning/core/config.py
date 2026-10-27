@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from defender.records._locations import (LearningRoot)
+from defender.records.formats import LearningRoot
 
 import dataclasses
 import enum
@@ -14,14 +14,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
-from defender.configuration._env import env_int, env_str
-from defender.configuration._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
+from defender.configuration import env_int, env_str
+from defender.configuration import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
 from defender.records import WIRE_LOG_NAMES
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
-from defender.knowledge._knowledge import LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths
+from defender.knowledge import LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths
 
 
-from defender.tenancy._tenant import Tenant
+from defender.tenancy import Tenant
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -128,7 +128,7 @@ class LoopPaths(DefenderPaths):
     @classmethod
     def for_tenant(cls, tenant: Tenant) -> LoopPaths:
         """@owns tenant learning root — accepted identity selects mutable state, never env."""
-        from defender.tenancy._tenant import Tenant
+        from defender.tenancy import Tenant
 
         if not isinstance(tenant, Tenant):
             raise TypeError(f"the runs repository takes an accepted Tenant, not "

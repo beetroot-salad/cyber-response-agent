@@ -265,7 +265,36 @@ _RUN_REPOSITORY = "defender.records"
 #: The door's own file in this checkout. #1080 merged the runs repository into `records/`, whose
 #: record-format modules the door does not serve; the door's `_HOMES` map is the one list of the
 #: submodules it does.
-_DOOR_FILE = Path(__file__).resolve().parents[2] / "defender" / "records" / "__init__.py"
+_DEFENDER = Path(__file__).resolve().parents[2] / "defender"
+_DOOR_FILE = _DEFENDER / "records" / "__init__.py"
+
+
+def homes_of(tree: ast.Module, rel: str) -> dict[str, str] | None:
+    """A door's literal `_HOMES` map (served name -> the submodule of its package that defines
+    it), or None when the module declares none. Entries are `"name": "_module"` or
+    `**dict.fromkeys((names...), "_module")`; anything else is ScanBlind, since a gate that cannot
+    read the map cannot tell what the door serves. The one reader of a door's map."""
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else (
+            node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else None)
+        if not (isinstance(target, ast.Name) and target.id == "_HOMES"):
+            continue
+        if not isinstance(node.value, ast.Dict):
+            raise ScanBlind(f"{rel}: `_HOMES` is not a literal dict")
+        homes: dict[str, str] = {}
+        for key, value in zip(node.value.keys, node.value.values, strict=True):
+            names: list[ast.expr | None] = [key]
+            if key is None and isinstance(value, ast.Call) and len(value.args) == 2 \
+                    and ast.unparse(value.func) == "dict.fromkeys" \
+                    and isinstance(value.args[0], (ast.Tuple, ast.List)):
+                names, value = list(value.args[0].elts), value.args[1]
+            if not (isinstance(value, ast.Constant) and isinstance(value.value, str)
+                    and all(isinstance(n, ast.Constant) and isinstance(n.value, str) for n in names)):
+                raise ScanBlind(f"{rel}: `_HOMES` holds {ast.unparse(value)!r}, not literal names "
+                                "and a submodule name")
+            homes.update(dict.fromkeys((n.value for n in names), value.value))  # type: ignore[union-attr]
+        return homes
+    return None
 
 
 @functools.cache
@@ -274,22 +303,37 @@ def door_modules() -> frozenset[str]:
     read from the door's source. ScanBlind when the map cannot be found — a gate that cannot tell
     the repository's files from the record formats beside them cannot clear either."""
     tree = parse_source(read_source(_DOOR_FILE, "records/__init__.py"), "records/__init__.py")
-    for node in tree.body:
-        target = node.target if isinstance(node, ast.AnnAssign) else (
-            node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else None)
-        if isinstance(target, ast.Name) and target.id == "_HOMES" and isinstance(node.value, ast.Dict):
-            homes = set()
-            for key, value in zip(node.value.keys, node.value.values):
-                if key is None and isinstance(value, ast.Call) and len(value.args) == 2 \
-                        and ast.unparse(value.func) == "dict.fromkeys":
-                    value = value.args[1]  # `**dict.fromkeys((names...), "_module")`
-                if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
-                    raise ScanBlind(f"records/__init__.py: `_HOMES` holds {ast.unparse(value)!r}, "
-                                    "not a submodule name")
-                homes.add(value.value)
-            if homes:
-                return frozenset(homes)
-    raise ScanBlind("records/__init__.py: no `_HOMES` map naming the runs repository's submodules")
+    homes = homes_of(tree, "records/__init__.py")
+    if not homes:
+        raise ScanBlind("records/__init__.py: no `_HOMES` map naming the runs repository's submodules")
+    return frozenset(homes.values())
+
+
+@functools.cache
+def _lazy_doors() -> tuple[tuple[str, str, dict[str, str]], ...]:
+    """This checkout's lazy doors (#1315) other than the runs repository's, longest first:
+    `(door module, package its homes sit in, served name -> home submodule)`."""
+    doors = []
+    for rel in source_files(_DEFENDER, ("tests", "evals", ".venv", "venv", "__pycache__")):
+        text = read_source(_DEFENDER / rel, rel)
+        if "_HOMES" not in text:
+            continue
+        homes = homes_of(parse_source(text, rel), rel)
+        module, package = module_and_package(rel)
+        if homes and module != _RUN_REPOSITORY:
+            doors.append((module, package, homes))
+    return tuple(sorted(doors, key=lambda d: -len(d[0])))
+
+
+def _home_spelling(origin: str) -> str:
+    """A name a lazy door serves, spelled at its home: `defender.records.formats.EpisodePaths` is
+    `defender.records._episode_paths.EpisodePaths`."""
+    for door, package, homes in _lazy_doors():
+        if origin.startswith(door + "."):
+            name, dot, tail = origin[len(door) + 1:].partition(".")
+            if name in homes:
+                return f"{package}.{homes[name]}.{name}{dot}{tail}"
+    return origin
 
 
 @functools.cache
@@ -305,8 +349,10 @@ def run_repository_files() -> tuple[str, ...]:
 def door_spelling(origin: str) -> str:
     """`origin` in its one spelling: a name the runs repository defines in a private submodule
     (`defender.records._layout.RunPaths`) is the door's (`defender.records.
-    RunPaths`), since the door serves it; anything else is unchanged."""
-    parts = origin.split(".")
+    RunPaths`), since the door serves it; a name any other lazy door serves is its home's
+    (`defender.records.formats.Episode` is `defender.records._episode_handle.Episode`), since
+    the gates' tables name homes; anything else is unchanged."""
+    parts = _home_spelling(origin).split(".")
     if origin.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3 \
             and parts[2] in door_modules():
         del parts[2]

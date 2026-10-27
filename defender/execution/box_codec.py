@@ -37,7 +37,7 @@ BOX_ENV_ALLOWLIST: tuple[str, ...] = (
 #: The in-box mark. Applied after every other env source in both `docker run` builders, so a
 #: caller cannot switch it off; the host lanes (`_host_fallback_env`, `run_common.run_env`)
 #: strip it.
-_BOX_MARK_ENV: dict[str, str] = {"DEFENDER_BOX": "1"}
+BOX_MARK_ENV: dict[str, str] = {"DEFENDER_BOX": "1"}
 
 
 class BoxFault(Exception):

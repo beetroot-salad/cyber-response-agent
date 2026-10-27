@@ -14,7 +14,7 @@ import urllib.request
 from typing import TYPE_CHECKING, Any
 
 from defender.kit.verbs import VerbContext, verb
-from defender.integrations import _stub_transport
+from defender import integrations as stub_transport
 from defender.kit import faults
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -35,7 +35,7 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     run addresses. (A credentialed system has no secret delivery yet: #1163.)
     `load_config` strips the prefix and raises `ConfigFault` for a system with no config, or a
     missing or blank required key — which `check_settings` below raises first, at run start."""
-    return _stub_transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
+    return stub_transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
 def check_settings(tenant: TenantRecord) -> None:
@@ -47,7 +47,7 @@ def check_settings(tenant: TenantRecord) -> None:
     anything else, is down as broken. A system needing no settings still declares one that never
     raises. This system's verbs fault only in `_config`, so the check is `_config`'s, over the
     record."""
-    _stub_transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_KEYS)
+    stub_transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
 def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) -> Any:

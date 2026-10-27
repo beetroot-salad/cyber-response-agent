@@ -13,15 +13,15 @@ from pydantic import SkipValidation
 from pathlib import Path, PurePath
 
 from defender._io import Bound
-from defender.records._report import ReportRead, parse_report_text
+from defender.records.formats import ReportRead, parse_report_text
 from defender._vocab import normalized_disposition
-from defender.records._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
+from defender.records.formats import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
     normalized_source,
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
-from defender.records._family import (
+from defender.records.formats import (
     BASE_ROLE,
     FamilyError,
     ManifestPredatesOracle,
@@ -36,13 +36,13 @@ from defender.records.run_end import (
     parse_record,
 )
 from defender.kit.verbs import is_system_name
-from defender.knowledge._query_rules import (
+from defender.knowledge import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,
     REPEAT_TRIP_QUERY_ID,
 )
-from defender.skills.invlang._walkers import iter_resolutions
+from defender.skills.invlang import iter_resolutions
 from defender.skills.invlang.parser import NO_OPEN_BLOCK, parse_dense_companion, scan_fences
 
 

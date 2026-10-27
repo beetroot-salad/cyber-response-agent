@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 
-from defender.records._locations import (RunsBase, _unwrap_episodes_root, _unwrap_runs_base)
+from defender.records._locations import (RunsBase, unwrap_episodes_root, unwrap_runs_base)
 
 import builtins
 import contextlib
@@ -229,20 +229,20 @@ class RunsRepository(Generic[_T]):
     def _natural(self, *, create: bool = False) -> _io.Held:
         """`<T>/runs`, walked from the tenant's folder (made when `create`)."""
         return walk_from_tenant(self._tenant, self._io,
-                                tenant_levels(self._tenant, _unwrap_runs_base(self._tenant.runs)), create=create)
+                                tenant_levels(self._tenant, unwrap_runs_base(self._tenant.runs)), create=create)
 
     def open(self, run_id: RunId) -> Run:
         """The tenant's run `run_id` in its natural container (PR 1's `open_run` rule). Every
         refusal is a `RunRefused`: `RunAbsent`, `RunUnreachable` or a refused entry (see the
         module docstring)."""
-        return _open(self._tenant.id, Path(_unwrap_runs_base(self._tenant.runs)), self._natural, run_id, self._io)
+        return _open(self._tenant.id, Path(unwrap_runs_base(self._tenant.runs)), self._natural, run_id, self._io)
 
     def list(self) -> Listed:
         """The tenant's natural runs (PR 1's `list_run_ids` rule), telling an absent container
         from an empty one. A container that cannot be held refuses (`TenantRefused`); an entry
         that is not a UUID run folder or a sidecar of one refuses (`RunRefused`, naming the
         one-time command that moves pre-#1187 entries aside)."""
-        with _hand_out(self._tenant.id, Path(_unwrap_runs_base(self._tenant.runs)), self._io, self._natural) as out:
+        with _hand_out(self._tenant.id, Path(unwrap_runs_base(self._tenant.runs)), self._io, self._natural) as out:
             return Listed(absent=True) if out.absent else Listed(tuple(out.ids()))
 
     def all_runs(self) -> builtins.list[Run]:
@@ -253,7 +253,7 @@ class RunsRepository(Generic[_T]):
         after it is still handed out, its records then reading as absent — nothing here raises
         for it, as a per-id `open` would. An absent container holds none; one that cannot be
         held refuses (`TenantRefused`), and a stray entry (`RunRefused`), as `list` does."""
-        with _hand_out(self._tenant.id, Path(_unwrap_runs_base(self._tenant.runs)), self._io, self._natural) as out:
+        with _hand_out(self._tenant.id, Path(unwrap_runs_base(self._tenant.runs)), self._io, self._natural) as out:
             return [cast(Run, run) for run in out.values()]
 
     def create(self) -> Run:
@@ -291,7 +291,7 @@ class RunsRepository(Generic[_T]):
         """`<T>/episodes/<episode_id>`, walked from the tenant's folder no-follow and wrapped in
         the owner's handle. Absent is `FileNotFoundError` naming the episode; a link or a
         non-directory at any level is `TenantRefused` naming that level."""
-        path = Path(_unwrap_episodes_root(self._tenant.episodes)) / episode_id
+        path = Path(unwrap_episodes_root(self._tenant.episodes)) / episode_id
         try:
             return Episode.open(path, io=_EpisodeWalk(self._tenant, self._io))
         except FileNotFoundError:
@@ -307,7 +307,7 @@ class RunsRepository(Generic[_T]):
         something is wrong, and nothing is retried. The view owns the episode handle; leaving
         it closes it."""
         episode_id = mint_uuid()
-        path = Path(_unwrap_episodes_root(self._tenant.episodes)) / episode_id
+        path = Path(unwrap_episodes_root(self._tenant.episodes)) / episode_id
         try:
             episode = Episode.create(path, io=_EpisodeWalk(self._tenant, self._io),
                                      exclusive=True)
@@ -465,7 +465,7 @@ class EpisodeRuns:
     def _hold_container(self, *, create: bool = False) -> _io.Held:
         """`runs/` held off the episode's handle, never followed; absent is
         `FileNotFoundError`, a link or a non-directory `TenantRefused` naming it."""
-        return hold_level(self.episode._held_folder(), LAYOUT.runs.as_posix(), _unwrap_runs_base(self._folder),  # noqa: SLF001 — the view is built on the owner's handle; its container is the view's alone
+        return hold_level(self.episode._held_folder(), LAYOUT.runs.as_posix(), unwrap_runs_base(self._folder),  # noqa: SLF001 — the view is built on the owner's handle; its container is the view's alone
                           io=self._io, create=create, what="the arm container")
 
     def _judge(self) -> None:
@@ -488,7 +488,7 @@ class EpisodeRuns:
             self.state = ABSENT
         elif listed.entries is None:
             self.state = UNREADABLE
-            self.unreadable_reason = (f"the arm container {_unwrap_runs_base(self._folder)} cannot be listed: "
+            self.unreadable_reason = (f"the arm container {unwrap_runs_base(self._folder)} cannot be listed: "
                                       f"{listed.reason}")
 
     @property
@@ -653,7 +653,7 @@ class EpisodeRuns:
     def open(self, arm_id: RunId) -> Run:
         """The arm `arm_id`, as `RunsRepository.open` answers in the natural container: an
         absent container is `RunAbsent`, one that cannot be held `RunUnreachable`."""
-        return _open(self._tenant.id, _unwrap_runs_base(self._folder), self._hold_container, arm_id, self._io)
+        return _open(self._tenant.id, unwrap_runs_base(self._folder), self._hold_container, arm_id, self._io)
 
     @contextlib.contextmanager
     def arms(self, arm_ids: Sequence[RunId]) -> Iterator[Handout]:
@@ -663,7 +663,7 @@ class EpisodeRuns:
         gone, `RunUnreachable` when it cannot be held) — and `handout.reader(arm_id)` a
         no-follow reader over a handed-out arm, walked from the held container, for the block
         only."""
-        with _hand_out(self._tenant.id, _unwrap_runs_base(self._folder), self._io, self._hold_container,
+        with _hand_out(self._tenant.id, unwrap_runs_base(self._folder), self._io, self._hold_container,
                        arm_ids) as out:
             yield out
 
@@ -685,6 +685,6 @@ class EpisodeRuns:
         try:
             self._hold_container().close()
         except FileNotFoundError:
-            raise TenantRefused(f"the arm container {_unwrap_runs_base(self._folder)} is absent — RUNS makes it "
+            raise TenantRefused(f"the arm container {unwrap_runs_base(self._folder)} is absent — RUNS makes it "
                                 "before the roster") from None
         return Run.under(self._folder, arm_id, io=self._io, tenant_id=self._tenant.id)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from defender.skills.invlang.parser import (
-    _split_cells,
+    split_cells,
     _split_subcells,
     _unquote,
     parse_dense_companion,
@@ -41,15 +41,15 @@ def _blocked(errors: list[str]) -> list[str]:
 # the escaped quote never reaches the quote toggle
 
 def test_backslash_quote_in_a_middle_cell_does_not_merge_the_rest_of_the_row():
-    assert _split_cells(r"a|b\"c|d") == ["a", r"b\"c", "d"]
+    assert split_cells(r"a|b\"c|d") == ["a", r"b\"c", "d"]
     # ...and the row keeps its cell count however many escaped quotes it carries.
-    assert _split_cells(r'a|b\"c|d\"e|f') == ["a", r"b\"c", r"d\"e", "f"]
+    assert split_cells(r'a|b\"c|d\"e|f') == ["a", r"b\"c", r"d\"e", "f"]
 
 
 def test_escaped_delimiter_and_quoted_cells_are_unchanged():
-    assert _split_cells(r"a|b\|c|d") == ["a", "b|c", "d"]
+    assert split_cells(r"a|b\|c|d") == ["a", "b|c", "d"]
     row = 'v-002|process|process:bash|bash[pid=42]|flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
-    assert _split_cells(row)[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
+    assert split_cells(row)[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
     assert _split_subcells('a=1;b="x;y"') == ["a=1", 'b="x;y"']
     assert _unquote(r'"he said \"hi\""') == 'he said "hi"'
 

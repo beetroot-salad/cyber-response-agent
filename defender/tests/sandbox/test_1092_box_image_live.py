@@ -110,7 +110,7 @@ def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exact
 @requires_live_box
 def test_the_live_suites_duckdb_startup_probe_exits_zero_in_a_box_from_the_owned_image(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
+    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker)
     try:
         res = box_run(box, "python3 -c 'import duckdb'", cwd=Path("/"))
     finally:

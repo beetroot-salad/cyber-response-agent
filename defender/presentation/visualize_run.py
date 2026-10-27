@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Literal
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.records import _knowledge_status, _provenance
+from defender.records import formats
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows, read_text_utf8
-from defender.records._report import ReportRead
+from defender.records.formats import ReportRead
 from defender.records import RunPaths
 from defender.learning import lead_repository
 from defender.presentation.publisher import NoPublishRoot, Publisher
@@ -65,7 +65,7 @@ _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from defender.records import Run
-    from defender.tenancy._tenant import Tenant
+    from defender.tenancy import Tenant
 
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
 CopyOutcome = Literal["copied", "skipped", "failed"]
@@ -413,7 +413,7 @@ def render_knowledge_banner(run_dir: Path) -> str:
     This page is an operator surface written after the box stops (OD21), so the raw reason is
     shown here and nowhere the box or a customer can read."""
     paths = RunPaths(run_dir)
-    status = _knowledge_status.read_knowledge_status(paths.knowledge_source(), paths.provenance)
+    status = formats.read_knowledge_status(paths.knowledge_source(), paths.provenance)
     if status is None or not status.stale:
         return ""
     parts = [f"stale knowledge ({esc(status.stale_kind or '')})"]
@@ -429,7 +429,7 @@ def _display_facts(run_dir: Path) -> list[str]:
     moment run setup stamped, each shown escaped and only when it is text — the stamp sits in a
     folder the box can write, so a value is shown, never trusted, and a missing or unusable one
     is simply not shown."""
-    prov = _provenance.read(RunPaths(run_dir).provenance)
+    prov = formats.read_provenance(RunPaths(run_dir).provenance)
     if prov is None:
         return []
     parts = []
@@ -586,7 +586,7 @@ def main(argv: list[str]) -> int:
     cannot be opened (the refusal printed on stderr), when the record was not saved, or when a
     `dev` copy failed — refreshing that copy is often why an operator re-renders."""
     from defender import _log
-    from defender.tenancy._command_line_run import open_command_line_run
+    from defender.tenancy import open_command_line_run
 
     try:
         ns = _parse_run_page_args(argv[1:])

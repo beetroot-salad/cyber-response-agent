@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 
-from defender.records import _alert_input
+from defender.records import formats as alert_input
 from defender._io import (
     load_json_artifact,
 )
@@ -37,11 +37,11 @@ def source_alert(source_run: Run) -> dict[str, Any] | None:
     data (#1224): never raises."""
     try:
         # Read only as the run's record vouches for it: a replaced alert is no alert here.
-        raw, _record = _alert_input.verify_input_bytes(
+        raw, _record = alert_input.verify_input_bytes(
             source_run.facts.alert.read_bytes().data, source_run.facts.alert_record.read(),  # lint-whole-read: ok — RecordHandle reads bounded original bytes through the rooted core
             run_name=str(source_run.id))
         doc, unreadable = load_json_artifact(raw.decode("utf-8"))
-    except (OSError, ValueError, BranchError, _alert_input.AlertReplaced):
+    except (OSError, ValueError, BranchError, alert_input.AlertReplaced):
         return None
     return doc if unreadable is None and isinstance(doc, dict) else None
 
@@ -54,9 +54,9 @@ def _inherit_alert(source_run: Run, run: Run) -> None:
     if alert.absent:
         return
     try:
-        raw, record_text = _alert_input.verify_input_bytes(
+        raw, record_text = alert_input.verify_input_bytes(
             alert.data, source_run.facts.alert_record.read(), run_name=source_run.run_dir.name)
-    except _alert_input.AlertReplaced as replaced:
+    except alert_input.AlertReplaced as replaced:
         raise BranchError(str(replaced)) from replaced
     run.facts.alert.write(raw)
     run.facts.alert_record.replace(record_text)

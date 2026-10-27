@@ -12,11 +12,11 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.knowledge._corpus import iter_query_templates  # noqa: E402
-from defender.knowledge._knowledge import KnowledgePaths  # noqa: E402
+from defender.knowledge import iter_query_templates  # noqa: E402
+from defender.knowledge import KnowledgePaths  # noqa: E402
 from defender._io import TEXT_READ_ERRORS, read_plain, read_text_soft  # noqa: E402
 from defender._paths import adapters_under, process_defender_dir  # noqa: E402
-from defender.systems._scaffold_rules import (  # noqa: E402
+from defender.systems import (  # noqa: E402
     ScaffoldRuleError,
     VerbResolver,
     check_system_skill,
@@ -36,7 +36,7 @@ from defender.systems.verbs import (  # noqa: E402
     read_roster,
 )
 from defender.kit.verbs import VerbContext as AdapterContext, engine_of  # noqa: E402
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _GLYPH = {PASS: "✓", WARN: "!", FAIL: "✗"}
@@ -288,8 +288,8 @@ def check_templates(report: Report, staged: Path, system: str, verbs) -> None:
 def main() -> None:
     import argparse
 
-    from defender.tenancy import _tenant
-    from defender.tenancy._tenants import add_tenant_arguments
+    from defender import tenancy
+    from defender.tenancy import add_tenant_arguments
 
     ap = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
     ap.add_argument("system")
@@ -310,9 +310,9 @@ def main() -> None:
     # A tenant acceptance refuses only warns: the config check is advisory. The tenant is the
     # one under `$DEFENDER_DATA_ROOT`, never a folder found through `$DEFENDER_DIR`.
     try:
-        requested = _tenant.requested_tenant_id(args.tenant)
-        settings_dir = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), requested, defender_dir=defender).settings
+        requested = tenancy.requested_tenant_id(args.tenant)
+        settings_dir = tenancy.accept_tenant(
+            tenancy.resolve_data_root(), requested, defender_dir=defender).settings
     except TenantRefused as refusal:
         report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
                          f"resolved: {refusal}")

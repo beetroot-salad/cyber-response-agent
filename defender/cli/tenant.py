@@ -62,7 +62,7 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-# Hand-rolled rather than `_venv.reexec_into_venv`, matching `run.py`: this must run
+# Hand-rolled rather than `venv_guard.reexec_into_venv`, matching `run.py`: this must run
 # BEFORE any `defender.*` import resolves, and reaching that helper is itself such an import.
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent
@@ -91,14 +91,14 @@ if __name__ == "__main__":
     sys.path[:] = [_root, *(entry for entry in sys.path if entry != _root)]
 
 from defender import _git
-from defender.tenancy import _tenant  # noqa: E402
+from defender import tenancy  # noqa: E402
 from defender._io import guarded_mkdir, read_plain_bytes, write_guarded  # noqa: E402
-from defender.tenancy._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
+from defender.tenancy import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
 from defender.systems import run_tenant  # noqa: E402
 from defender.learning.core import state as learning_state  # noqa: E402
 from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.tenancy import case_ticket  # noqa: E402
-from defender.records._tenant_id import TenantId, TenantRefused
+from defender.records.formats import TenantId, TenantRefused
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
 #: path, so a call still running is blocked (a FIFO where git expects a file), not slow.
@@ -128,9 +128,9 @@ def setup(tenant_id: str, learning_state_from: Path | None = None, *,
     printed visibly, exit 1."""
     try:
         tid = TenantId(tenant_id)
-        root = _tenant.resolve_data_root()
-        _tenant.refuse_foreign_data_root(root, tid)
-        settings, has_row = _tenant.accept_placed_knowledge(
+        root = tenancy.resolve_data_root()
+        tenancy.refuse_foreign_data_root(root, tid)
+        settings, has_row = tenancy.accept_placed_knowledge(
             root, tid, defender_dir=_DEFENDER_DIR)
         _settings_files_parse(settings)
         run_tenant.resolve_run_tenant_or_refuse(
@@ -139,7 +139,7 @@ def setup(tenant_id: str, learning_state_from: Path | None = None, *,
                                           create_row=not has_row)
         if learning_state_from is not None:
             print(f"learning state adopted from {learning_state_from}")
-        tenant = _tenant.accept_tenant(root, tid, defender_dir=_DEFENDER_DIR)
+        tenant = tenancy.accept_tenant(root, tid, defender_dir=_DEFENDER_DIR)
     except (OSError, TenantRefused) as refused:
         _say(refused)
         return 1
@@ -148,9 +148,9 @@ def setup(tenant_id: str, learning_state_from: Path | None = None, *,
     return 0
 
 
-def _has_forge_binding(tenant: _tenant.Tenant) -> bool:
+def _has_forge_binding(tenant: tenancy.Tenant) -> bool:
     try:
-        _tenant.read_forge_binding(tenant)
+        tenancy.read_forge_binding(tenant)
     except TenantRefused:
         return False
     return True
@@ -174,15 +174,15 @@ def check_tenant(tenant_id: str) -> int:
     """`check <id>`: the tenant under `$DEFENDER_DATA_ROOT` through acceptance (stopping at
     its first refusal), then every finding about its settings and its repo, all reported."""
     try:
-        tenant = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
+        tenant = tenancy.accept_tenant(
+            tenancy.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
     except TenantRefused as refused:
         _say(refused)
         return 1
     return _report([*_findings(tenant.knowledge), *_publish_findings(tenant)])
 
 
-def _publish_findings(tenant: _tenant.Tenant) -> list[str]:
+def _publish_findings(tenant: tenancy.Tenant) -> list[str]:
     """O-SEE: how far `current` trails the clone's `origin/main` (as the last fetch left it; no
     network), and the last publish refusal any trigger recorded, while no later publish has
     succeeded. Read locally only."""
@@ -205,7 +205,7 @@ def _publish_findings(tenant: _tenant.Tenant) -> list[str]:
     return findings
 
 
-def _trail(tenant: _tenant.Tenant, current: str | None) -> str | None:
+def _trail(tenant: tenancy.Tenant, current: str | None) -> str | None:
     """The finding that `current` trails `origin/main`, or None when it does not (or there is
     no clone with an `origin/main` to compare with)."""
     from defender.learning.author.version_control import DeliveryRefused
@@ -234,7 +234,7 @@ def _trail(tenant: _tenant.Tenant, current: str | None) -> str | None:
 # update / propose (#1108 P4)
 # ==========================================================================================
 
-def _delivery(tenant: _tenant.Tenant, *, client=None, identity=None,
+def _delivery(tenant: tenancy.Tenant, *, client=None, identity=None,
               issuer_config: Path | None = None):
     """The tenant's opened `TenantDelivery` (a context manager): its row's bound origin, an
     identity from the issuer client config the binding names (or the given stand-ins)."""
@@ -244,7 +244,7 @@ def _delivery(tenant: _tenant.Tenant, *, client=None, identity=None,
                               identity=identity, issuer_config=issuer_config)
 
 
-def _publish(tenant: _tenant.Tenant, *, by: str, client=None, identity=None,
+def _publish(tenant: tenancy.Tenant, *, by: str, client=None, identity=None,
              issuer_config: Path | None = None) -> int:
     from defender.learning.author import version_control as vc
     from defender.learning.author.version_control.status import recording
@@ -266,8 +266,8 @@ def update(tenant_id: str, *, client=None, identity=None,
     stand-ins for the forge client and the issuer login. Refusals print `[tenant.py] ...`,
     exit 1, and are what `check` reports afterwards."""
     try:
-        tenant = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
+        tenant = tenancy.accept_tenant(
+            tenancy.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
     except TenantRefused as refused:
         _say(refused)
         return 1
@@ -286,12 +286,12 @@ def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
     from dataclasses import replace
 
     from defender.learning.author import version_control as vc
-    from defender.tenancy._exports import regular_files as _regular_files
+    from defender.tenancy import regular_files as _regular_files
 
     batch = None
     try:
-        tenant = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
+        tenant = tenancy.accept_tenant(
+            tenancy.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
         try:
             files = _regular_files(Path(staged))
         except OSError as unreadable:
@@ -328,7 +328,7 @@ def check_folder(folder: Path) -> int:
     no data root. `agent/.tenant-id` is held to the id grammar only when present, and no
     containment is applied — that belongs to a process that mounts the folder."""
     try:
-        _tenant.check_knowledge_folder(folder, tenant_id=None)
+        tenancy.check_knowledge_folder(folder, tenant_id=None)
     except TenantRefused as refused:
         _say(refused)
         return 1
@@ -543,7 +543,7 @@ def _commit_new_tenant_repo(target: Path, tid: TenantId,
         guarded_mkdir((target / rel).parent, base=target)
         write_guarded(target / rel, _git.git_blob_bytes(_REPO_ROOT, sha, env=env), mode="create")
         written.append(rel)
-    write_guarded(target / TENANT_ID_FILE, _tenant.tenant_id_file_text(tid), mode="create")
+    write_guarded(target / TENANT_ID_FILE, tenancy.tenant_id_file_text(tid), mode="create")
     written.append(TENANT_ID_FILE.as_posix())
     _git.git(["init", "-q", "-b", "main"], cwd=target, env=env)
     _git.git(["add", "--force", "--", *written], cwd=target, env=env)

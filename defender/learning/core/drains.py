@@ -53,7 +53,7 @@ from defender.learning.core.state import (
     PendingDelivery,  # noqa: F401 — re-export: the delivery record the drains and the pin name
     StateRefused,
 )
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     import httpx
 
     from defender.learning.author.version_control import Batch, ForgejoIdentity, TenantDelivery
-    from defender.tenancy._tenant import Tenant
+    from defender.tenancy import Tenant
 
 _logger = logging.getLogger(__name__)
 
@@ -400,12 +400,12 @@ def _tenant_acceptor(tenant: Tenant | None) -> Callable[[object], Tenant]:
     root. A missing or bad setting is the stage's configuration refusal
     (`FatalConfigError`, raised from `resolve_data_root`'s
     `TenantRefused`): `_run_stage` logs it on one line and exits 2."""
-    from defender.tenancy import _tenant
+    from defender import tenancy
 
     if tenant is not None:
         return tenant.accept_requested_tenant
     try:
-        return functools.partial(_tenant.requested_tenant, _tenant.resolve_data_root())
+        return functools.partial(tenancy.requested_tenant, tenancy.resolve_data_root())
     except TenantRefused as refused:
         raise FatalConfigError(str(refused)) from refused
 

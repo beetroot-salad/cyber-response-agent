@@ -8,7 +8,7 @@ from collections.abc import Collection
 from typing import Protocol
 
 from defender._model import model
-from defender.records._tenant_id import TenantId
+from defender.records.formats import TenantId
 
 from .rows import Membership, MembershipStatus, Session, User
 

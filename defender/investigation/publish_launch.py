@@ -30,13 +30,13 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from defender.execution._process_group import kill_group
+from defender.execution import kill_group
 from defender.box import provider_scrubbed_environ
 from defender.tenancy import run_knowledge
-from defender.tenancy._exports import knowledge_lock_holder
-from defender.tenancy._publish_status import STALE_TRANSIENT, record_report
-from defender.tenancy._tenant import Tenant, data_root_from_path, requested_tenant
-from defender.records._tenant_id import TenantRefused
+from defender.tenancy import knowledge_lock_holder
+from defender.tenancy import STALE_TRANSIENT, record_report
+from defender.tenancy import Tenant, data_root_from_path, requested_tenant
+from defender.records.formats import TenantRefused
 
 #: The real child's process entry, named (never imported: P-3).
 CHILD_MODULE = "defender.learning.author.version_control.publish_child"

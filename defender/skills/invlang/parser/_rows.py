@@ -15,7 +15,7 @@ from .._cells import (
     _require,
     _row_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _row_dict,
-    _split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
+    split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_csv,
     _split_csv_or_semi,
     _split_quoted,  # noqa: F401 — re-export: invlang tests import it from `parser`
@@ -114,8 +114,8 @@ HYPOTHESIS_ID_RE = re.compile(r"h-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 
 
 def _row_first_cell(row: str) -> str:
-    # `_split_cells`, not `row.split("|")`, so escaped `\|` and quoted cells are honoured.
-    return _split_cells(row)[0]
+    # `split_cells`, not `row.split("|")`, so escaped `\|` and quoted cells are honoured.
+    return split_cells(row)[0]
 
 
 def deferred_hypothesis_ids(

@@ -21,7 +21,7 @@ from defender._io import (
     write_guarded,
 )
 from defender.records import Run, RunPaths, artifact_dir, artifact_file
-from defender.knowledge._query_rules import is_reserved_query_id
+from defender.knowledge import is_reserved_query_id
 
 from defender.records import session_store
 from ..run_state import RunState
@@ -53,7 +53,12 @@ from ._frontier import (
     session_for_run,
     source_session,
 )
-from defender.records._seeded import _holds_content, _inherited, _lead_dirs, refuse_seeded_run_dir
+from defender.records.formats import (
+    holds_content,
+    inherited_artifact_names,
+    lead_dirs,
+    refuse_seeded_run_dir,
+)
 from ._seed import restore_run_folder, source_alert
 
 
@@ -247,14 +252,14 @@ __all__ = [
     "ToolCallPart",
     "ToolReturnPart",
     "_DISPATCH_TOOL",
-    "_inherited",
-    "_lead_dirs",
+    "inherited_artifact_names",
+    "lead_dirs",
     "_appended_text",
     "_as_of_of",
     "_call_args",
     "_clock",
     "_drop_refused_dispatch",
-    "_holds_content",
+    "holds_content",
     "_known_leads",
     "_lead_of",
     "_prefix_stamps",

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from defender._paths import PATHS
 from defender.integrations.tacit_knowledge_adapter import (
-    _literal_chars,
-    _parse_date,
+    literal_chars,
+    parse_date,
     read_registry,
     registry_path,
 )
@@ -31,8 +31,8 @@ def _notes(entry: dict[str, str], today: dt.date) -> list[str]:
     the author is editing the file.
     """
     out: list[str] = []
-    review_by = _parse_date(entry["review_by"])
-    added_at = _parse_date(entry["added_at"])
+    review_by = parse_date(entry["review_by"])
+    added_at = parse_date(entry["added_at"])
     if review_by is not None:
         remaining = (review_by - today).days
         if remaining < 0:
@@ -55,10 +55,10 @@ def _notes(entry: dict[str, str], today: dt.date) -> list[str]:
         scope = entry[field]
         # Without a wildcard a scope names one thing however short (`uid-0`), so only a
         # wildcarded scope can be broad.
-        if not any(ch in scope for ch in "*?[") or _literal_chars(scope) >= _BROAD_SCOPE_CHARS:
+        if not any(ch in scope for ch in "*?[") or literal_chars(scope) >= _BROAD_SCOPE_CHARS:
             continue
         out.append(
-            f"`{field}` is {scope!r} — legal, and broad: {_literal_chars(scope)} literal "
+            f"`{field}` is {scope!r} — legal, and broad: {literal_chars(scope)} literal "
             f"character(s) around a wildcard. The loader's minimum is a shape rule, not a "
             f"breadth proof; confirm you MEANT everything this covers"
         )
@@ -102,8 +102,8 @@ def _report_drops(path: Path, today: dt.date) -> int:
 
 
 def _expired(entry: dict[str, str], today: dt.date) -> bool:
-    review_by = _parse_date(entry["review_by"])
-    added_at = _parse_date(entry["added_at"])
+    review_by = parse_date(entry["review_by"])
+    added_at = parse_date(entry["added_at"])
     if review_by is None or added_at is None:
         return True
     return not added_at <= today <= review_by
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     defender_dir = args.defender_dir if args.defender_dir is not None else PATHS.defender_dir
-    today = dt.date.today() if args.as_of is None else _parse_date(args.as_of)
+    today = dt.date.today() if args.as_of is None else parse_date(args.as_of)
     if today is None:
         print(f"--as-of {args.as_of!r} is not an ISO date (YYYY-MM-DD)", file=sys.stderr)
         return 2

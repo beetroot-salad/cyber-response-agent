@@ -56,7 +56,7 @@ from defender._filesystem.bound import (
     _read_plain_fd as _read_plain_fd,
     _read_prefix as _read_prefix,
     _read_reason as _read_reason,
-    _refused_by as _refused_by,
+    refusal_kind_of as refusal_kind_of,
     _step as _step,
     _too_large as _too_large,
     bind as bind,
@@ -77,7 +77,7 @@ from defender._filesystem.write import (
     _create_unnamed as _create_unnamed,
     _ensure_dir_component as _ensure_dir_component,
     _link_unnamed as _link_unnamed,
-    _mark_alias as _mark_alias,
+    mark_alias as mark_alias,
     _process_umask as _process_umask,
     _refuse_unless_plain as _refuse_unless_plain,
     _refuse_unless_plain_stat as _refuse_unless_plain_stat,
@@ -278,7 +278,7 @@ def _open_plain_fd(path: Path, os_: Any = os) -> tuple[int, os.stat_result]:
         # Reword a symlink-at-the-leaf `ELOOP` as the alias refusal. An `ELOOP` from a looped
         # component higher up keeps its own strerror: the leaf is not the alias.
         if getattr(e, "write_guarded_alias", False) and _leaf_is_link(path, os_):
-            raise _mark_alias(OSError(errno.ELOOP, ALIAS_READ_REFUSAL, str(path)),
+            raise mark_alias(OSError(errno.ELOOP, ALIAS_READ_REFUSAL, str(path)),
                               is_alias=True) from None
         raise
     try:
@@ -436,7 +436,7 @@ def locked_for_read(path: Path, *, os_: Any = os) -> Iterator[tuple[int, os.stat
     try:
         fd = os_.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     except OSError as e:
-        raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
+        raise mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
     try:
         st = os_.fstat(fd)
         _refuse_unless_plain_stat(st, path)
@@ -640,7 +640,7 @@ def _replace_at(
         fd = os_.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                       _FILE_MODE, dir_fd=dir_fd)
     except OSError as e:
-        raise _mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
+        raise mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
     try:
         _write_all(fd, text, os_=os_)
         os_.rename(staged, leaf, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
@@ -903,7 +903,7 @@ def rename_into(src: Held, name: str, dst: Held) -> None:
     with src._dup() as src_fd, dst._dup() as dst_fd:
         st = os_.stat(name, dir_fd=src_fd, follow_symlinks=False)
         if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
-            raise _mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)),
+            raise mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)),
                               is_alias=stat.S_ISLNK(st.st_mode))
         try:
             os_.stat(name, dir_fd=dst_fd, follow_symlinks=False)

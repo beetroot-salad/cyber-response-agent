@@ -13,12 +13,29 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import ValidationError
 
-from defender.records._locations import (
-    DataRoot, TenantRoot, TenantRecord, RunsBase, SessionsRoot, EpisodesRoot, LearningRoot, WorktreesRoot, ExportsRoot, DraftsRoot, KnowledgeLock, CommitRecord, LegacyRunsRoot, LegacyEpisodesRoot, _unwrap_data_root, _unwrap_tenant_root, _unwrap_runs_base, _unwrap_episodes_root,
+from defender.records.formats import (
+    DataRoot,
+    TenantRoot,
+    TenantRecord,
+    RunsBase,
+    SessionsRoot,
+    EpisodesRoot,
+    LearningRoot,
+    WorktreesRoot,
+    ExportsRoot,
+    DraftsRoot,
+    KnowledgeLock,
+    CommitRecord,
+    LegacyRunsRoot,
+    LegacyEpisodesRoot,
+    unwrap_data_root,
+    unwrap_tenant_root,
+    unwrap_runs_base,
+    unwrap_episodes_root,
 )
-from defender.records import _alert_input
-from defender.records._held import RecordTenant
-from defender.records._tenant_id import TenantId, TenantRefused
+from defender.records import formats as alert_input
+from defender.records import RecordTenant
+from defender.records.formats import TenantId, TenantRefused
 from defender import _io as _real_io
 from defender import _paths
 from defender._model import model
@@ -32,7 +49,7 @@ from defender.tenancy._tenants import (
 )
 
 if TYPE_CHECKING:
-    from defender.records._lookup import RunsRepository
+    from defender.records import RunsRepository
 
 _R = TypeVar("_R")
 _P = TypeVar("_P")
@@ -183,7 +200,7 @@ class _TenantPaths(_TenantLayout):
     def __init__(self, root: DataRoot, tenant_id: str) -> None:
         #: The id, parsed: a plain string handed in is checked here (a `TenantId` passes as-is).
         self.tenant_id = TenantId(tenant_id)
-        root_path = _unwrap_data_root(root)
+        root_path = unwrap_data_root(root)
         _refuse_unusable_data_root(root_path)
         _refuse_inside_defender_tree(_resolve_or_refuse(root_path / self.tenant_id), root_path)
         super().__init__(root_path / self.tenant_id)
@@ -254,7 +271,7 @@ class Tenant(RecordTenant):
 
     @property
     def _layout(self) -> _TenantLayout:
-        return _TenantLayout(_unwrap_data_root(self.data_root) / self.id)
+        return _TenantLayout(unwrap_data_root(self.data_root) / self.id)
 
     @property
     def tenant_root(self) -> TenantRoot:
@@ -359,14 +376,14 @@ class Tenant(RecordTenant):
         (#1256's reasons) — handed to `_paths.name_roots`, which names whole paths only and the
         longest spelling first, so the tenant's folder is never cut into `<data root>/<id>`.
         Read here because this module owns the root (#1210)."""
-        return {**_paths.root_spellings(_unwrap_data_root(self.data_root), "<data root>"),
-                **_paths.root_spellings(_unwrap_tenant_root(self.tenant_root), "<tenant folder>")}
+        return {**_paths.root_spellings(unwrap_data_root(self.data_root), "<data root>"),
+                **_paths.root_spellings(unwrap_tenant_root(self.tenant_root), "<tenant folder>")}
 
     def runs_repository(self) -> RunsRepository[Tenant]:
         """This tenant's runs repository (#1105 PR 2, decision C): bound to this tenant, and
         below it everything is ids. Only an accepted `Tenant` exists, so this is the one way a
         repository is built. The package is imported here, lazily: it imports this module."""
-        from defender.records._lookup import RunsRepository
+        from defender.records import RunsRepository
 
         return RunsRepository(self)
 
@@ -444,11 +461,11 @@ def box_mounted_arm_container(data_root: DataRoot, raw_id: object, episode_id: s
     link planted there is seen). The episode id is judged first (`EpisodeRefused`), the root and
     the id as every pre-acceptance site judges them (`TenantRefused`). A join: nothing is read
     or made."""
-    from defender.records._episode_handle import refuse_bad_episode_id
-    from defender.records._episode_paths import LAYOUT
+    from defender.records.formats import refuse_bad_episode_id
+    from defender.records.formats import LAYOUT
 
     episode_id = refuse_bad_episode_id(episode_id)
-    return RunsBase(_unwrap_episodes_root(box_mounted_episodes(data_root, raw_id)) / episode_id / LAYOUT.runs)
+    return RunsBase(unwrap_episodes_root(box_mounted_episodes(data_root, raw_id)) / episode_id / LAYOUT.runs)
 
 
 def requested_tenant(data_root: DataRoot, raw: object) -> Tenant:
@@ -508,7 +525,7 @@ def _accept_knowledge(
     settings_real = root_real / paths.settings.relative_to(root)
     halves_real = (settings_real, root_real / paths.agent.relative_to(root))
     knowledge_real = root_real / paths.knowledge.relative_to(root)
-    for mounted in (Path(defender_dir), paths.runs, *(_unwrap_runs_base(m) if isinstance(m, RunsBase) else _unwrap_episodes_root(m) if isinstance(m, EpisodesRoot) else m for m in box_mounted)):
+    for mounted in (Path(defender_dir), paths.runs, *(unwrap_runs_base(m) if isinstance(m, RunsBase) else unwrap_episodes_root(m) if isinstance(m, EpisodesRoot) else m for m in box_mounted)):
         mounted_real = _resolve_or_refuse(mounted)
         if settings_real.is_relative_to(mounted_real):
             raise TenantRefused(
@@ -592,7 +609,7 @@ def _check_knowledge(
     # The two mapping files (#1222 A5): every fault, one fixed reason each, in one refusal. Asked
     # before the link walk, so a link or FIFO at a mapping's name is that mapping's reason (the
     # reader refuses it without opening it), not the walk's first-found refusal alone.
-    mapping_faults = _alert_input.settings_reasons(bound.under(SETTINGS_HALF))
+    mapping_faults = alert_input.settings_reasons(bound.under(SETTINGS_HALF))
     if mapping_faults:
         raise TenantRefused("; ".join(mapping_faults))
     for name in (SETTINGS_HALF, AGENT_HALF):
@@ -616,7 +633,7 @@ def check_run_settings(settings: Path) -> None:
     with _real_io.bind(settings) as bound:
         for rel in REQUIRED_SETTINGS:
             _required_setting(_real_io.stat_entry(bound, rel), settings / rel)
-        mapping_faults = _alert_input.settings_reasons(bound)
+        mapping_faults = alert_input.settings_reasons(bound)
     if mapping_faults:
         raise TenantRefused("; ".join(mapping_faults))
 
@@ -771,7 +788,7 @@ def read_forge_binding(tenant: Tenant) -> ForgeBinding:
     row file NOW (an operator may bind or re-bind after the tenant was accepted). Absent, any
     of the four missing or not a non-empty string, an `issuer_role` that is not a plain name,
     or an `issuer_config` that is not an absolute path, is `TenantRefused` naming the row."""
-    path = _unwrap_tenant_root(tenant.tenant_root) / ROW_NAME
+    path = unwrap_tenant_root(tenant.tenant_root) / ROW_NAME
     try:
         with _real_io.bind(path.parent) as bound:
             answer = bound.read(ROW_NAME)
@@ -820,7 +837,7 @@ def create_tenant(root: DataRoot, tenant_id: TenantId) -> TenantRow:
     (J16/J63, #1137), never overwritten (O2, D1)."""
     paths = _TenantPaths(root, tenant_id)
     refuse_foreign_data_root(root, paths.tenant_id)
-    root_path = _unwrap_data_root(root)
+    root_path = unwrap_data_root(root)
     row = TenantRow(tenant_id=paths.tenant_id, created_at=_now())
     body = json.dumps(
         {"tenant_id": row.tenant_id, "created_at": row.created_at}, indent=2, sort_keys=True,
@@ -854,10 +871,10 @@ def refuse_foreign_data_root(root: DataRoot, tenant_id: TenantId) -> None:
     caller that skips `create_tenant` on a re-run still meets it."""
     tenant_id = TenantId(tenant_id)  # before anything under `root` is named with it
     try:
-        _refuse_foreign_entries(_unwrap_data_root(root), tenant_id)
+        _refuse_foreign_entries(unwrap_data_root(root), tenant_id)
     except OSError as unreadable:
         raise TenantRefused(
-            f"the data root {_unwrap_data_root(root)} could not be checked for other tenants: {unreadable}",
+            f"the data root {unwrap_data_root(root)} could not be checked for other tenants: {unreadable}",
         ) from unreadable
 
 
@@ -936,4 +953,4 @@ def data_root_from_path(path: Path) -> DataRoot:
 def data_root_for_child(root: DataRoot) -> Path:
     """Explicit owner export of a configured root to a child process, which is handed
     identifiers only (the tenant id and this root, #1108 P4 O8) and accepts the tenant itself."""
-    return _unwrap_data_root(root)
+    return unwrap_data_root(root)

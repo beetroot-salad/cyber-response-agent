@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import NoReturn
 
-from defender.records import _alert_input
+from defender.records import formats as alert_input
 from defender._io import read_text_utf8
 
 
@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ASSETS = Path(__file__).resolve().parent / "assets"
 CSS = read_text_utf8(ASSETS / "styles.css")
 
-from defender.records._report import ReportRead, read_report  # noqa: E402
+from defender.records.formats import ReportRead, read_report  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 
 
@@ -149,8 +149,8 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
         body = '<div class="empty">no alert.json</div>'  # lint-run-records: ok — page text naming the record for a reader, not a path
     else:
         try:
-            raw, _record = _alert_input.verified_alert(paths.alert, paths.alert_record, run_name=Path(run_dir).name)
-        except _alert_input.AlertReplaced as refused:
+            raw, _record = alert_input.verified_alert(paths.alert, paths.alert_record, run_name=Path(run_dir).name)
+        except alert_input.AlertReplaced as refused:
             return section(anchor, "alert", "Alert", "— input to the defender runtime",
                            f'<div class="empty">{esc(str(refused))}</div>')
         text = raw.decode("utf-8", errors="replace")

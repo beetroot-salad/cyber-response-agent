@@ -13,7 +13,7 @@ def _split_quoted(
     strip: bool = True,
 ) -> list[str]:
     """The cell tokenizer. `strip=False` returns raw spans; a knob rather than a second
-    scanner, so `_split_cells_raw` always finds the same boundaries as `_split_cells`."""
+    scanner, so `_split_cells_raw` always finds the same boundaries as `split_cells`."""
     parts: list[str] = []
     cur: list[str] = []
     in_q = False
@@ -53,15 +53,15 @@ def _split_quoted(
     return parts
 
 
-def _split_cells(row: str) -> list[str]:
+def split_cells(row: str) -> list[str]:
     return _split_quoted(row, "|", unescape_delim=True, keep_empty=True)
 
 
 def _split_cells_raw(row: str) -> list[str]:
     """Cell boundaries only, every byte preserved (no strip, no unescape).
 
-    Cell N here is cell N of `_split_cells`, so a caller can replace one cell and rejoin with
-    `"|"` leaving the others byte-identical; rebuilding from `_split_cells` output would lose
+    Cell N here is cell N of `split_cells`, so a caller can replace one cell and rejoin with
+    `"|"` leaving the others byte-identical; rebuilding from `split_cells` output would lose
     padding and corrupt escaped pipes."""
     return _split_quoted(row, "|", keep_empty=True, strip=False)
 
@@ -147,7 +147,7 @@ def _quotes_wrap_whole_values(cell: str) -> bool:
 
 
 def _row_cells(block: Block, row: str, expected: int) -> list[str]:
-    cells = _split_cells(row)
+    cells = split_cells(row)
     # Before the count checks: a bad count is usually this defect's symptom.
     for cell in cells:
         if not _quotes_wrap_whole_values(cell):

@@ -47,17 +47,17 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._model import model
-from defender.records import _alert_input
+from defender.records import formats as alert_input
 from defender._clock import parse_iso_utc
-from defender.knowledge._corpus import iter_lessons
+from defender.knowledge import iter_lessons
 from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
-from defender.records._report import UNKNOWN_DISPOSITION, read_report
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.records.formats import UNKNOWN_DISPOSITION, read_report
+from defender.knowledge import KnowledgePaths
 from defender._text import one_line
 from defender.records import Run, RunPaths
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -66,10 +66,10 @@ def published_lessons_dir(raw_tenant: str) -> Path:
     """The lessons of the export the tenant's `current` names (`<export>/agent/lessons`).
     `TenantRefused` when the tenant cannot be accepted; `DeliveryRefused` when nothing is
     published for it."""
-    from defender.tenancy import _tenant
-    from defender.tenancy._exports import current_export
+    from defender import tenancy
+    from defender.tenancy import current_export
 
-    tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
+    tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
     return KnowledgePaths(current_export(tenant).path / "agent").lessons_dir
 
 
@@ -128,9 +128,9 @@ def tenant_runs(raw_tenant: str) -> list[Run]:
     refuses an entry that is not a run (`RunRefused`, naming it). An absent runs folder holds
     none. `TenantRefused` when the tenant cannot be accepted or its runs folder cannot be
     held."""
-    from defender.tenancy import _tenant
+    from defender import tenancy
 
-    tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
+    tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
     return tenant.runs_repository().all_runs()
 
 
@@ -145,7 +145,7 @@ def in_context_cases(
 def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[CaseHit]:
     """One run's exposures to `lesson_name` since `created_at`, read through the run's own
     `lessons_loaded` record, then the report of its folder for the disposition."""
-    if _alert_input.read_record(run.facts.alert_record.path) is None:
+    if alert_input.read_record(run.facts.alert_record.path) is None:
         return []
     loaded = Path(run.observability.lessons_loaded.path)
     if not loaded.is_file():
@@ -191,7 +191,7 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
     try:
         runs = tenant_runs(raw_tenant)
         unrecorded = [run for run in runs
-                      if _alert_input.read_record(RunPaths(run.run_dir).alert_record) is None]
+                      if alert_input.read_record(RunPaths(run.run_dir).alert_record) is None]
         if unrecorded:
             print(f"warn: {len(unrecorded)} run folder(s) with no run record skipped: "
                   f"{', '.join(one_line(str(run.id)) for run in unrecorded)}", file=sys.stderr)
@@ -204,7 +204,7 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
 
 def _published_or_none(raw_tenant: str) -> Path | None:
     """`published_lessons_dir`, or `None` with the refusal on stderr (one line)."""
-    from defender.tenancy._exports import DeliveryRefused
+    from defender.tenancy import DeliveryRefused
 
     try:
         return published_lessons_dir(raw_tenant)

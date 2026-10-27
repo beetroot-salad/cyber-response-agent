@@ -864,7 +864,7 @@ def test_p150_unsandboxed_opt_out_runs_without_the_mount(tmp_path, monkeypatch, 
 
     def absent_docker(argv: list[str], **_kw: Any) -> Any:
         # A real startup fault through the real primitive: the docker binary is not there.
-        return S.sym("box._docker", "_docker")(
+        return S.sym("box._docker", "run_docker")(
             [str(tmp_path / "no-docker-here" / "docker"), *argv[1:]])
 
     bare = _gated_run(tmp_path / "bare", absent_docker, caplog)

@@ -17,7 +17,7 @@ from defender._model import model
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.configuration._env import env_str
+from defender.configuration import env_str
 from defender.investigation import observe
 from defender.investigation.agent_definition import AgentDefinition, RunScope, ToolSet, bind
 from defender._agent_role import REVIEW_AGENT_ID_PREFIX, AgentRole

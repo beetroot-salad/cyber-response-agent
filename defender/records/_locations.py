@@ -44,7 +44,7 @@ class DataRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_data_root(location: DataRoot) -> Path:
+def unwrap_data_root(location: DataRoot) -> Path:
     if not isinstance(location, DataRoot):
         raise TypeError("expected DataRoot")
     return location._record_location_path
@@ -55,7 +55,7 @@ class TenantRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_tenant_root(location: TenantRoot) -> Path:
+def unwrap_tenant_root(location: TenantRoot) -> Path:
     if not isinstance(location, TenantRoot):
         raise TypeError("expected TenantRoot")
     return location._record_location_path
@@ -71,7 +71,7 @@ class RunsBase(_Location):
     __slots__ = ()
 
 
-def _unwrap_runs_base(location: RunsBase) -> Path:
+def unwrap_runs_base(location: RunsBase) -> Path:
     if not isinstance(location, RunsBase):
         raise TypeError("expected RunsBase")
     return location._record_location_path
@@ -82,7 +82,7 @@ class SessionsRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_sessions_root(location: SessionsRoot) -> Path:
+def unwrap_sessions_root(location: SessionsRoot) -> Path:
     if not isinstance(location, SessionsRoot):
         raise TypeError("expected SessionsRoot")
     return location._record_location_path
@@ -93,7 +93,7 @@ class EpisodesRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_episodes_root(location: EpisodesRoot) -> Path:
+def unwrap_episodes_root(location: EpisodesRoot) -> Path:
     if not isinstance(location, EpisodesRoot):
         raise TypeError("expected EpisodesRoot")
     return location._record_location_path
@@ -104,7 +104,7 @@ class LearningRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_learning_root(location: LearningRoot) -> Path:
+def unwrap_learning_root(location: LearningRoot) -> Path:
     if not isinstance(location, LearningRoot):
         raise TypeError("expected LearningRoot")
     return location._record_location_path
@@ -120,7 +120,7 @@ class ExportsRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_exports_root(location: ExportsRoot) -> Path:
+def unwrap_exports_root(location: ExportsRoot) -> Path:
     if not isinstance(location, ExportsRoot):
         raise TypeError("expected ExportsRoot")
     return location._record_location_path
@@ -131,7 +131,7 @@ class DraftsRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_drafts_root(location: DraftsRoot) -> Path:
+def unwrap_drafts_root(location: DraftsRoot) -> Path:
     if not isinstance(location, DraftsRoot):
         raise TypeError("expected DraftsRoot")
     return location._record_location_path
@@ -142,7 +142,7 @@ class KnowledgeLock(_Location):
     __slots__ = ()
 
 
-def _unwrap_knowledge_lock(location: KnowledgeLock) -> Path:
+def unwrap_knowledge_lock(location: KnowledgeLock) -> Path:
     if not isinstance(location, KnowledgeLock):
         raise TypeError("expected KnowledgeLock")
     return location._record_location_path
@@ -153,7 +153,7 @@ class CommitRecord(_Location):
     __slots__ = ()
 
 
-def _unwrap_commit_record(location: CommitRecord) -> Path:
+def unwrap_commit_record(location: CommitRecord) -> Path:
     if not isinstance(location, CommitRecord):
         raise TypeError("expected CommitRecord")
     return location._record_location_path
@@ -164,7 +164,7 @@ class LegacyRunsRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_legacy_runs_root(location: LegacyRunsRoot) -> Path:
+def unwrap_legacy_runs_root(location: LegacyRunsRoot) -> Path:
     if not isinstance(location, LegacyRunsRoot):
         raise TypeError("expected LegacyRunsRoot")
     return location._record_location_path
@@ -175,7 +175,7 @@ class LegacyEpisodesRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_legacy_episodes_root(location: LegacyEpisodesRoot) -> Path:
+def unwrap_legacy_episodes_root(location: LegacyEpisodesRoot) -> Path:
     if not isinstance(location, LegacyEpisodesRoot):
         raise TypeError("expected LegacyEpisodesRoot")
     return location._record_location_path
@@ -186,7 +186,7 @@ class SessionTrustRoot(_Location):
     __slots__ = ()
 
 
-def _unwrap_session_trust_root(location: SessionTrustRoot) -> Path:
+def unwrap_session_trust_root(location: SessionTrustRoot) -> Path:
     if not isinstance(location, SessionTrustRoot):
         raise TypeError("expected SessionTrustRoot")
     return location._record_location_path

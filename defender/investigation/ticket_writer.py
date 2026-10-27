@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
-from defender.records import _alert_input, _knowledge_status
+from defender.records import formats
 from defender._model import model
 from defender.records import Run, RunPaths
 from defender.tenancy import case_ticket
@@ -16,7 +16,7 @@ from defender.records import run_end
 from defender.systems.run_tenant import RunTenant
 from defender.kit.settings import SETTINGS_POINTER
 from defender.systems.verbs import VerbContext, redact_settings_path
-from defender.integrations import _stub_transport as transport
+from defender import integrations
 from defender.kit.faults import AdapterFault, TransportFault
 
 _logger = logging.getLogger(__name__)
@@ -45,12 +45,12 @@ def _request(
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
     try:
-        rc, stdout, stderr = transport.docker_exec_curl(
+        rc, stdout, stderr = integrations.docker_exec_curl(
             ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=SYSTEM,
         )
     except TransportFault as e:
         return None, f"transport error: {e.detail}"
-    body_text, status = transport.split_status(stdout)
+    body_text, status = integrations.split_status(stdout)
     if not status:
         return None, f"no/malformed response (rc={rc}, stderr={stderr.strip()!r})"
     return status, body_text
@@ -70,7 +70,7 @@ DEFAULT_DEPS = TicketWriterDeps()
 def _config_of(ctx: VerbContext) -> dict[str, str]:
     """The case-history store's config from the run's record — `ConfigFault` (an `AdapterFault`)
     when it is absent, on another access method, or missing or blank on a required key."""
-    return transport.load_config(ctx, SYSTEM, PREFIX, _CONFIG_KEYS)
+    return integrations.load_config(ctx, SYSTEM, PREFIX, _CONFIG_KEYS)
 
 
 def _reason_of(fault: BaseException, tenant: RunTenant) -> str:
@@ -100,7 +100,7 @@ def open_case_ticket(
             return
         # The open leg meets the run's RECORD alone: the facts were settled once at run start,
         # and no byte of the alert is read here.
-        record = _alert_input.parse_alert_record(run.facts.alert_record.read() or "")
+        record = formats.parse_alert_record(run.facts.alert_record.read() or "")
         if record is None:
             _logger.warning(f"{run_dir.name} has no readable record of its alert; skipping open")
             return
@@ -213,11 +213,11 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
 #: customer's words and the commit used, never the publish's raw reason (no URL, error text or
 #: credential hint reaches a ticket). Fresh and pinned runs carry none.
 STALE_SENTENCE = {
-    _knowledge_status.TRANSIENT: (
+    formats.TRANSIENT: (
         "Knowledge notice: this investigation used the tenant's knowledge as of an earlier "
         "version (commit {commit}) because newer approved knowledge could not be loaded due to "
         "a temporary problem."),
-    _knowledge_status.OPERATOR: (
+    formats.OPERATOR: (
         "Knowledge notice: this investigation used the tenant's knowledge as of an earlier "
         "version (commit {commit}) because newer approved knowledge could not be loaded; this "
         "is awaiting operator action."),
@@ -234,12 +234,12 @@ def stale_sentence(run_dir: Path) -> str | None:
     or `None` for a fresh, pinned or pre-P4 run. The stamp in the run dir decides nothing here
     beyond whether a record should exist (OD22')."""
     paths = RunPaths(run_dir)
-    status = _knowledge_status.read_knowledge_status(paths.knowledge_source(), paths.provenance)
+    status = formats.read_knowledge_status(paths.knowledge_source(), paths.provenance)
     if status is None or not status.stale:
         return None
     if status.commit is None:
         return UNREADABLE_SENTENCE
-    return STALE_SENTENCE[status.stale_kind or _knowledge_status.OPERATOR].format(
+    return STALE_SENTENCE[status.stale_kind or formats.OPERATOR].format(
         commit=status.commit)
 
 

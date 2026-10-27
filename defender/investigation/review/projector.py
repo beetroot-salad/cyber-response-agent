@@ -9,7 +9,8 @@ from typing import Any
 
 from defender._untrusted import wrap as _wrap
 from defender._vocab import CEILING_DISPOSITION
-from defender.skills.invlang import _walkers, vocab
+from defender.skills.invlang import vocab
+from defender.skills import invlang as walkers
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.schema import CompanionBody
 
@@ -154,7 +155,7 @@ def ablation_target(companion: CompanionBody) -> tuple[str, int] | None:
     carries everything removes the whole case; the count travels so the composer can tell the
     two apart."""
     footprint: dict[str, int] = {}
-    for _lead_id, res in _walkers.iter_resolutions(companion):
+    for _lead_id, res in walkers.iter_resolutions(companion):
         if res.get("after") not in vocab.STRONG_WEIGHTS:
             continue
         for edge in res.get("supporting_edges") or []:

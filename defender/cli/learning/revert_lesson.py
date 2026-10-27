@@ -13,10 +13,10 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.knowledge._knowledge import AGENT_REL, LESSONS
+from defender.knowledge import AGENT_REL, LESSONS
 from defender.learning.core.cli import command_line_paths
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 
 _logger = logging.getLogger(__name__)
 

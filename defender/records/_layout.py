@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from defender.records._locations import (RunsBase, SessionsRoot, SessionTrustRoot, _unwrap_runs_base, _unwrap_sessions_root, _unwrap_session_trust_root)
+from defender.records._locations import (RunsBase, SessionsRoot, SessionTrustRoot, unwrap_runs_base, unwrap_sessions_root, unwrap_session_trust_root)
 
 import dataclasses
 import errno
@@ -9,7 +9,7 @@ import stat
 from pathlib import Path, PurePosixPath
 
 from defender.records import _alert_input
-from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
+from defender._io import ALIAS_READ_REFUSAL, mark_alias, is_plain_entry
 from defender.records._run_id import refuse_bad_case_id
 
 # Stdlib `@dataclass`, not `defender._model.model`: the box entrypoint imports this module
@@ -320,7 +320,7 @@ class RunPaths:
     Accessors resolve relative to ``run_dir``, except the four sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
 
-    ``provenance`` may be absent on an arbitrary run dir: read it via ``_provenance.read``
+    ``provenance`` may be absent on an arbitrary run dir: read it via ``_provenance.read_provenance``
     (``None`` = no stamp), never assume the file exists.
     """
 
@@ -440,7 +440,7 @@ class RunPaths:
     # J15): a caller holding only its run folder never names the container itself.
 
     def _container(self, runs_base: RunsBase | None) -> Path:
-        return self.run_dir.parent if runs_base is None else _unwrap_runs_base(runs_base)
+        return self.run_dir.parent if runs_base is None else unwrap_runs_base(runs_base)
 
     def run_end_sidecar(self, runs_base: RunsBase | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{RUN_END_SIDECAR_SUFFIX}"
@@ -512,18 +512,18 @@ class SessionPaths:
     def trust_root(self) -> SessionTrustRoot:
         """The runs base's parent: the highest point no box gets a writable mount on. Anchoring
         higher would refuse on a symlinked runs base (`/tmp` on macOS)."""
-        return SessionTrustRoot(_unwrap_runs_base(self.runs_base).parent)
+        return SessionTrustRoot(unwrap_runs_base(self.runs_base).parent)
 
     @property
     def sessions_dir(self) -> SessionsRoot:
         """A sibling of the runs base, never a child."""
-        return SessionsRoot(_unwrap_session_trust_root(self.trust_root) / SESSIONS_DIRNAME)
+        return SessionsRoot(unwrap_session_trust_root(self.trust_root) / SESSIONS_DIRNAME)
 
     def session_db(self, lineage_id: str) -> Path:
         """`<sessions>/<lineage_id>.db`. Raises `InvalidCaseId` for a malformed or
         case-unstable lineage id."""
         refuse_bad_case_id(lineage_id)
-        return _unwrap_sessions_root(self.sessions_dir) / f"{lineage_id}{SESSION_DB_SUFFIX}"
+        return unwrap_sessions_root(self.sessions_dir) / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
     def store(self, lineage_id: str) -> tuple[Path, SessionTrustRoot]:
         """The store for `lineage_id` and the root its directory is made under, as one hand-out
@@ -619,12 +619,12 @@ def _confine(candidate: Path, root: Path, *, what: str) -> Path:
         resolved_root = Path(root).resolve()
         resolved = Path(candidate).resolve()
     except _RESOLVE_ERRORS as e:
-        raise _mark_alias(
+        raise mark_alias(
             OSError(errno.ELOOP, f"{what}: {candidate} could not be resolved: {e}",
                     str(candidate)),
             is_alias=True) from e
     if resolved != resolved_root and resolved_root not in resolved.parents:
-        raise _mark_alias(
+        raise mark_alias(
             OSError(errno.ELOOP, f"{what}: {ALIAS_READ_REFUSAL} — {candidate} resolves "
                     f"outside {root}", str(candidate)),
             is_alias=True)

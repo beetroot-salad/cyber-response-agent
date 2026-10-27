@@ -23,5 +23,5 @@ def test_moved_exception_type_raised_on_one_side_and_caught_on_the_other():
     deep: Any = []
     for _ in range(40):
         deep = [deep]
-    exc = _run(S.query_rule("_json_safe_params"), {"q": deep})[1]
+    exc = _run(S.query_rule("json_safe_params"), {"q": deep})[1]
     assert type(exc) is too_deep, f"the nesting refusal is {exc!r}"

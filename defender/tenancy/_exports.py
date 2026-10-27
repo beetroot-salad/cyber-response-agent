@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _io
-from defender.records._locations import _unwrap_exports_root, _unwrap_knowledge_lock
-from defender.records._run_id import OID
+from defender.records.formats import unwrap_exports_root, unwrap_knowledge_lock
+from defender.records.formats import OID
 from defender.tenancy._tenant import Tenant
 
 
@@ -49,7 +49,7 @@ def current_export(tenant: Tenant) -> TenantExport:
     """The export `<T>/exports/current` names, read from the files alone: no git and no process
     (P4's runs have neither). An absent or empty pointer, one that is not an object id (one
     leading out of `exports/` included), or one naming a missing export is `DeliveryRefused`."""
-    return _current_at(_unwrap_exports_root(tenant.exports), tenant.id)
+    return _current_at(unwrap_exports_root(tenant.exports), tenant.id)
 
 
 def _current_at(exports: Path, tenant_id: object) -> TenantExport:
@@ -82,7 +82,7 @@ def knowledge_lock_holder(tenant: Tenant) -> int | None:
     """The pid the tenant's knowledge lock file names (its holder writes it on taking the lock),
     or `None` when it names none. Reads the file only: it says who took the lock last, not that
     the lock is held now, so a caller pairs it with whether that process is still running."""
-    path = _unwrap_knowledge_lock(tenant.knowledge_lock)
+    path = unwrap_knowledge_lock(tenant.knowledge_lock)
     with _io.bind(path.parent) as folder:
         read = folder.read(path.name, errors="replace")
     return lock_pid(read.text or "")

@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Collection
 from typing import Any
 
-from defender.records._tenant_id import TenantId
+from defender.records.formats import TenantId
 
 from .errors import DataRuleViolation
 from .rows import Membership, MembershipStatus, Session, User, UserStatus, normalize_email

@@ -11,7 +11,7 @@ from defender._model import model
 
 from .._cells import (
     _row_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
-    _split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
+    split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_quoted,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_subcells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     is_conclude_empty_marker,  # noqa: F401 — re-export: parser is this name's public home

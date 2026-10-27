@@ -11,7 +11,8 @@ file plus the fully resolved module it names (`from defender.records import sess
 as `defender.records.session_store`), so a listed entry never covers a second import.
 
 Besides the order, two adapter rules (#1080 O4): `integrations/` imports only `kit`, the flat
-tier, `knowledge` and itself; and nothing outside `integrations/` imports it. The named reach-ins
+tier, `knowledge`, the `lazy_door` helper its door binds (#1315) and itself; and nothing outside
+`integrations/` imports it. The named reach-ins
 that remain are baseline entries owned by #1172, so they fail like any other once gone. That the
 API loads no `investigation` or `learning` module is a question of what Python executes, not of
 spelling, so it is answered by importing (`defender/tests/api/test_1080_api_loads.py`), not here.
@@ -46,7 +47,7 @@ LABEL = "lint_import_order"
 #: Bottom to top. A pair with no imports either way is ordered arbitrarily; swap it when an import
 #: first needs the other direction.
 ORDER = (
-    "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records",
+    "lazy_door", "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records",
     "tenancy", "identity", "knowledge", "box", "integrations", "systems", "hooks", "skills",
     "investigation", "learning", "presentation", "run_common", "agents", "run", "cli", "api",
 )
@@ -55,7 +56,7 @@ _RANK = {node: rank for rank, node in enumerate(ORDER)}
 _EXCLUDED = ("tests", ".venv", "__pycache__")
 _ADAPTERS = "integrations"
 #: What the adapters may import besides themselves.
-_ADAPTER_IMPORTS = frozenset({"kit", "_flat", "knowledge"})
+_ADAPTER_IMPORTS = frozenset({"lazy_door", "kit", "_flat", "knowledge"})
 _OWNER = re.compile(r"#\d+")
 
 _HEADER = (

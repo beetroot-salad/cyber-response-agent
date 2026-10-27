@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from defender.configuration._env import FatalConfigError, env_str
+from defender.configuration import FatalConfigError, env_str
 
 from defender._agent_role import AgentRole
 

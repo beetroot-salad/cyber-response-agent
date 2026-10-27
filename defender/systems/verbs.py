@@ -165,7 +165,7 @@ def body_param_for(system: str, verb_name: str) -> str | None:
 _NONE_TYPE = type(None)
 
 
-def _resolved_hints(fn: Verb) -> dict[str, Any]:
+def resolved_hints(fn: Verb) -> dict[str, Any]:
     try:
         return typing.get_type_hints(fn)
     except Exception:  # noqa: BLE001 — an unresolvable hint must not deny a well-formed call
@@ -191,7 +191,7 @@ def _matches(value: Any, ann: Any) -> bool:
     return True
 
 
-def _ann_name(ann: Any) -> str:
+def ann_name(ann: Any) -> str:
     return getattr(ann, "__name__", None) or str(ann).replace("typing.", "")
 
 
@@ -224,10 +224,10 @@ def validate_params(fn: Verb, params: Mapping[str, Any]) -> str | None:
         problems.append(
             f"missing required param(s) {missing} (declared params: {sorted(declared)}).")
 
-    hints = _resolved_hints(fn)
+    hints = resolved_hints(fn)
     already_named = set(reserved) | set(unknown)
     mistyped = sorted(
-        f"{name!r} takes {_ann_name(hints[name])}, got "
+        f"{name!r} takes {ann_name(hints[name])}, got "
         f"{type(params[name]).__name__} ({params[name]!r})"
         for name in params
         if name in hints and name not in already_named and not _matches(params[name], hints[name])

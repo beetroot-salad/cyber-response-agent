@@ -17,8 +17,8 @@ from types import MappingProxyType
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.knowledge import _corpus
-from defender.systems import _scaffold_rules
+from defender import knowledge as corpus
+from defender import systems as scaffold_rules
 from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
 from defender.learning.core.lane_trees import KIND_ABSENT, TreeFor, kind_at, read_at, view_at
 from defender.learning.leads import lead_neighbors
@@ -74,17 +74,17 @@ def _membership_segment(path: str) -> str:
 
 def _template_in_tree(
     repo_root: Path, tree_for: TreeFor, path: str,
-) -> tuple[_corpus.QueryTemplate | None, str]:
+) -> tuple[corpus.QueryTemplate | None, str]:
     """`read_query_template` of the working-copy `path`, through the lane's held mount when
     `tree_for` places it in one (#1134), its `path` spelled `repo_root / path` as today; outside
     the lane's mounts, its plain path (the box's read-only area, D3)."""
     full = repo_root / path
     hit = tree_for(full)
     if hit is None:
-        return _corpus.read_query_template(full)
+        return corpus.read_query_template(full)
     held, name = hit
     folder, leaf = posixpath.split(name)
-    return _corpus.read_query_template(view_at(held, folder or "."), leaf, where=full.parent)
+    return corpus.read_query_template(view_at(held, folder or "."), leaf, where=full.parent)
 
 
 def _frontmatter_id(repo_root: Path, path: str, *, tree_for: TreeFor) -> str | None:
@@ -102,7 +102,7 @@ def _frontmatter_id(repo_root: Path, path: str, *, tree_for: TreeFor) -> str | N
     return value if isinstance(value, str) and value else None
 
 
-def _refuse(path: str, findings: list[_scaffold_rules.Finding]) -> None:
+def _refuse(path: str, findings: list[scaffold_rules.Finding]) -> None:
     if not findings:
         return
     detail = "; ".join(f.message for f in findings)
@@ -112,7 +112,7 @@ def _refuse(path: str, findings: list[_scaffold_rules.Finding]) -> None:
 
 
 def _check_promoted_template(
-    repo_root: Path, resolver: _scaffold_rules.VerbResolver | _ResolverOf, path: str, *, tree_for: TreeFor,
+    repo_root: Path, resolver: scaffold_rules.VerbResolver | _ResolverOf, path: str, *, tree_for: TreeFor,
 ) -> None:
     """The content half of the promotion gate: `connect`'s invariants (e.g. every
     `${placeholder}` is a param its verb declares), which `validate_scaffold` doesn't reach
@@ -130,13 +130,13 @@ def _check_promoted_template(
         )
     try:
         verbs = resolver.verbs(template.system)
-    except _scaffold_rules.ScaffoldRuleError as e:
+    except scaffold_rules.ScaffoldRuleError as e:
         # Not a skip: a template under a system with no importable adapter is a phantom
         # system, and "could not check" must refuse.
         raise LeadAuthorError(
             f"agent wrote {path}, whose system could not be resolved ({e}); refusing to commit"
         ) from e
-    _refuse(path, _scaffold_rules.check_template(template, verbs))
+    _refuse(path, scaffold_rules.check_template(template, verbs))
 
 
 def _still_there(repo_root: Path, tree_for: TreeFor, path: str) -> bool:
@@ -147,7 +147,7 @@ def _still_there(repo_root: Path, tree_for: TreeFor, path: str) -> bool:
 
 
 def _skills_content_rule(
-    repo_root: Path, resolver: _scaffold_rules.VerbResolver | _ResolverOf, xy: str, path: str,
+    repo_root: Path, resolver: scaffold_rules.VerbResolver | _ResolverOf, xy: str, path: str,
     *, tree_for: TreeFor,
 ) -> None:
     """The content half of the gate: is what the agent wrote well-formed? Runs only on paths
@@ -177,8 +177,8 @@ def _skills_content_rule(
         hit = tree_for(repo_root / path)
         _refuse(
             path,
-            _scaffold_rules.check_system_skill(repo_root / path, system) if hit is None
-            else _scaffold_rules.check_system_skill(hit[0].view(), system, hit[1]),
+            scaffold_rules.check_system_skill(repo_root / path, system) if hit is None
+            else scaffold_rules.check_system_skill(hit[0].view(), system, hit[1]),
         )
 
 
@@ -224,7 +224,7 @@ def _skills_path_rule(
 
 def _skills_rule(
     repo_root: Path,
-    resolver: _scaffold_rules.VerbResolver | _ResolverOf,
+    resolver: scaffold_rules.VerbResolver | _ResolverOf,
     xy: str,
     path: str,
     *,
@@ -238,7 +238,7 @@ def _skills_rule(
 
 def _template_at_head(
     repo_root: Path, path: str, *, base: Mapping[str, bytes] | None = None,
-) -> _corpus.QueryTemplate | None:
+) -> corpus.QueryTemplate | None:
     """The template `path` was at the batch's base (`base`, `Batch.base`'s blobs), or `None`
     if the base did not carry it or it did not parse. With no base given, a `repo_root` that is
     itself a git checkout answers from its HEAD; any other root has no pre-image.
@@ -248,7 +248,7 @@ def _template_at_head(
     text = committed_text(repo_root, path, base=base)
     if text is None:
         return None
-    template, _reason = _corpus.parse_query_template(text, repo_root / path)
+    template, _reason = corpus.parse_query_template(text, repo_root / path)
     return template
 
 
@@ -271,7 +271,7 @@ def _minted_identities(
     """
     out: dict[Path, tuple[str, ...]] = {}
     for path in created:
-        template = _corpus.read_query_template(
+        template = corpus.read_query_template(
             skills, path.relative_to(where).as_posix(), where=where,
         )[0]
         if template is not None and template.covers:
@@ -303,24 +303,24 @@ def _answered_after_batch(repo_root: Path, *, tree_for: TreeFor) -> set[str]:
     return answered_identities(lead_neighbors.load_catalog(view, where=where))
 
 
-def _catalog_drafts(repo_root: Path, tree_for: TreeFor) -> list[_corpus.QueryTemplate]:
+def _catalog_drafts(repo_root: Path, tree_for: TreeFor) -> list[corpus.QueryTemplate]:
     """Every readable `<system>/_draft/*.md` template in the working copy's catalog, in path
     order; one that does not read or parse is passed over.
 
     Listed and read through the lane's held mount, by the catalog readers' own selection
-    (`_corpus._template_names`, the catalog's fixed three-level listing): a link is never
+    (`corpus.template_names`, the catalog's fixed three-level listing): a link is never
     entered or read, a linked, non-directory or refused `<sys>` or `_draft` folder is skipped and
     warned exactly as they skip it, and one found gone is passed over silently (#1134 O5.5).
     Outside the lane's mounts, the plain path's glob (D3)."""
     view, where = _catalog_in_tree(repo_root, tree_for)
     if view is None:
-        found = [_corpus.read_query_template(p)[0] for p in sorted(where.glob("*/_draft/*.md"))]
+        found = [corpus.read_query_template(p)[0] for p in sorted(where.glob("*/_draft/*.md"))]
     else:
         names = [
-            name for name in _corpus._template_names(view, where)
+            name for name in corpus.template_names(view, where)
             if len(parts := name.split("/")) == 3 and parts[1] == "_draft"
         ]
-        found = [_corpus.read_query_template(view, name, where=where)[0] for name in names]
+        found = [corpus.read_query_template(view, name, where=where)[0] for name in names]
     return [t for t in found if t is not None]
 
 
@@ -426,7 +426,7 @@ def _covers_rule(
 
 
 def _repairs_the_id(
-    before: _corpus.QueryTemplate, after: _corpus.QueryTemplate,
+    before: corpus.QueryTemplate, after: corpus.QueryTemplate,
 ) -> bool:
     """Is this `id:` change the repair of an id that disagreed with its directory?
 
@@ -434,14 +434,14 @@ def _repairs_the_id(
     the id change, and the delete-prohibition refuses moving the file — a deadlock on every
     tick that touches it. Narrow: the id must be wrong before and right after.
     """
-    def _prefix(t: _corpus.QueryTemplate) -> str:
+    def _prefix(t: corpus.QueryTemplate) -> str:
         return t.id.split(".", 1)[0] if "." in t.id else ""
 
     return _prefix(before) != before.system and _prefix(after) == after.system
 
 
 def _refuse_lost_provenance(
-    path: str, before: _corpus.QueryTemplate | None, after: _corpus.QueryTemplate,
+    path: str, before: corpus.QueryTemplate | None, after: corpus.QueryTemplate,
 ) -> None:
     """The monotonicity half of `_covers_rule`, on one established template against its
     pre-image (passed in, since the caller needs it too).
@@ -485,14 +485,14 @@ class _ResolverOf:
 
     def __init__(self, defender_dir: Path, *, eager: bool = False) -> None:
         self._defender_dir = defender_dir
-        self._resolver: _scaffold_rules.VerbResolver | None = None
+        self._resolver: scaffold_rules.VerbResolver | None = None
         if eager:
-            self._resolver = _scaffold_rules.VerbResolver(defender_dir)
+            self._resolver = scaffold_rules.VerbResolver(defender_dir)
 
     def verbs(self, system: str):  # noqa: ANN201 — `VerbResolver.verbs`' own return
         with _no_bytecode():
             if self._resolver is None:
-                self._resolver = _scaffold_rules.VerbResolver(self._defender_dir)
+                self._resolver = scaffold_rules.VerbResolver(self._defender_dir)
             return self._resolver.verbs(system)
 
 
@@ -515,7 +515,7 @@ def _verify_skills_state(  # noqa: PLR0913 — the claim, its base, the systems,
     else:
         try:
             resolver = _ResolverOf(defender_dir, eager=True)
-        except _scaffold_rules.ScaffoldRuleError as e:
+        except scaffold_rules.ScaffoldRuleError as e:
             raise LeadAuthorError(
                 f"the tree's systems could not be resolved ({e}); refusing to commit"
             ) from e

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from defender.box._output import BoxOutputLimitExceeded
+from defender.box import BoxOutputLimitExceeded
 from defender._io import read_text_utf8
 from defender.records import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call

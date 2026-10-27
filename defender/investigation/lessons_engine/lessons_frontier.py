@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import field, replace
 from pathlib import Path
 
-from defender.knowledge._corpus import PROVENANCE_KEYS
+from defender.knowledge import PROVENANCE_KEYS
 from defender._model import model
 from defender._untrusted import wrap_fresh
 from defender.investigation.lessons_engine._lessons_common import (
@@ -51,7 +51,7 @@ from defender.skills.invlang.validate import (
     is_open_slot,
 )
 from defender import _yaml
-from defender.knowledge._knowledge import LESSONS
+from defender.knowledge import LESSONS
 
 #: The one corpus this engine retrieves: the run's runtime lessons, under its agent root
 #: (`$DEFENDER_AGENT_DIR/lessons`, #1108 P4); `--corpus` relocates the walk, never the corpus.

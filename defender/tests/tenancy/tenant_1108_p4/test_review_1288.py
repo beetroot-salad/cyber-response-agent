@@ -433,7 +433,7 @@ def _run_with_record(tmp_path: Path, *, record: str, stamp: str):
     (run_dir / "provenance.json").write_text(real.as_json(
         knowledge_source={"kind": "fresh", "commit": stamp, "stale_kind": None}),
         encoding="utf-8")
-    assert _provenance.read(run_dir / "provenance.json") is not None, "control: a readable stamp"
+    assert _provenance.read_provenance(run_dir / "provenance.json") is not None, "control: a readable stamp"
     (run_dir.parent / "r1.knowledge-source.json").write_text(json.dumps(
         {"kind": "fresh", "commit": record, "stale_kind": None, "reason": None}), encoding="utf-8")
     return Run(run_dir, runs_base=None)

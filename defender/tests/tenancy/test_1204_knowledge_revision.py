@@ -77,7 +77,7 @@ def test_1204_a_malformed_knowledge_value_folds_to_none_and_keeps_every_other_fi
 
     path = tmp_path / "provenance.json"
     path.write_text(json.dumps(doc), encoding="utf-8")
-    assert _provenance.read(path) == record
+    assert _provenance.read_provenance(path) == record
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
@@ -93,7 +93,7 @@ def test_1204_each_valid_knowledge_value_reads_back_as_itself(tmp_path, name):
     path = tmp_path / "provenance.json"
     _provenance.write(path, record)
     assert json.loads(path.read_text(encoding="utf-8"))["knowledge"] == VALID[name]
-    assert _provenance.read(path) == record
+    assert _provenance.read_provenance(path) == record
 
 
 def test_1204_a_stamp_that_does_not_say_writes_null_and_an_old_stamp_reads_as_none():

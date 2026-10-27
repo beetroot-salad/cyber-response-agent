@@ -105,5 +105,5 @@ def test_the_allowlist_and_the_mark_have_one_owner():
     """`box_codec` owns both constants; the package door hands out the same objects, not a
     restated copy that could drift from what the entrypoint filters by."""
     assert box.BOX_ENV_ALLOWLIST is box_codec.BOX_ENV_ALLOWLIST
-    assert box._BOX_MARK_ENV is box_codec._BOX_MARK_ENV  # type: ignore[attr-defined]
-    assert set(box_codec._BOX_MARK_ENV) <= set(box_codec.BOX_ENV_ALLOWLIST)  # type: ignore[attr-defined]
+    assert box.BOX_MARK_ENV is box_codec.BOX_MARK_ENV  # type: ignore[attr-defined]
+    assert set(box_codec.BOX_MARK_ENV) <= set(box_codec.BOX_ENV_ALLOWLIST)  # type: ignore[attr-defined]
