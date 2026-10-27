@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
 
-from defender.tests.support.shared.contracts._spec1077 import fixture_run
-
 import threading
 import time
 from datetime import UTC, datetime
@@ -23,9 +21,7 @@ from defender.systems import circuit_breaker as cb  # noqa: E402
 from defender.investigation.run_state import RunState  # noqa: E402
 from defender.investigation import record_query as rq  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
-
-LEAD = "l-001"
-_PAYLOAD = '{"total": 1, "hits": ["web-1"]}'
+from defender.tests.runtime.state.test_1235_round3 import LEAD, _append  # noqa: E402
 _BUDGET_KEYS = {"run_id", "tool_calls", "subagent_spawns", "created_at", "started_at"}
 
 
@@ -34,14 +30,6 @@ def _run_dir(root: Path, name: str = "run") -> Path:
     run_dir = root / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     return run_dir
-
-
-def _append(state: RunState, *, params: dict, lead: str = LEAD) -> dict:
-    """One executed row through the production writer."""
-    return rq.append_query_row(
-        state, run=fixture_run(state.run_dir), lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
-        params=params, raw_command="elastic query", payload_text=_PAYLOAD, exit_code=0,
-        payload_status="ok", payload_digest=rq.payload_digest(_PAYLOAD, "", 0), system_key="")
 
 
 def _tree(root: Path) -> dict[str, bytes | None]:

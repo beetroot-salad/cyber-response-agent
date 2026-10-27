@@ -448,7 +448,7 @@ def record_source(tmp_path: Path, *, limits: dict | None = None) -> tuple[str, P
     """A source run recorded through `run.main` (natural, unboxed), its clock source at `SOURCE_START`."""
     from defender.tests.support.learning.branch import _triplet_947 as T
 
-    base, seed = location_path(T.runs_base)(tmp_path)
+    base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
     clock = FakeClock(SOURCE_START)
     main = script(clock, (0, append_first_fence()), (5, gather_turn("l-001", "elastic")),

@@ -42,7 +42,6 @@ from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._lead_author_1134 import (
     clear,
     draft_lead_deps,
-    lead_trees,
     write,
 )
 from defender.tests.support.shared.contracts._repo import query_template
@@ -196,17 +195,14 @@ REFUSED = query_template("elastic.w1178", "draft")
 REFUSED_SAYS = "disagreeing with its directory"
 
 
-# The lead-author rows run over a git-free draft of a batch (`_curator1134.draft_lane`, lane
-# `skills`): the skills tree is the tenant's `agent/skills/` in the batch base, the adapters stay
-# in the product checkout. What a run committed is read from the batch branch's tip; "no
-# half-made commit staged" is the tenant clone's index (the draft has none).
-
-
 @dataclasses.dataclass
-class LeadScene:
+class DraftScene:
+    """A started batch's git-free draft (`_curator1134.draft_lane`, lane `skills`): what a run
+    committed is read from the batch branch's tip; "no half-made commit staged" is the tenant
+    clone's index (the draft has none)."""
+
     tmp: Path
     lane: C.DraftLane
-    run_dir: Path
     head: str
 
     @property
@@ -218,12 +214,6 @@ class LeadScene:
     def paths(self) -> LoopPaths:
         return self.lane.paths
 
-    def at(self, name: str) -> Path:
-        return self.lane.skills_dir / name
-
-    def rel(self, name: str) -> str:
-        return f"agent/skills/{name}"
-
     def committed(self, rel: str) -> str | None:
         """The text at `rel` on the batch branch's tip (the base before any commit)."""
         return self.lane.text_at_tip(rel)
@@ -231,6 +221,21 @@ class LeadScene:
     def nothing_landed(self) -> bool:
         """No commit reached the batch branch and none was left staged in the clone."""
         return self.lane.tip() == self.head and _nothing_staged(self.lane.clone)
+
+
+# The lead-author rows: the skills tree is the tenant's `agent/skills/` in the batch base, the
+# adapters stay in the product checkout.
+
+
+@dataclasses.dataclass
+class LeadScene(DraftScene):
+    run_dir: Path
+
+    def at(self, name: str) -> Path:
+        return self.lane.skills_dir / name
+
+    def rel(self, name: str) -> str:
+        return f"agent/skills/{name}"
 
 
 def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None, *,
@@ -383,11 +388,11 @@ def test_a_lead_author_path_the_box_wrote_during_its_run_is_judged(
 START_FAULTS = ["refused", "takes-no-effect", "left-running"]
 
 
-def _start_fault(daemon: X.FakeDaemon, fault: str, *, nth: int = 1) -> None:
+def _start_fault(daemon: X.FakeDaemon, fault: str) -> None:
     if fault == "refused":
-        daemon.refuse_start(at=[nth])
+        daemon.refuse_start(at=[1])
     elif fault == "takes-no-effect":
-        daemon.start_takes_no_effect(at=[nth])
+        daemon.start_takes_no_effect(at=[1])
     else:
         daemon.hold(NAME, "running")
 
@@ -460,34 +465,10 @@ DRAFT_EXECUTION_REL = f"agent/skills/{EXECUTION_NAME}"
 EXECUTION_TEXT = "# execution\n\n## Common pitfalls\n\n- use the key, not the id\n"
 
 
-# The pitfalls rows run over a batch draft too, read as the lead-author rows' is.
-
-
 @dataclasses.dataclass
-class PitfallsScene:
-    tmp: Path
-    lane: C.DraftLane
-    head: str
-
-    @property
-    def repo(self) -> Path:
-        """The draft's root (it holds `agent/`): where the curator writes and the gate reads."""
-        return Path(self.lane.batch.draft_root)
-
-    @property
-    def paths(self) -> LoopPaths:
-        return self.lane.paths
-
+class PitfallsScene(DraftScene):
     def at(self, rel: str) -> Path:
         return self.repo / rel
-
-    def committed(self, rel: str) -> str | None:
-        """The text at `rel` on the batch branch's tip (the base before any commit)."""
-        return self.lane.text_at_tip(rel)
-
-    def nothing_landed(self) -> bool:
-        """No commit reached the batch branch and none was left staged in the clone."""
-        return self.lane.tip() == self.head and _nothing_staged(self.lane.clone)
 
 
 def _pitfalls_scene(tmp_path: Path, monkeypatch, rows: list[dict], *,
@@ -672,7 +653,7 @@ NOT_UTF8 = b"# notes\n\n- caf\xe9 \xff\xfe not utf-8\n"
 BIG_SIZE = READ_LIMIT + 2**20
 
 
-def _assert_plain_file_rule_on_the_batch(got: tuple, s: PitfallsScene | LeadScene, rel: str,
+def _assert_plain_file_rule_on_the_batch(got: tuple, s: DraftScene, rel: str,
                                          text: str, kind: str) -> None:
     """The plain-file rule over a draft scene: a link, hard link or FIFO in the lane is a
     ChangeSet refusal of the whole claim, naming `rel`, and nothing lands. A plain or executable
@@ -873,13 +854,6 @@ def test_a_draft_minted_this_tick_that_the_box_removes_once_started_is_a_departu
     assert s.nothing_landed()
 
 
-def _head_size(repo: Path, rel: str, rev: str = "HEAD") -> tuple[str, int]:
-    """`(mode, size)` of the blob committed at `rel` in `rev`."""
-    entry = _git.git(["ls-tree", "-l", rev, "--", rel], cwd=repo)  # lint-oracle: ok — reads what was committed; the oracle is the planted size
-    mode, _kind, _sha, size = entry.split("\t", 1)[0].split()
-    return mode, int(size)
-
-
 # An oversized file in the lane is a ChangeSet refusal of the whole claim (the commit-maker's
 # size bound), naming the entry; nothing lands. The under-bound control is
 # `test_the_lead_author_gate_commits_only_a_plain_file[*-plain]`.
@@ -929,15 +903,13 @@ class Lanes:
         self.handed: list[Any] = []
         #: The batch the lanes serve (`_drain` sets the scene's).
         self.lane: C.DraftLane | None = None
-        self.seam_faults: list[TypeError] = []
         self.swallowed: list[BoxFault] = []
 
     def run_lead(self, paths: LoopPaths, state: Any, run: Any, *, box: Any = None,
                  on_done: Any, **_kw: Any) -> int:
         self.handed.append(box)
-        deps = self._seamed(lambda: draft_lead_deps(
-            self.lane, state=state, invoke_agent=self.agent,
-            extract=lambda _run_dir: ([], [ELASTIC_LEAD])))
+        deps = draft_lead_deps(self.lane, state=state, invoke_agent=self.agent,
+                               extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
         if self.log is not None:
             deps = _journaled_deps(deps, self.log)
         try:
@@ -954,26 +926,11 @@ class Lanes:
         self.pitfalls_ticks += 1
         if self.curator is None:
             return 0
-        if self.lane is None:  # `TenantLanes`: the drain-level rows serve no scene batch
-            with lead_trees(paths) as trees:
-                return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=trees,
-                                                     invoke=self.curator, box=box,
-                                                     on_curated=on_curated)
-        lane = self.lane
-        with C.draft_trees(lane) as trees:
+        with C.draft_trees(self.lane) as trees:
             held = trees if self.log is None else LoggedTrees(trees, self.log)
-            return self._seamed(lambda: pitfalls_curator.run_pitfalls(
-                paths=paths, state=state, trees=held, batch=lane.batch, invoke=self.curator,
-                box=box, on_curated=on_curated))
-
-    def _seamed(self, call: Callable[[], Any]) -> Any:
-        """`call()`, recording a refused keyword (the `batch=` seam) in `seam_faults`."""
-        try:
-            return call()
-        except TypeError as e:
-            if "unexpected keyword" in str(e):
-                self.seam_faults.append(e)
-            raise
+            return pitfalls_curator.run_pitfalls(
+                paths=paths, state=state, trees=held, batch=self.lane.batch, invoke=self.curator,
+                box=box, on_curated=on_curated)
 
 
 def _request_dir(s: LeadScene, *below: str) -> Path:
@@ -986,26 +943,14 @@ def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
     """`drains._drain_lead_author` over the scene's paths, on a learning-state handle over its
     root (as the lane's entry opens one), its two work steps `lanes`', serving the scene's batch."""
     lanes.lane = s.lane
-    try:
-        return drains._drain_lead_author(
-            s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead, lanes.run_pitfalls,
-            accept_tenant=drains._tenant_acceptor(s.paths.tenant), **kw)
-    finally:
-        _assert_the_lanes_took_their_seams(lanes)
-
-
-def _assert_the_lanes_took_their_seams(lanes: Lanes) -> None:
-    """The drain swallows a claim's error into a quarantine and a pitfalls error into a log
-    line, so a lane refusing the `batch=` seam fails the row here, named, rather than as a
-    downstream observation of a lane that never ran."""
-    assert not lanes.seam_faults, f"the lanes do not take the P4 batch seam yet: {lanes.seam_faults[0]}"
+    return drains._drain_lead_author(
+        s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead, lanes.run_pitfalls,
+        accept_tenant=drains._tenant_acceptor(s.paths.tenant), **kw)
 
 
 def _caught_drain(s: LeadScene, lanes: Lanes, **kw: Any) -> BaseException | None:
-    """`X.caught` over `_drain`, the seam check re-raised rather than judged as the drain's."""
-    got = X.caught(lambda: _drain(s, lanes, **kw))
-    _assert_the_lanes_took_their_seams(lanes)
-    return got
+    """What `_drain` raised, or `None`."""
+    return X.caught(lambda: _drain(s, lanes, **kw))
 
 
 def _failed(s: LeadScene) -> list[str]:
@@ -1033,12 +978,22 @@ def _claim_attempts(s: LeadScene) -> dict[str, Any]:
             for p in sorted(inflight.glob("*.json"))}
 
 
-def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Path, monkeypatch):
+def _claim_then_pitfalls(tmp_path: Path, monkeypatch: Any
+                         ) -> tuple[X.FakeDaemon, Any, Any, LeadScene, list[Any], str | None]:
+    """One claim queued and three pitfalls rows at threshold, over a stopped box: the daemon,
+    the executor, the handle, the scene, the rows' attempts and `execution.md` at HEAD."""
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
     _queue_claims(s, "run-0")
+    return (daemon, box, runs, s, _attempts(s.paths),
+            s.committed(DRAFT_EXECUTION_REL))
+
+
+def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Path, monkeypatch):
+    daemon, box, runs, s, _attempts_before, _execution_before = _claim_then_pitfalls(
+        tmp_path, monkeypatch)
     log = X.Journal(daemon)
 
     def author(_run_dir: Path) -> None:
@@ -1142,17 +1097,12 @@ PITFALLS_BOX_FAULTS = ["start", "stop", "curator-fails"]
 @pytest.mark.parametrize("where", PITFALLS_BOX_FAULTS)
 def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
         tmp_path: Path, monkeypatch, where: str):
-    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs, s, attempts_before, execution_before = _claim_then_pitfalls(
+        tmp_path, monkeypatch)
     if where == "start":
         daemon.refuse_start(at=[2])
     elif where == "stop":
         daemon.refuse_stop(at=[2])
-    s = _lead_scene(tmp_path)
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
-    _queue_claims(s, "run-0")
-    attempts_before = _attempts(s.paths)
-    execution_before = s.committed(DRAFT_EXECUTION_REL)
 
     def curate(root: Path) -> None:
         write(s.repo / DRAFT_EXECUTION_REL, EXECUTION_TEXT)
@@ -1184,19 +1134,6 @@ def _run_calls(daemon: X.FakeDaemon) -> list[str]:
 
 #: One run that holds: its check, its start and proof, its stop and proof.
 ONE_RUN = ["status", "start", "status", "stop", "status"]
-
-
-def _claim_then_pitfalls(tmp_path: Path, monkeypatch: Any
-                         ) -> tuple[X.FakeDaemon, Any, Any, LeadScene, list[Any], str | None]:
-    """One claim queued and three pitfalls rows at threshold, over a stopped box: the daemon,
-    the executor, the handle, the scene, the rows' attempts and `execution.md` at HEAD."""
-    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
-    s = _lead_scene(tmp_path)
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
-    _queue_claims(s, "run-0")
-    return (daemon, box, runs, s, _attempts(s.paths),
-            s.committed(DRAFT_EXECUTION_REL))
 
 
 #: What the pitfalls curator raises inside its run: `AuthorError` (a `RETIRE_SET` member), a
@@ -1365,13 +1302,7 @@ class TenantLanes(Lanes):
             return lead_author._run_locked(run.run_dir, deps, box=box, on_done=on_done)
 
 
-def _vetted_author(lanes_ref: list) -> Callable[[Path], None]:
-    def author(_run_dir: Path) -> None:
-        write(lanes_ref[0].skills_dir / AGENT_NAME, VETTED)
-    return author
-
-
-def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any, **seams: Any
+def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any
                      ) -> tuple[BaseException | None, list[str]]:
     """`lead_author_drain` with its DEFAULT work steps over the fake daemon, whose first run
     start is refused; `start_box=` is `HeldStart` (a real create, minus the probes), whose
@@ -1385,8 +1316,7 @@ def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any, **seams: Any
     daemon.refuse_start(at=[1])
     start = X.HeldStart(daemon)
     got = _p4_caught(lambda: drains.lead_author_drain(
-        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), start_box=start,
-        **seams))
+        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), start_box=start))
     [request] = start.requests
     X.no_path_docker(daemon)
     return got, daemon.calls_from_the_first_stop(request.name)
@@ -1503,19 +1433,17 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
     claims = ("run-0", "run-1") if follows == "next-claim" else ("run-0",)
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, *claims) as (s, daemon):
         raised = failure()
-        ref: list = []
 
         def author(run_dir: Path) -> None:
             daemon.mark(f"agent:{run_dir.name}")
             if run_dir.name != fixture_uuid("run-0"):
-                write(ref[0].skills_dir / AGENT_NAME, VETTED)
+                write(lanes.skills_dir / AGENT_NAME, VETTED)
                 return
             if stop != "holds":  # 1: the post-create stop; 2: this run's; its proof: the next ask
                 X.fail_stop(daemon, stop, at=2, inspect_at=daemon.inspect_count() + 1)
             raise raised
 
         lanes = TenantLanes(BoxSeenLeadSpawn(author))
-        ref.append(lanes)
         got, lanes = _production_lead_drain(s, daemon, lanes=lanes)
 
         assert len(daemon.created()) == 1, "the batch did not create exactly its one box"
@@ -1552,16 +1480,13 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
     agent's draft is delivered as a `lead-author/` PR."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0",
                                        path_default=docker == "path-default") as (s, daemon):
-        ref: list = []
-
         def author(run_dir: Path) -> None:
             daemon.mark(f"agent:{run_dir.name}")
-            write(ref[0].skills_dir / AGENT_NAME, VETTED)
+            write(lanes.skills_dir / AGENT_NAME, VETTED)
             if stop == "refused":
                 daemon.refuse_stop()
 
         lanes = TenantLanes(BoxSeenLeadSpawn(author))
-        ref.append(lanes)
         got, _lanes = _production_lead_drain(s, daemon, lanes=lanes)
 
         assert f"agent:{fixture_uuid('run-0')}" in daemon.steps(), "the agent was never reached"
@@ -1584,17 +1509,15 @@ def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(
     """The re-served claim's commit is then delivered on the tenant forge (#1195)."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0") as (s, daemon):
         served: list[str] = []
-        ref: list = []
 
         def author(run_dir: Path) -> None:
             daemon.mark(f"agent:{run_dir.name}")
             served.append(run_dir.name)
-            write(ref[0].skills_dir / AGENT_NAME, VETTED)
+            write(lanes.skills_dir / AGENT_NAME, VETTED)
             if len(served) == 1:
                 daemon.refuse_stop()  # tick 1's run only
 
         lanes = TenantLanes(BoxSeenLeadSpawn(author))
-        ref.append(lanes)
         got1, _ = _production_lead_drain(s, daemon, lanes=lanes)
         assert isinstance(got1, BoxFault), f"tick 1 did not halt on its box fault: {got1!r}"
         _nothing_delivered(s)

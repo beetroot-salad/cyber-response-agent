@@ -15,11 +15,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from defender._agent_role import GATHER_AGENT_ID_PREFIX
+from defender.providers import ProviderDown, RetryPolicy, with_retries
 from defender.records import RunPaths
+from defender.records.run_end import parse_record
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
-
-mod = S.mod
-sym = S.sym
 
 #: The run-end value for a provider that stays down, and run.py's exit for it.
 PROVIDER_DOWN = "provider-down"
@@ -41,73 +41,57 @@ L3 = S.L3
 
 
 # =================================================================================================
-# The production surfaces, resolved per test
+# The production surfaces
 # =================================================================================================
 
-def providers() -> Any:
-    return mod("providers")
-
-
-def provider_down_cls() -> type[BaseException]:
-    return sym("providers", "ProviderDown")
-
-
-def provider_down(model: str = "fake", status: int | None = 503, attempts: int = MAX_ATTEMPTS) -> BaseException:
+def provider_down_fault(model: str = "fake") -> Callable[[], BaseException]:
     """A `ProviderDown` as the retrier would raise it — for a site test whose subject is what a
     caller does with one, not how it arose."""
-    return provider_down_cls()(model=model, status=status, attempts=attempts)
-
-
-def provider_down_fault(model: str = "fake") -> Callable[[], BaseException]:
-    return lambda: provider_down(model)
-
-
-def with_retries(model: Any, policy: Any) -> Any:
-    return sym("providers", "with_retries")(model, policy)
+    return lambda: ProviderDown(model=model, status=503, attempts=MAX_ATTEMPTS)
 
 
 def retry_policy(*, sleep: Any = None, clock: Any = None, jitter: Any = None) -> Any:
     kw = {k: v for k, v in (("sleep", sleep), ("clock", clock), ("jitter", jitter)) if v is not None}
-    return sym("providers", "RetryPolicy")(**kw)
+    return RetryPolicy(**kw)
 
 
 # =================================================================================================
 # Faults
 # =================================================================================================
 
-def http_error(status: int, model: str = "fake", *, retry_after: str | None = None) -> BaseException:
+def http_error(status: int, *, retry_after: str | None = None) -> BaseException:
     from pydantic_ai.exceptions import ModelHTTPError
 
     headers = {"retry-after": retry_after} if retry_after is not None else {}
-    return ModelHTTPError(status, model, body={"error": {"message": f"status {status}"}},
+    return ModelHTTPError(status, "fake", body={"error": {"message": f"status {status}"}},
                           headers=headers)
 
 
-def no_response(model: str = "fake") -> BaseException:
+def no_response() -> BaseException:
     """A request that got no response (a timeout): `ModelAPIError` with no status."""
-    return S.provider_timeout(model)
+    return S.provider_timeout("fake")
 
 
-def connection_error(model: str = "fake") -> BaseException:
+def connection_error() -> BaseException:
     from pydantic_ai.exceptions import ModelAPIError
 
-    return ModelAPIError(model, "Connection error.")
+    return ModelAPIError("fake", "Connection error.")
 
 
-def server_disconnected(model: str = "fake") -> BaseException:
+def server_disconnected() -> BaseException:
     """No response, in words the suite never otherwise uses (httpx's own text for a peer that
     closed the connection): the retrier classifies by status code or its absence, never by body
     text, so this is exactly as temporary as a timeout."""
     from pydantic_ai.exceptions import ModelAPIError
 
-    return ModelAPIError(model, "Server disconnected without sending a response.")
+    return ModelAPIError("fake", "Server disconnected without sending a response.")
 
 
-def opaque_api_error(model: str = "fake") -> BaseException:
+def opaque_api_error() -> BaseException:
     """A status-less model API error whose message names nothing at all."""
     from pydantic_ai.exceptions import ModelAPIError
 
-    return ModelAPIError(model, "zq-7f3a")
+    return ModelAPIError("fake", "zq-7f3a")
 
 
 Fault = Callable[[], BaseException]
@@ -128,9 +112,9 @@ def exception_group(*members: Fault) -> Fault:
     return lambda: ExceptionGroup(GROUP_MESSAGE, [m() for m in members])
 
 
-def ordinary_error(detail: str = "a sibling tool task broke") -> Fault:
+def ordinary_error() -> Fault:
     """A non-provider failure for a group's other member (never a provider end)."""
-    return lambda: RuntimeError(detail)
+    return lambda: RuntimeError("a sibling tool task broke")
 
 
 #: The grouped shapes a `ProviderDown` can arrive in, keyed by test id. `flat`: the group holds
@@ -222,8 +206,8 @@ class Timeline:
     for is recorded and advances the clock; a model fault can advance it too (`advance`), which
     is how "an attempt that hangs until its timeout" is expressed without waiting for real."""
 
-    def __init__(self, start: float = 1000.0) -> None:
-        self.now = start
+    def __init__(self) -> None:
+        self.now = 1000.0
         self.waits: list[float] = []
 
     def clock(self) -> float:
@@ -353,8 +337,8 @@ class LeadsFailing(S.LeadRouter):
     __name__ = "LeadsFailing"
 
     def __init__(self, scripts: Mapping[str, Sequence[S.Turn]] | None = None,
-                 plans: Mapping[str, Plan] | None = None, **kw: Any) -> None:
-        super().__init__(scripts, **kw)
+                 plans: Mapping[str, Plan] | None = None) -> None:
+        super().__init__(scripts)
         self.plans = dict(plans or {})
         self.inbound: dict[str, list[list[Any]]] = {}
         self._attempt_lock = threading.Lock()
@@ -439,7 +423,7 @@ def session_rows(store_path: Path) -> dict[str, list[tuple[str, str | None]]]:
 
 
 def gather_agent(lead: str) -> str:
-    return f"{sym('_agent_role', 'GATHER_AGENT_ID_PREFIX')}{lead}"
+    return f"{GATHER_AGENT_ID_PREFIX}{lead}"
 
 
 def sidecar(run_dir: Path) -> dict[str, Any] | None:
@@ -448,7 +432,7 @@ def sidecar(run_dir: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     doc = json.loads(path.read_text(encoding="utf-8"))
-    rec = sym("records.run_end", "parse_record")(doc)
+    rec = parse_record(doc)
     return None if rec is None else {"truncated_by": rec.truncated_by,
                                      "closed_before_cut": rec.closed_before_cut, "raw": doc}
 
@@ -488,11 +472,10 @@ def assert_ended_provider_down(d: S.Drive, *, rc: bool = True) -> None:
     rec = sidecar(d.folder)
     assert rec is not None, "no run-end record (or one the production reader refuses)"
     assert rec["truncated_by"] == PROVIDER_DOWN, rec
-    assert not d.paths.report.exists(), (
-        "a provider-down run wrote report.md — an infrastructure end writes no report (O4, C15)")
+    assert not d.paths.report.exists(), "a provider-down run wrote report.md"
     if rc:
         assert d.rc == PROVIDER_DOWN_EXIT, (
-            f"run.py exited {d.rc!r} on a provider-down run; D4 says {PROVIDER_DOWN_EXIT}")
+            f"run.py exited {d.rc!r} on a provider-down run, not {PROVIDER_DOWN_EXIT}")
 
 
 # =================================================================================================

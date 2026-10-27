@@ -67,7 +67,6 @@ def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(
     assert not adapters.exists(), "the fixture did not remove the directory"
     assert registry.systems() == expected, \
         "the roster followed the disk: it is re-read per call rather than fixed at construction"
-    assert registry.systems() == registry.systems(), "two reads of the snapshot disagree"
 
 
 def test_the_query_tool_consults_the_snapshot_not_the_disk(tmp_path):

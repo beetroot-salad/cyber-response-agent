@@ -48,10 +48,10 @@ def _bare_run(root: Path, name: str = "run") -> tuple[Path, RunState]:
     return run_dir, RunState(run_dir, run_dir.name)
 
 
-def _append(state: RunState, *, params: dict, lead: str = LEAD) -> dict:
+def _append(state: RunState, *, params: dict) -> dict:
     """One executed row through the production writer."""
     return rq.append_query_row(
-        state, run=fixture_run(state.run_dir), lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
+        state, run=fixture_run(state.run_dir), lead_id=LEAD, system="elastic", verb="query", query_id="elastic.probe",
         params=params, raw_command="elastic query", payload_text=_PAYLOAD, exit_code=0,
         payload_status="ok", payload_digest=rq.payload_digest(_PAYLOAD, "", 0), system_key="")
 

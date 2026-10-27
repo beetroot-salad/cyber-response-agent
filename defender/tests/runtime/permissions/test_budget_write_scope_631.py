@@ -147,7 +147,7 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
     assert decision.allow, f"investigation.md was refused: {decision.reason}"
     decision = permission.decide_write(run_dir / "report.md", _report_text(), run_dir=run_dir,
                                        defender_dir=DEFENDER, policy=policy)
-    assert not decision.allow, "report.md is no longer model-writable after R1"
+    assert not decision.allow, "report.md is model-writable"
 
     from defender.investigation.run_state import RunState
 

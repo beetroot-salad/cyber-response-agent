@@ -12,6 +12,9 @@ pytest.importorskip("pydantic_ai")
 from defender.tests.support.runtime.state import _1255_world as W
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24  # noqa: E402
+from defender.learning.branch.capture import prime_base  # noqa: E402
+from defender.learning.branch.ledger import ORACLE, PASSTHROUGH, normalized_source, request_key  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -39,8 +42,6 @@ CLOSING_MARKER = "CLOSING-NOTE-1255: verdict malicious, account disabled"
 TICKET_AT_FORK = {"ticket": "CASE-1255", "status": "open", "comments": [ANALYST_NOTE]}
 #: The side query a removal of the closing comment is claimed with: it selects that comment.
 CLOSING_SIDE = S24.query_params("comment_id:c-2")
-
-_LEDGER = "learning.branch.ledger"
 
 _PRE_1255_DECISIONS = frozenset({"base", "passthrough", "refused", "fault", "captured", "oracle",
                                  "real-error", "staged", "patched"})
@@ -92,16 +93,14 @@ def _removing_closing_comment() -> Any:
 
 def _assert_reconstructed(decision: Any, where: str) -> None:
     """Require a distinct reconstruction decision preserved by ledger normalization."""
-    oracle_word = S24.sym(_LEDGER, "ORACLE")
-    passthrough = S24.sym(_LEDGER, "PASSTHROUGH")
-    assert decision not in (oracle_word, passthrough), (
-        f"{where}: the control world's changed answer was recorded {decision!r} (D5: a decision "
-        f"of its own, neither {oracle_word!r} nor {passthrough!r})")
+    assert decision not in (ORACLE, PASSTHROUGH), (
+        f"{where}: the control world's changed answer was recorded {decision!r}, one of "
+        f"{ORACLE!r}/{PASSTHROUGH!r} rather than a decision of its own")
     assert decision not in _PRE_1255_DECISIONS, (
-        f"{where}: the control world's changed answer was recorded {decision!r}, a decision word "
-        f"the ledger already had (D5: a distinct word of its own; the judge reads every existing "
-        f"word as something else — {sorted(_PRE_1255_DECISIONS)})")
-    assert S24.sym(_LEDGER, "normalized_source")(decision) == decision, (
+        f"{where}: the control world's changed answer was recorded {decision!r}, a word the "
+        f"ledger already had (the judge reads each of {sorted(_PRE_1255_DECISIONS)} as something "
+        f"else)")
+    assert normalized_source(decision) == decision, (
         f"{where}: {decision!r} is not a decision word of the ledger's own vocabulary")
 
 
@@ -170,9 +169,8 @@ def test_1255_an_answer_the_source_received_is_served_with_the_sources_own_bytes
 
     ep = S24.episode_v2(tmp_path / "branch")
     (ep / "served" / "base.jsonl").unlink()  # the episode is primed from the source, once
-    episode_cls = S24.sym("records._episode_handle", "Episode")
-    with episode_cls.open(ep) as handle:
-        S24.sym("learning.branch.capture", "prime_base")(source_dir, handle)
+    with Episode.open(ep) as handle:
+        prime_base(source_dir, handle)
     reads_before = len(est.calls("idp", "query"))
 
     oracle = _routed_passing((ALICE, ALICE_ANSWER))
@@ -232,7 +230,7 @@ def test_1255_the_control_world_answers_a_question_the_source_never_asked_throug
     rows = S24.ledger_rows(ep, "a")
     assert len(rows) == 2, "each investigator call is one ledger row"
     assert [r.get("source") for r in _rows_asking(rows, BOB)] == [S24.PASSTHROUGH], (
-        "D5: a control-world oracle turn that leaves the base unchanged records `passthrough`")
+        "a control-world oracle turn that leaves the base unchanged must record `passthrough`")
 
 
 def test_1255_the_control_world_serves_its_oracles_changed_answer_never_the_base(
@@ -253,7 +251,7 @@ def test_1255_the_control_world_serves_its_oracles_changed_answer_never_the_base
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
     assert [c["as_of"] for c in est.calls("idp", "query")[reads_before:]] == [
         S24.AS_OF_DT.isoformat()], "fixture: the control's base was not one fork-time live read"
-    assert oracle.requests >= 1, "the control world's new question took no oracle turn (D3)"
+    assert oracle.requests >= 1, "the control world's new question took no oracle turn"
 
     handed = "\n".join(arm.handed_back())
     assert "db-fork-1255" in handed, "the model was not handed the oracle's submission"
@@ -287,7 +285,7 @@ def test_1255_a_control_world_oracle_that_removes_the_sources_closing_comment_hi
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns),
                                 system="siem-x")
-    assert oracle.requests >= 1, "the control world's ticket read took no oracle turn (D3)"
+    assert oracle.requests >= 1, "the control world's ticket read took no oracle turn"
 
     handed = "\n".join(arm.handed_back())
     assert ANALYST_NOTE["body"] in handed, "fixture: the arm was not served the ticket at all"
@@ -325,16 +323,15 @@ def test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork
 
     ep = S24.episode_v2(tmp_path / "branch")
     (ep / "served" / "base.jsonl").unlink()  # the episode is primed from the source, once
-    with S24.sym("records._episode_handle", "Episode").open(ep) as handle:
-        report = S24.sym("learning.branch.capture", "prime_base")(source_dir, handle)
+    with Episode.open(ep) as handle:
+        report = prime_base(source_dir, handle)
     assert getattr(report, skip) == 1, f"fixture: the real primer did not skip it as {skip}"
     base = S24.read_jsonl(ep / "served" / "base.jsonl")
     assert not _rows_asking(base, CASE), "fixture: the recording holds the ticket read"
     assert _rows_asking(base, ALICE), "fixture: the recording holds the source's answered call"
 
     _ticket_after_close(est)  # after the fork the source closed its case
-    key = S24.sym(_LEDGER, "request_key")
-    prebranch = frozenset(key(r["system"], r["verb"], r["params"]) for r in source_rows)
+    prebranch = frozenset(request_key(r["system"], r["verb"], r["params"]) for r in source_rows)
     reads_before = len(est.calls("siem-x", "lookup"))
     oracle = _removing_closing_comment()
     world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
@@ -446,8 +443,7 @@ def test_1255_a_control_world_whose_oracle_cannot_serve_never_falls_back_to_a_li
     if cause == "fault":
         door = getattr(getattr(control, "oracle", None), "door", None)
         assert hasattr(door, "real_verbs"), (
-            "fixture: the registry's oracle door (the seam #1224's broken-machine regression "
-            "breaks) is not where that regression finds it")
+            "fixture: the registry's oracle door has no `real_verbs` to break")
         door.real_verbs = _broken_verb_lookup
     ctx = est.ctx(tmp_path / "run")
 

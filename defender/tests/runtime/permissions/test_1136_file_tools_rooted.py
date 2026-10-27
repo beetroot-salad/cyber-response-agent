@@ -411,7 +411,7 @@ def test_the_write_gate_does_not_take_its_baseline_through_a_hard_link(tmp_path)
         )
 
     inv.write_text(baseline, encoding="utf-8")
-    assert decide().allow, "the plain-file control: an extending append is allowed today"
+    assert decide().allow, "the plain-file control: an extending append is allowed"
 
     inv.unlink()
     host = tmp_path / "outside" / "inv.md"
