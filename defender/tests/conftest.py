@@ -143,14 +143,30 @@ def session_data_root(tmp_path_factory) -> Iterator[Path]:
         yield root
 
 
+#: Whether the test's call phase passed, for fixtures that clean up only after a pass.
+_CALL_PASSED = pytest.StashKey[bool]()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Iterator[pytest.TestReport]:
+    report = yield
+    if report.when == "call":
+        item.stash[_CALL_PASSED] = report.passed
+    return report
+
+
 @pytest.fixture(autouse=True)
-def data_root(tmp_path_factory, monkeypatch) -> Path:
-    """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078 D9, §7 J57(b))."""
+def data_root(tmp_path_factory, monkeypatch, request) -> Iterator[Path]:
+    """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078 D9, §7 J57(b)).
+    Removed once the test passes, as `tmp_path` is (`tmp_path_retention_policy`); a failed
+    test's is kept to inspect."""
     from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("data-root")
     monkeypatch.setenv(DATA_ROOT_ENV, str(root))
-    return root
+    yield root
+    if request.node.stash.get(_CALL_PASSED, False):
+        shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture

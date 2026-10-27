@@ -119,6 +119,10 @@ dev = [
 # test, so `defender.*` namespace imports resolve in tests under both tests/ and
 # learning/ — in isolation or in a full run — without per-file sys.path hacks.
 pythonpath = [".."]
+# A passed test's `tmp_path` is removed when the test ends; a failed one's is kept to inspect.
+# Kept for every test, a CI shard's tmp dirs filled the runner's disk (run 40502356215:
+# `No space left on device`, then every later test unable to make its tmp dir).
+tmp_path_retention_policy = "failed"
 markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
