@@ -1,4 +1,4 @@
-"""#1165 O3/O4: Run-backed logger lifecycle and exact wire/review bytes."""
+"""#1165: Run-backed logger lifecycle and exact wire/review bytes."""
 from __future__ import annotations
 
 import json
@@ -23,7 +23,7 @@ def _deny(logger):
 
 
 def test_from_record_is_eager_truncates_first_open_and_routes_encoded_rows(tmp_path):
-    """O3/O4: first construction creates an empty wire record then appends exact encoding."""
+    """First construction creates an empty wire record then appends exact encoding."""
     io = S.RecordingIo()
     run = run_at(tmp_path, io=io)
     record = run.observability.wire_log
@@ -48,7 +48,7 @@ def test_from_record_is_eager_truncates_first_open_and_routes_encoded_rows(tmp_p
 
 
 def test_record_logger_writes_to_current_record_instead_of_a_held_open_stream(tmp_path):
-    """O3: replacing the leaf between events cannot strand subsequent writes on an old fd."""
+    """Replacing the leaf between events cannot strand subsequent writes on an old fd."""
     record = run_at(tmp_path).observability.wire_log
     logger = observe.RequestLogger.from_record(record)
     old = record.path.with_name("previous.jsonl")
@@ -68,7 +68,7 @@ def test_record_logger_writes_to_current_record_instead_of_a_held_open_stream(tm
 
 
 def test_duplicate_active_identity_includes_a_host_owned_root_alias(tmp_path):
-    """O4: two Run spellings of one sink cannot become simultaneous writers."""
+    """Two Run spellings of one sink cannot become simultaneous writers."""
     run = run_at(tmp_path)
     alias = tmp_path / "same-run"
     alias.symlink_to(run.run_dir, target_is_directory=True)
@@ -91,7 +91,7 @@ def test_duplicate_active_identity_includes_a_host_owned_root_alias(tmp_path):
 
 @pytest.mark.parametrize("missing", [False, True])
 def test_closed_record_logger_reopens_with_an_eager_empty_append(tmp_path, missing):
-    """O4: reopening appends, recreates absent files immediately, and never clobbers rows."""
+    """Reopening appends, recreates absent files immediately, and never clobbers rows."""
     io = S.RecordingIo()
     record = run_at(tmp_path, io=io).observability.wire_log
     logger = observe.RequestLogger.from_record(record)
@@ -111,7 +111,7 @@ def test_closed_record_logger_reopens_with_an_eager_empty_append(tmp_path, missi
 
 @pytest.mark.parametrize("reopen", [False, True])
 def test_alias_initialization_refuses_eagerly_and_retry_preserves_open_mode(tmp_path, reopen):
-    """O4: planted first/reopen initialization refuses eagerly and preserves retry mode."""
+    """Planted first/reopen initialization refuses eagerly and preserves retry mode."""
     io = S.RecordingIo()
     record = run_at(tmp_path, io=io).observability.wire_log
     path = record.path
@@ -138,7 +138,7 @@ def test_alias_initialization_refuses_eagerly_and_retry_preserves_open_mode(tmp_
 
 @pytest.mark.parametrize("reopen", [False, True])
 def test_initialization_fault_never_registers_an_active_or_new_ever_opened_identity(tmp_path, reopen):
-    """O4: a same-identity failed open cannot consume first-open mode or block its retry."""
+    """A same-identity failed open cannot consume first-open mode or block its retry."""
     io = S.RecordingIo()
     record = run_at(tmp_path, io=io).observability.wire_log
     record.path.parent.mkdir()
@@ -158,7 +158,7 @@ def test_initialization_fault_never_registers_an_active_or_new_ever_opened_ident
 
 
 def test_record_write_failure_propagates_and_close_releases_identity(tmp_path):
-    """O4: wire faults are loud; close forbids later writes and permits another writer."""
+    """Wire faults are loud; close forbids later writes and permits another writer."""
     io = S.RecordingIo()
     record = run_at(tmp_path, io=io).observability.wire_log
     logger = observe.RequestLogger.from_record(record)
@@ -180,7 +180,7 @@ def test_record_write_failure_propagates_and_close_releases_identity(tmp_path):
 
 
 def test_legacy_stream_close_failure_still_closes_logger_and_releases_identity(tmp_path):
-    """O4: a real failed file close cannot leave an active logger identity behind."""
+    """A real failed file close cannot leave an active logger identity behind."""
     path = tmp_path / "learning.jsonl"
     logger = observe.RequestLogger(path)
     # The existing path logger's held fd is a legacy seam; invalidate it immediately before
@@ -198,7 +198,7 @@ def test_legacy_stream_close_failure_still_closes_logger_and_releases_identity(t
 
 
 def test_denial_sink_is_lazy_shared_and_initial_fault_logs_once_with_cached_null(tmp_path, caplog):
-    """O4: denial initialization failure caches a null sink; it does not alter denials."""
+    """Denial initialization failure caches a null sink; it does not alter denials."""
     io = S.RecordingIo()
     run = run_at(tmp_path, io=io)
     path = run.tables.policy_denials.path
@@ -223,7 +223,7 @@ def test_denial_sink_is_lazy_shared_and_initial_fault_logs_once_with_cached_null
 
 
 def test_denial_later_append_fault_propagates_instead_of_switching_to_null(tmp_path, caplog):
-    """O4: lazy fallback applies to initialization only; a subsequent append fault is loud."""
+    """Lazy fallback applies to initialization only; a subsequent append fault is loud."""
     io = S.RecordingIo()
     run = run_at(tmp_path, io=io)
     logger = observe.denial_logger(run)
@@ -241,7 +241,7 @@ def test_denial_later_append_fault_propagates_instead_of_switching_to_null(tmp_p
 
 @pytest.mark.parametrize("reply", ["raw caf\u00e9\nsecond line", '{"verdict":"caf\\u00e9"}\n'])
 def test_review_row_and_raw_reply_use_one_byte_faithful_record_append(tmp_path, reply):
-    """O3/O4: review keeps its row-shaped reply predicate and atomic row/reply append."""
+    """Review keeps its row-shaped reply predicate and atomic row/reply append."""
     io = S.RecordingIo()
     run = run_at(tmp_path, io=io)
     row = {"stage": "review", "text": "caf\u00e9 \ud800"}
@@ -261,7 +261,7 @@ def test_review_row_and_raw_reply_use_one_byte_faithful_record_append(tmp_path, 
 
 
 def test_review_append_fault_propagates_instead_of_observability_swallowing(tmp_path):
-    """O4: review text append retains the existing effective write failure."""
+    """Review text append retains the existing effective write failure."""
     io = S.RecordingIo(S.IoFault(fail_on=("rooted_write",), error=OSError("review disk fault")))
     run = run_at(tmp_path, io=io)
     with pytest.raises(OSError, match="review disk fault"):

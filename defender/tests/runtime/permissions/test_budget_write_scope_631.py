@@ -1,4 +1,5 @@
-"""#631 — S1/S2: the run's integrity surface, and the two authoring paths that reach `investigation.md` without the gate the constraint lives inside."""
+"""#631 — MAIN cannot reach the run's integrity surface or the enforcement flag, its one write is
+a validated `investigation.md`, and a query row stays one strict-JSON line."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -55,7 +56,7 @@ INTEGRITY_SURFACE = (
 
 
 def _run_dir(tmp_path: Path, name: str = "run") -> Path:
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # A run folder is named by its UUID run id.
     rd = tmp_path / fixture_uuid(name)
     (rd / "gather_raw").mkdir(parents=True)
     (rd / "gather_summaries").mkdir(parents=True)
@@ -72,7 +73,8 @@ def _report_text() -> str:
 
 
 def test_model_cannot_disable_enforcement(tmp_path):
-    """A model that writes to files or runs bash cannot turn the enforcement FLAG off mid-run: the flag is read..."""
+    """Neither the bash lane nor a write can turn the enforcement flag off mid-run, and a child
+    process cannot change the parent's environment."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -108,7 +110,8 @@ def test_model_cannot_disable_enforcement(tmp_path):
 
 
 def test_model_cannot_author_its_own_budget_state(tmp_path):
-    """MAIN cannot author or edit the record its own enforcement decision reads: a write_file or edit_file call..."""
+    """Every integrity-surface file is refused to MAIN's writes (with a reason) and to bash
+    redirects, and MAIN holds no path-taking writer."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -133,7 +136,8 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
 
 
 def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path):
-    """#774/R1 UPDATE. `report.md` left MAIN's write allow-list entirely (the close tool is now its only writer),..."""
+    """`report.md`'s only writer is the close tool (#774), so the main loop cannot commit it;
+    `investigation.md` still lands."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -155,7 +159,8 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
 
 
 def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
-    """MAIN's compiled write scope is a POSITIVE ALLOW-LIST of exactly investigation.md (#774/R1 narrowed this..."""
+    """MAIN's compiled write scope admits exactly `investigation.md`: not `report.md`, the
+    integrity surface, near-miss names or arbitrary paths."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
     admitted = set()
@@ -181,7 +186,8 @@ def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
 
 
 def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_path):
-    """The invlang validator is selected on the RESOLVED path, so a write through an alias that resolves to..."""
+    """The invlang validator is selected on the resolved path, so a write through an alias to
+    `investigation.md` is validated, neither waved through nor refused outright."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
     real = run_dir / "investigation.md"
@@ -209,7 +215,8 @@ def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_pat
 
 
 def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
-    """Drive ONE real `query` call on a real GATHER agent against an injected verb registry — the tool boundary..."""
+    """Drive one real `query` call on a real gather agent against an injected verb registry;
+    returns the queries table's rows."""
     class Verbs(VerbRegistry):
         def __init__(self):
             super().__init__(VerbGrant(role="gather", entries=(("elastic", "esql", "r"),)))
@@ -233,8 +240,8 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
         make_model=lambda n, e: BuiltModel(FunctionModel(model), None),
         verbs=Verbs(), limits=DEFAULT_LIMITS,
     )
-    # #1235 round 2: the query tool's writer and guards read the run's `RunState` its deps
-    # carry; this agent is driven outside a run, so it carries the state a started run would.
+    # The query tool's writer and guards read the `RunState` the deps carry; driven outside a
+    # run, the agent carries the state a started run would.
     from defender.investigation.run_state import RunState
 
     deps = replace(_with_live_run_1165(bind(gather_def, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
@@ -252,7 +259,8 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
 
 
 def test_a_query_row_carrying_a_non_finite_param_is_still_strict_json(tmp_path):
-    """A query call whose params carry a non-finite value appends a row every line of which parses under a STRICT..."""
+    """A non-finite param still leaves a row that parses as strict JSON, and finite floats and
+    strings are kept as given."""
     run_dir = _run_dir(tmp_path)
     _drive_one_query(run_dir, {"threshold": 1e400, "count": 42.5, "index": "logs"})
 
@@ -276,7 +284,8 @@ def test_a_query_row_carrying_a_non_finite_param_is_still_strict_json(tmp_path):
 
 
 def test_hostile_string_params_still_produce_exactly_one_row(tmp_path):
-    """Ordinary params round-trip byte-identical, and the sharp string cases — an embedded newline and U+2028 —..."""
+    """Line breaks (newline, CRLF, U+2028/2029, NEL) and a forged row inside a param stay in one
+    physical line, and every param round-trips unchanged."""
     hostile = {
         "index": "logs-*",
         "newline": 'a\nb',

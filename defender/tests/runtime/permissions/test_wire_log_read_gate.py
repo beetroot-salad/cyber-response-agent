@@ -141,7 +141,7 @@ def lenv(tmp_path):
     )
 
 
-#: TWO LEARNING-LANE DEMANDS LEFT WITH #922, recorded because their absence weakens this file.
+#: The learning roles asked about here (two more left with #922, narrowing this file).
 LEARNING_READERS = ("curator",)
 
 

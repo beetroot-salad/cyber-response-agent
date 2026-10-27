@@ -16,7 +16,7 @@ ROW_COLUMNS = (
     "system_key",
 )
 
-#: The column name the design removes from the model's table (G4/G5).
+#: The column name kept out of the model's table.
 CALL_ID = "call_id"
 
 FORK_TIME = S24.T.AS_OF

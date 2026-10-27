@@ -1,8 +1,6 @@
-"""#1243 suite fixtures: the configured roots a scenario must never share with the host.
-
-The `alert_front_door_1222/conftest.py` shape: the learning-state root and the launcher's
-episodes root are pointed under the test's own `tmp_path`, so the front-door runs and the
-launcher scenario here write nothing outside it. `monkeypatch.setenv` only — never `setattr`.
+"""#1243 suite fixtures: the learning-state root and the launcher's episodes root point under
+the test's own `tmp_path` (as in `alert_front_door_1222/conftest.py`), so nothing here writes
+outside it. `monkeypatch.setenv` only, never `setattr`.
 """
 from __future__ import annotations
 

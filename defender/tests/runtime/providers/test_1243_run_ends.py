@@ -105,8 +105,8 @@ def test_o3_scenario5_correlation_lead_down_stops_before_main(tmp_path: Path) ->
 
 
 def test_o3_correlation_lead_provider_down_is_not_a_lead_ending(tmp_path: Path) -> None:
-    """O3 (amends #1222 A2): a `ProviderDown` raised in l-00c passes the lead's catch-all like
-    `BudgetKill` — the same stop as the real-retrier scenario, from the typed failure alone."""
+    """A `ProviderDown` raised in l-00c passes the lead's catch-all like `BudgetKill`: the
+    real-retrier scenario's stop, from the typed failure alone."""
     d = S.run_alert(tmp_path, leads={L3: [S.text(CORR)]}, lead_faults={L3: _down_at(1)})
     assert d.router.dispatched(L3), "l-00c never ran"
     assert d.main.requests == 0, "MAIN ran after the correlation lead's provider went down"
@@ -227,8 +227,8 @@ def test_o3_d5_a_review_stage_down_ends_the_run_after_its_sibling_settles(tmp_pa
 
 
 def test_o3_d5_the_composer_down_ends_the_run(tmp_path: Path) -> None:
-    """O3/D5 (R7): with both lenses answering, a down COMPOSER ends the run `provider-down`
-    the same way, and the round's traces are marked incomplete."""
+    """With both lenses answering, a down composer ends the run `provider-down` the same way,
+    and the round's traces are marked incomplete."""
     events: list[str] = []
     composer = _Lens(exc=P.provider_down_fault("review"), events=events, name="composer")
     support, ablation = _Lens(events=events, name="support"), _Lens(events=events, name="ablation")
@@ -321,11 +321,9 @@ SIBLING_WORLD = "b"
 
 
 def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A launched episode a sibling process can run as (`test_1222_judge_and_episode`'s
-    `_source` + `_launch` shape): a finished source run on tenant `acme` (the #947 runs base's
-    branchable run, recorded: its alert and record at the front door's places), the episode primed from
-    it by the REAL launcher door (`cli.prepare_episode`) with its container made, and the
-    family manifest (worlds a, b, c) written. The episodes root is pointed at its parent."""
+    """A launched episode a sibling process can run as: a finished, recorded source run on
+    tenant `acme`, the episode primed from it by the real launcher door (`cli.prepare_episode`),
+    and the family manifest (worlds a, b, c) written. The episodes root is its parent."""
     from defender.records import RunId
 
     planted = S.plant_tenant(SIBLING_TENANT)
@@ -353,7 +351,7 @@ def _run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
     try:
-        # #1108 P4 (OD14, O11): the in-process launch-time publish.
+        # The launch-time publish, in-process.
         d.rc = P.sym("run", "main")(argv, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
                                     preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket(),
                                     publish=in_process_publish())

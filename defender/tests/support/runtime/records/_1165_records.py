@@ -10,9 +10,8 @@ from defender.tests.support.shared.contracts import _spec1077 as S
 
 
 def run_at(tmp_path: Path, *, io: Any = None):
-    """A fixture run's real `Run` in a fresh runs folder (#1187: the folder holds no
-    `_tenant.json`, R1; the run is built by `Run.under`, which replaces `Run.for_tenant`, at a
-    uuid4 id, which `RunId` alone admits)."""
+    """A fixture run's real `Run`, built by `Run.under` in a fresh runs folder (no
+    `_tenant.json`) at a uuid4 id, the only id `RunId` admits."""
     base = S.make_runs_base(tmp_path)
     directory = S.make_run_dir(base, RUN_ID)
     options = {} if io is None else {"io": io}

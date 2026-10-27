@@ -63,9 +63,8 @@ NAME = "defender-drain-g1178"
 
 def _outcome(fn: Callable[[], Any]) -> tuple:
     """`("returned", value)`, or `("raised", class name, message)` for the gate's refusal, the
-    box's fault and P3's commit-maker refusal (`DeliveryRefused`: a ChangeSet holding a link,
-    FIFO, oversized file or out-of-lane path, #1108 P4 OD18 — the direct entry raises it, the
-    drain routes it as a U10 refused claim). Anything else (a call-shape `TypeError`, a
+    box's fault and the commit-maker's `DeliveryRefused` (a ChangeSet holding a link, FIFO,
+    oversized file or out-of-lane path). Anything else (a call-shape `TypeError`, a
     `ValidationError`) propagates."""
     from defender.learning.author.version_control import DeliveryRefused
 
@@ -82,8 +81,7 @@ def _head_mode(repo: Path, rel: str, rev: str = "HEAD") -> str:
 
 
 def _head_bytes(repo: Path, rel: str, rev: str = "HEAD") -> bytes:
-    """The blob committed at `rel` in `rev`, as bytes (no decoding: the subject may not be text).
-    The observed value; the expected one is the bytes the test planted."""
+    """The blob committed at `rel` in `rev`, as bytes (no decoding: the subject may not be text)."""
     argv = ["git", "cat-file", "blob", f"{rev}:{rel}"]  # lint-oracle: ok — reads what was committed; the oracle is the planted bytes
     return subprocess.run(argv, cwd=repo, capture_output=True, check=True).stdout  # noqa: S603
 
@@ -174,10 +172,8 @@ def _assert_one_run_holds_exactly_the_agent(  # noqa: PLR0913 — one run's whol
     log: X.Journal, daemon: X.FakeDaemon, spawn: Any, box: Any, *, head_before: str,
     head_after: str,
 ) -> None:
-    """One window, holding the agent and nothing else, the agent handed the batch's executor
-    (`box`), never the handle the lane was handed; every host step before it, and every gate
-    read after it, saw nothing running; the commit (after the gate) landed; the box is
-    stopped."""
+    """One run window, holding only the agent, which was handed the batch's executor (`box`),
+    never the lane's handle; host steps and gate reads fall outside it, and the commit landed."""
     log.assert_runs_hold_exactly(["agent"], ("agent",))
     kinds = [e[0] for e in log]
     at = kinds.index("agent")
@@ -200,13 +196,10 @@ REFUSED = query_template("elastic.w1178", "draft")
 REFUSED_SAYS = "disagreeing with its directory"
 
 
-# #1108 P4 (O7, OD6, OD12 class ii): the lead-author rows run over a git-free draft of a P3
-# batch (`_curator1134.draft_lane`, lane `skills`), never a product worktree: the legacy
-# worktree's `defender/skills/` tree is the tenant's `agent/skills/` in the batch base, its
-# adapters stay in the product checkout (#1172). What a run committed is read from the batch
-# branch (its tip stands where HEAD stood); "no half-made commit staged" is the tenant clone's
-# index (the draft has none). ASSUMED SEAMS (S-H): `build_lead_author_deps(..., batch=)`
-# (`draft_lead_deps`); `_verify_skills_state(root, *, change_set, systems, tree_for)`.
+# The lead-author rows run over a git-free draft of a batch (`_curator1134.draft_lane`, lane
+# `skills`): the skills tree is the tenant's `agent/skills/` in the batch base, the adapters stay
+# in the product checkout. What a run committed is read from the batch branch's tip; "no
+# half-made commit staged" is the tenant clone's index (the draft has none).
 
 
 @dataclasses.dataclass
@@ -242,10 +235,10 @@ class LeadScene:
 
 def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None, *,
                 files: dict[str, str] | None = None) -> LeadScene:
-    """A started batch whose draft carries the legacy lead worktree's tree (the `elastic` and
-    `wazuh` markers and catalogs, the `elastic` skill, the catalog schema) plus `committed`
-    (`{name below skills/: text}`) and `files` (agent-relative), all in the batch base; the
-    product checkout holds the `elastic` and `wazuh` adapters."""
+    """A started batch whose draft carries the `elastic` and `wazuh` markers and catalogs, the
+    `elastic` skill and the catalog schema, plus `committed` (`{name below skills/: text}`) and
+    `files` (agent-relative), all in the batch base; the product checkout holds the `elastic`
+    and `wazuh` adapters."""
     product = seed_product(tmp_path, adapters=("elastic", "wazuh"))
     agent_files = {**seed_agent_files(markers=("elastic", "wazuh"), skills=("elastic",),
                                       catalog=("elastic", "wazuh")),
@@ -462,17 +455,12 @@ REDUCER_REFUSED_SAYS = "frontmatter block"
 
 #: The system surface the pitfalls lane commits, with no content rule of its own.
 EXECUTION_NAME = "elastic/execution.md"
-#: The page in a batch draft (#1108 P4, OD6: repo-relative in the tenant repo).
+#: The page in a batch draft (repo-relative in the tenant repo).
 DRAFT_EXECUTION_REL = f"agent/skills/{EXECUTION_NAME}"
 EXECUTION_TEXT = "# execution\n\n## Common pitfalls\n\n- use the key, not the id\n"
 
 
-# #1108 P4 (O7, OD6, OD12 class ii): the pitfalls rows run over a git-free draft of a P3 batch
-# (`_curator1134.draft_lane`, lane `skills`), never a product worktree, as `test_870_partition`
-# does. What a tick committed is read from the batch branch (its tip stands where HEAD stood);
-# "no half-made commit staged" is the tenant clone's index (the draft has none). ASSUMED SEAMS
-# (S-H): `run_pitfalls(..., batch=)`; `_verify_pitfalls_state(root, *, change_set, systems,
-# reducer_offered, tree_for)`.
+# The pitfalls rows run over a batch draft too, read as the lead-author rows' is.
 
 
 @dataclasses.dataclass
@@ -534,11 +522,8 @@ def _drive_pitfalls(  # noqa: PLR0913 — one drive, every seam a row varies
         s: PitfallsScene, log: list, *, rel: str, text: str | bytes, kind: str = "plain",
         box: Any = None, more: dict[str, str] | None = None,
 ) -> tuple[tuple, BoxSeenSpawn]:
-    """Drive `run_pitfalls` over the scene: the curator (rc 0) leaves `text` at `rel` as `kind`,
-    and each of `more` (`{rel: text}`) as a plain file, logging `("agent",)`. The trees log the
-    lane's first host step and each `tree_for` call into `log`. `box` is handed to `run_pitfalls`
-    (the batch's stopped box, or `None`); the spawn records the box it was handed. Returns the
-    outcome and the spawn."""
+    """`_drive_lead`'s counterpart over `run_pitfalls`, the curator leaving `text` at `rel`; the
+    trees log the lane's first host step and each `tree_for` call into `log`."""
 
     def curate(_root: Path) -> None:
         _plant(s.at(rel), text, kind, s.tmp / "outside")
@@ -656,8 +641,8 @@ def test_a_pitfalls_stop_fault_after_a_clean_curator_halts_before_the_gate(
     assert _queued(s) == queued
 
 
-#: The lead lane's addresses no content rule reads, so a link there passes every other rule and
-#: is committed on main (#1178 C1), with the bytes a plain file there commits with.
+#: The lead lane's addresses no content rule reads, so only the plain-file rule keeps a link
+#: there from being committed (#1178).
 LEAD_ADDRESSES = [
     pytest.param("gather/queries/wazuh/_draft/d1178.md", query_template("wazuh.d1178", "draft"),
                  id="catalog-draft"),
@@ -689,12 +674,9 @@ BIG_SIZE = READ_LIMIT + 2**20
 
 def _assert_plain_file_rule_on_the_batch(got: tuple, s: PitfallsScene | LeadScene, rel: str,
                                          text: str, kind: str) -> None:
-    """The plain-file rule over a draft scene. #1108 P4 (OD18/OD23, owner ruling 2026-10-23 2):
-    a link, hard link or FIFO in the lane is a ChangeSet refusal of the whole claim, naming
-    `rel`, and nothing lands (the drain routes it as U10, `test_refused_claims.py`). A plain
-    file commits with its bytes; an executable one commits as a plain file too — its bytes, mode
-    `100644` (P3's commit-maker writes plain files only: `tenant_1108_delivery/test_changes.py::
-    test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`)."""
+    """The plain-file rule over a draft scene: a link, hard link or FIFO in the lane is a
+    ChangeSet refusal of the whole claim, naming `rel`, and nothing lands. A plain or executable
+    file commits with its bytes, mode `100644` (the commit-maker writes plain files only)."""
     if kind in REFUSED_KINDS:
         assert got[:2] == ("raised", "DeliveryRefused"), got
         assert rel in got[2], got
@@ -755,8 +737,7 @@ UNPLACED_DRAFT = "agent/skills/elastic/_draft/u1178.md"
 def test_a_lead_author_record_no_held_mount_places_is_refused(tmp_path: Path, tree_for: str):
     """`_verify_skills_state` over a draft whose ChangeSet holds one new system-skill draft,
     with a `tree_for` that places no path: `LeadAuthorError` naming it. Control: the lane's own
-    `tree_for` admits it. (#1108 P4, OD12 class ii: the legacy `baseline_stray=`/`git=` seam is
-    the claim's ChangeSet, OD15; ASSUMED SEAM `_verify_skills_state(root, *, change_set, ...)`.)"""
+    `tree_for` admits it."""
     s = _lead_scene(tmp_path)
     write(s.repo / UNPLACED_DRAFT, "# elastic draft\n\n- a lifted note\n")
     with C.draft_trees(s.lane) as trees:
@@ -781,8 +762,6 @@ def test_the_pitfalls_gate_commits_only_a_plain_execution_md(
 
 
 def test_a_plain_execution_md_that_is_not_utf8_commits(tmp_path: Path, monkeypatch):
-    """The curator leaves `elastic/execution.md` as a plain file whose bytes are not UTF-8: it
-    commits, those exact bytes."""
     s = _pitfalls_scene(tmp_path, monkeypatch, _system_rows())
     got = _run_pitfalls(s, [], rel=DRAFT_EXECUTION_REL, text=NOT_UTF8)
     assert got == ("returned", 0), got
@@ -828,13 +807,8 @@ STRAY_EDIT = "rewritten by the box\n"
 #: write there once started is a stray.
 DRAFT_STRAY_REL = "agent/notes/stray1178.md"
 
-# #1108 P4, OD15: a claim's ChangeSet is its draft against the batch base, the draft re-synced
-# per claim, so there is no "pre-run stray tolerated" baseline. The legacy `before-the-run` rows
-# (a stray edited before the run is tolerated and the tick commits) are deleted (OD12 class i);
-# the derivation is pinned by P3's `tenant_1108_delivery/test_changes.py::
-# test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`,
-# `::test_claims_commit_and_reset_one_after_another_within_one_batch` and
-# `::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`. `untouched` is the
+# A claim's ChangeSet is its draft against the batch base (re-synced per claim), so there is no
+# pre-run stray baseline (pinned in `tenant_1108_delivery/test_changes.py`). `untouched` is the
 # positive control: the stray left as the base holds it, the tick commits.
 
 
@@ -852,8 +826,8 @@ def test_a_lead_author_stray_the_box_writes_once_started_is_refused(
         assert s.committed(s.rel(AGENT_NAME)) == VETTED
         assert s.committed(DRAFT_STRAY_REL) == "committed\n"
         return
-    # OD18: a path outside the lane is a ChangeSet refusal of the whole claim (P3's
-    # out-of-lane rule), routed by the drain as U10; the direct entry raises it, naming the path.
+    # A path outside the lane is a ChangeSet refusal of the whole claim; the direct entry
+    # raises it, naming the path.
     assert got[:2] == ("raised", "DeliveryRefused"), got
     assert DRAFT_STRAY_REL in got[2], got
     assert s.nothing_landed()
@@ -875,8 +849,6 @@ def test_a_pitfalls_stray_the_box_writes_once_started_is_refused(
         assert s.committed(REDUCER_REL) == REDUCER_VETTED
         assert s.committed(DRAFT_STRAY_REL) == "committed\n"
         return
-    # OD18: a path outside the lane is a ChangeSet refusal of the whole claim (P3's
-    # out-of-lane rule), routed by the drain as U10; the direct entry raises it, naming the path.
     assert got[:2] == ("raised", "DeliveryRefused"), got
     assert DRAFT_STRAY_REL in got[2], got
     assert s.nothing_landed()
@@ -908,10 +880,9 @@ def _head_size(repo: Path, rel: str, rev: str = "HEAD") -> tuple[str, int]:
     return mode, int(size)
 
 
-# #1108 P4 (OD18): an oversized file in the lane is a ChangeSet refusal of the whole claim (P3's
-# size bound), not a commit: the legacy "larger than any read commits" rows are re-spelled to
-# the refusal, naming the entry, with nothing landed. A plain file under the bound commits
-# (`test_the_lead_author_gate_commits_only_a_plain_file[*-plain]`).
+# An oversized file in the lane is a ChangeSet refusal of the whole claim (the commit-maker's
+# size bound), naming the entry; nothing lands. The under-bound control is
+# `test_the_lead_author_gate_commits_only_a_plain_file[*-plain]`.
 @pytest.mark.parametrize("name", ["elastic/_draft/b1178.md", "gather/queries/wazuh/README.md"],
                          ids=["system-skill-draft", "catalog-readme"])
 def test_a_plain_lead_author_file_larger_than_any_read_is_refused(tmp_path: Path, name: str):
@@ -943,13 +914,11 @@ def _queue_claims(s: LeadScene, *run_names: str) -> list[Path]:
 
 
 class Lanes:
-    """The drain's two work steps, each driving its REAL lane over the scene's batch draft:
-    `run_lead` serves a claim through the run `lead_author.run_under_held_queue_lock` makes
-    (`_run_locked`, over the real deps on the drain's handle; only the agent and the two tables
-    faked), `run_pitfalls` a tick through `run_pitfalls` (only the curator faked), each handed
-    the box the drain handed down (`handed` records it). With a `log`, each lane's host steps
-    and gate reads log into it. `pitfalls_ticks` counts the pitfalls ticks. With
-    `swallow_claim_box_faults`, a claim's `BoxFault` is swallowed (`swallowed`), as a layer
+    """The drain's two work steps, each driving its real lane over the scene's batch draft:
+    `run_lead` serves a claim through `lead_author._run_locked` (real deps; only the agent and
+    the two tables faked), `run_pitfalls` a tick (only the curator faked); `handed` records the
+    box each was handed. With a `log`, the lanes' host steps and gate reads log into it. With
+    `swallow_claim_box_faults`, a claim's `BoxFault` is swallowed into `swallowed`, as a layer
     above a spawn may mask it."""
 
     def __init__(self, agent: BoxSeenLeadSpawn, curator: BoxSeenSpawn | None = None, *,
@@ -958,8 +927,7 @@ class Lanes:
         self.swallow = swallow_claim_box_faults
         self.pitfalls_ticks = 0
         self.handed: list[Any] = []
-        #: The batch the lanes serve (`_drain` sets the scene's; #1108 P4, ASSUMED SEAMS
-        #: `build_lead_author_deps(..., batch=)`, `run_pitfalls(..., batch=)`).
+        #: The batch the lanes serve (`_drain` sets the scene's).
         self.lane: C.DraftLane | None = None
         self.seam_faults: list[TypeError] = []
         self.swallowed: list[BoxFault] = []
@@ -986,7 +954,7 @@ class Lanes:
         self.pitfalls_ticks += 1
         if self.curator is None:
             return 0
-        if self.lane is None:  # `TenantLanes`: the drain-level rows, red on the drain's seams
+        if self.lane is None:  # `TenantLanes`: the drain-level rows serve no scene batch
             with lead_trees(paths) as trees:
                 return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=trees,
                                                      invoke=self.curator, box=box,
@@ -999,7 +967,7 @@ class Lanes:
                 box=box, on_curated=on_curated))
 
     def _seamed(self, call: Callable[[], Any]) -> Any:
-        """`call()`, a refused keyword (the P4 batch seam) recorded in `seam_faults`."""
+        """`call()`, recording a refused keyword (the `batch=` seam) in `seam_faults`."""
         try:
             return call()
         except TypeError as e:
@@ -1009,8 +977,8 @@ class Lanes:
 
 
 def _request_dir(s: LeadScene, *below: str) -> Path:
-    """The lead-author request queue's folder (or one below it), spelled literally as the #1135
-    suite spells it: `state.py` names it for no caller."""
+    """The lead-author request queue's folder (or one below it), spelled literally: `state.py`
+    names it for no caller."""
     return location_path(s.paths.state_root).joinpath("author-queue", *below)
 
 
@@ -1028,7 +996,7 @@ def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
 
 def _assert_the_lanes_took_their_seams(lanes: Lanes) -> None:
     """The drain swallows a claim's error into a quarantine and a pitfalls error into a log
-    line: a lane refusing the P4 batch seam fails the row here, named, rather than as a
+    line, so a lane refusing the `batch=` seam fails the row here, named, rather than as a
     downstream observation of a lane that never ran."""
     assert not lanes.seam_faults, f"the lanes do not take the P4 batch seam yet: {lanes.seam_faults[0]}"
 
@@ -1058,8 +1026,8 @@ def _attempts(paths: LoopPaths) -> list[Any]:
 
 
 def _claim_attempts(s: LeadScene) -> dict[str, Any]:
-    """Each claimed marker's (`inflight/`) `attempts`: a serve is charged once, before its run
-    (N14), and a box fault charges nothing more."""
+    """Each claimed marker's (`inflight/`) `attempts`: a serve is charged once, before its run,
+    and a box fault charges nothing more."""
     inflight = _request_dir(s, "inflight")
     return {p.name: json.loads(p.read_text(encoding="utf-8")).get("attempts")
             for p in sorted(inflight.glob("*.json"))}
@@ -1312,23 +1280,19 @@ def test_a_swallowed_stop_fault_in_the_last_claim_makes_the_pitfalls_run_refuse(
 
 
 # ---------------------------------------------------------------------------------------------
-# The drain-level rows (#1108 P4 re-spelling, OD12 class ii): the lane runs over a tenant draft
-# and delivers to the tenant forge (`lead_author_drain(..., client=, identity=, start_box=,
-# stop_box=)`), not a product worktree through `branch=`/`scrub=`. The #1178/#1195 promises
-# stand: a box fault halts the lane before anything is committed, pushed or opened, no claim is
-# dead-lettered for it, and a claim is charged its one serve. "Nothing delivered" is read on the
-# tenant origin (`lead-author/` branches) and the forge's PR creates; the product checkout's HEAD
-# never moves. The batch scan (`scrub=`) and the worktree cut-commit pointer are gone with the
-# worktree (amendment 3 C3: a draft is never scrubbed) and are not re-asserted.
+# The drain-level rows: `lead_author_drain(..., client=, identity=, start_box=)` over a tenant
+# draft, delivering to the tenant forge. A box fault halts the lane before anything is
+# committed, pushed or opened; no claim is dead-lettered for it and a claim is charged its one
+# serve. "Nothing delivered" is read on the tenant origin's `lead-author/` branches and the
+# forge's PR creates; the product checkout's HEAD never moves.
 # ---------------------------------------------------------------------------------------------
 
 
 @dataclasses.dataclass
 class TenantLeadScene:
-    """`LeadScene`'s fields over the P4 tenant path: `repo` is the product checkout the drain
-    runs over (adapters declaring elastic/wazuh, as the legacy worktree had), `paths` the
-    tenant's learning paths over it, `t` the published tenant whose `agent/skills/` holds the
-    same catalog and skills the legacy worktree's `defender/skills/` did."""
+    """`LeadScene`'s fields over a published tenant: `repo` is the product checkout the drain
+    runs over (elastic/wazuh adapters), `paths` the tenant's learning paths over it, `t` the
+    tenant, whose `agent/skills/` holds the catalog and skills of `repo`'s `defender/skills/`."""
 
     tmp: Path
     repo: Path
@@ -1375,8 +1339,8 @@ def _delivered_text(s: TenantLeadScene, name: str) -> str:
 
 
 class TenantLanes(Lanes):
-    """`Lanes` whose agent writes where the lane's own deps put its skills (the draft's, on the
-    P4 path): `skills_dir` is read off the deps the claim's run is served with."""
+    """`Lanes` whose agent writes where the lane's own deps put its skills (the batch draft's):
+    `skills_dir` is read off the deps the claim's run is served with."""
 
     skills_dir: Path | None = None
 
@@ -1389,14 +1353,14 @@ class TenantLanes(Lanes):
         )
 
         self.handed.append(box)
-        # The lane's held `skills/` mount over the draft of the batch the drain handed down
-        # (OD16), its deps built with that batch (S-H's `batch=`), never `paths`' checkout.
+        # The lane's held `skills/` mount over the draft of the batch the drain handed down,
+        # its deps built with that batch, never `paths`' checkout.
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
             deps = dataclasses.replace(
                 lead_author.build_lead_author_deps(paths, state=state, trees=trees, batch=batch),
                 invoke_agent=self.agent, extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
-            # The draft's `skills/` lane (OD6: `agent/skills` under the batch's draft root),
-            # where the box's agent writes — not `deps.paths`, which stays product-rooted.
+            # The draft's `agent/skills` lane, where the box's agent writes — not `deps.paths`,
+            # which stays product-rooted.
             self.skills_dir = draft_root_of(batch) / LEAD_DRAFT_LANES[0]
             return lead_author._run_locked(run.run_dir, deps, box=box, on_done=on_done)
 
@@ -1431,8 +1395,7 @@ def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any, **seams: Any
 @pytest.mark.parametrize("first", ["box-faults", "nothing-to-author"])
 def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
         tmp_path: Path, monkeypatch, data_root: Path, first: str):
-    """#1178/#1195 on the P4 lane: a run-start fault in the default claim step halts the lane
-    with nothing delivered, nothing dead-lettered, the claim charged its one serve."""
+    """Nothing is delivered or dead-lettered, and the claim is charged its one serve (#1195)."""
     with _tenant_lead_scene(tmp_path, data_root) as s:
         leads = {"claim-0": WAZUH_LEAD if first == "box-faults" else None, "claim-1": ELASTIC_LEAD}
         for name, lead in leads.items():
@@ -1461,8 +1424,7 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
 
 def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
         tmp_path: Path, monkeypatch, data_root: Path):
-    """#1178/#1195 on the P4 lane: a run-start fault in the default pitfalls step halts the lane,
-    bumps no pitfalls row and delivers nothing."""
+    """It bumps no pitfalls row and delivers nothing (#1195)."""
     with _tenant_lead_scene(tmp_path, data_root) as s:
         monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
         persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
@@ -1536,10 +1498,8 @@ LEAD_F1_FAILURES = [
 @pytest.mark.parametrize("failure", LEAD_F1_FAILURES)
 def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failure_as_context(
         tmp_path: Path, monkeypatch, data_root: Path, failure: Any, stop: str, follows: str):
-    """#1195 F1 on the P4 lane: a stop fault under a failing agent halts the drain with the
-    agent's failure as context, nothing delivered, nothing dead-lettered; with the stop holding
-    (control) the failing claim is dead-lettered and the next claim's commit is delivered as a
-    `lead-author/` PR on the tenant forge."""
+    """Nothing is delivered or dead-lettered (#1195). Control (the stop holds): the failing claim
+    is dead-lettered and the next claim's commit is delivered as a `lead-author/` PR."""
     claims = ("run-0", "run-1") if follows == "next-claim" else ("run-0",)
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, *claims) as (s, daemon):
         raised = failure()
@@ -1588,9 +1548,8 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
         tmp_path: Path, monkeypatch, data_root: Path, stop: str, docker: str):
-    """#1195 on the P4 lane: a claim's stop fault after a clean agent halts the production drain
-    with nothing delivered and the claim charged once; with the stop holding (control) the
-    agent's draft is delivered as a `lead-author/` PR on the tenant forge."""
+    """Nothing is delivered and the claim is charged once (#1195). Control (the stop holds): the
+    agent's draft is delivered as a `lead-author/` PR."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0",
                                        path_default=docker == "path-default") as (s, daemon):
         ref: list = []
@@ -1622,8 +1581,7 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
 
 def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(
         tmp_path: Path, monkeypatch, data_root: Path):
-    """#1195 on the P4 lane: a claim a box fault halted is served again on the next tick, and its
-    commit is then delivered on the tenant forge."""
+    """The re-served claim's commit is then delivered on the tenant forge (#1195)."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0") as (s, daemon):
         served: list[str] = []
         ref: list = []
@@ -1673,7 +1631,7 @@ def test_the_lead_authors_deps_refuse_the_handle_as_its_box(tmp_path: Path, monk
 
 
 #: A batch box that never comes up (#1195): the create refused, the sentinel refused, the alias
-#: ban not in force. The legacy worktree cut-commit pointer is gone with the worktree.
+#: ban not in force.
 BATCH_START_FAULTS = [
     pytest.param("refuse_create", BoxFault, id="create"),
     pytest.param("refuse_sentinel", BoxFault, id="sentinel"),
@@ -1684,8 +1642,7 @@ BATCH_START_FAULTS = [
 @pytest.mark.parametrize(("knob", "kind"), BATCH_START_FAULTS)
 def test_a_batch_start_fault_claims_nothing_and_dead_letters_nothing(
         tmp_path: Path, monkeypatch, data_root: Path, knob: str, kind: type):
-    """#1195 on the P4 lane: a batch box that never comes up claims and charges nothing, runs no
-    lane step and delivers nothing."""
+    """It also charges nothing, runs no lane step and delivers nothing (#1195)."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0", "run-1") as (s, daemon):
         monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
         persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))

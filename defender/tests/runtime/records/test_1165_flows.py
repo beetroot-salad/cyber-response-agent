@@ -1,4 +1,4 @@
-"""#1165 O1/O2/O4/O6: durable operations use the passed Run in real flows."""
+"""#1165: durable operations use the passed Run in real flows."""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,7 @@ def append(state, run, *, params=None, payload='{"hits": [1]}'):
 
 
 def test_query_writer_uses_run_and_keeps_state_before_failed_view_append(tmp_path):
-    """O6: payload precedes state, state precedes append, and a failed view spends seq."""
+    """Payload precedes state, state precedes append, and a failed view spends seq."""
     io = RecordIO()
     run = run_handle(tmp_path / fixture_uuid("run"), io)
     state = RunState(run.run_dir, str(run.id))
@@ -58,7 +58,7 @@ def test_query_writer_uses_run_and_keeps_state_before_failed_view_append(tmp_pat
 
 
 def test_query_params_validate_before_any_run_operation_and_payload_fault_is_best_effort(tmp_path):
-    """O4/O6: params failure writes nothing; payload refusal leaves a null reference."""
+    """Params failure writes nothing; payload refusal leaves a null reference."""
     io = RecordIO()
     run = run_handle(tmp_path / fixture_uuid("run"), io)
     state = RunState(run.run_dir, str(run.id))
@@ -80,7 +80,7 @@ def test_query_params_validate_before_any_run_operation_and_payload_fault_is_bes
 
 
 def test_parallel_query_writers_keep_the_existing_state_lock_and_order(tmp_path):
-    """O6: one state lock orders seq, payload, state row, and file append together."""
+    """One state lock orders seq, payload, state row, and file append together."""
     io = RecordIO()
     run = run_handle(tmp_path / fixture_uuid("run"), io)
     state = RunState(run.run_dir, str(run.id))
@@ -94,7 +94,7 @@ def test_parallel_query_writers_keep_the_existing_state_lock_and_order(tmp_path)
 
 @pytest.mark.parametrize("fault", [False, True])
 def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault):
-    """O1/O2: MAIN → gather → query uses the repository handle, including its faults."""
+    """MAIN → gather → query uses the repository handle, including its faults."""
     directory = materialize(tmp_path / "fixture", GOLDEN_AB3)
     io = RecordIO()
     run = run_handle(directory, io)
@@ -129,8 +129,8 @@ def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault
                          verbs=FakeVerbs({"elastic": {"query": query}}), state=state, toolset=probes)
 
     if fault:
-        # #1235 keeps rows/charges in live state but preserves the append's own failure.
-        # No summary or executed_queries recording cut is fabricated from a view failure.
+        # Rows and charges stay in live state (#1235) but the append's own failure propagates:
+        # no summary or recording cut is fabricated from a view failure.
         with pytest.raises(OSError):  # noqa: PT011 — preserve the backend refusal, including its errno
             drive()
     else:
@@ -158,7 +158,7 @@ def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault
 
 
 def test_driver_refuses_missing_run_before_invoking_a_model(tmp_path):
-    """O1: the driver has a required Run, so callers cannot reconstruct one from paths."""
+    """The driver has a required Run, so callers cannot reconstruct one from paths."""
     from defender.investigation import driver
     with pytest.raises(TypeError, match="'run'"):
         # Omit run deliberately; this must fail at the boundary before any setup.
@@ -167,7 +167,7 @@ def test_driver_refuses_missing_run_before_invoking_a_model(tmp_path):
 
 
 def test_budget_and_breaker_decisions_keep_the_same_live_state_across_record_migration(tmp_path, monkeypatch):
-    """O6: model-written retired state files cannot reopen the budget or reset the breaker."""
+    """Model-written retired state files cannot reopen the budget or reset the breaker."""
     from defender.hooks import budget_enforcer as budgets
     from defender.systems import circuit_breaker as breaker
     from defender.tests.e2e.test_1235_host_state_in_memory import PlantingReplay
@@ -204,7 +204,7 @@ def test_budget_and_breaker_decisions_keep_the_same_live_state_across_record_mig
 
 
 def test_live_query_reads_ignore_model_file_edits_and_payload_cap_is_preserved(tmp_path):
-    """O4/O6: query guards read host rows; oversized payloads keep null references."""
+    """Query guards read host rows; oversized payloads keep null references."""
     from defender._io import READ_LIMIT
 
     io = RecordIO()
@@ -228,7 +228,7 @@ def test_live_query_reads_ignore_model_file_edits_and_payload_cap_is_preserved(t
 
 
 def test_lead_claim_uses_the_run_and_preserves_exclusive_statuses_and_exact_bytes(tmp_path):
-    """O1/O4: real exclusive claims map collisions and backend faults to old statuses."""
+    """Real exclusive claims map collisions and backend faults to the existing statuses."""
     from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, NOT_CLAIMED, claim_lead
 
     io = RecordIO()

@@ -1,4 +1,5 @@
-"""#992 — the close's contract once `inconclusive` spends the review (demand #0, O1, M1, the key flow, and the driver's own lanes)."""
+"""#992 — the close's contract once `inconclusive` spends the review: the host close, the model's
+tool lane and the driver's forced closes."""
 from __future__ import annotations
 
 import asyncio
@@ -48,7 +49,8 @@ STANDING_CAUSES = frozenset({CEILING_EXAMINED})
 
 
 def _tool_lane_return(tmp_path: Path, disposition: str, stages) -> str:
-    """The string the MODEL is handed back by the registered close tool, through MAIN's real composition root and..."""
+    """The string the model is handed back by the registered close tool, driven through MAIN's
+    real composition root (`build_main_agent`) with a replayed close call."""
     from pydantic_ai.models import override_allow_model_requests
 
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
@@ -76,7 +78,8 @@ def _tool_lane_return(tmp_path: Path, disposition: str, stages) -> str:
 
 
 def test_inconclusive_close_return_contract(tmp_path):
-    """Driving the sync host close with `inconclusive` and a bound bundle returns a `CloseResult` whose `outcome`..."""
+    """The host close of `inconclusive` stands, fails closed or is challenged as the review
+    decides, and the model's tool lane is handed back exactly `result.message`."""
     # `stands` — the review completed and held the ceiling claim.
     deps, run_dir = deps_over(tmp_path / "stands", ceiling_companion())
     stood = close_investigation(deps, GAP, stages=recording(holds()).bundle())
@@ -125,7 +128,8 @@ def test_inconclusive_close_return_contract(tmp_path):
 
 
 def test_inconclusive_spends_the_review(tmp_path):
-    """An `inconclusive` close that has paid its entry price dispatches the support lens, the ablation lens (when..."""
+    """A paid `inconclusive` close dispatches both lenses, then the composer, each leaving an
+    `ok` trace row, and is never recorded as not reviewed."""
     stages = recording(holds())
     deps, run_dir = deps_over(tmp_path, ceiling_companion())
     result = close_with(deps, GAP, stages)
@@ -142,7 +146,8 @@ def test_inconclusive_spends_the_review(tmp_path):
 
 
 def test_no_review_set_is_exactly_unresolved(tmp_path):
-    """Driving every member of DISPOSITION_ENUM on its own lane (the four model members through the model lane,..."""
+    """Of every `DISPOSITION_ENUM` member, each driven on its own lane, only the host-only one
+    commits without a stage call."""
     spent_nothing: set[str] = set()
     for member in sorted(DISPOSITION_ENUM):
         stages = recording(holds())
@@ -168,7 +173,8 @@ def test_no_review_set_is_exactly_unresolved(tmp_path):
 
 
 def test_gates_ahead_of_the_review_spend_no_stage(tmp_path):
-    """An `inconclusive` close that owes its entry price, is refused as already closed, sits inside the..."""
+    """An `inconclusive` close refused by a gate ahead of the review (price owed, malformed or
+    flagged companion, already closed) dispatches no stage and writes no trace or report."""
     from defender.tests.support.invlang.validation._invlang_warn_836 import WARN_ROW, attr_block
 
     pre_gate = {
@@ -212,7 +218,8 @@ def test_gates_ahead_of_the_review_spend_no_stage(tmp_path):
 
 
 def test_inconclusive_close_whose_record_has_no_strong_belief_move(tmp_path):
-    """An `inconclusive` close whose record carries no strong belief move dispatches the support lens and the..."""
+    """With no strong belief move the ablation lens is skipped (a `skipped` row, not an answer);
+    support and the composer still run, and the composer's host text keeps the ceiling question."""
     stages = recording(holds())
     deps, run_dir = deps_over(tmp_path, sparse_companion())
     result = close_with(deps, GAP, stages)
@@ -229,7 +236,8 @@ def test_inconclusive_close_whose_record_has_no_strong_belief_move(tmp_path):
 
 
 def test_first_close_attempt_refused_pre_gate_leaves_no_residue(tmp_path):
-    """An `inconclusive` close refused before the gate (entry price owed) leaves `ReviewState` untouched — turns..."""
+    """A close refused before the gate (entry price owed) leaves `ReviewState`, traces and
+    records untouched; a challenged close is the control."""
     stages = recording(holds())
     deps, run_dir = deps_over(tmp_path / "refused", _spec923.gapless())
     refusal(deps, GAP, stages)
@@ -256,7 +264,8 @@ def _challenged_inconclusive(tmp_path: Path):
 
 
 def test_forced_close_ignores_inflight_review_bookkeeping(tmp_path):
-    """The driver's forced `unresolved` close after a challenged `inconclusive` neither resets nor routes on..."""
+    """The driver's forced `unresolved` close after a challenged `inconclusive` dispatches no
+    stage and leaves the turn counter and the ask watermark as they were."""
     deps, run_dir = _challenged_inconclusive(tmp_path)
     before = review_state(deps)
     turns, asks = before.turns, dict(before.raised_asks)
@@ -278,7 +287,8 @@ def test_forced_close_ignores_inflight_review_bookkeeping(tmp_path):
 
 
 def test_driver_forced_unresolved_survives_after_a_challenged_inconclusive(tmp_path):
-    """A run whose `inconclusive` close was challenged and which then exhausts the tool-retry budget is..."""
+    """Exhausting the tool-retry budget after a challenged `inconclusive` force-closes
+    `unresolved`, unreviewed and without the receipts, keeping the challenged record and rows."""
     deps, run_dir = _challenged_inconclusive(tmp_path)
     challenged_record = record(run_dir, 1)
     challenged_rows = {role: trace_rows(run_dir, role) for role in trace_files(run_dir)}
@@ -301,7 +311,8 @@ def test_driver_forced_unresolved_survives_after_a_challenged_inconclusive(tmp_p
 
 
 def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
-    """A run whose `inconclusive` close was challenged and which then hits the request ceiling is force-closed..."""
+    """Hitting the request ceiling after a challenged `inconclusive` force-closes `unresolved`
+    without a stage call, keeping the challenged record."""
     from defender.investigation import driver
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
 
@@ -324,7 +335,8 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
 
 
 def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
-    """The other two exits that stop the model — the tool budget's kill and the circuit breaker's abort — do NOT..."""
+    """The tool budget's kill and the circuit breaker's abort stop the model without a close:
+    no stage call, no report, the challenged record kept."""
     from defender.hooks.budget_enforcer import BudgetKill
     from defender.investigation import driver
     from defender.records import session_store
@@ -364,7 +376,9 @@ def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
 
 
 def test_disposition_threaded_seams(tmp_path):
-    """`composer_projection` accepts the reviewed disposition and renders a different host sentence for..."""
+    """`composer_projection` renders a different host sentence per reviewed disposition, and
+    the gate keeps the disposition when the review holds and forces `unresolved` when it routes
+    or fails."""
     from defender.investigation import challenge_gate
     from defender.investigation.review.projector import composer_projection, parse_investigation
 

@@ -61,13 +61,12 @@ class Captured:
 
 
 def _run_copy_stage(mount: dict) -> Path | None:
-    """#1108 P4 (U9, O-A): the run copy's `stage/` — `agent/` plus one token — is the one
-    other read-only content outside the model roots a run's box carries by design (the token is
-    read back at startup; `/agent` resolves into `stage/agent/`). Whether it is bound as one
-    mount or several (`stage/agent/` and the token apart) is the implementer's choice, so a
-    mount belongs to it when its source is `<T>/run-knowledge/<run id>/stage` or anything below
-    it — where the design's data model puts it (the copy is gone once the run ends, so its shape
-    cannot be read afterwards). Returns that `stage/` path, or `None`."""
+    """The run copy's `stage/` (`agent/` plus one token) is the one other read-only content
+    outside the model roots a run's box carries (the token is read back at startup; `/agent`
+    resolves into `stage/agent/`). It may be bound whole or as `stage/agent/` and the token
+    apart, so a mount belongs to it when its source is `<T>/run-knowledge/<run id>/stage` or
+    below — matched by path, since the copy is gone once the run ends. Returns that `stage/`
+    path, or `None`."""
     source = Path(mount["source"])
     for stage in (source, *source.parents):
         if stage.name == "stage" and stage.parent.parent.name == "run-knowledge":
@@ -92,7 +91,7 @@ def _stage_mount_kind(mount: dict, stage: Path) -> str | None:
 def _clock_candidates(docker: RecordingDocker) -> list[dict]:
     """Read-only mounts outside the model roots, the run copy's `stage/` aside; only the clock
     belongs there. The mounts set aside are only the copy's agent and token mounts — each kind
-    at most once, each read-only (U9)."""
+    at most once, each read-only."""
     candidates, kinds = [], []
     for m in docker.mounts():
         stage = _run_copy_stage(m)

@@ -29,7 +29,8 @@ def test_fails_closed_on_corrupt_json(tmp_path, bad):
 
 
 def test_fallback_denylist_is_not_weaker_than_the_committed_one():
-    """The fail-closed net must actually be a net. The fallback DUPLICATES the JSON's strings on purpose (a..."""
+    """The fallback duplicates the JSON's strings on purpose (it serves when the JSON cannot be
+    read), so it must hold every committed entry."""
     fb = bash_policy._FALLBACK_POLICY["read_deny"]
     assert set(bash_policy.read_deny_substrings()) <= set(fb["substrings"])
     assert set(bash_policy.read_deny_dirs()) <= set(fb["dirs"])

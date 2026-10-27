@@ -65,7 +65,7 @@ def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     T.plant_roster(ep)
     lifecycle = _Lifecycle()
-    # #1108 P4 (OD14, O11): run.main handed the in-process launch-time publish.
+    # run.main handed the in-process launch-time publish.
     rc = RunWithPublish(T.mod("run")).main(
         ["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", world],
         lifecycle=lifecycle, visualize=lambda *_a, **_k: None,

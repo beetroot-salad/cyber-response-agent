@@ -79,8 +79,8 @@ def test_settings_faults_name_no_host_path(tmp_path):
         "elastic key": str(_raised(elastic_adapter.query, ctx, native_query="*")),
         "no folder": str(_raised(transport.system_entry, ctx, "no-such-system")),
     }
-    # The unreadable case-history mapping is no longer a stored fault: the one tenant check
-    # refuses the folder (#1222 A5), naming the file by its settings-relative path.
+    # An unreadable case-history mapping is refused by the tenant check (#1222), which names
+    # the file by its settings-relative path.
     from defender.records._tenant_id import TenantRefused
 
     bad_root, bad_folder = _tenant(tmp_path, "pth2")
@@ -155,7 +155,7 @@ def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_pat
     from defender.investigation import ticket_writer
     from defender.presentation import visualize_run
 
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    # A run folder's name is its UUID run id.
     run_dir = tmp_path / "runs" / fixture_uuid("run-1")
     run_dir.mkdir(parents=True)
     path = S.receipt_path(run_dir)

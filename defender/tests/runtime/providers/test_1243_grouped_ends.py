@@ -37,7 +37,7 @@ def _assert_fired_a_group(fault: P.Recorded, *, holding_provider_down: bool) -> 
     if holding_provider_down:
         assert P.carries(group, P.provider_down_cls()), group
     else:
-        # Read without the coined class, so a control stands on today's code alone.
+        # Read without `ProviderDown`, so the control does not lean on the class it controls for.
         assert all(isinstance(leaf, (RuntimeError, ValueError)) for leaf in _leaves(group)), group
     return group
 
@@ -60,10 +60,9 @@ def _assert_not_provider_down(d: S.Drive, stores: list) -> None:
 
 
 def _assert_escaped_as_itself(d: S.Drive, group: BaseException) -> None:
-    """Today's behaviour at MAIN's loop for a group with no `ProviderDown` (and no
-    `CallRecordWriteFailed`): `_drive_agent` re-raises it and the run crashes on it. The
-    failures it carries still escape, none dropped or relabelled. Object identity of the group
-    is not pinned; its member failures' identity is."""
+    """MAIN's loop on a group with no `ProviderDown` (and no `CallRecordWriteFailed`):
+    `_drive_agent` re-raises it and the run crashes on it, every failure it carries escaping,
+    none dropped or relabelled. The members' identity is pinned, not the group's."""
     assert d.raised is not None, (
         "a group holding no ProviderDown was swallowed: the run did not crash on it "
         f"(summary {d.summary!r})")

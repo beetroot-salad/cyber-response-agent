@@ -1,6 +1,5 @@
-"""Shared machinery for #1243 part 1's contract — "one retrier for temporary provider failures; a
-provider that stays down ends the run by name". NO test functions; underscore-prefixed so pytest
-never collects it."""
+"""Shared machinery for #1243: one retrier for temporary provider failures, and a provider that
+stays down ends the run by name. No test functions (underscore-prefixed, never collected)."""
 from __future__ import annotations
 
 import asyncio
@@ -22,20 +21,19 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 mod = S.mod
 sym = S.sym
 
-#: The design's literal run-end value (O3, O5) and run.py's exit for it (D4).
+#: The run-end value for a provider that stays down, and run.py's exit for it.
 PROVIDER_DOWN = "provider-down"
 PROVIDER_DOWN_EXIT = 4
 #: The exits run.py already uses (0 ok, 2 preflight refusal, 3 unservable sibling).
 TAKEN_EXITS = frozenset({0, 2, 3})
-#: O1's bounds: 4 wire attempts at most; no attempt starts once this long has passed since the
-#: first attempt began.
+#: The retrier's bounds: 4 wire attempts at most; no attempt starts once this long has passed
+#: since the first attempt began.
 MAX_ATTEMPTS = 4
 WINDOW_S = 600.0
 
-#: O1's temporary statuses, and statuses that are not (O2: part 2 owns 4xx). O1 says ">=500",
-#: not a list: unlisted 5xx (501, 505, 507, 599) are in, so a retrier keyed on a set of named
-#: statuses fails; O2 says "all other 4xx", so unlisted 4xx (402, 405, 410, 418, 451) are in
-#: the other list, and a retrier keyed on a denylist of named 4xx fails.
+#: Temporary statuses, and statuses that are not. The rule is ">=500" (plus 408/409/429), not a
+#: list: unlisted 5xx (501, 505, 507, 599) are in, so a retrier keyed on named statuses fails;
+#: every other 4xx (402, 405, 410, 418, 451 included) is out, so a 4xx denylist fails too.
 RETRIED_STATUSES = (408, 409, 429, 500, 501, 502, 503, 504, 505, 507, 529, 599)
 NOT_RETRIED_STATUSES = (400, 401, 402, 403, 404, 405, 410, 413, 418, 422, 451)
 
@@ -43,7 +41,7 @@ L3 = S.L3
 
 
 # =================================================================================================
-# The coined surfaces, reached per test
+# The production surfaces, resolved per test
 # =================================================================================================
 
 def providers() -> Any:
@@ -74,7 +72,7 @@ def retry_policy(*, sleep: Any = None, clock: Any = None, jitter: Any = None) ->
 
 
 # =================================================================================================
-# Faults (C1, C17, PA-15)
+# Faults
 # =================================================================================================
 
 def http_error(status: int, model: str = "fake", *, retry_after: str | None = None) -> BaseException:
@@ -86,7 +84,7 @@ def http_error(status: int, model: str = "fake", *, retry_after: str | None = No
 
 
 def no_response(model: str = "fake") -> BaseException:
-    """A request that got no response (a timeout): `ModelAPIError` with no status (PA-15)."""
+    """A request that got no response (a timeout): `ModelAPIError` with no status."""
     return S.provider_timeout(model)
 
 
@@ -98,8 +96,8 @@ def connection_error(model: str = "fake") -> BaseException:
 
 def server_disconnected(model: str = "fake") -> BaseException:
     """No response, in words the suite never otherwise uses (httpx's own text for a peer that
-    closed the connection): the design classifies by "status code or its absence; body text
-    never parsed", so this is exactly as temporary as a timeout."""
+    closed the connection): the retrier classifies by status code or its absence, never by body
+    text, so this is exactly as temporary as a timeout."""
     from pydantic_ai.exceptions import ModelAPIError
 
     return ModelAPIError(model, "Server disconnected without sending a response.")
@@ -116,7 +114,7 @@ Fault = Callable[[], BaseException]
 
 
 # =================================================================================================
-# Faults inside exception groups (D6: the human's ruling after code review)
+# Faults inside exception groups
 # =================================================================================================
 
 #: The message every group this suite builds carries — the words pydantic-ai/anyio-style bundling
@@ -131,13 +129,13 @@ def exception_group(*members: Fault) -> Fault:
 
 
 def ordinary_error(detail: str = "a sibling tool task broke") -> Fault:
-    """A non-provider failure for a group's other member (O2: never a provider end)."""
+    """A non-provider failure for a group's other member (never a provider end)."""
     return lambda: RuntimeError(detail)
 
 
 #: The grouped shapes a `ProviderDown` can arrive in, keyed by test id. `flat`: the group holds
 #: it alone; `nested`: a group inside a group holds it (a one-level peel misses it); `mixed`:
-#: a group holding an ordinary error FIRST and it second (a reader of `exceptions[0]`, or an
+#: a group holding an ordinary error FIRST and it second (a reader of `exceptions[0]`, or a
 #: peel of one-member groups only, misses it). A group with NO `ProviderDown` is the control
 #: (`GROUPED_WITHOUT_PROVIDER_DOWN`).
 GROUPED_PROVIDER_DOWN: dict[str, Callable[[Fault], Fault]] = {
@@ -154,8 +152,8 @@ GROUPED_WITHOUT_PROVIDER_DOWN: dict[str, Fault] = {
 class Recorded:
     """A fault that keeps every exception it put on the model's path (`raised`), so a test can
     assert the fault actually fired, in the shape it claims, and compare identity with what
-    escaped. A fault that could not even be built (a coined class missing) is recorded as the
-    error building it raised, which is then what the model raises."""
+    escaped. A fault that cannot be built is recorded as the error building it raised, which is
+    then what the model raises."""
 
     def __init__(self, fault: Fault) -> None:
         self.fault = fault
@@ -398,7 +396,7 @@ _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 def numbers_besides(message: str, *, status: int | None = None, spelled: Iterable[str] = ()) -> list[float]:
     """The numbers a retry line carries besides the ones it names for other reasons: `status`
     (removed only as a whole number, so a wait such as `5.03` survives) and every string in
-    `spelled` (the model name, `n/4`). What is left holds the wait (coined: in seconds)."""
+    `spelled` (the model name, `n/4`). What is left holds the wait (in seconds)."""
     text = message
     for s in spelled:
         if s:
@@ -424,8 +422,8 @@ def sessions(store_path: Path) -> dict[str, str | None]:
 
 
 def session_rows(store_path: Path) -> dict[str, list[tuple[str, str | None]]]:
-    """agent_id -> its stored messages as `(kind, tool_name)` in order — the "one set of store
-    rows" channel (P3): a run whose request was retried stores what a clean run stores."""
+    """agent_id -> its stored messages as `(kind, tool_name)` in order: a run whose request was
+    retried stores what a clean run stores."""
     con = sqlite3.connect(str(store_path))
     try:
         rows = con.execute(
@@ -456,7 +454,7 @@ def sidecar(run_dir: Path) -> dict[str, Any] | None:
 
 
 def wire_responses(run_dir: Path, agent_id: str) -> list[dict[str, Any]]:
-    """The wire log's response records for one agent — one per request the run made (P3)."""
+    """The wire log's response records for one agent — one per request the run made."""
     from defender._io import read_jsonl_rows
 
     path = RunPaths(run_dir).wire_log
@@ -477,8 +475,8 @@ def trace_rows(run_dir: Path, role: str) -> list[dict[str, Any]]:
 
 
 def assert_ended_provider_down(d: S.Drive, *, rc: bool = True) -> None:
-    """The run ended `provider-down` through a run-level end (O3): no crash, the summary and the
-    run-end record name the class, the exit reason says so, no report.md (O4), exit 4 (D4)."""
+    """The run ended `provider-down` through a run-level end: no crash, the summary and the
+    run-end record name the class, the exit reason says so, no report.md, exit 4."""
     assert d.raised is None, f"the run crashed instead of ending provider-down: {d.raised!r}"
     summary = d.summary or {}
     assert summary.get("truncated_by") == PROVIDER_DOWN, (
@@ -498,7 +496,7 @@ def assert_ended_provider_down(d: S.Drive, *, rc: bool = True) -> None:
 
 
 # =================================================================================================
-# A local fake provider over real HTTP (P1: the real builders, the real client libraries)
+# A local fake provider over real HTTP, reached by the real builders and client libraries
 # =================================================================================================
 
 ANTHROPIC_OK = {
@@ -582,10 +580,9 @@ class RefusingProxy:
     (`hits`, the target) and answered 502, so a client sent through it (`HTTPS_PROXY`) gets no
     response from the provider at all — a connection error — and nothing leaves the host.
 
-    The channel for the OpenAI-compatible provider's REAL base URL, which the builder hard-codes
+    The channel for the OpenAI-compatible provider's real base URL, which the builder hard-codes
     (https, so it cannot be pointed at `FakeProvider`): the client libraries read the proxy
-    from the environment when the builder constructs them (C1 probe: today's Fireworks client
-    makes 3 tunnels through it)."""
+    from the environment when the builder constructs them."""
 
     def __init__(self) -> None:
         self.hits: list[str] = []

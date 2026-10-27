@@ -1,4 +1,4 @@
-"""#1165 O1/O4/O7: fork reads belong to the opened source Run."""
+"""#1165: fork reads belong to the opened source Run."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -62,7 +62,7 @@ def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_
 
 
 def test_missing_alert_fallback_replaces_a_stale_record_through_target_run(tmp_path):
-    """O2/O7: legacy missing-alert fallback replaces an existing stale input record."""
+    """The missing-alert fallback replaces an existing stale input record."""
     store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
     plant_alert(source.run_dir, b'{"id":"source"}\n')
     plant_alert(target.run_dir, b'{"id":"stale"}\n')
@@ -137,7 +137,7 @@ def test_recognized_source_payload_refusal_still_fails_fork(tmp_path, kind):
 
 
 def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_its_fault(tmp_path):
-    """O1: the driver store factory reads the source session pointer through source Run."""
+    """The driver store factory reads the source session pointer through the source Run."""
     store, spec, source, _target, _state, source_io, _target_io = source_and_sibling(tmp_path)
     store.close()
     factory = branch.store_factory_for(spec, source_run=source)

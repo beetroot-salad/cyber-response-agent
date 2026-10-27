@@ -30,7 +30,7 @@ _BUDGET_KEYS = {"run_id", "tool_calls", "subagent_spawns", "created_at", "starte
 
 
 def _run_dir(root: Path, name: str = "run") -> Path:
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(name)
+    # A run folder is named by its UUID run id.
     run_dir = root / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     return run_dir
@@ -212,7 +212,8 @@ def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_ta
 
 
 def test_every_state_has_a_clock_whose_credit_is_its_own(tmp_path):
-    """R6."""
+    """The oracle clock lives in the state alone: a new state with a reused run id starts at
+    zero, and nothing is written to disk."""
     run_dir = _run_dir(tmp_path / "runs")
     before = _tree(tmp_path)
     first = RunState(run_dir, "reused-id")
