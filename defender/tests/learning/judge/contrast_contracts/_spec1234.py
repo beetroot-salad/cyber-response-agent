@@ -301,8 +301,6 @@ FakeGitShow = J.FakeGitShow
 refusals = J.refusals
 read_jsonl = S24.read_jsonl
 strings_in = S24.strings_in
-grep_shipped = S24.grep_shipped
-shipped_python = S24.shipped_python
 source_text = S24.source_text
 query_params = S24.query_params
 canonical = S24.canonical
@@ -1591,44 +1589,7 @@ def capture_sentinel(src: Path, *, system: str = "edr", verb: str = "lookup",  #
         fh.write(json.dumps(out) + "\n")
 
 
-class Routed:
-    """A model double that hands each request to the scripted double whose MARKER the request's
-    inbound text carries (`last_wins`: the marker occurring last). It injects nothing: an
-    unmatched request goes to `default`, else is answered text-only and recorded in `unrouted`
-    (assert it empty)."""
-
-    __name__ = "Routed"
-
-    def __init__(self, routes: Mapping[str, Any], *, default: Any = None, name: str = "routed",
-                 last_wins: bool = False) -> None:
-        self.routes = dict(routes)
-        self.default = default
-        self.name = name
-        self.last_wins = last_wins
-        self.unrouted: list[str] = []
-        self._lock = threading.Lock()
-        self._model: Any = None
-
-    @property
-    def model(self) -> Any:
-        if self._model is None:
-            from pydantic_ai.models.function import FunctionModel
-            self._model = FunctionModel(self, model_name=S24.double_model_name(self.name))
-        return self._model
-
-    def __call__(self, messages: list[Any], info: Any) -> Any:
-        text = S24._messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
-        hits = [double for m, double in self.routes.items() if m in text]
-        if len(hits) > 1 and self.last_wins:
-            hits = [self.routes[max(self.routes, key=text.rfind)]]
-        if len(hits) == 1:
-            return hits[0](messages, info)
-        if not hits and self.default is not None:
-            return self.default(messages, info)
-        with self._lock:
-            self.unrouted.append(text)
-        from pydantic_ai.messages import ModelResponse, TextPart
-        return ModelResponse(parts=[TextPart(content="(no scripted double for this request)")])
+Routed = S24.Routed
 
 
 def passing_oracle() -> Any:

@@ -19,6 +19,7 @@ from defender.learning.leads.path_validation import (
     _is_schema_md,
 )
 from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.runtime.engine._declared869 import AGENT_NESTED_MARKER_RELS
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 NON_SYSTEMS = ("advisory", "connect", "gather", "handbook", "invlang", "judge")
@@ -27,13 +28,6 @@ DECLARED = frozenset({"elastic", "cmdb"})
 
 #: The repo-relative spelling of the catalog.
 CATALOG_REL = "agent/skills/gather/queries/"
-#: The two nested `execution.md` addresses (`_declared869.NESTED_MARKER_RELS`), as the draft
-#: spells them.
-NESTED_MARKER_RELS = (
-    "agent/skills/elastic/_draft/mcpsys/execution.md",
-    "agent/skills/gather/queries/elastic/mcpsys/execution.md",
-)
-
 #: The fixture tenant's committed catalog (made-up content, `knowledge/tenant-fixture/agent/`).
 FIXTURE_CATALOG = FIXTURE_AGENT / "skills" / "gather" / "queries"
 #: The fixture tenant's declared systems: `cmdb` (its system skill, marker and catalog folder)
@@ -204,7 +198,7 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
                                              tree_for=_tree_for(lane)) is None
 
     assert not _is_in_scope("agent/skills/elastic/execution.md")
-    nested_forms = (*NESTED_MARKER_RELS, "agent/skills/gather/queries/elastic/execution.md")
+    nested_forms = (*AGENT_NESTED_MARKER_RELS, "agent/skills/gather/queries/elastic/execution.md")
     for nested in nested_forms:
         assert _is_in_scope(nested), f"{nested} left scope; this composition has moved"
 
@@ -222,7 +216,7 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
     # And through the composed gate on the NESTED form: the file lands in the draft and the
     # claim still commits nothing.
     nested_lane = _gate_lane(tmp_path)
-    nested = _write(nested_lane, NESTED_MARKER_RELS[0], "# mcpsys\n")
+    nested = _write(nested_lane, AGENT_NESTED_MARKER_RELS[0], "# mcpsys\n")
     assert nested.is_file(), "the refusal is the gate's, not the filesystem's"
     with pytest.raises(LeadAuthorError):
         _composed(nested_lane)

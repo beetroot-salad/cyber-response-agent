@@ -4,33 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from defender.tests.support.learning.curation import _curator1134 as C
-
-
-# The lessons author over a git-free batch draft; `cfg` (`_curator1134.draft_author_cfg`) is
-# built on first use.
-class _DraftRepo:
-    def __init__(self, lane):
-        from defender.learning.author.lessons import run as author_mod
-
-        self.lane = lane
-        self.author = author_mod
-        self.paths = lane.paths
-        self.lessons_dir = lane.lessons_dir
-        self.state = C.open_state(lane.paths)
-        self._cfg = None
-
-    @property
-    def cfg(self):
-        if self._cfg is None:
-            self._cfg = C.draft_author_cfg(self.lane, state=self.state)
-        return self._cfg
+from defender.tests.support.learning.curation._author_draft import DraftRepo
 
 
 @pytest.fixture
 def draft_repo(tmp_path):
     """The fixture tenant's batch draft (lanes `lessons`, `lessons-questioner`) and its author."""
-    return _DraftRepo(C.draft_lane(tmp_path))
+    return DraftRepo.over(tmp_path)
 
 
 def test_existing_finding_ids_handles_empty_dir(draft_repo):

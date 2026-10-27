@@ -191,7 +191,7 @@ def _lessons_frontier():
 
 # corpora
 
-# `_write_lesson` and `_main_deps` live in `_lessons_corpus` so a second suite can use them
+# `_write_lesson` and `_run_copy_main_deps` live in `_lessons_corpus` so a second suite can use them
 # without importing this COLLECTED module (which would load it twice in one session).
 from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
 from defender.tests.support.learning.retrieval._lessons_corpus import _run_copy_main_deps  # noqa: E402

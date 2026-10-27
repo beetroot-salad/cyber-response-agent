@@ -14,7 +14,7 @@ import pytest
 
 from defender.tests.support.learning.curation import _drain719 as h
 from defender.learning.core.state import FINDINGS, LearningState
-from defender.tests.support.learning.curation._drain719 import drain  # noqa: F401 — the target; the shim keeps collection alive
+from defender.learning.author import drain  # noqa: F401 — the target
 
 
 def _ids_in(line: str, label: str) -> str:

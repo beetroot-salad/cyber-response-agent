@@ -195,7 +195,7 @@ class _Curator:
         for name, text in self.lessons.items():
             (Path(cfg.corpus_dir) / f"{name}.md").write_text(text, encoding="utf-8")
         ids = [r["finding_id"] for r in rows]
-        return {"committed": ids, "consumed_skip": [], "held_forward_bad": [],
+        return {"committed": ids, "consumed_skip": [],
                 "commit_message": "front-door fixture lessons"}
 
     def rows(self) -> list[dict]:

@@ -69,14 +69,6 @@ CONFIG_RELPATH = "systems/case-history/config.env"
 TENANT_ID = fixture_uuid("tenant:t767")
 
 
-def require(obj: Any, name: str, why: str) -> Any:
-    """The named attribute, or a failure that says `why` it is needed instead of an
-    `AttributeError` inside a scenario about something else."""
-    got = getattr(obj, name, None)
-    assert got is not None, f"{getattr(obj, '__name__', obj)}.{name} does not exist — {why}"
-    return got
-
-
 # --------------------------------------------------------------------------------------
 # The mapping — built as data, written to a settings folder, handed in explicitly (#1106)
 # --------------------------------------------------------------------------------------

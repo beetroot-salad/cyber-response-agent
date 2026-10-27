@@ -97,16 +97,16 @@ def _failing(*, fault: S.Fault = S.CLEAN) -> S.ScriptedModel:
     return S.oracle(then=S.text_only("no served answer fits this world"), fault=fault)
 
 
-def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) -> _Routed:
+def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) -> S.Routed:
     """One world's pre-flight double: `double` answers the requests of the
     post-branch call (routed by `_MARK_POST`; `extra` maps further post-branch call markers to
     their doubles), and every pre-branch call is served unchanged (`_passing()`). No marker is
     a substring of another, and none is carried by a pre-branch call's params."""
-    return _Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name,
+    return S.Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name,
                    last_wins=True)
 
 
-def _forging_b() -> _Routed:
+def _forging_b() -> S.Routed:
     """World b's pre-flight: forge f1's telemetry, record a fact and serve the forged row on
     the POST-branch call only; every pre-branch call is served unchanged."""
     return _on_post(S.oracle(
@@ -115,53 +115,12 @@ def _forging_b() -> _Routed:
         S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")]))), name="oracle-b")
 
 
-class _Routed:
-    """A model double that hands each request to the scripted double whose MARKER the
-    request's inbound text carries (the world's fact statement, or a call's params). It
-    injects nothing of its own: an unmatched or doubly-matched request is answered text-only
-    and recorded in `unrouted`, which the scenario asserts empty. `last_wins` (call routing
-    only, never world routing) hands a request carrying several markers to the one occurring
-    LAST in its inbound text: the current call's turn, after earlier calls' turns."""
-
-    __name__ = "Routed"
-
-    def __init__(self, routes: Mapping[str, Any], *, default: Any = None,
-                 name: str = "routed", last_wins: bool = False) -> None:
-        self.routes = dict(routes)
-        self.default = default
-        self.name = name
-        self.last_wins = last_wins
-        self.unrouted: list[str] = []
-        self._lock = threading.Lock()
-        self._model: Any = None
-
-    @property
-    def model(self) -> Any:
-        if self._model is None:
-            from pydantic_ai.models.function import FunctionModel
-            self._model = FunctionModel(self, model_name=S.double_model_name(self.name))
-        return self._model
-
-    def __call__(self, messages: list[Any], info: Any) -> Any:
-        text = S._messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
-        hits = [double for marker, double in self.routes.items() if marker in text]
-        if len(hits) > 1 and self.last_wins:
-            last = max(self.routes, key=text.rfind)
-            hits = [self.routes[last]]
-        if len(hits) == 1:
-            return hits[0](messages, info)
-        if not hits and self.default is not None:
-            return self.default(messages, info)
-        with self._lock:
-            self.unrouted.append(text)
-        from pydantic_ai.messages import ModelResponse, TextPart
-        return ModelResponse(parts=[TextPart(content="(no scripted double for this request)")])
 
 
 class _Raising:
     """Answers every request by raising what the provider client raises once its own retries
     give up: `S.provider_outage(status)`, a fresh instance per request, recorded. Not a model of
-    its own: it is always wrapped by a `_Routed`, whose model carries the priced name."""
+    its own: it is always wrapped by a `S.Routed`, whose model carries the priced name."""
 
     __name__ = "Raising"
 
@@ -177,21 +136,21 @@ class _Raising:
         raise exc
 
 
-def _assert_routed(*routers: _Routed) -> None:
+def _assert_routed(*routers: S.Routed) -> None:
     """No request went unrouted, in these routers or any router nested in them (a world's
     `_on_post` double inside `_by_world`)."""
     for r in routers:
         assert not r.unrouted, (
             f"{r.name}: {len(r.unrouted)} request(s) carried no single world/call marker; "
             f"first: {r.unrouted[0][:600]!r}")
-        _assert_routed(*[d for d in (*r.routes.values(), r.default) if isinstance(d, _Routed)])
+        _assert_routed(*[d for d in (*r.routes.values(), r.default) if isinstance(d, S.Routed)])
 
 
-def _by_world(b: Any, c: Any, *, name: str = "oracle", **more: Any) -> _Routed:
+def _by_world(b: Any, c: Any, *, name: str = "oracle", **more: Any) -> S.Routed:
     routes = {_MARK_B: b, _MARK_C: c}
     if "d" in more:
         routes[_MARK_D] = more["d"]
-    return _Routed(routes, name=name)
+    return S.Routed(routes, name=name)
 
 
 def _world_arg(argv: list[str]) -> str | None:
@@ -919,7 +878,7 @@ def test_preflight_oracle_provider_is_down_for_every_world(tmp_path, status):
     """a provider outage for the whole pre-flight records `unusable` with each world's reason naming the provider failure, and starts no sibling."""
     est = S.estate(tmp_path)
     down = _Raising(status)
-    oracle = _Routed({}, default=down)
+    oracle = S.Routed({}, default=down)
     run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
 
     outcome = S.read_outcome(run.ep)
@@ -1065,7 +1024,7 @@ def test_conc_36_second_launch_while_the_first_is_running(tmp_path, episodes_roo
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls_post())
     second: dict[str, Any] = {}
-    routers: list[_Routed] = []
+    routers: list[S.Routed] = []
 
     def relaunch_once(world: str) -> None:
         if world == "a" and not second:

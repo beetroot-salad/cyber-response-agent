@@ -20,8 +20,7 @@ from defender.tests.support.learning.curation._author_draft import DraftRepo, at
 @pytest.fixture
 def tmp_repo(tmp_path: Path):
     """The real lessons tick over a batch's git-free draft (`_curator1134.draft_lane`, config
-    `draft_author_cfg`); shadows the conftest's product-shaped `tmp_repo` with the same surface
-    (`author`, `paths`, `cfg`, `state`) plus `lane`."""
+    `draft_author_cfg`): `author`, `paths`, `cfg`, `state` and `lane`."""
     return DraftRepo.over(tmp_path)
 
 

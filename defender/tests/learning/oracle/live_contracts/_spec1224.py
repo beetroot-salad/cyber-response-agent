@@ -713,6 +713,49 @@ class ScriptedModel:
         return out
 
 
+class Routed:
+    """A model double that hands each request to the scripted double whose MARKER the
+    request's inbound text carries (a world's fact statement, or a call's params). It injects
+    nothing of its own: an unmatched request goes to `default`, else (or when doubly matched) it
+    is answered text-only and recorded in `unrouted`, which the scenario asserts empty.
+    `last_wins` (call routing only, never world routing) hands a request carrying several
+    markers to the one occurring LAST in its inbound text: the current call's turn, after
+    earlier calls' turns."""
+
+    __name__ = "Routed"
+
+    def __init__(self, routes: Mapping[str, Any], *, default: Any = None,
+                 name: str = "routed", last_wins: bool = False) -> None:
+        self.routes = dict(routes)
+        self.default = default
+        self.name = name
+        self.last_wins = last_wins
+        self.unrouted: list[str] = []
+        self._lock = threading.Lock()
+        self._model: Any = None
+
+    @property
+    def model(self) -> Any:
+        if self._model is None:
+            from pydantic_ai.models.function import FunctionModel
+            self._model = FunctionModel(self, model_name=double_model_name(self.name))
+        return self._model
+
+    def __call__(self, messages: list[Any], info: Any) -> Any:
+        text = _messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
+        hits = [double for marker, double in self.routes.items() if marker in text]
+        if len(hits) > 1 and self.last_wins:
+            hits = [self.routes[max(self.routes, key=text.rfind)]]
+        if len(hits) == 1:
+            return hits[0](messages, info)
+        if not hits and self.default is not None:
+            return self.default(messages, info)
+        with self._lock:
+            self.unrouted.append(text)
+        from pydantic_ai.messages import ModelResponse, TextPart
+        return ModelResponse(parts=[TextPart(content="(no scripted double for this request)")])
+
+
 def oracle(*moves: Move, then: Move | None = None, fault: Fault = CLEAN) -> ScriptedModel:
     return ScriptedModel(*moves, then=then, fault=fault, name="oracle")
 
@@ -1350,35 +1393,8 @@ def source_text(rel: str) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
-def shipped_python(*, exclude_tests: bool = True) -> list[Path]:
-    out = []
-    for p in DEFENDER.rglob("*.py"):
-        rel = p.relative_to(DEFENDER).as_posix()
-        if exclude_tests and (rel.startswith("tests/") or rel.startswith("evals/")):
-            continue
-        if "/.venv/" in f"/{rel}" or "__pycache__" in rel:
-            continue
-        out.append(p)
-    return sorted(out)
 
 
-def grep_shipped(needle: str, *, suffixes: tuple[str, ...] = (".py",)) -> list[str]:
-    """`rel:line` for every shipped (non-test) file line containing `needle`."""
-    hits = []
-    for p in DEFENDER.rglob("*"):
-        if not p.is_file() or p.suffix not in suffixes:
-            continue
-        rel = p.relative_to(DEFENDER).as_posix()
-        if rel.startswith(("tests/", "evals/", ".venv/")) or "__pycache__" in rel:
-            continue
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        for i, line in enumerate(text.splitlines(), 1):
-            if needle in line:
-                hits.append(f"{rel}:{i}")
-    return hits
 
 
 # --------------------------------------------------------------------------------------
