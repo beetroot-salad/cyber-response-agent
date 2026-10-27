@@ -282,7 +282,7 @@ def launch_branch(src: Path, data_root: Path, **seams: Any) -> tuple[Any, BaseEx
     fakes.update(seams)
     argv = [str(src), str(t947.BRANCH_MESSAGE_ID), *t947.retired_continuation_argv()]
     try:
-        return mod("learning.branch.cli").main(argv, **fakes), None
+        return mod("cli.learning.branch").main(argv, **fakes), None
     except SystemExit as refused:
         return None, refused
 

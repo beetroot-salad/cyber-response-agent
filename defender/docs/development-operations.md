@@ -17,7 +17,7 @@ export TENANT_ID=<uuid-committed-in-the-tenant-repo>  # new tenants: mint with t
 git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"   # the tenant's settings + agent knowledge, on the host
 python3 defender/cli/tenant.py setup "$TENANT_ID"    # once, after the clone exits 0, before the first run
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
-python3 defender/learning/branch/cli.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
+python3 defender/cli/learning/branch.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
 python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
 ```

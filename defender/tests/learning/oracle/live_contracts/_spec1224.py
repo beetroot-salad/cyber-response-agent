@@ -1592,7 +1592,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         seams["oracle"] = oracle.model
     if verifier is not None:
         seams["verifier"] = verifier.model
-    cli = mod(CLI)
+    cli = mod("cli.learning.branch")
     message = ""
     # #1187 (O9): the episode lands under the launching tenant's own `<T>/episodes/`, no
     # configured root; the launcher mints its id, so it is found as the ONE new folder there.

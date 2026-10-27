@@ -18,7 +18,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anything(
         tmp_path, capsys):
-    from defender.learning.branch import cli as branch_cli
+    from defender.cli.learning import branch as branch_entry
 
     _base, src = location_path(T.runs_base)(tmp_path, pre_snapshot=True, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
     questioner = T.FakeAgent()  # no replies: a call it should never get fails loudly
@@ -33,7 +33,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
     episodes = location_path(tenant.data_root) / tenant.id / "episodes"
     before = set(episodes.glob("*"))
     try:
-        got: object = branch_cli.main(
+        got: object = branch_entry.main(
             ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
              *T.retired_continuation_argv()],
             spawn=spawn, questioner=questioner, preflight=recording_preflight,

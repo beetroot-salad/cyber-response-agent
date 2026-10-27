@@ -133,7 +133,7 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     seams.setdefault("verifier", S.passing_verifier().model)
     message = ""
     try:
-        rc = S.mod(S.CLI).main(
+        rc = S.mod("cli.learning.branch").main(
             ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID),
              *T.retired_continuation_argv(), *argv_extra],
             spawn=spawn, questioner=questioner, **seams)

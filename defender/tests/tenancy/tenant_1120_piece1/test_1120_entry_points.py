@@ -22,6 +22,7 @@ from defender.tenancy import _tenant
 from defender.records._episode_handle import Episode
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
+from defender.cli.learning import branch as branch_entry
 from defender.cli import policy_cli
 from defender.cli import tenant as tenant_py
 from defender.skills.connect import validate_scaffold
@@ -110,7 +111,7 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     seams.setdefault("preflight", T.no_preflight)
     requested = source.parent.parent.name if tenant_id is None else tenant_id
     try:
-        return branch_cli.main(
+        return branch_entry.main(
             ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID),
              *T.retired_continuation_argv()],
             spawn=spawn, **seams)

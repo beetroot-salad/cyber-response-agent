@@ -130,7 +130,7 @@ Completed run dir (alert.json + investigation.md + report.md
                    + executed_queries.jsonl + gather_raw/)
         │
         ▼
-defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>
+defender/cli/learning/branch.py --tenant <T> <run_id> <branch_message_id>
         ├── 0. refusals         — everything that can refuse before anything is spent
         ├── 1. questioner       — family.yaml: a control world + one-axis counterfactuals
         ├── 2. pre-flight       — replay the original calls through each world's oracle;

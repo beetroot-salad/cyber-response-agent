@@ -168,7 +168,7 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
         spawn = T.FakeSpawn()
         questioner = T.FakeAgent(T.declaration(T.family_doc(worlds=worlds)), *[T.declaration(w) for w in worlds[1:]])
         with pytest.raises(T.refusals()) as refused:
-            T.mod("learning.branch.cli").main(
+            T.mod("cli.learning.branch").main(
                 ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                  *T.retired_continuation_argv()],
                 spawn=spawn, preflight=_no_preflight,

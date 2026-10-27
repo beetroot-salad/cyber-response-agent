@@ -193,7 +193,7 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     """Drive the REAL `learning/branch/cli.main` over `argv`, every fake by its seam: the
     role preflight neutralised, pre-flight's oracle serving every captured call unchanged and
     its verifier passing it (so the family is accepted), the judge recording its prompts."""
-    from defender.learning.branch import cli
+    from defender.cli.learning import branch as branch_entry
 
     # The fake sibling materialises each arm at the id the launched episode's roster holds
     # (#1187), the episode named by the child's own argv.
@@ -209,7 +209,7 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     message = ""
     raised: BaseException | None = None
     try:
-        rc = cli.main(list(argv), spawn=spawn, judge=judge, questioner=questioner, **seams)
+        rc = branch_entry.main(list(argv), spawn=spawn, judge=judge, questioner=questioner, **seams)
     except SystemExit as stop:
         raised = stop
         if isinstance(stop.code, str):

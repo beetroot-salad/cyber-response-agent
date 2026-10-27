@@ -228,7 +228,7 @@ def at_branch_launch(w: World) -> Verdict:
     stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
     text = ""
     try:
-        S.mod("learning.branch.cli").main(
+        S.mod("cli.learning.branch").main(
             ["--tenant", w.planted.tenant_id, w.source_run.name,
              str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
             spawn=spawn, preflight=preflight,

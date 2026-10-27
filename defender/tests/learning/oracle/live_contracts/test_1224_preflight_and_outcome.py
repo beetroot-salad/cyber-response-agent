@@ -286,7 +286,7 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
         seams["oracle"] = oracle.model
     if verifier is not None:
         seams["verifier"] = verifier.model
-    cli = S.mod(S.CLI)
+    cli = S.mod("cli.learning.branch")
     message = ""
     root = S.tenant_episodes(src.parent.parent.name)
     already = _names(root)

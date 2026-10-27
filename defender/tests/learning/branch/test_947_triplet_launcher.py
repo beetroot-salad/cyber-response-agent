@@ -31,6 +31,11 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
+def _entry():
+    """The command entry, whose `main` supplies the real preflight and page renderer."""
+    return T.mod("cli.learning.branch")
+
+
 def _verify_family(ep_dir, plant=T.arm_run_dir, **kw):
     """`cli.verify_family` over an `Episode` opened on `ep_dir`"""
     if not (ep_dir / T.ROSTER_NAME).exists():  # once per episode (a loop may re-verify one)
@@ -87,7 +92,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     src = invalid
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
-        _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                      *T.retired_continuation_argv()],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
@@ -114,7 +119,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
         agent = T.FakeAgent()
         prepare()
         with pytest.raises(SystemExit):
-            _cli().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
+            _entry().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
                          *T.retired_continuation_argv()],
                         spawn=T.FakeSpawn(), questioner=agent,
                         preflight=S.no_preflight, live_tree=T.source_capture())
@@ -135,7 +140,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     RunPaths(src).alert.symlink_to(secret)
     agent = T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
     with pytest.raises(T.refusals()) as refusal:
-        _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                      *T.retired_continuation_argv()],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
