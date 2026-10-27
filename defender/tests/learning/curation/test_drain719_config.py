@@ -295,7 +295,7 @@ def test_1186_tenant_state_requires_a_real_learning_directory(
 ):
     """O1/O4/O6: opening tenant state refuses root links, including with stored paths."""
     from defender.learning.core.state import StateRefused
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 

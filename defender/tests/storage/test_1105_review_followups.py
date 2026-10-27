@@ -147,7 +147,7 @@ def _family_doc(episode_id: str, label: str) -> dict:
 def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
     """A hold failure other than a link says what the hold said (here: the name is too long),
     not 'it is a link … or not a directory'."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     with pytest.raises(TenantRefused) as refused:
         R.hold_runs_folder(tmp_path / ("x" * 300), create=True)
     assert "link" not in str(refused.value), str(refused.value)
@@ -160,7 +160,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
 
     #1279 (A3): run setup takes no id, so it reaches its runs folder with the id it mints."""
     from defender import run_common
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     t = H.tenant(tmp_path / "data")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -201,7 +201,7 @@ def test_a_long_printable_path_keeps_its_file_name_when_cut():
 def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_path):
     """An ancestor that is a symlink loop or a file is reported as the hold's own reason, not
     as 'the runs folder is a link' or 'is not a directory'."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     loop = tmp_path / "loop"
     os.symlink(loop, loop)
     plain = tmp_path / "plain"
@@ -217,7 +217,7 @@ def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_pa
 def test_creating_a_runs_folder_under_a_dangling_ancestor_is_a_refusal(tmp_path):
     """With `create`, nothing but a refusal leaves the hold: a dangling ancestor makes the
     create fail, which is `TenantRefused`, not a raw `FileNotFoundError` run.py cannot catch."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
     os.symlink(tmp_path / "nowhere", tmp_path / "dangling")
     with pytest.raises(TenantRefused):
         R.hold_runs_folder(tmp_path / "dangling" / "runs", create=True)

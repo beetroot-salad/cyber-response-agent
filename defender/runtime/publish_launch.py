@@ -35,12 +35,8 @@ from defender.box import provider_scrubbed_environ
 from defender.runtime import run_knowledge
 from defender.tenancy._exports import knowledge_lock_holder
 from defender.tenancy._publish_status import STALE_TRANSIENT, record_report
-from defender.tenancy._tenant import (
-    Tenant,
-    TenantRefused,
-    data_root_from_path,
-    requested_tenant,
-)
+from defender.tenancy._tenant import Tenant, data_root_from_path, requested_tenant
+from defender.records._tenant_id import TenantRefused
 
 #: The real child's process entry, named (never imported: P-3).
 CHILD_MODULE = "defender.learning.author.version_control.publish_child"

@@ -30,13 +30,8 @@ from types import FrameType
 from typing import TYPE_CHECKING
 
 from defender._text import one_line
-from defender.tenancy._tenant import (
-    Tenant,
-    TenantRefused,
-    data_root_from_path,
-    read_forge_binding,
-    requested_tenant,
-)
+from defender.tenancy._tenant import Tenant, data_root_from_path, read_forge_binding, requested_tenant
+from defender.records._tenant_id import TenantRefused
 
 from .auth import ForgejoIdentity
 from .exports import _pointed_at, publish_locked, tenant_lock

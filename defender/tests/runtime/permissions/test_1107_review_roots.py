@@ -81,7 +81,7 @@ def test_settings_faults_name_no_host_path(tmp_path):
     }
     # The unreadable case-history mapping is no longer a stored fault: the one tenant check
     # refuses the folder (#1222 A5), naming the file by its settings-relative path.
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
 
     bad_root, bad_folder = _tenant(tmp_path, "pth2")
     S.mapping_path(bad_folder).write_text("- not\n- a mapping\n", encoding="utf-8")

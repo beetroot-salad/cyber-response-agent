@@ -38,7 +38,8 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.tenancy._tenant import TenantRefused, requested_tenant, resolve_data_root
+from defender.tenancy._tenant import requested_tenant, resolve_data_root
+from defender.records._tenant_id import TenantRefused
 
 
 def main(argv: list[str]) -> int:

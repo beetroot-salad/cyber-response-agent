@@ -85,6 +85,7 @@ from defender._first_party_key import (  # noqa: E402,F401
     _read_env_key,
     resolve_first_party_key,
 )
+from defender.records._tenant_id import TenantRefused
 
 _logger = logging.getLogger(__name__)
 
@@ -572,7 +573,7 @@ def _copy_knowledge(tenant: _tenant.Tenant, source: run_knowledge.KnowledgeSourc
         sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
     try:
         _tenant.check_run_settings(copy.settings)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         copy.remove()
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     return copy
@@ -590,7 +591,7 @@ def _early_run(ns: argparse.Namespace, accepted: _tenant.Tenant, world: Any,
         if world is not None:
             return episode_runs.create(episode_runs.arm_id(world.world_id))
         return accepted.runs_repository().create()
-    except (RunRefused, _tenant.TenantRefused) as refused:
+    except (RunRefused, TenantRefused) as refused:
         where = f"--episode {ns.episode}: " if world is not None else ""
         sys.exit(f"[run.py] {where}{refused}")
 
@@ -747,7 +748,7 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     try:
         run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
                                    settings=settings, knowledge=knowledge)
-    except _tenant.TenantRefused as refusal:
+    except TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
 
@@ -758,7 +759,7 @@ def _request_data_root(ns: argparse.Namespace) -> DataRoot:
     try:
         _tenant.requested_tenant_id(ns.tenant)
         return _tenant.resolve_data_root()
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
@@ -778,7 +779,7 @@ def _accept_request_tenant(
         return _tenant.accept_tenant(
             data_root, tenant_id, defender_dir=DEFENDER_DIR, box_mounted=box_mounted,
             clone_tree=False)
-    except _tenant.TenantRefused as refused:
+    except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
@@ -794,7 +795,7 @@ def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> tuple[R
 
     try:
         return (_tenant.box_mounted_arm_container(data_root, ns.tenant, ns.episode),)
-    except (EpisodeRefused, _tenant.TenantRefused) as refused:
+    except (EpisodeRefused, TenantRefused) as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
 
 
@@ -812,7 +813,7 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
 
     try:
         return accepted.runs_repository().episode(ns.episode, require_roster=True)
-    except (_tenant.TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
+    except (TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
 

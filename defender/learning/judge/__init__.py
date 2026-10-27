@@ -36,6 +36,7 @@ from defender import _yaml
 
 if TYPE_CHECKING:
     from defender.records import RunsRepository
+    from defender.tenancy._tenant import Tenant
 
 _logger = logging.getLogger(__name__)
 
@@ -302,7 +303,7 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
 
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
-    runs: RunsRepository, episode_id: str, *, judge: Any = None,
+    runs: RunsRepository[Tenant], episode_id: str, *, judge: Any = None,
     state: LearningState, draws: int | None = None, git_show: Any = None,
 ) -> EpisodeGrade:
     """Grade episode `episode_id` of `runs`'s tenant (#1105 PR 2: the judge takes the
@@ -334,10 +335,10 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
         raise JudgeRefused(f"episode {episode_id}: {bad!r}") from bad
 
 
-def _open_episode(runs: RunsRepository, episode_id: str) -> Episode:
+def _open_episode(runs: RunsRepository[Tenant], episode_id: str) -> Episode:
     """The pass's one handle, through the judge's door. A missing episode is refused, never
     recreated by the not-graded stamp."""
-    from defender.tenancy._tenant import TenantRefused
+    from defender.records._tenant_id import TenantRefused
 
     try:
         return runs.episode_files(episode_id)

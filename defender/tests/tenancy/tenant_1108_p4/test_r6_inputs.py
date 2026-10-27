@@ -20,6 +20,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
     git,
     push_to_remote,
 )
+from defender.records._tenant_id import TenantRefused
 
 OID = "0123456789abcdef0123456789abcdef01234567"
 
@@ -80,7 +81,7 @@ def test_r6_a_forge_binding_with_an_empty_or_non_string_field_is_refused(p4_tena
     row = json.loads(path.read_text(encoding="utf-8"))
     row["forge"][field] = bad
     path.write_text(json.dumps(row), encoding="utf-8")
-    with pytest.raises(_tenant.TenantRefused):
+    with pytest.raises(TenantRefused):
         _tenant.read_forge_binding(p4_tenant.tenant)
 
 
@@ -95,7 +96,7 @@ def test_r6_a_forge_binding_naming_a_relative_issuer_config_is_refused(p4_tenant
     row = json.loads(path.read_text(encoding="utf-8"))
     row["forge"]["issuer_config"] = "playground-issuer/client/issuer.json"
     path.write_text(json.dumps(row), encoding="utf-8")
-    with pytest.raises(_tenant.TenantRefused, match="relative issuer_config"):
+    with pytest.raises(TenantRefused, match="relative issuer_config"):
         _tenant.read_forge_binding(p4_tenant.tenant)
 
 
