@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 — re-exported vocabulary
-    AS_OF,
-    BRANCH_MESSAGE_ID,
     CLEAN,
     EPISODE_ID,
     EPISODES_BASE_ENV,
@@ -24,7 +22,6 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
     archived_world,
     assert_wrapped_untrusted,
     base_capture,
-    capture_call,
     captured_row,
     current_tenant,
     episode,
@@ -41,13 +38,9 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
     world_doc,
     fixture_world_id,
     world_id,
-    write_family,
 )
 
 from defender.tests.support.storage._alert_plant import plant_alert, plant_source_copy  # noqa: E402
-#: `request_key` (one question's canonical identity) is re-exported so a fixture planting a
-#: recorded key mints it as the recorder does, not by a `json.dumps` that matches by dict-order luck.
-from defender.learning.branch.ledger import request_key  # noqa: E402
 from defender import _yaml
 
 #: The system the fixtures' worlds query and the default reply blames. One of
@@ -80,13 +73,6 @@ CALL_ID = "call_id"
 #: (`family.read_world`). The judge model, not these facts, decides each world's bucket.
 PER_WORLD_FACTS = ("verdict", "resolution_moved", "malformed_rows", "served_nothing")
 
-#: The DEFENDER-lane row's fifteen keys (`enqueue.build_finding_row`).
-ROW_KEYS = (
-    "schema_version", "finding_id", "run_id", "alert_rule_key", "direction", "subject", "type",
-    "subject_anchor", "subject_topic", "finding", "citations", "source_run_dir",
-    "contrast_evidence", "on_verdict_path", "world_label_doubted",
-)
-
 
 # --------------------------------------------------------------------------------------
 # The served ledger, as rows on disk.
@@ -115,14 +101,9 @@ def ledger_row(*, source: str, system: str = HOLDING_SYSTEM, verb: str = "esql",
     return row
 
 
-def oracle_row(world_label: str = "b", *, scope_ok: bool = True) -> dict:
-    """An `oracle` row: world `world_label`'s live oracle answered this call.
-
-    `scope_ok=False` drops the window and scope key from the asked params, the shape of a query
-    that did not discriminate.
-    """
-    asked = {"index": EVENTS_PATTERN, "window": "24h", "scope_key": "host.name"}
-    params = asked if scope_ok else {"index": EVENTS_PATTERN}
+def oracle_row(world_label: str = "b") -> dict:
+    """An `oracle` row: world `world_label`'s live oracle answered this call."""
+    params = {"index": EVENTS_PATTERN, "window": "24h", "scope_key": "host.name"}
     return ledger_row(source="oracle", world_label=world_label, params=params)
 
 
@@ -187,29 +168,6 @@ def read_call_join(world_dir: Path) -> list[dict]:
 # --------------------------------------------------------------------------------------
 # The episode.
 # --------------------------------------------------------------------------------------
-
-
-def review_record(episode_dir: Path, *, outcome: str = "accepted",
-                  decision: str = "accepted", reason: str | None = None,
-                  worlds: dict | None = None) -> Path:
-    """A pre-oracle `review.yaml` (the retired replay review's record), planted to pin that an
-    old archive's review record is not read as an outcome; that is pre-flight's `outcome.yaml`
-    (`outcome_record`)."""
-
-    ep = Path(episode_dir)
-    doc = {
-        "episode": {
-            "episode_id": EPISODE_ID,
-            "decision": decision,
-            "outcome": outcome,
-            "reason": reason,
-            "unreadable_capture_rows": 0,
-        },
-        "worlds": worlds if worlds is not None else {},
-    }
-    path = ep / "review.yaml"
-    path.write_text(_yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
-    return path
 
 
 def comparable_family_stamp(episode_dir: Path, *, commit: str = "deadbee") -> Path | None:
@@ -565,22 +523,18 @@ def finding_doc(*, bucket: str = "lead-set", subject: str = "defender",  # noqa:
                 root_cause: str = "the lead was set and never revisited",
                 anchor: str = "l-001", topic: str = "holding-system coverage",
                 evidence: list[str] | None = None,
-                discriminator_related: bool = True,
-                systems: list[str] | None = None,
-                on_verdict_path: bool = True) -> dict:
+                systems: list[str] | None = None) -> dict:
     """One filed finding, tagged with its `subject` for `reply_doc`.
 
     `subject: "defender"` (the default) is an investigator finding: `evidence` fills its
     `contrast_evidence` (default `DEFAULT_CONTRAST`). `subject: "world"` is a world finding:
     `evidence` (default `DEFAULT_WORLD_EVIDENCE`) and `systems` (default `[HOLDING_SYSTEM]`).
-    `anchor` and `topic` fill `subject_anchor` / `subject_topic`. `discriminator_related` is
-    accepted for its callers and written nowhere: the finding has no such field."""
-    del discriminator_related
+    `anchor` and `topic` fill `subject_anchor` / `subject_topic`."""
     doc: dict[str, Any] = {SUBJECT: subject, "bucket": bucket, "claim": claim,
                            "root_cause": root_cause, "anchor": anchor, "topic": topic}
     if subject == "defender":
         doc["contrast_evidence"] = list(evidence if evidence is not None else DEFAULT_CONTRAST)
-        doc["on_verdict_path"] = on_verdict_path
+        doc["on_verdict_path"] = True
     else:
         doc["systems"] = list(systems) if systems is not None else [HOLDING_SYSTEM]
         doc["evidence"] = list(evidence if evidence is not None else DEFAULT_WORLD_EVIDENCE)
@@ -738,15 +692,9 @@ class FakeSibling:
     """The launcher's process seam (`spawn=`), standing in for a sibling that RAN."""
 
     def __init__(self, *, data_root: Path | None = None, exits: dict[str, int] | None = None,
-                 ledgers: dict[str, list[dict]] | None = None,
-                 dispositions: dict[str, str] | None = None,
-                 scrub_ran: bool = True, commit: str | None = "deadbee",
-                 knowledge: Any = _STAMP_DEFAULT) -> None:
+                 commit: str | None = "deadbee", knowledge: Any = _STAMP_DEFAULT) -> None:
         self.data_root = None if data_root is None else Path(data_root)
         self.exits = dict(exits or {})
-        self.ledgers = dict(ledgers or {})
-        self.dispositions = dict(dispositions or {})
-        self.scrub_ran = scrub_ran
         self.commit = commit
         # The knowledge revision each sibling's stamp carries; left out, the stamp builder's
         # default.
@@ -786,10 +734,9 @@ class FakeSibling:
             return 97
         self.episode_dir = ep
         runs = ep / "runs"
-        run_dir = sibling_run_dir(runs, label, arm_id=arm_id, scrub_ran=self.scrub_ran,
-                                  commit=self.commit, **self.stamp_fields)
-        (run_dir / "report.md").write_text(
-            report_text(self.dispositions.get(label, "malicious")), encoding="utf-8")
+        run_dir = sibling_run_dir(runs, label, arm_id=arm_id, commit=self.commit,
+                                  **self.stamp_fields)
+        (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
         (run_dir / "investigation.md").write_text(
             investigation_document(label), encoding="utf-8")
         summaries = run_dir / "gather_summaries"
@@ -801,7 +748,7 @@ class FakeSibling:
         plant_alert(run_dir, ALERT_RAW)
         # A real sibling that queried nothing still leaves an empty served ledger. An absent
         # ledger is a different, ungradable state, which this fake never produces.
-        write_ledger(ep, label, self.ledgers.get(label) or [])
+        write_ledger(ep, label, [])
         return self.exits.get(label, 0)
 
     @property
@@ -863,21 +810,20 @@ def refusals() -> tuple[type[BaseException], ...]:
 
 
 __all__ = [
-    "ALERT_ID", "AS_OF", "BRANCH_MESSAGE_ID", "CAP_KNOB", "CLEAN", "DRAWS_KNOB",
+    "ALERT_ID", "CAP_KNOB", "CLEAN", "DRAWS_KNOB",
     "EFFORT_KNOB", "EPISODES_BASE_ENV", "FAMILY_AGENT_PREFIX", "EPISODE_ID", "EVENTS_PATTERN",
     "STATE_DIR_ENV",
-    "HOLDING_SYSTEM", "MODEL_KNOB", "PER_WORLD_FACTS", "ROW_KEYS", "RUNS_BASE_ENV",
+    "HOLDING_SYSTEM", "MODEL_KNOB", "PER_WORLD_FACTS", "RUNS_BASE_ENV",
     "SOURCE_RUN_ID",
     "FakeGitShow", "FakeJudge", "FakeSibling", "Fault",
     "accepted_episode", "archived_judge_world", "episode_runs_for", "episode_tenant_of", "grade", "grade_at",
     "judge_runs", "scripted_judge", "archived_world", "as_reply_text",
-    "assert_wrapped_untrusted", "base_capture", "capture_call", "captured_row", "draw_doc",
+    "assert_wrapped_untrusted", "base_capture", "captured_row", "draw_doc",
     "draw_files", "enqueued_rows", "episode", "family_doc", "family_reply", "finding_doc",
     "investigation_document", "judge_record", "ledger_row", "mod", "outcome_record",
     "outside_untrusted_frames",
     "fact", "provenance_record", "refusals", "reply_doc", "report_text",
-    "request_key", "review_record",
     "runs_base",
     "oracle_row", "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
-    "rows", "word_of", "world_rows", "fixture_world_id", "write_family", "write_ledger",
+    "rows", "word_of", "world_rows", "fixture_world_id", "write_ledger",
 ]

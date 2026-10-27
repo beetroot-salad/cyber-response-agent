@@ -45,9 +45,9 @@ J3_KEY = _key(FAMILY_RUN, "edr", "lookup", J3_PARAMS)
 NOT_REPLAYABLE_KEY = _key(FAMILY_RUN, "siem-x", "lookup", S.L3)
 
 
-def _denied(label: str, params: dict | None = None) -> tuple[Any, Any, Any, str]:
+def _denied(label: str) -> tuple[Any, Any, Any, str]:
     """The key of world `label`'s refused `edr lookup` (the real path's withheld call)."""
-    return _key(_run(label), "edr", "lookup", params if params is not None else S.DENIED_LOOKUP)
+    return _key(_run(label), "edr", "lookup", S.DENIED_LOOKUP)
 
 
 def _text(obj: Any) -> str:
@@ -185,7 +185,7 @@ def test_1234_user_record_holds_named_gaps_found_gaps_and_serving_findings(
 
     assert _counts(built) == {
         _denied("a"): 1, _denied("b"): 1, _denied("c"): 1,
-        J3_KEY: 1, NOT_REPLAYABLE_KEY: 1}, "every run's refusal, J3's row and not_replayable"
+        J3_KEY: 1, NOT_REPLAYABLE_KEY: 1}, "every run's refusal, the inherited denial and not_replayable"
 
     serving = S.serving_findings(built)
     assert serving, "the serving finding is listed"
@@ -266,7 +266,7 @@ def test_1234_gap_scan_over_a_failed_worlds_damaged_archive(tmp_path: Path, dama
         S.grade(built, S.judge(), draws=1)
         counts = _counts(built)
         assert counts.get(_denied("c")) == 1, "the census read c's ledger, not its table"
-        assert counts.get(J3_KEY) == 1, "a and b still read: J3's row is identified"
+        assert counts.get(J3_KEY) == 1, "a and b still read: the inherited denial is identified"
         assert _run("c") not in _unread(built)
         assert S.row(built, "b").get("completed_draws"), "b is still graded"
         return
@@ -543,7 +543,7 @@ def test_1234_episode_page_renders_the_user_section(tmp_path: Path, record: str)
         return
     pg = _page(built)
     user_section = _text_outside(pg, skip_ids=("sec-stages",), skip_classes=("fr-row",))
-    assert j3_mark in user_section, "the found gap (J3's family entry) is on the page"
+    assert j3_mark in user_section, "the found gap (the inherited denial's family entry) is on the page"
     assert named_mark in user_section, "the named gap is on the page"
     assert serving_mark in user_section, "the serving finding is on the page"
     lanes = {("b", d, i): S.lane_of(built, built.finding_id("b", d, i))

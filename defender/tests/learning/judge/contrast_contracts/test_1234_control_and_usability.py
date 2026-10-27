@@ -285,14 +285,6 @@ def _fifo(path: Path, _tmp_path: Path) -> Any:
     return S.plant_fifo(path)
 
 
-def _directory(path: Path, _tmp_path: Path) -> Any:
-    return S.plant_dir(path)
-
-
-def _sparse(path: Path, _tmp_path: Path) -> Any:
-    return S.plant_oversize(path)
-
-
 def _second_key(path: Path, _tmp_path: Path) -> Any:
     return S.second_disposition(path)
 
@@ -332,24 +324,6 @@ _READS: dict[str, tuple[Callable[[str, S.CallRow], dict] | None, Damage | None, 
     "oracle-store-is-torn": (None, _on("oracle", _torn), _file("forged.jsonl")),
     "oracle-store-is-a-fifo": (None, _on("oracle", _fifo), _file("forged.jsonl")),
 }
-
-#: Special files at each file a run's context reads.
-_SPECIAL: dict[str, tuple[Damage, Names]] = {
-    "report-is-a-fifo": (_on("report.md", _fifo), _file("report.md")),
-    "report-is-a-directory": (_on("report.md", _directory), _file("report.md")),
-    "report-is-sparse-past-the-read-limit": (_on("report.md", _sparse), _file("report.md")),
-    "query-table-is-a-fifo": (_on("executed_queries.jsonl", _fifo),
-                              _file("executed_queries.jsonl")),
-    "query-table-is-sparse-past-the-read-limit": (_on("executed_queries.jsonl", _sparse),
-                                                  _file("executed_queries.jsonl")),
-    "alert-is-a-fifo": (_on("alert.json", _fifo), _file("alert.json")),
-    "alert-is-a-directory": (_on("alert.json", _directory), _file("alert.json")),
-    "lessons-record-is-a-fifo": (_on("lessons_loaded.jsonl", _fifo),
-                                 _file("lessons_loaded.jsonl")),
-    "gather-summary-is-a-fifo": (_on("gather_summaries/l-001.md", _fifo),
-                                 _file("gather_summaries")),
-}
-
 
 def _damaged(tmp_path: Path, case: str, label: str, worlds: Callable[..., list[S.World]],
              first: S.CallRow) -> tuple[S.Built, tuple[str, ...]]:
@@ -411,9 +385,7 @@ def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
         return
 
     est = S.Estate1234(tmp_path / "estate", withheld=(("edr", "lookup"),))
-    pattern = ("{run_dir}/executed_queries.jsonl" if cut == "failed-query-table-write"
-               else "{episode}/served/{world_id}.jsonl")
-    est.break_write("idp", "query", FRESH, pattern)
+    est.break_write("idp", "query", FRESH, "{episode}/served/{world_id}.jsonl")
     turns = [*S.default_turns()[:-1], S.query_turn("idp", "query", FRESH), S.done_turn()]
     real = S.real_family(tmp_path, {"a": S.RealWorld("a", disposition="benign", turns=turns)},
                          estate=est)
@@ -423,8 +395,7 @@ def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
 
     reason = _assert_stamped(real, judge)
     assert _names_label(reason, "a"), f"the stamp does not name the control a: {reason!r}"
-    record = (("executed_queries.jsonl", "query table") if cut == "failed-query-table-write"
-              else (real.ledger_path("a").name, "served ledger", "ledger"))
+    record = (real.ledger_path("a").name, "served ledger", "ledger")
     assert any(name in reason for name in record), (
         f"the stamp does not name the failed write ({record}): {reason!r}")
 
@@ -674,10 +645,10 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
     before = H5.tree_state(renamed)
     judge = S.judge(world_ids=real.world_ids)
     err = H5.raised(S.grade, renamed, judge)
-    assert err is not None, "a renamed copy was graded (R5)"
+    assert err is not None, "a renamed copy was graded"
     said = H5.message(err)
-    assert renamed_id in said, f"the R5 refusal does not name the folder's id: {said!r}"
-    assert real.ep.name in said, f"the R5 refusal does not name the manifest's id: {said!r}"
+    assert renamed_id in said, f"the refusal does not name the folder's id: {said!r}"
+    assert real.ep.name in said, f"the refusal does not name the manifest's id: {said!r}"
     assert judge.calls == 0, f"a renamed copy reached the model: {judge.agent_ids}"
     assert H5.tree_state(renamed) == before, "the refused pass wrote into the renamed copy"
 
@@ -745,12 +716,13 @@ def test_1234_box_edits_the_inherited_rows_of_its_own_query_table(tmp_path, edit
     assert not judge.called("c"), "the world whose table differs was graded"
     _assert_out_of_references(judge, "c")
     assert _j3_listed_once(edited), (
-        f"c's edit un-identified J3's row: {S.found_gaps(edited)}")
+        f"c's edit un-identified the inherited denial: {S.found_gaps(edited)}")
     j3_finding, ordinary = edited.finding_id("b", 0, 1), edited.finding_id("b", 0, 0)
-    assert S.lane_of(edited, j3_finding) == S.LANES["user_record"], "J3's finding left gap-only"
+    assert S.lane_of(edited, j3_finding) == S.LANES["user_record"], (
+        "the finding on the inherited denial left gap-only")
     assert S.from_world(S.defender_queue(), "b"), "b's ordinary finding did not queue"
     assert all(r.get("finding_id") != j3_finding for r in S.defender_queue()), (
-        "b's J3 finding queued")
+        "b's finding on the inherited denial queued")
     assert S.lane_of(edited, ordinary) == S.LANES["defender"]
 
     clean = _build(tmp_path, "clean", _quad(), inherited=_PREFIX)
@@ -758,7 +730,8 @@ def test_1234_box_edits_the_inherited_rows_of_its_own_query_table(tmp_path, edit
     S.grade(clean, judge)
     assert judge.called("c"), "control: the unedited c was not graded"
     assert not S.row(clean, "c").get("ungradable"), f"control: {S.row(clean, 'c')}"
-    assert _j3_listed_once(clean), f"control: J3 is not listed once: {S.found_gaps(clean)}"
+    assert _j3_listed_once(clean), (
+        f"control: the inherited denial is not listed once: {S.found_gaps(clean)}")
 
 
 #: The column a box's rewrite changes on its own table row, and the value it writes.

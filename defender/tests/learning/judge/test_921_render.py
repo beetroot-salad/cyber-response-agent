@@ -18,8 +18,6 @@ from defender.tests.support.learning.core import _state1135
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -33,11 +31,11 @@ def _lessons_view(ctx) -> str:
     return _render()._render_lessons(ctx.focus.lessons)
 
 
-def _world_prompt(ep, label: str = "b", **kw) -> str:
-    """World `label`'s prompt from the real assembler over the real render
+def _world_prompt(ep) -> str:
+    """World b's prompt from the real assembler over the real render
     (`run._build_prompt(ctx, manifest)`)."""
     manifest = J.read_manifest_at(ep)
-    ctx = J.render_at(ep, label, **kw)
+    ctx = J.render_at(ep, "b")
     return J.mod("learning.judge.run")._build_prompt(ctx, manifest)[0]
 
 
@@ -51,7 +49,7 @@ def _prompts(tmp_path, ep, **kw):
     return judge
 
 
-def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread(tmp_path):
+def test_921_judge_input_carries_the_per_lead_chain_per_call_view_and_lessons(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     ctx = J.render_at(ep, "b")
     judge_input = ctx.focus
@@ -60,8 +58,8 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
     for link in ("goal", "params", "payload", "summary", "resolutions"):
         assert link in chain, f"the per-lead chain is missing its {link} link"
     assert "document_rows" not in chain, \
-        "the per-lead chain still carries the raw row dump #1017 removed"
-    assert ctx.focus_calls, "the per-call view (#1224's successor to coverage) is empty"
+        "the per-lead chain still carries the raw row dump"
+    assert ctx.focus_calls, "the per-call view is empty"
     assert judge_input.lessons, "the lessons-loaded view is empty"
 
 
@@ -95,7 +93,7 @@ def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
     assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).bucket == "lead-set"
 
 
-def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
+def test_921_sibling_facts_reach_the_prompt_labelled_as_the_reference_runs(tmp_path):
     secret = "SIBLING-ONLY-INJECTED-FACT"
     worlds = [
         J.world_doc("a", role="A", axis=None, disposition_declared="benign", facts=[]),
@@ -209,7 +207,7 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
         "the lesson body was not read at the sibling's recorded commit")
     assert "the body" in _lessons_view(view)
     assert not list((ep / "worlds" / T.world_id(ep, "b")).glob("**/L1.md")), (
-        "a lesson BODY was archived; D7 keeps them out of the archive on purpose")
+        "a lesson body was archived")
 
 
 def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_how_it_reached_the_model(tmp_path):

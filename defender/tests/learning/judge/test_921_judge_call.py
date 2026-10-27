@@ -13,8 +13,6 @@ from defender.tests.support.learning.core._state1135 import env_state
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -216,14 +214,10 @@ def test_921_reply_is_validated_into_JudgeReply_before_anything_reads_it(tmp_pat
     assert rows["b"]["completed_draws"] == 0, "an invalid reply counted as a completed draw"
     # A refused reply is asked again, up to three asks per draw, and every refused ask counts.
     assert rows["b"]["malformed_replies"] == 3, (
-        "the malformed reply was skipped without a count; a silent skip and a counted skip are "
-        "the same pass and different evidence")
+        "the malformed reply was skipped without a count")
     assert record["enqueued_rows"] == 0, "a finding was enqueued off a reply that never parsed"
     assert J.wire_logs(ep), "the unparseable reply's own bytes were not kept anywhere"
-    assert (ep / "judge.yaml").is_file(), (
-        "the pass left no family record at all; a model that replies unparseably is exactly "
-        "the case an operator needs a record OF, and its absence is indistinguishable from an "
-        "episode nothing ever graded")
+    assert (ep / "judge.yaml").is_file(), "an unparseable reply left no family record"
 
 
 def test_921_a_reply_whose_top_level_is_not_a_mapping_fails_before_anything_reads_it(tmp_path):
@@ -335,17 +329,9 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
     (ep / "judge.yaml").unlink()
     monkeypatch.setenv(J.DRAWS_KNOB, "2")
     _grade(tmp_path, ep, J.FakeJudge(default=varied[0], family_default=family))
-    assert len(J.draw_files(ep, "b")) == 3, "P4 says a retry clobbers rather than cleans up"
+    assert len(J.draw_files(ep, "b")) == 3, "a retry cleaned up the wider attempt's stale draw file"
     assert J.judge_record(ep)["draws"] == {"configured": 2, "completed": 2}, (
         "the record does not distinguish this pass's draws from the files on disk")
-
-
-def _prompt(ep, label: str = "b") -> str:
-    """World `label`'s prompt from the real assembler over the real render
-    (`_build_prompt(ctx, manifest)` returns the prompt and its layout)."""
-    run_mod = J.mod("learning.judge.run")
-    manifest = J.read_manifest_at(ep)
-    return run_mod._build_prompt(J.render_at(ep, label), manifest)[0]
 
 
 def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_path):
@@ -357,7 +343,7 @@ def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_pa
     assert "evidence" in str(refusal.value)
 
 
-def test_921_a_degenerate_outcome_still_discards_the_findings(tmp_path):
+def test_921_the_not_measured_buckets_are_unreachable_and_incoherent(tmp_path):
     run_mod = J.mod("learning.judge.run")
     assert set(run_mod.NOT_MEASURED_BUCKETS) == {"unreachable", "incoherent"}
     assert "mislabelled" not in run_mod.NOT_MEASURED_BUCKETS

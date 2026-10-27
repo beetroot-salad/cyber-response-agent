@@ -14,7 +14,6 @@ import pytest
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.shared.contracts._by_path import (
-    import_lint_lib,
     load_module,
     on_sys_path,
 )
@@ -32,13 +31,11 @@ RUN = S.EPISODE_ID
 CITATIONS = S.RULED["row.citations"]
 
 
-def _fid(label: str, draw: int, index: int, *, run: str = RUN) -> str:
-    return f"{run}/{label}/{draw}/{index}"
+def _fid(label: str, draw: int, index: int) -> str:
+    return f"{RUN}/{label}/{draw}/{index}"
 
 
-def _new_row(fid: str, *, label: str = "b", **over: Any) -> dict:
-    """A defender queue row in the current shape (`S.defender_row`)."""
-    return S.defender_row(fid, label=label, **over)
+_new_row = S.defender_row
 
 
 def _without(row: Mapping[str, Any], *keys: str) -> dict:
@@ -102,27 +99,16 @@ def _assert_held_naming(pending: Mapping[str, dict], fid: str, names: Iterable[s
         f"{what}: {fid} is queued but its {HELD_REASON}={reason!r} names none of {names}")
 
 
-def _graded_triad(tmp_path: Path, replies: Mapping[Any, Any] | None = None, *,
-                  draws: int = 1) -> S.Built:
+def _graded_triad(tmp_path: Path, replies: Mapping[Any, Any] | None = None) -> S.Built:
     """A hand-built triad graded once by the real pass."""
     built = S.family(tmp_path)
-    S.grade(built, S.judge(replies), draws=draws)
+    S.grade(built, S.judge(replies), draws=1)
     return built
 
 
 #: A world reply filing one investigator finding with a resolving two-run pair (b vs the
 #: control) — what the pass turns into one defender row.
 ONE_FINDING = S.world_reply("lead-quality", ["idp"], investigator=[S.inv(contrast=list(PAIR))])
-
-
-_TEXT_SUFFIXES = (".py", ".md", ".json", ".jsonl", ".yaml", ".yml", ".txt", ".css", ".tsv",
-                  ".toml", ".js", ".html")
-#: Directory NAMES the census never enters: every test folder, and tool caches.
-_NOT_SHIPPED = ("tests", ".venv", "__pycache__", "node_modules")
-
-
-def _astlib() -> Any:
-    return import_lint_lib("_astlib")
 
 
 SEED_DIR = S.DEFENDER.parent / "evaluations" / "scenarios" / "01-real-baseline"

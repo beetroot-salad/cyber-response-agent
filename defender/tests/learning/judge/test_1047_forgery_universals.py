@@ -49,8 +49,7 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
 
     honest = S.cut_short_episode(tmp_path / "honest", cut={"b": "request-limit"})
     assert S.graded(honest)["b"].get("cut_short") == "request-limit", (
-        "the control failed: a HOST-written record no longer moves the grade either, so the "
-        "assertions above are not about the forgery")
+        "control: a host-written record does not move the grade either")
 
     control_ticket = S.record_ticket(
         S.closed_run_dir(tmp_path / "ticket-clean", disposition="benign"), truncated_by=None)
@@ -88,8 +87,7 @@ def test_every_box_writable_artifact_carrying_a_truncated_by_looking_value_leave
 
     honest = S.cut_short_episode(tmp_path / "honest", cut={"b": "request-limit"})
     assert S.graded(honest)["b"].get("cut_short") == "request-limit", (
-        "the control failed: a HOST-written record no longer moves the grade, so every "
-        "`unmoved` above is a tautology rather than a finding")
+        "control: a host-written record does not move the grade")
 
 
 def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_the_run_dir_does_not_reach_the_grade(
@@ -117,16 +115,11 @@ def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_th
 # report frontmatter — the surface the first design would have trusted
 
 
-def _frontmatter_row(tmp_path, name, extra=None, raw=None):
+def _frontmatter_row(tmp_path, name, extra=None):
     """One episode whose world b carries a planted `report.md`, graded."""
     ep = S.cut_short_episode(tmp_path / name)
-    S.plant_frontmatter(ep / "worlds" / T.world_id(ep, "b"), extra=extra or "", raw=raw)
+    S.plant_frontmatter(ep / "worlds" / T.world_id(ep, "b"), extra=extra or "")
     return _rows_and_word(ep)
-
-
-#: A frontmatter key that means nothing, exactly as wide as `truncated_by`.
-INERT_KEY = "harmless_key"
-assert len(INERT_KEY) == len("truncated_by")
 
 
 def test_grading_given_a_planted_truncated_by_frontmatter_line_with_a_valid_value(tmp_path):

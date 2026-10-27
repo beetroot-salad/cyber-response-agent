@@ -16,19 +16,17 @@ def test_an_aborted_run_leaves_its_ticket_open_with_the_escalation(tmp_path):
     fake = S.record_ticket(run_dir, truncated_by="aborted", closed_before_cut=False)
 
     assert fake.records == [], (
-        "an aborted run recorded a verdict; the environment was unreachable, so nothing "
-        "about the case was settled and there is nothing to propose to a person")
+        "an aborted run recorded a verdict")
     assert len(fake.notes) == 1, f"the aborted arm made {len(fake.notes)} note calls, not one"
     note = fake.notes[0]
     assert note.method == "POST"
     assert note.key == opened.calls[0].body["key"], (
         f"the note addressed ticket {note.key!r} while the open leg wrote "
-        f"{opened.calls[0].body['key']!r} — two namespaces, so the note lands on no ticket")
+        f"{opened.calls[0].body['key']!r}")
     body = note.text().lower()
     assert "aborted" in body, f"the note does not name the exit class: {note.text()!r}"
     assert "escalate" in body, (
-        f"the note does not carry the escalation ask: {note.text()!r} — leaving the ticket "
-        "open without one is silence, not an escalation")
+        f"the note does not carry the escalation ask: {note.text()!r}")
 
 
 def test_a_request_limit_run_records_unresolved(tmp_path):
@@ -49,7 +47,7 @@ def test_a_budget_kill_leaves_its_ticket_open_and_makes_no_call(tmp_path):
         run_dir = S.closed_run_dir(tmp_path / f"report-{report}", report=report)
         fake = S.record_ticket(run_dir, truncated_by="budget")
         assert fake.calls == [], (
-            f"report={report}: the budget arm made {fake.calls} — it must make no call at all")
+            f"report={report}: the budget arm made calls: {fake.calls}")
         assert S.receipt(run_dir) is None, "the budget arm wrote a receipt for a call it never made"
 
 
@@ -65,8 +63,7 @@ def test_a_run_that_was_not_cut_short_still_records_off_its_report(tmp_path):
 
 def test_an_exit_class_the_table_does_not_name_takes_the_report_driven_fallback(tmp_path):
     assert "dead-end" in S.vocabulary(), (
-        "the control failed: `dead-end` left the vocabulary, so this no longer tests a real "
-        "member with no arm in the table")
+        "control: `dead-end` is not in the vocabulary")
     run_dir = S.closed_run_dir(tmp_path, disposition="malicious")
     unmapped = S.record_ticket(run_dir, truncated_by="dead-end")
     baseline = S.record_ticket(run_dir, truncated_by=None)
@@ -133,12 +130,10 @@ def test_a_forced_close_set_exit_whose_own_forced_close_failed_leaves_the_ticket
         decided = S.closed_run_dir(tmp_path / f"{exit_class}-decided", report=False)
         both = S.record_ticket(decided, truncated_by=exit_class, closed_before_cut=True)
         assert both.records == [], (
-            f"{exit_class}: a run that had closed but left no report.md still recorded a "
-            "verdict — off what? F-A's deferral has no verdict on disk to defer to here, and "
-            "inventing the payload is what F-K refuses")
+            f"{exit_class}: a run that had closed but left no report.md still recorded a verdict")
         assert len(both.notes) == 1, (
-            f"{exit_class}: `closed_before_cut=True` swallowed F-K's escalation on a run whose "
-            "own forced close failed, leaving the ticket open in silence")
+            f"{exit_class}: `closed_before_cut=True` swallowed the escalation of a failed "
+            "forced close")
         assert exit_class in both.notes[0].text()
 
 
@@ -245,7 +240,7 @@ def test_no_exit_class_transitions_the_ticket(tmp_path):
                                        closed_before_cut=closed)
                 assert fake.transitions == [], (
                     f"{exit_class}/report={report}/closed_before_cut={closed}: the host "
-                    f"transitioned the ticket — {[c.path for c in fake.transitions]}")
+                    f"transitioned the ticket: {[c.path for c in fake.transitions]}")
                 assert all(c.is_comment for c in fake.writes), (
                     f"{exit_class}: a write that is neither a comment nor a transition: "
                     f"{[c.path for c in fake.writes]}")

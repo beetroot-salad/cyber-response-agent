@@ -13,8 +13,6 @@ from defender.tests.support.learning.core._state1135 import env_state
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -39,12 +37,10 @@ def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path)
 
     assert early["c"].get("ungradable") is True, "the stash did not take world c out"
     assert late["c"].get("ungradable") is not True
-    for label in ("b",):
-        for fact in J.PER_WORLD_FACTS:
-            assert early[label][fact] == late[label][fact], (
-                f"{label}.{fact} moved with the CONTROL world's archive write, so some fact "
-                "still reaches across worlds")
-        assert early[label]["bucket"] == late[label]["bucket"]
+    for fact in J.PER_WORLD_FACTS:
+        assert early["b"][fact] == late["b"][fact], (
+            f"b.{fact} moved with world c's archive, so some fact still reaches across worlds")
+    assert early["b"]["bucket"] == late["b"]["bucket"]
 
 
 def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(tmp_path):

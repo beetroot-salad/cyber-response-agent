@@ -16,20 +16,9 @@ from defender.tests.support.learning.core._state1135 import env_state
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Point the runs, episodes and learning-state roots inside `tmp_path`; otherwise the
-    production resolver answers about the real roots."""
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    """Point the learning-state root inside `tmp_path`; otherwise the production resolver
+    answers about the real one."""
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def _cli():
-    return T.mod("learning.branch.cli")
-
-
-def _tenant_paths():
-    """The tenant `T.runs_base` (or `d9_tenant`) already created."""
-    return T.current_tenant()
 
 
 _EMPTY: dict = {"rows": []}
@@ -78,8 +67,6 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
     assert (ep / "judge.yaml").is_file(), "the family record was never written"
     graded = [label for label in ("b", "c") if J.draw_files(ep, label)]
     assert graded == ["b", "c"], "a non-control world was archived and never graded"
-    for label in graded:
-        assert J.draw_files(ep, label), f"world {label} has no per-draw reply on disk"
 
     grade = J.judge_record(ep)
     assert [row["world"] for row in grade["worlds"]] == ["b", "c"], (
@@ -117,7 +104,7 @@ def test_921_unaccepted_episodes_are_not_graded(tmp_path):
             assert record["not_graded"]["outcome"] == word, (
                 f"the record does not name the outcome that caused it: {record['not_graded']}")
 
-    assert seen["accepted"][0] > 0, "the accepted episode was not graded — the control failed"
+    assert seen["accepted"][0] > 0, "control: the accepted episode was not graded"
     assert seen["unusable"][0] == 0, "an unusable episode reached the model"
     assert seen["refused"][0] == 0, "a refused episode reached the model"
     assert seen["incomplete"][0] == 0, "an episode with no outcome word reached the model"
@@ -217,15 +204,14 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
             state=refused)
     states = {row["world"]: row.get("state") for row in J.judge_record(ep2)["worlds"]}
     assert "queued" not in states.values(), (
-        f"a row whose append failed was committed `queued`: {states} — its presence would then "
-        "certify an enqueue that never happened")
+        f"a row whose append failed was committed `queued`: {states}")
     assert states.get("b") == "queueing", f"the failed commit is not on world b's row: {states}"
     with pytest.raises(J.refusals()) as rerun:
         J.grade_at(ep2, judge=J.scripted_judge(), state=refused)
     assert "queueing" in str(rerun.value), "the re-run did not refuse the uncommitted row"
 
 
-def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncated_with_a_marker(
+def test_921_the_four_knobs_are_resolved_once_and_an_oversized_lead_is_truncated_with_a_marker(
         tmp_path, monkeypatch):
     monkeypatch.setenv(J.DRAWS_KNOB, "2")
     monkeypatch.setenv(J.MODEL_KNOB, "kimi-k3")

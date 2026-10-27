@@ -200,10 +200,6 @@ def _bytes_of(paths: Iterable[Path]) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in paths}
 
 
-_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-                        "meta", "source", "track", "wbr"})
-
-
 def _without(text: str, *episode_ids: str) -> str:
     """`text` with every episode id and token replaced, so two episodes' rows compare."""
     for ep in episode_ids:
@@ -302,13 +298,12 @@ class Watch:
         self.seen.append(Seen(event, who, kind, S.record(self.built), self._queue(DEFENDER_Q),
                               self._queue(QUESTIONER_Q)))
 
-    def first(self, event: str, who: str, kind: str | None = None) -> Seen:
+    def first(self, event: str, who: str) -> Seen:
         for s in self.seen:
-            if s.event == event and s.who == who and (kind is None or s.kind == kind):
+            if s.event == event and s.who == who:
                 return s
         raise AssertionError(f"the pass made no {event} for {who!r}"
-                             + (f" on the {kind} queue" if kind else "")
-                             + f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
+                             f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
 
     def __call__(self, prompt: str, **kw: Any) -> str:
         label, n, _attempt = self.judge.coordinate(kw.get("agent_id", "judge"))
@@ -362,14 +357,13 @@ def _stopped(built: Any, watch: Watch, **kw: Any) -> BaseException:
     raise AssertionError("the pass was expected to stop at its planted fault and finished")
 
 
-def _left_queueing(tmp_path: Path, episode_id: str, *, spare: str,
-                   reply: dict | None = None) -> S.Built:
+def _left_queueing(tmp_path: Path, episode_id: str, *, spare: str) -> S.Built:
     """An episode whose first pass stopped after world bravo's defender append and before its
     flip (the flip write refused): bravo's row is left `queueing`, charlie and the family have
     none. Returns the episode with the plant cleared."""
     built = _built(tmp_path, episode_id=episode_id)
     flip = Refuse(tmp_path / spare, built.ep / "judge.yaml")
-    watch = Watch(built, S.judge({B: reply or _reply(inv=[_inv(B, "left")])}),
+    watch = Watch(built, S.judge({B: _reply(inv=[_inv(B, "left")])}),
                   after_append={(B, DEFENDER_Q): flip})
     _stopped(built, watch)
     flip.clear()
@@ -872,7 +866,7 @@ def test_1234_per_world_appends_while_the_drain_retires_lose_no_row(tmp_path):
     control = _g05_round(tmp_path, "unlocked", Unlocked)
     assert control["exitcodes"] == [0] * _G05_PROCESSES, control["exitcodes"]
     assert control["missing"] or control["twice"] or control["unreadable"], (
-        "with the append lock removed no row was lost — this race cannot fail")
+        "control: with the append lock removed no row was lost")
 
 
 @contextlib.contextmanager
@@ -897,9 +891,7 @@ def _gate_config(tmp_path: Path, *, questioner: bool) -> Iterator[tuple[Any, Pat
         corpus.mkdir(parents=True, exist_ok=True)
         yield cfg, corpus
     finally:
-        close = getattr(trees, "close", None)
-        if close is not None:
-            close()
+        trees.close()
 
 
 def _author_lesson(corpus: Path, name: str, finding_id: str) -> None:

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import inspect
 import json
 import re
 from collections.abc import Callable
@@ -752,11 +751,7 @@ def test_1234_hostile_run_text_reaches_the_wire_log_and_page_unframed(tmp_path):
 
 def _titled(title: str, body: str) -> Any:
     """`titled_section(title, body)` with a fixed message salt and the `untrusted` tag."""
-    _prompt = S.mod(S.PROMPT)  # the shared stage contract, `defender.learning._prompt`
-    fn = _prompt.titled_section
-    params = inspect.signature(fn).parameters
-    kw = {k: v for k, v in (("salt", "5a" * 8), ("tag", "untrusted")) if k in params}
-    return fn(title, body, **kw)
+    return S.mod(S.PROMPT).titled_section(title, body, salt="5a" * 8, tag="untrusted")
 
 
 def test_1234_titled_section_cannot_be_built_with_a_title_or_run_label_outside_the_host_grammar():

@@ -51,8 +51,7 @@ def test_the_worlds_exit_class_is_read_from_a_source_no_box_can_write(tmp_path):
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "store", "closed_before_cut": True}, (
-        "the archived record does not match the host's own sidecar — something inside the "
-        "box's rw bind reached it")
+        "the archived record does not match the host's own sidecar")
 
 
 def test_a_forged_run_end_file_in_the_run_dir_is_never_the_archived_one(tmp_path):
@@ -80,8 +79,7 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "budget", "closed_before_cut": False}, (
-        "a stale record at the destination survived a re-archive; a retried world would keep "
-        "reporting the attempt it no longer has")
+        "a stale record at the destination survived a re-archive")
 
     victim = tmp_path / "victim.json"
     victim.write_text("VICTIM\n", encoding="utf-8")
@@ -180,15 +178,13 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
     rw_specs = [spec for spec in argv if spec.startswith("type=bind,") and "readonly" not in spec]
     writable = [spec.split("source=", 1)[1].split(",", 1)[0] for spec in rw_specs]
     assert writable == [str(run_dir)], (
-        f"the box's writable binds are {writable}; O3's whole argument is that there is "
-        "exactly one and it is the run dir")
+        f"the box's writable binds are {writable}, not the run dir alone")
     # The box sees that bind at `/runs/current`; containment is judged on the bind's host
     # source, the run dir.
     assert [spec.split("target=", 1)[1].split(",", 1)[0] for spec in rw_specs] == [
         "/runs/current"], rw_specs
     assert not str(sidecar).startswith(str(run_dir) + "/"), (
-        f"{sidecar} is inside the box's own rw bind — the record would be forgeable by the "
-        "subject it is about")
+        f"{sidecar} is inside the box's own rw bind")
     assert sidecar.parent == run_dir.parent
 
 
@@ -281,12 +277,9 @@ def test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_report(tmp_p
     assert truncated_by == "retry-exhausted", (
         "the run did not reach a forced-close-set exit, so no forced report was ever owed")
     assert S.sidecar_doc(run_dir) is None, (
-        "the fixture failed: the record write landed despite a directory at its own path, so "
-        "nothing below is about a FAILED write")
+        "fixture: the record write landed despite a directory at its own path")
     assert not (run_dir / "report.md").exists(), (
-        "the forced `unresolved` report was written although the run-end record write failed "
-        "— the report-without-a-record shape claim h2 observed flipping verdict_word from "
-        "`caught` to `survived`")
+        "the forced `unresolved` report was written although the run-end record write failed")
 
     ok_deps, ok_run = _deps(tmp_path / "ok")
     _run, ok_truncated, _reason = _spec923.drive_to_retry_exhaustion(ok_deps)
@@ -354,4 +347,4 @@ def test_a_path_traversal_style_value_written_by_the_box_anywhere_in_the_run_dir
     assert _record(ep, "b") == {"truncated_by": "aborted", "closed_before_cut": False}
     landed = sorted(p.relative_to(ep) for p in ep.rglob(S.run_end_name()))
     assert [str(p) for p in landed] == [f"worlds/{T.fixture_world_id('b')}/{S.run_end_name()}"], (
-        f"the feature's write landed at {landed} — a path derived from box-written content")
+        f"the feature's write landed at {landed}, a path derived from box-written content")

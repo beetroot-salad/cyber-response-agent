@@ -48,9 +48,8 @@ def _inv(contrast: Iterable[str], *, label: str = "b", tag: str = "inv") -> dict
     return S.inv(contrast=list(contrast), claim=_claim(label, tag))
 
 
-def _wf(evidence: Iterable[str], *, bucket: str = "mislabelled", label: str = "b",
-        tag: str = "wf", systems: Sequence[str] = ("idp",)) -> dict:
-    return S.wf(bucket, evidence=list(evidence), systems=systems, claim=_claim(label, tag))
+def _wf(evidence: Iterable[str], *, label: str = "b", tag: str = "wf") -> dict:
+    return S.wf("mislabelled", evidence=list(evidence), systems=("idp",), claim=_claim(label, tag))
 
 
 def _reply(*, investigator: Sequence[dict] = (), world: Sequence[dict] = (),
@@ -247,7 +246,7 @@ def _c_row_names(built: Any, path: Path) -> bool:
     return bool(said) and path.name in str(row_c.get("ungradable_reason", ""))
 
 
-def _manifest_case(built: Any, *, damaged: bool) -> dict[str, Any]:
+def _manifest_case(built: Any) -> dict[str, Any]:
     """The manifest boundary over an already-built (and possibly damaged) family: b's reply
     cites the plan at b's own entry (design). Read back whether the pass refused naming the
     manifest, whether it asked the model, the finding's lane and questioner row."""
@@ -617,7 +616,7 @@ def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
     S.validate(reply)
 
 
-# The undamaged manifest twin is the read-cell tests' (`_manifest_case(..., damaged=False)`).
+# The undamaged manifest twin is the oversize test's `manifest-plain-twin` row.
 @pytest.mark.parametrize("link", ["to_a_byte_copy_of_itself", "to_a_reference_runs_report"])
 def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, link: str) -> None:
     built = S.family(tmp_path)
@@ -626,8 +625,7 @@ def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, li
         S.plant_symlink(manifest, S.scratch_copy(tmp_path, manifest, "manifest-copy.yaml"))
     elif link == "to_a_reference_runs_report":
         S.plant_symlink(manifest, f"worlds/{T.fixture_world_id('c')}/report.md")
-    damaged = link != "plain_twin"
-    assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
+    assert _manifest_case(built) == _manifest_expected(damaged=True)
 
 
 _FIVE = ("manifest", "conduct", "oracle", "served", "table")
@@ -641,7 +639,7 @@ def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: P
         built = S.family(tmp_path)
         if damaged:
             S.plant_oversize(built.ep / "family.yaml")
-        assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
+        assert _manifest_case(built) == _manifest_expected(damaged=damaged)
         return
     seen, expected, built, path = _cell(tmp_path, where, "oversize" if damaged else None)
     assert (seen, _c_row_names(built, path)) == (expected, damaged)
@@ -652,13 +650,11 @@ def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: P
                          ids=["fifo", "directory", "device-node"])
 @pytest.mark.parametrize("where", _FIVE)
 def test_1234_pointer_naming_a_fifo_or_directory_does_not_resolve_and_does_not_hang(
-        tmp_path: Path, where: str, kind: str | None) -> None:
+        tmp_path: Path, where: str, kind: str) -> None:
     if where == "manifest":
         built = S.family(tmp_path)
-        if kind is not None:
-            _damage(tmp_path, built.ep / "family.yaml", kind)
-        damaged = kind is not None
-        assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
+        _damage(tmp_path, built.ep / "family.yaml", kind)
+        assert _manifest_case(built) == _manifest_expected(damaged=True)
         return
     seen, expected, _built, _path = _cell(tmp_path, where, kind)
     assert seen == expected
@@ -684,8 +680,8 @@ _LINK_CELLS = [("oracle", "symlink"), ("oracle", "linked_dir"), ("oracle", "hard
 
 
 @pytest.mark.parametrize(("where", "kind"), _LINK_CELLS,
-                         ids=[f"{w}-{k or 'plain-twin'}" for w, k in _LINK_CELLS])
+                         ids=[f"{w}-{k}" for w, k in _LINK_CELLS])
 def test_1234_pointer_through_a_link_is_unresolved_in_the_oracle_store_and_served_ledger_classes(
-        tmp_path: Path, where: str, kind: str | None) -> None:
+        tmp_path: Path, where: str, kind: str) -> None:
     seen, expected, _built, _path = _cell(tmp_path, where, kind)
     assert seen == expected

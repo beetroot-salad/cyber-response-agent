@@ -56,10 +56,9 @@ def _inv(label: str, bucket: str = "lead-quality", **kw: Any) -> dict:
     return S.inv(bucket, **kw)
 
 
-def _shown(label: str, system: str = "idp") -> dict:
+def _shown(label: str) -> dict:
     """World overrides giving `label` one altered (`oracle`) answer: shown its facts."""
-    return {"calls": [S.CallRow(), S.oracle_call(system=system, fact_id=f"f-{label}",
-                                                 forged_id=f"fg-{label}-1")]}
+    return {"calls": [S.CallRow(), S.oracle_call(fact_id=f"f-{label}", forged_id=f"fg-{label}-1")]}
 
 
 def _never_shown() -> dict:
@@ -67,10 +66,10 @@ def _never_shown() -> dict:
     return {"calls": [S.CallRow()]}
 
 
-def _with_refusal(label: str, system: str = "idp") -> dict:
+def _with_refusal(label: str) -> dict:
     """`_shown` plus one deployment refusal (a `refused` ledger row and its `∅.denied` row) as
     the world's third call."""
-    calls = _shown(label, system)["calls"]
+    calls = _shown(label)["calls"]
     return {"calls": [*calls, S.refused_call()]}
 
 

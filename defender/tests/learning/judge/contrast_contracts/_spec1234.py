@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
-from defender.tests.support.learning.branch import _branch_947 as B947
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
@@ -50,22 +49,15 @@ JUDGE_ENQUEUE = "learning.judge.enqueue"
 JUDGE_FAMILY = "learning.judge.family"
 OUTCOME = "learning.branch.outcome"
 EPISODE_MOD = "learning.branch.episode"
-REGISTRY = "learning.branch.estate.registry"
-QUERY_TOOL = "investigation.query_tool"
 RECORD_QUERY = "investigation.record_query"
-SEED = "investigation.branch._seed"
-BASH_TOOL = "investigation.tools._bash"
 LESSONS_RUN = "learning.author.lessons.run"
 QUESTIONER_RUN = "learning.author.questioner.run"
 DRAIN = "learning.author.drain"
 CONFIG = "learning.core.config"
 STATE = "learning.core.state"
-VOCAB = "_vocab"
-REPORT = "records._report"
 PROMPT = "learning._prompt"
 VISUALIZE = "presentation.visualize_episode"
 FAMILY_LOADER = "records._family"
-CLI = "learning.branch.cli"
 RUN = "run"
 
 #: Environment knobs, re-exported so a test never spells them.
@@ -262,7 +254,6 @@ QUEUEING = RULED["state.queueing"]
 QUEUED = RULED["state.queued"]
 USER = COINED["record.user"]
 NAMED_GAPS = COINED["user.named"]
-UNKEYED_GAPS = COINED["user.unkeyed"]
 FOUND_GAPS = COINED["user.found"]
 SERVING = COINED["user.serving"]
 FAMILY_ROW = COINED["record.family"]
@@ -282,9 +273,7 @@ RETIRED_RECORD_FIELDS = ("judge_outcome", "verdict_word", "episode_outcome", "fa
 RETIRED_REPLY_WORDS = ("episode_outcome", "verdict_word")
 RETIRED_FINDING_FIELD = "evidence"  # on an investigator finding
 RETIRED_LANES = ("never_eligible", "withheld")
-#: The retired family-word vocabulary (spelled here: its enum is deleted), and the two retired
-#: enums by name.
-RETIRED_FAMILY_WORDS = ("verdict_word", "caught", "survived", "undecidable")
+#: The two retired enums by name.
 RETIRED_ENUMS = ("JUDGE_OUTCOME_ENUM", "_REPLY_OUTCOME_ENUM")
 
 #: Pointers that never resolve (`{label}` filled by `never_resolving`).
@@ -349,22 +338,11 @@ def unsalted(text: str) -> str:
     return _FRAME_SALT.sub("run-SALT-", text)
 
 
-def normalized_prompt(prompt: str, where: Any) -> str:
-    """`prompt` with what two otherwise-identical episodes differ by taken out: the frame salt
-    and the episode's own root directory."""
-    return unsalted(prompt).replace(str(_ep(where).parent), "<ROOT>")
-
-
 def call_id(label: str, n: int) -> str:
     """The host-written id of call `n` of world `label`'s run: the run's world token (every
     ledger row's `world_id`) and the call. Only the hand-built archive writes this spelling; a
     real-path archive is read, never planted."""
     return f"{fixture_world_id(label)}/{n}"
-
-
-def call_ids(rows: Iterable[Mapping[str, Any]]) -> list[Any]:
-    """The call id each row carries (`None` where it carries none), in row order."""
-    return [r.get(CALL_ID) for r in rows]
 
 
 def found_run(label: str) -> str:
@@ -383,11 +361,6 @@ def conduct(label: str, leaf: str = "report.md", frag: str | None = None) -> str
     return f"worlds/{T.fixture_world_id(label)}/{leaf}" + (f"#{frag}" if frag is not None else "")
 
 
-def table_ptr(label: str, row: int) -> str:
-    """COINED fragment: the query table's row by its 0-based line index."""
-    return conduct(label, "executed_queries.jsonl", str(row))
-
-
 def served_ptr(label: str, row: int | None) -> str:
     """The served form, `served/<world UUID>.jsonl#<row>` (0-based line index); `row=None`
     drops the fragment, leaving it unresolved."""
@@ -395,9 +368,9 @@ def served_ptr(label: str, row: int | None) -> str:
     return base if row is None else f"{base}#{row}"
 
 
-def oracle_ptr(label: str, leaf: str = "forged.jsonl", frag: str | None = None) -> str:
-    """A built-layer pointer (`oracle/<X>/<leaf>[#frag]`) — its own class, never conduct."""
-    return f"oracle/{T.fixture_world_id(label)}/{leaf}" + (f"#{frag}" if frag is not None else "")
+def oracle_ptr(label: str) -> str:
+    """A built-layer pointer (`oracle/<X>/forged.jsonl`) — its own class, never conduct."""
+    return f"oracle/{T.fixture_world_id(label)}/forged.jsonl"
 
 
 def plan_ptr(label: str | None = None) -> str:
@@ -483,19 +456,17 @@ def fault_call(system: str = "edr", verb: str = "query", params: dict | None = N
                    source="fault", exit_code=2, **kw)
 
 
-def error_call(system: str = "idp", verb: str = "query", params: dict | None = None,
-               **kw: Any) -> CallRow:
+def error_call(params: dict | None = None, **kw: Any) -> CallRow:
     """A live outage the investigator saw: a `real-error` ledger row (served with an error, not
     a gap) and a failed table row."""
-    return CallRow(system=system, verb=verb, params=params or query_params("user:alice"),
+    return CallRow(system="idp", verb="query", params=params or query_params("user:alice"),
                    source="real-error", exit_code=1, **kw)
 
 
-def inherited_denial(system: str = "edr", verb: str = "lookup",
-                     params: dict | None = None) -> CallRow:
+def inherited_denial(params: dict | None = None) -> CallRow:
     """A pre-branch `∅.denied` table row the source wrote, inherited identically by every
     sibling (no sibling's call id, no ledger row)."""
-    return CallRow(system=system, verb=verb, params=params or {"entity": "sent-real"},
+    return CallRow(system="edr", verb="lookup", params=params or {"entity": "sent-real"},
                    source=None, query_id=DENIED_QUERY_ID, exit_code=DENIED_EXIT,
                    inherited=True)
 
@@ -953,8 +924,8 @@ def plant_dir(path: Path) -> Path:
     return path
 
 
-def plant_oversize(path: Path, *, over: int = 1) -> Path:
-    """Make `path` a SPARSE file `over` bytes past `_io.READ_LIMIT` (no data written, so the
+def plant_oversize(path: Path) -> Path:
+    """Make `path` a SPARSE file one byte past `_io.READ_LIMIT` (no data written, so the
     test pays no disk): a bounded reader refuses it by `fstat` before reading."""
     limit = sym("_io", "READ_LIMIT")
     path = Path(path)
@@ -963,25 +934,25 @@ def plant_oversize(path: Path, *, over: int = 1) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("ab"):
         pass
-    os.truncate(path, limit + over)
+    os.truncate(path, limit + 1)
     return path
 
 
-def tear_jsonl(path: Path, text: str = '{"system": "idp", "verb"') -> Path:
+def tear_jsonl(path: Path) -> Path:
     """Append a torn (unterminated, unparseable) line to a JSONL record."""
     with Path(path).open("a", encoding="utf-8") as fh:
-        fh.write(text)
+        fh.write('{"system": "idp", "verb"')
     return Path(path)
 
 
-def second_disposition(path: Path, first: str = "benign", second: str = "malicious") -> Path:
+def second_disposition(path: Path) -> Path:
     """Rewrite a report.md so its frontmatter carries two top-level `disposition:` keys, a
     headline two readers could resolve differently."""
     Path(path).write_text(
         "---\n"
-        f"disposition: {first}\n"
+        "disposition: benign\n"
         "outcome: stands\n"
-        f"disposition: {second}\n"
+        "disposition: malicious\n"
         "---\nTwo headlines.\n", encoding="utf-8")
     return Path(path)
 
@@ -1185,19 +1156,6 @@ def world_row(fid: str, *, label: str = "b", **over: Any) -> dict:
     return row
 
 
-def pre_change_row(fid: str, *, judge_outcome: Any = "survived", **over: Any) -> dict:
-    """A defender row as the pre-#1234 appender wrote it: thirteen keys with `judge_outcome`,
-    none of the three new fields, `citations` the old pointer list. The world is the one `fid`
-    names (`<run>/<world>/<draw>/<index>`)."""
-    label = fid.split("/")[1]
-    row = {k: v for k, v in defender_row(fid, label=label).items()
-           if k not in (CONTRAST, ON_PATH, DOUBT)}
-    row["judge_outcome"] = judge_outcome
-    row[RULED["row.citations"]] = [conduct(label)]
-    row.update(over)
-    return row
-
-
 def pre_change_world_row(fid: str, **over: Any) -> dict:
     """A questioner row as the pre-#1234 appender wrote it: `judge_outcome` forced to None, a
     non-plan citation (none could cite the manifest), valid `systems`, so what a reader meets
@@ -1302,12 +1260,12 @@ class RoutedJudge:
     def called(self, label: str) -> bool:
         return bool(self.calls_for(label))
 
-    def prompt_for(self, label: str, draw: int = 0, attempt: int = 0) -> str:
-        """The prompt handed to the call `(label, draw, attempt)`."""
+    def prompt_for(self, label: str) -> str:
+        """The prompt handed to world `label`'s first call (draw 0, attempt 0)."""
         for agent, prompt in zip(self.agent_ids, self.prompts, strict=True):
-            if self.coordinate(agent) == (label, draw, attempt):
+            if self.coordinate(agent) == (label, 0, 0):
                 return prompt
-        raise AssertionError(f"RoutedJudge: no call for {(label, draw, attempt)}; "
+        raise AssertionError(f"RoutedJudge: no call for {(label, 0, 0)}; "
                              f"calls were {self.agent_ids}")
 
     def prompts_for(self, label: str) -> list[str]:
@@ -1392,8 +1350,7 @@ def page(where: Any) -> str:
         return ve.build_page(view)
 
 
-def render_context(where: Any, label: str, *, payload_cap: int = 20000,
-                   git_show: Any = None) -> Any:
+def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
     """`render.render(episode_dir, label, ...)` with its keyword tail threaded from the
     production readers (manifest, samples, pre-flight's record, the world's facts). Returns
     render's `JudgeContext`; the one place to change if render's keyword tail changes."""
@@ -1412,7 +1369,7 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000,
             pre, failed = None, {}
         world = next(w for w in manifest["worlds"] if w["label"] == label)
         _row, facts = fam.read_world(bound, world, episode_dir=ep)
-        return rnd.render(ep, label, git_show=git_show if git_show is not None else FakeGitShow(),
+        return rnd.render(ep, label, git_show=FakeGitShow(),
                           payload_cap=payload_cap, facts=facts, lessons_commit=None,
                           manifest=manifest, samples=samples,
                           family_text=rnd.render_family_text(pre, failed), bound=bound)
@@ -1498,11 +1455,6 @@ def serving_findings(where: Any) -> list[dict]:
     return list(user(where).get(SERVING) or [])
 
 
-def unkeyed_gaps(where: Any) -> list[dict]:
-    """The user record's list of flagged named gaps with no blocked-call key."""
-    return list(user(where).get(UNKEYED_GAPS) or [])
-
-
 def in_user_record(where: Any, *needles: str) -> bool:
     """Does judge.yaml's user section carry any of `needles` (a finding id, a claim marker)?
     Which list holds it is the implementation's choice; pair this with the finding's
@@ -1556,23 +1508,6 @@ def wire_log_records(where: Any) -> list[dict]:
     for path in sorted(d.iterdir()):
         if path.is_file() and path.name.endswith("_framed_trace.jsonl"):
             out.extend(r for r in read_jsonl(path) if "agent_id" in r)
-    return out
-
-
-def episode_texts(where: Any, *, skip: Iterable[str] = ("wire_logs",)) -> dict[str, str]:
-    """Every regular file under the episode as text (relative path -> text), `skip`ped top-level
-    dirs out — for "stored nowhere but the wire log"."""
-    ep = _ep(where)
-    skipped = tuple(skip)
-    out: dict[str, str] = {}
-    for path in sorted(ep.rglob("*")):
-        rel = path.relative_to(ep).as_posix()
-        if rel.split("/", 1)[0] in skipped or path.is_symlink() or not path.is_file():
-            continue
-        try:
-            out[rel] = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
     return out
 
 
@@ -1706,11 +1641,11 @@ def on_post(double: Any, *, name: str) -> Routed:
     return Routed({QP["q"]: double}, default=passing_oracle(), name=name, last_wins=True)
 
 
-def altering_oracle(*, name: str = "oracle-b") -> Routed:
+def altering_oracle() -> Routed:
     """World b's sibling oracle: on the post-branch call it serves the forged row (claim adds
     fg-b-1 for f1); every other call passes unchanged."""
     return on_post(S24.oracle(S24.submit(CHANGED_B, S24.claim(added=[S24.added("fg-b-1", "f1")]))),
-                   name=name)
+                   name="oracle-b")
 
 
 def preflight_oracle() -> Routed:
@@ -1783,15 +1718,15 @@ class Estate1234(S24.Estate):
                 _ADAPTER_1234.format(system=system, state=str(self.state)), encoding="utf-8")
 
     def break_write(self, system: str, verb: str, params: Mapping[str, Any] | None,  # noqa: PLR0913 — the call's key plus what it answers
-                    pattern: str, *, payload: Any = None, fault: str | None = None) -> None:
+                    pattern: str, *, fault: str | None = None) -> None:
         """On this call, replace every path `pattern` names with a directory before answering
-        (`payload`, default the recorded answer) or raising the real `fault` class."""
+        (the recorded answer) or raising the real `fault` class."""
         key = f"{system}|{verb}|" + ("*" if params is None else canonical(params))
         entry: dict[str, Any] = {"replace_with_dir": pattern}
         if fault is not None:
             entry.update(fault=fault, detail="upstream said no")
         else:
-            entry["payload"] = payload if payload is not None else BASE_ANSWER
+            entry["payload"] = BASE_ANSWER
         self._put(key, entry)
 
 
@@ -1818,7 +1753,7 @@ _ADAPTER_1234 = S24._ADAPTER.replace(
     "            p.unlink()\n"
     "            p.mkdir()\n"
     "    if \"fault\" in entry:\n")
-assert _ADAPTER_1234 != S24._ADAPTER, "fixture bug: the #1224 adapter template changed shape"
+assert _ADAPTER_1234 != S24._ADAPTER, "the `_spec1224._ADAPTER` patch anchor was not found"
 
 
 def _no_visualize(*_a: Any, **_k: Any) -> None:
@@ -1838,11 +1773,10 @@ class InProcessSiblings:
     stamp matching the source's (the real checkout's own stamp would make the family not
     comparable). Records every launch, run dir, rc and escaped exception."""
 
-    def __init__(self, est: Estate1234, worlds: Mapping[str, RealWorld], *,
-                 verifier: Any = None) -> None:
+    def __init__(self, est: Estate1234, worlds: Mapping[str, RealWorld]) -> None:
         self.est = est
         self.worlds = dict(worlds)
-        self.verifier = verifier if verifier is not None else S24.passing_verifier()
+        self.verifier = S24.passing_verifier()
         self._lock = threading.Lock()
         self.launches: list[dict[str, Any]] = []
         self.run_dirs: dict[str, Path] = {}
@@ -1875,13 +1809,9 @@ class InProcessSiblings:
             self.run_dirs[label] = run_dir
             fam = kw["world"].family
             src = Path(kw["source"].run_dir)
-            # Compat: the prompt is read off the family and handed to the spec only while both
-            # still carry it (`_branch_947.declares_retired_prompt`).
-            retired = ({B947.RETIRED_PROMPT_FIELD: fam.continuation_prompt}
-                       if B947.declares_retired_prompt() else {})
             spec = branch_mod.BranchSpec(
                 source_run_dir=src, branch_message_id=fam.branch_message_id,
-                as_of=fam.as_of, **retired)
+                as_of=fam.as_of)
             leads = [("gather", {"lead_id": lid, "system": "idp", "goal": f"measure {lid}",
                                  "what_to_summarize": ["what the system says"]})
                      for lid in script.main_leads]
@@ -1988,7 +1918,6 @@ def _launcher_judge_suppressed(tmp_path: Path) -> Iterator[None]:
 def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *,  # noqa: PLR0913 — one switch per real-path input
                 calls: Iterable[Any] | None = None,
                 withheld: Iterable[tuple[str, str]] = (("edr", "lookup"),),
-                manifest: dict | None = None, preflight: Any = None, verifier: Any = None,
                 after_source: Callable[[Path], None] | None = None,
                 estate: Estate1234 | None = None) -> RealBuilt:
     """One episode through the REAL launcher and REAL siblings. Default: control `a`
@@ -2009,10 +1938,10 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
     # sentinel) would leave the source unrestorable and the launch refused.
     _base, src = S24.source_run(tmp_path, est, calls=list(calls) if calls is not None
                                 else source_calls(), after_source=after_source)
-    spawn = InProcessSiblings(est, scripts, verifier=verifier)
-    doc = manifest if manifest is not None else real_manifest()
-    pre = preflight if preflight is not None else preflight_oracle()
-    check = verifier if verifier is not None else S24.passing_verifier()
+    spawn = InProcessSiblings(est, scripts)
+    doc = real_manifest()
+    pre = preflight_oracle()
+    check = S24.passing_verifier()
     seams = {"questioner": S24.questioner_for(doc), "preflight": S24.no_preflight,
              "live_tree": T.source_capture(), "roster": est.roster(), "judge": judge(),
              "oracle": pre.model, "verifier": check.model}

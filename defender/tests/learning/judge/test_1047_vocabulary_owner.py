@@ -36,8 +36,7 @@ def test_session_store_owns_what_a_truncated_by_value_means():
 def test_normalized_truncated_by_is_strict_about_whitespace_case_and_confusables():
     normalized = _owner()
     assert normalized("aborted") == "aborted", (
-        "the control failed: the owner refused an exactly-spelled member, so the refusals "
-        "below would not be about how the near-misses are spelled")
+        "control: the owner refused an exactly-spelled member")
     for spelling, why in (
         (" request-limit ", "whitespace-padded"),
         ("\trequest-limit\n", "whitespace-padded with tabs and newlines"),
@@ -47,9 +46,7 @@ def test_normalized_truncated_by_is_strict_about_whitespace_case_and_confusables
         ("aborted​", "a zero-width space inside a member"),
     ):
         assert normalized(spelling) is None, (
-            f"{spelling!r} ({why}) was coerced into the member it resembles; on READ there is "
-            "no author left to ask, so a value that only becomes a member after something "
-            "strips or folds it must be answered exactly as one that never was")
+            f"{spelling!r} ({why}) was coerced into the member it resembles")
 
 
 # coherence — the three interpretation sites give one answer
@@ -78,7 +75,7 @@ def _three_sites(tmp_path, value):
 def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
     refused_archived, refused_row, refused_ticket = _three_sites(tmp_path / "no", "REQUEST-LIMIT")
     assert refused_archived["truncated_by"] == "REQUEST-LIMIT", (
-        "the archive rewrote the sidecar's value instead of copying it — a third interpreter")
+        "the archive rewrote the sidecar's value instead of copying it")
     assert refused_row.get("cut_short") is None, "the judge read a value the owner refuses"
     assert len(refused_ticket.records) == 1, (
         "a value the owner refuses did not take the report-driven fallback at the ticket lane")
@@ -91,5 +88,4 @@ def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
 
     gate = S.mod("run_common").learning_refusal_gate
     assert gate(tmp_path, tmp_path / "alert.json", truncated_by="REQUEST-LIMIT") is not None, (
-        "the corpus-refusal gate stopped refusing an unrecognized exit class; F-E's recorded "
-        "divergence between the two lanes is intentional and this is its pin")
+        "the corpus-refusal gate stopped refusing an unrecognized exit class")

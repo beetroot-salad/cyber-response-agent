@@ -17,20 +17,6 @@ from defender.tests.support.sandbox._spec791 import (
 )
 
 
-def _family():
-    return S.mod("learning.judge.family")
-
-
-def _archive():
-    return S.mod("learning.branch.archive")
-
-
-def _episode_with(tmp_path, worlds=("b",), **kw):
-    base, _src = location_path(S.runs_base)(tmp_path)
-    ep = S.episode(tmp_path)
-    return ep, {w: S.sibling_run_dir(base, w, **kw) for w in worlds}, base
-
-
 @pytest.mark.parametrize(("truncated_by", "closed_before_cut"), [
     ("aborted", True),
     ("request-limit", False),

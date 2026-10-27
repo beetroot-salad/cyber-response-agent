@@ -15,8 +15,6 @@ from defender.tests.support.learning.core import _state1135
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -84,7 +82,7 @@ def test_921_an_empty_or_absent_ledger_is_a_world_that_served_nothing(tmp_path):
     (ep / "served" / f"{J.fixture_world_id('c')}.jsonl").unlink()
     absent = _rows(ep)["c"]
     assert absent.get("ungradable") is not True, (
-        "an ABSENT ledger set the world aside; S8 makes it a world no call reached")
+        "an absent ledger set the world aside instead of making it a world no call reached")
     assert absent["served_nothing"] is True
 
 
@@ -130,8 +128,7 @@ def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_pa
         J.report_text("mali​cious"), encoding="utf-8")
     laced = _rows(ep)
     assert laced["c"].get("malformed") is True, (
-        "a laced headline graded as a clean one; the normalizer is exact by decision and the "
-        "judge is the reader that must not be fooled by a value that renders as `malicious`")
+        "a laced headline that renders as `malicious` graded as a clean one")
     assert laced["b"].get("ungradable") is not True, (
         "world c's laced headline cost world b its grade")
 
@@ -182,8 +179,7 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
         mutate(ep)
         rows = _rows(ep)
         assert rows["c"].get("ungradable") is not True, (
-            f"{name}: world b's malformed archive cost world c its grade — one world's bad "
-            "artifact is not a reason to throw away a sibling that graded cleanly")
+            f"{name}: world b's malformed archive cost world c its grade")
         return rows["b"]
 
     for name, mutate in (
@@ -202,8 +198,7 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
         row = _malform(name, mutate)
         assert row.get("ungradable") is True, f"{name}: the malformed world still graded"
         assert row.get("malformed") is True, (
-            f"{name}: the row does not say the input was MALFORMED — absent and malformed are "
-            "different answers and a reader keying on `ungradable` alone cannot tell them apart")
+            f"{name}: the row does not say the input was malformed")
         assert row.get("ungradable_reason"), f"{name}: the exclusion carries no reason"
         assert "b" in row["ungradable_reason"], f"{name}: the reason does not name the world"
 
@@ -220,8 +215,7 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
     gone = _rows(absent)["b"]
     assert gone.get("ungradable") is True, "an absent report.md still graded"
     assert gone.get("malformed") is not True, (
-        "an absent input was recorded as a malformed one; tier 1 skips, tier 2 refuses, and "
-        "the record is where the difference has to survive")
+        "an absent input was recorded as a malformed one")
 
 
 def test_921_two_world_entries_under_one_label_are_refused_at_manifest_load(tmp_path):
@@ -247,16 +241,14 @@ def test_921_a_world_label_equal_to_a_real_run_id_grades(tmp_path):
         ledgers={"b": [J.oracle_row("b")], colliding: []})
 
     assert sorted(_rows(ep)) == sorted(["b", colliding]), (
-        "the control failed: a label spelled like a run id did not load while no such run "
-        "existed, so the refusal below would not be about the collision")
+        "control: a label spelled like a run id did not load while no such run existed")
 
     # The real run appears under the tenant's runs base — `runs_base` writes an ORDINARY
     # finished run there — and the label still grades.
     _base, source_run_dir = location_path(J.runs_base)(tmp_path, source_run_id=colliding)
     assert source_run_dir.name == colliding
     assert sorted(_rows(ep)) == sorted(["b", colliding]), (
-        "a label spelled like a natural run id of the tenant no longer grades — the judge read "
-        "the tenant's runs, which it no longer does (J3)")
+        "a label spelled like a natural run id of the tenant did not grade")
 
 
 def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(tmp_path):
@@ -277,12 +269,12 @@ def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(t
         kept, malformed, _read = _family().read_world_ledger(
             bound, T.world_id(ep, "b"))
     assert [row["source"] for row in kept] == ["oracle", "passthrough"], (
-        "a row of a repeated pair-key was dropped; each row is its own call (A2)")
+        "a row of a repeated pair-key was dropped; each row is its own call")
     assert malformed == 2, (
         "the torn line and the out-of-vocabulary `source` were dropped without a count")
 
     rows = _rows(ep)
-    assert rows["b"]["malformed"] is True, "a partly-read ledger was graded (A3)"
+    assert rows["b"]["malformed"] is True, "a partly-read ledger was graded"
     assert J.fixture_world_id("b") in rows["b"]["ungradable_reason"], (
         "the refusal does not name the ledger file it refused")
     assert rows["c"].get("ungradable") is not True, "world b's torn ledger took world c's grade"
