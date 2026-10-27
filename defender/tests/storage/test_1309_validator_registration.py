@@ -3,12 +3,17 @@ than passes text unvalidated, until the validator has registered, and the roots 
 investigations register it by loading it."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from defender.records import _artifact_schema as schema
+
+# The child is a fresh interpreter: it finds `defender` only through this checkout's root.
+WORKTREE = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture
@@ -42,4 +47,9 @@ def test_a_writing_root_registers_the_validator_on_import(module):
         "from defender.records import _artifact_schema as s\n"
         "raise SystemExit(0 if s._diagnose is not None else 1)\n"
     )
-    assert subprocess.run([sys.executable, "-c", probe]).returncode == 0
+    inherited = os.environ.get("PYTHONPATH", "")
+    env = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(p for p in (str(WORKTREE), inherited) if p)}
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                          cwd=WORKTREE, env=env, timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]
