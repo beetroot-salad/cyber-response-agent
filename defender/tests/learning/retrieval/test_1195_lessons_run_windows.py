@@ -125,15 +125,13 @@ def _rows(channel: str, *ids: str) -> list[dict]:
 
 
 def _channel_scene(tmp_path: Path, channel: str, *, rows: list[dict], curator: S.FakeCurator,
-                   seed_corpus: dict[str, str] | None = None,
                    agent_files: dict[str, str] | None = None) -> S.DraftScene:
     """The channel's tick over a draft lane: its corpus is the batch's draft lane, its commits
     land on the batch branch."""
     if channel == "lessons":
-        return S.build_draft_scene(tmp_path, rows=rows, curator=curator,
-                                   seed_corpus=seed_corpus, agent_files=agent_files)
+        return S.build_draft_scene(tmp_path, rows=rows, curator=curator, agent_files=agent_files)
     return S.build_questioner_draft_scene(tmp_path, rows=rows, curator=curator,
-                                          seed_corpus=seed_corpus, agent_files=agent_files)
+                                          agent_files=agent_files)
 
 
 def _rel(sc: S.DraftScene, name: str) -> str:
@@ -204,12 +202,12 @@ class Tick:
 
 def _tick(  # noqa: PLR0913 — one tick's two curators, every seam a row varies
         tmp_path: Path, log: list, *, curator: S.FakeCurator, q_curator: S.FakeCurator,
-        seed_corpus: dict[str, str] | None = None, q_rows: tuple[str, ...] = ("w1",),
-        journal: bool = False, on_place: Callable[[], object] | None = None,
+        q_rows: tuple[str, ...] = ("w1",), journal: bool = False,
+        on_place: Callable[[], object] | None = None,
 ) -> Tick:
     """The lessons curator over `f1` (`curator`) and the questioner curator over `q_rows`
     (`q_curator`), in one worktree."""
-    sc = S.build_draft_scene(tmp_path, curator=curator, seed_corpus=seed_corpus)
+    sc = S.build_draft_scene(tmp_path, curator=curator)
     S.seed(sc.paths, QUESTIONER_FINDINGS, [S.world_row(i) for i in q_rows])
     lessons = _wire(sc.cfg, log, curator=curator, journal=journal, on_place=on_place)
     questioner = _wire(draft_questioner_cfg(sc.lane), log, curator=q_curator, journal=journal)
@@ -495,27 +493,15 @@ def _set_daemon_fault(daemon: X.FakeDaemon, kind: str, nth: int) -> None:
 
 def _box_fault_scene(  # noqa: PLR0913 — one tick, every fault a row varies
         tmp_path: Path, monkeypatch: Any, source: str, *, in_curator: str = "author",
-        seed_corpus: dict[str, str] | None = None, plant: Callable[..., None] | None = None,
-        log: list | None = None, stops_before: int = 0,
 ) -> Faulted:
     """A tick whose lessons curator leaves `a.md` (citing f1) and whose questioner curator leaves
     `q.md` (citing w1), each committing it unless something faults. The curator `in_curator`
-    meets a box fault from `source` (`FIRST_CURATOR_SOURCES`), after running `plant` (the box's
-    own act) in its spawn. `stops_before`: the stops the daemon answers before the first run's
-    (the drain's post-create stop, through `author_drain`, which starts a box of its own: then
-    the daemon holds nothing to begin with, and `runs` is `None`). A `Tripwire` is the `docker`
-    on `PATH` either way."""
-    if stops_before:
-        daemon, runs = X.FakeDaemon(tmp_path), None
-        daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
-    else:
-        daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
-    log = log if log is not None else []
+    meets a box fault from `source` (`FIRST_CURATOR_SOURCES`). A `Tripwire` is the `docker` on
+    `PATH`."""
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     fault: BaseException | None = BoxFault(f"the box failed ({source})") if source == "spawn" else None
 
     def act(rows: Any, batch_id: str, cfg: Any) -> None:
-        if plant is not None:
-            plant(rows, batch_id, cfg)
         if source == "spawn":
             assert fault is not None
             raise fault
@@ -523,10 +509,9 @@ def _box_fault_scene(  # noqa: PLR0913 — one tick, every fault a row varies
     first = in_curator == "author"
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=act if first else None)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")}, also=None if first else act)
-    t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, seed_corpus=seed_corpus)
+    t = _tick(tmp_path, [], curator=curator, q_curator=q_curator)
     # The faulting run's ordinal: the lessons curator's is 1, the questioner's 2.
-    nth = 1 if first else 2
-    _set_daemon_fault(daemon, source, nth + (stops_before if source.startswith("stop") else 0))
+    _set_daemon_fault(daemon, source, 1 if first else 2)
     return Faulted(t=t, curator=curator, q_curator=q_curator, daemon=daemon, runs=runs,
                    fault=fault)
 

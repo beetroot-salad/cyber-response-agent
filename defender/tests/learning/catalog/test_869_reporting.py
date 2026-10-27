@@ -29,8 +29,6 @@ from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir
 from defender.learning.core.state import PITFALLS
 
-DECLARED = frozenset({"elastic"})
-
 
 def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
     """Two `elastic` rows, one undeclared `elastik` row, and a curator edit that makes a real

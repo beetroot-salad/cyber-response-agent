@@ -22,6 +22,7 @@ from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV  # noqa
 from defender.tests.learning.curation.test_curator_manifest import _findings_lesson  # noqa: E402
 from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa: E402
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
+from defender.tests.support.learning.retrieval._lessons_corpus import _tenant_runs
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 
@@ -29,19 +30,8 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 TID = H1105.T_ID
 
 
-def _tenant_runs() -> Path:
-    """The tenant's runs folder `<data root>/<T>/runs`, with its tenant record."""
-    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-
-    root = current_data_root()
-    H1105.tenant(root, TID)
-    runs = root / TID / "runs"
-    runs.mkdir(exist_ok=True)
-    return runs
-
-
-def _corpus_of(tmp_path: Path, *stems: str, name: str = "lessons") -> Path:
-    corpus = tmp_path / name
+def _corpus_of(tmp_path: Path, *stems: str) -> Path:
+    corpus = tmp_path / "lessons"
     corpus.mkdir(parents=True, exist_ok=True)
     for stem in stems:
         _findings_lesson(corpus, stem)
@@ -77,10 +67,10 @@ def _oserror_members(corpus: Path) -> dict[str, str]:
     return {"foo.md": "IsADirectoryError", "dead.md": "FileNotFoundError"}
 
 
-def _crlf_lesson(corpus: Path, stem: str = "crlf") -> Path:
+def _crlf_lesson(corpus: Path) -> Path:
     """A CRLF lesson whose body holds a frontmatter-looking line: the CRLF pins normalization, the
     body line that `raw` stops at the closing fence."""
-    p = corpus / f"{stem}.md"
+    p = corpus / "crlf.md"
     p.write_bytes(
         b"---\r\n"
         b"name: crlf\r\n"

@@ -1,17 +1,14 @@
 """The shipped container-identity lesson reaches records carrying a container id (frontier lane)."""
 from __future__ import annotations
 
-import sys
 from functools import lru_cache
-from pathlib import Path
 
 import pytest
 
-DEFENDER = Path(__file__).resolve().parents[3]
-if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
-    sys.path.insert(0, str(DEFENDER.parent))
-
-
+from defender.investigation.lessons_engine import lessons_frontier
+from defender.knowledge._corpus import iter_lessons
+from defender.skills.invlang.frontier import frontier_from_text
+from defender.skills.invlang.validate import diagnose
 from defender.tests.support.shared._pre_p4_shipped import LESSONS as SHIPPED_LESSONS  # noqa: E402
 
 #: The corpus shipped before P4, kept byte for byte as a fixture (the product tree ships no
@@ -25,27 +22,17 @@ ALL_HITS = 99
 # drivers
 
 
-def _frontier(text: str):
-    from defender.skills.invlang.frontier import frontier_from_text
-
-    return frontier_from_text(text)
-
-
 @lru_cache(maxsize=1)
 def _lessons() -> tuple:
     """The real shipped corpus, parsed once for this module."""
-    from defender.knowledge._corpus import iter_lessons
-
     return tuple(iter_lessons(CORPUS))
 
 
 def _recall(text: str, *, top_k: int | None = None) -> list[str]:
-    from defender.investigation.lessons_engine import lessons_frontier
-
     kw = {} if top_k is None else {"top_k": top_k}
     return [
         h.name
-        for h in lessons_frontier.match_loaded(_frontier(text), list(_lessons()), **kw)
+        for h in lessons_frontier.match_loaded(frontier_from_text(text), list(_lessons()), **kw)
     ]
 
 
@@ -123,11 +110,9 @@ _FIXTURES = {
 
 def test_the_fixture_documents_carry_no_invlang_fault():
     """Guards every document in this file."""
-    from defender.skills.invlang.validate import diagnose
-
     for label, doc in _FIXTURES.items():
         assert diagnose(doc, None) == [], f"{label}: fixture is not a clean invlang document"
-        f = _frontier(doc)
+        f = frontier_from_text(doc)
         assert not f.is_empty(), f"{label}: fixture derives an empty frontier"
 
 
@@ -151,9 +136,8 @@ def test_the_shipped_lesson_reaches_a_record_carrying_the_container_id(label):
 
 def test_the_container_id_written_as_the_vertexs_own_ident_is_still_not_reached():
     assert LESSON not in _recall(IDENT_IS_THE_ID, top_k=ALL_HITS), (
-        "the selector-only fix reached the ident shape — either a selector now matches every "
-        "named host, or this recorded ceiling has been closed and this test needs rewriting "
-        "against whatever closed it"
+        "the ident shape was reached: a selector matches every named host, or this recorded "
+        "ceiling has closed"
     )
     assert LESSON in _recall(IDENT_IS_THE_ID_PLUS_ATTR), (
         "positive control on the same record: adding the census cell must retrieve the lesson"
@@ -177,10 +161,3 @@ def test_the_shipped_open_ident_selector_still_fires():
     assert LESSON in _recall(OPEN_CONTAINER_IDENT, top_k=ALL_HITS), (
         "the open-ident selector no longer reaches a container declared with an unresolved ident"
     )
-
-
-def _lesson():
-    """The shipped lesson as PRODUCTION reads it."""
-    return next(le for le in _lessons() if le.path.stem == LESSON)
-
-

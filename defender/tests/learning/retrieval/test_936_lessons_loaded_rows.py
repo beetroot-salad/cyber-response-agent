@@ -26,27 +26,17 @@ from defender.tests.support.shared.contracts._fold_936 import (
     WRITE_RETURN_HEADER,
     _rows,
 )
-from defender.tests.support.learning.retrieval._lessons_corpus import _run_copy_main_deps, _write_lesson
+from defender.tests.support.learning.retrieval._lessons_corpus import (
+    _run_copy_main_deps,
+    _tenant_runs,
+    _write_lesson,
+)
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-DEFENDER = Path(__file__).resolve().parents[3]
-
 #: The tenant whose runs the tracer walks.
 TID = H1105.T_ID
-
-
-def _tenant_runs() -> Path:
-    """The tenant's runs folder `<data root>/<T>/runs`, for the tracer's `--tenant`. Set up on
-    request, so tests that never trace keep a tenant-free data root."""
-    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-
-    root = current_data_root()
-    H1105.tenant(root, TID)
-    runs = root / TID / "runs"
-    runs.mkdir(exist_ok=True)
-    return runs
 
 
 # `kind` and `role` on every row

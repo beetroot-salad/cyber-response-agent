@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -21,10 +20,6 @@ from defender.skills.invlang.parser import (
     parse_dense_companion,
 )
 
-_HERE = Path(__file__).resolve().parents[2]
-_GOLDEN_DIR = _HERE / "fixtures" / "invlang"
-_CORPUS_DIR = _HERE / "fixtures" / "e2e"
-
 
 def _fence(body: str) -> str:
     return "```invlang\n" + body + "\n```\n"
@@ -35,27 +30,6 @@ _HYP_HEADER = (
     "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
     "h-001|?a|v-001|rel|identity|op||null|active"
 )
-
-
-_PRODUCTION_SURFACE = [
-    "parse_dense_companion",
-    "ParseWarning",
-    "INVLANG_FENCE_RE",
-    "scan_fences",
-    "FenceScan",
-]
-_TEST_SURFACE = [
-    "RowError",
-    "_resolution_record",
-    "_split_cells",
-    "_VERTEX_COLS",
-    "_EDGE_COLS",
-    "_HYP_HEADER_COLS",
-    "_HYP_PRED_COLS",
-    "_HYP_ATTR_PRED_COLS",
-    "_HYP_REFUT_COLS",
-    "_HYP_AUTHZ_COLS",
-]
 
 
 def test_split_quoted_cell_form_keeps_empty_and_honors_quotes():

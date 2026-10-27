@@ -231,7 +231,7 @@ def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, 
     assert [seq for _id, seq, _t in rows] == [1, 2], rows
     (_r1, _s1, first), (_r2, _s2, second) = rows
     assert _model_path(class_lesson) in first
-    assert _model_path(loginuid_lesson) not in first, "loop 2 had not opened loginuid yet"
+    assert _model_path(loginuid_lesson) not in first, "boundary 1's block names the loginuid lesson before loop 2 opened it"
     assert _model_path(loginuid_lesson) in second, (
         "boundary 2 re-used boundary 1's block — the lesson loop 2 opened never reached MAIN")
     assert second.count(FOLD_HEADER) == 1

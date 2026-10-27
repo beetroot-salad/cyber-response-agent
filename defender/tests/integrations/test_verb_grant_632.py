@@ -38,12 +38,8 @@ from defender.systems.verbs import read_roster  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-#: Unwitnessed while gather is the only shipped role with a verb grant (#922): two such roles in
-#: one process never share a scoped registry or catalog. Restore that pin with a second grant.
-
-def _elastic(rec: VerbRecorder, granted=(("elastic", "query"),), declared=("query", "esql")):
-    table = recording_table(rec, {"elastic": declared})
-    return ScopedFakeVerbs(table, grant_of("gather", granted))
+# Unwitnessed while gather is the only shipped role with a verb grant (#922): two such roles in
+# one process never share a scoped registry or catalog. Restore that pin with a second grant.
 
 
 def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):

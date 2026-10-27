@@ -25,8 +25,7 @@ NON_SYSTEMS = ("advisory", "connect", "gather", "handbook", "invlang", "judge")
 
 DECLARED = frozenset({"elastic", "cmdb"})
 
-#: The repo-relative spellings.
-SKILLS_REL = "agent/skills/"
+#: The repo-relative spelling of the catalog.
 CATALOG_REL = "agent/skills/gather/queries/"
 #: The two nested `execution.md` addresses (`_declared869.NESTED_MARKER_RELS`), as the draft
 #: spells them.
@@ -162,7 +161,7 @@ def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
     lane = _gate_lane(tmp_path)
     for name in NON_SYSTEMS:
         path = f"agent/skills/{name}/SKILL.md"
-        assert _is_in_scope(path), f"{path} is in scope today, which is why it needs refusing"
+        assert _is_in_scope(path), f"{path} is outside the path rule's scope, so refusing it shows nothing"
         with pytest.raises(LeadAuthorError):
             lead_author._skills_path_rule(_root(lane), "A ", path, systems=DECLARED,
                                           tree_for=_tree_for(lane))

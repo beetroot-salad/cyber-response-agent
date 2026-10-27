@@ -146,7 +146,7 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     )
     committed = _committed_agent_paths(lane)
     for rel in AGENT_NESTED_MARKER_RELS:
-        assert rel in committed, f"{rel} is not committed, so the demand drives nothing"
+        assert rel in committed, f"{rel} is not committed, so the test drives nothing"
     base = lane.batch.base()
     # The wrong answer, measured rather than remembered: the depth-unbounded read DOES pick the
     # model-chosen parent name up out of this very tree.
@@ -162,7 +162,7 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     assert "cmdb" in got, "the depth-1 marker-only control is not declared either"
 
 
-def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
+def test_declared_systems_raises_when_the_adapter_half_is_unresolvable(tmp_path):
     """An unreadable adapter half raises whatever the markers say. The committed tree is the
     caller's to read, so an unresolvable one is pinned where it is read:
     `test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`."""

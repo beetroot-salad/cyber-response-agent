@@ -51,8 +51,7 @@ def test_the_reducer_surface_cannot_be_deleted():
                     pitfalls_curator._pitfalls_path_rule(xy, path, systems=DECLARED)
                 message = str(exc.value)
                 assert "deleted" in message, (
-                    f"{path} at {xy!r} was refused for the wrong reason ({message}) — the "
-                    f"allowance returned early and U4 was not inherited"
+                    f"{path} at {xy!r} was refused for the wrong reason: {message}"
                 )
                 assert "non-execution.md" not in message
             else:

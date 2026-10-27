@@ -63,14 +63,14 @@ DEMO_ONE = fixture_uuid("tenant:t-one")
 DEMO_TWO = fixture_uuid("tenant:t-two")
 B = fixture_uuid("tenant:tenant-b")
 USER = "user-ann"
-#: O7/O6 (#1306): the tenant is the path's `T`; the caller is a session seeded through the identity
-#: repository, sent as the `__Host-defender_session` cookie plus the configured `Origin`.
+#: The tenant is the path's `T`; the caller is a session seeded through the identity repository,
+#: sent as the `__Host-defender_session` cookie plus the configured `Origin`.
 T = f"/tenants/{A}"
 TB = f"/tenants/{B}"
 SESSION_COOKIE = "__Host-defender_session"
 SESSION_A = "session-value-of-ann"
 SESSION_B = "session-value-of-bob"
-#: Cy is a member of both A and B (O3): one session for two tenants.
+#: Cy is a member of both A and B: one session for two tenants.
 SESSION_AB = "session-value-of-cy"
 ORIGIN = "https://app.defender.test"
 AUTH = {"Cookie": f"{SESSION_COOKIE}={SESSION_A}", "Origin": ORIGIN}
@@ -99,7 +99,7 @@ SETTINGS = SystemSettings(system_id="tix", kind="ticketing", display_name="T", e
                           settings={"queue": "sec"})
 SIGNED = "https://blobs.invalid/signed?sig=1"
 
-#: #1131's "API" section as (method, path), now under `/tenants/{tenant_id}` (#1306 O7).
+#: #1131's "API" section as (method, path), under `/tenants/{tenant_id}`.
 EXISTING_ROUTES = {
     ("GET", "/tenants/{tenant_id}/alerts"),
     ("GET", "/tenants/{tenant_id}/alerts/{alert_id}"),
@@ -243,7 +243,7 @@ class _Unused:
 
 
 def _identity() -> tuple[IdentityService, dict[str, str]]:
-    """Ann is a member of A, Bob of B and Cy of both, each with a seeded session (O7). Returns the
+    """Ann is a member of A, Bob of B and Cy of both, each with a seeded session. Returns the
     service and the seeded user ids by session value."""
     repo = InMemoryIdentityRepository()
     register_tenant(repo, TenantId(A))
@@ -299,7 +299,7 @@ class Api:
 
 
 def test_the_published_routes_are_exactly_1131s_list_under_tenants_plus_1306s() -> None:
-    """Conflict updated, O7: #1131's routes move under `/tenants/{tenant_id}`; #1306 adds its own; no Bearer scheme (O6)."""
+    """#1131's routes live under `/tenants/{tenant_id}`, #1306 adds its own, and no Bearer scheme is published."""
     doc = Api().client.get("/openapi.json").json()
     documented = {(method.upper(), path) for path, ops in doc["paths"].items() for method in ops}
     assert documented == PUBLIC_ROUTES
@@ -313,7 +313,7 @@ def test_the_happy_path_table_covers_every_existing_route() -> None:
 
 
 def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
-    """Conflict updated, A4: `defender.identity` joins the guard and loads no `defender.api` module."""
+    """The API modules, with `defender.identity`, load no runtime or learning-loop module."""
     probe = (
         "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
         "import defender.identity; "
@@ -327,7 +327,7 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
 
 
 def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
-    """A4: `defender.identity` imports nothing from `api`, nor anything the API must never load
+    """`defender.identity` imports nothing from `api`, nor anything the API must never load
     (the learning loop and what was `defender.runtime` before #1308 placed it by layer)."""
     probe = "import json, sys; import defender.identity; print(json.dumps(sorted(sys.modules)))"
     out = subprocess.run(
@@ -339,7 +339,7 @@ def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
 
 
 def test_the_tenancy_package_loads_no_identity_module() -> None:
-    """DC-4: `identity` sits right after `tenancy`, so importing `defender.tenancy` pulls nothing from it."""
+    """`identity` sits right after `tenancy`, so importing `defender.tenancy` pulls nothing from it."""
     probe = (
         "import json, sys; import defender.tenancy; "
         "print(json.dumps(sorted(m for m in sys.modules if m.startswith('defender.identity'))))"
@@ -358,7 +358,7 @@ def test_the_tenancy_package_loads_no_identity_module() -> None:
 def test_every_route_asks_the_ports_as_the_sessions_user_in_the_paths_tenant(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any]
 ) -> None:
-    """Conflict updated, O7/P-D: the tenant is the path's T, the actor is the session's user id."""
+    """The tenant is the path's T, the actor is the session's user id."""
     api = Api(**answers)
     response = api.client.request(route[0], path, headers=AUTH, json=body, follow_redirects=False)
     assert response.status_code < 400, response.text
@@ -374,7 +374,7 @@ def test_every_route_asks_the_ports_as_the_sessions_user_in_the_paths_tenant(
 def test_a_member_of_one_tenant_gets_404_and_no_port_call_for_another_tenants_path(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any]
 ) -> None:
-    """P-D (new): Ann, a member of A only, asking under B's path is a 404 before any port."""
+    """Ann, a member of A only, asking under B's path is a 404 before any port."""
     api = Api(**answers)
     response = api.client.request(route[0], path.replace(T, TB), headers=AUTH, json=body)
     assert response.status_code == 404
@@ -397,7 +397,7 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
     headers: dict[str, str],
 ) -> None:
-    """Conflict updated, O1/O6: no, unknown, or Bearer-carried session → 401, no port, no Bearer challenge."""
+    """No, unknown, or Bearer-carried session → 401, no port, no Bearer challenge."""
     api = Api(**answers)
     response = api.client.request(route[0], path, headers=headers, json=body)
     assert response.status_code == 401
@@ -417,7 +417,7 @@ def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
     origin: str | None,
 ) -> None:
-    """O6: a valid cookie with a missing or foreign Origin is 403 before any port; the same call with Origin is served."""
+    """A valid cookie with a missing or foreign Origin is 403 before any port; the same call with Origin is served."""
     api = Api(**answers)
     headers = {"Cookie": f"{SESSION_COOKIE}={SESSION_A}"} | ({} if origin is None else {"Origin": origin})
     response = api.client.request(route[0], path, headers=headers, json=body, follow_redirects=False)
@@ -431,7 +431,7 @@ def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend
 
 @pytest.mark.parametrize("claim", ["Acme_Corp", "org_2NxAbCdEf", ""])
 def test_a_path_tenant_that_fails_the_grammar_is_a_404_not_a_500(claim: str) -> None:
-    """Conflict updated (was: a login whose tenant claim fails the grammar is a 401), r6 Fixed details: a malformed T is 404."""
+    """A malformed T in the path is a 404."""
     api = Api()
     response = api.lenient().get(f"/tenants/{claim}/alerts", headers=AUTH)
     assert response.status_code == 404
@@ -443,7 +443,7 @@ def test_a_path_tenant_that_fails_the_grammar_is_a_404_not_a_500(claim: str) -> 
     (f"{T}/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r", "tenant_id": A}),
 ])
 def test_a_body_cannot_name_a_tenant(path: str, body: dict[str, str]) -> None:
-    """Conflict updated, O7: still no tenant in a body, now under the prefixed path."""
+    """The tenant comes only from the prefixed path, never from a body."""
     api = Api()
     assert api.client.post(path, headers=AUTH, json=body).status_code == 422
     assert api.ports.calls == []
@@ -712,7 +712,7 @@ PROBLEM_KEYS = {"type", "title", "status", "detail"}
     ("GET", f"{T}/alerts?limit=0", None, AUTH, {}, 422),
     ("GET", f"{T}/alerts", None, AUTH, {"list_alerts": RuntimeError("db exploded at host-7")}, 500),
 ])
-def test_every_error_is_an_rfc_9457_problem(  # conflict updated: O7 paths; O6 401 has no Bearer challenge; P-D 404 row
+def test_every_error_is_an_rfc_9457_problem(
     method: str, path: str, body: dict[str, Any] | None, headers: dict[str, str],
     answers: dict[str, Any], code: int,
 ) -> None:
@@ -725,7 +725,7 @@ def test_every_error_is_an_rfc_9457_problem(  # conflict updated: O7 paths; O6 4
     assert (problem["type"], problem["title"], problem["status"]) == (
         "about:blank", HTTPStatus(code).phrase, code)
     if code == 401:
-        assert "WWW-Authenticate" not in response.headers, "a session cookie has no challenge (O6)"
+        assert "WWW-Authenticate" not in response.headers, "a session-cookie 401 carries no challenge"
     if code == 500:
         assert problem["detail"] == "internal error", "a 500 says nothing about its cause"
 
@@ -762,10 +762,10 @@ def test_the_published_contract_declares_each_routes_problems() -> None:
     assert declared[("POST", "/tenants/{tenant_id}/investigations")] >= {409}
     assert declared[("POST", "/tenants/{tenant_id}/learning-jobs")] >= {409}
     assert declared[("GET", "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}")] >= {404}
-    # P-D: every tenant route answers 404 to a non-member, so every one declares it.
+    # Every tenant route answers 404 to a non-member, so every one declares it.
     assert all(404 in errors for (_, path), errors in declared.items()
                if path.startswith("/tenants/{tenant_id}"))
-    # F-4: every identity route but the two redirecting ones declares its 401 as a problem.
+    # Every identity route but the two redirecting ones declares its 401 as a problem.
     signed_out = {("GET", "/auth/login"), ("GET", "/auth/callback")}
     for route in IDENTITY_ROUTES - signed_out:
         assert 401 in declared[route], route
@@ -872,7 +872,7 @@ def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
 
 @pytest.mark.parametrize("legacy", ["Not_A_Tenant", "acme", "playground", "tenant-a", "blue"])
 def test_a_principal_carries_a_checked_tenant(legacy) -> None:
-    """Conflict updated (was: a caller from the login provider...): `Principal` is unchanged by #1306 (r7), still grammar-checked."""
+    """`Principal`'s tenant is grammar-checked."""
     with pytest.raises(TenantRefused):
         Principal(tenant_id=legacy, user_id=USER)
 
@@ -1058,7 +1058,7 @@ def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
 @pytest.mark.parametrize(("path", "port", "rows", "_after"), LISTS, ids=[p.rsplit("/", 1)[1] for p, *_ in LISTS])
 def test_a_cursor_from_one_tenant_is_refused_in_another_by_the_same_person(
         path: str, port: str, rows: list[Any], _after: Any) -> None:
-    """P-D, O3: a cursor is bound to the path's tenant, not to the caller; a member of both tenants cannot carry it across."""
+    """A cursor is bound to the path's tenant, not to the caller: a member of both tenants cannot carry it across."""
     api = Api(**{port: _rows_after(rows), "has_credentials": False})
     page = api.client.get(path, headers=AUTH_AB, params={"limit": 1}).json()
     cursor = page["next_cursor"]
@@ -1100,7 +1100,7 @@ def _session(value: str, origin: str) -> dict[str, str]:
 
 
 def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
-    """Conflict updated, O7: the demo's seeded sessions (was: bearer tokens) reach only their own tenant."""
+    """The demo's seeded sessions reach only their own tenant."""
     tenants = (DEMO_ONE, DEMO_TWO)
     deps = demo_deps(tenants, lambda: NOW)
     client = TestClient(create_app(deps), base_url=BASE)
@@ -1118,7 +1118,7 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
             assert client.get(f"/tenants/{other}/alerts", headers=auth).status_code == 404
             body = client.get("/me", headers=auth).json()
             assert [t["tenant_id"] for t in body["tenants"]] == [tenant]
-            # O5/K10: a member is never an administrator; the demo seeds members only.
+            # A member is never an administrator; the demo seeds members only.
             assert body["administrator"] is False
             assert client.get("/admin/tenants", headers=auth).status_code == 403
             seen.setdefault(tenant, set()).update(a["alert_id"] for a in alerts)
@@ -1142,7 +1142,7 @@ def test_a_demo_session_outlasts_the_production_idle_limit() -> None:
 
 
 def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
-    """DC-4: the demo has no Keycloak; `/auth/login` answers a 503 problem, never a redirect."""
+    """The demo has no Keycloak; `/auth/login` answers a 503 problem, never a redirect."""
     client = TestClient(create_app(demo_deps((DEMO_ONE,), lambda: NOW)), base_url=BASE)
     response = client.get("/auth/login", follow_redirects=False)
     assert response.status_code == 503
@@ -1151,7 +1151,7 @@ def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
 
 
 def test_the_demo_store_keeps_the_audit_events_a_transaction_commits() -> None:
-    """Conflict updated, O7: the actor is the demo session's user id (read from `/me`)."""
+    """The actor is the demo session's user id (read from `/me`)."""
     deps = demo_deps((DEMO_ONE,), lambda: NOW)
     client = TestClient(create_app(deps), base_url=BASE)
     auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)

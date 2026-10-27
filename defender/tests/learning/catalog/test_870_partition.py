@@ -162,7 +162,7 @@ def test_an_unoffered_reducer_edit_is_refused(scene):
         _tick(lane, overreach)
 
     assert not by_surface(overreach.handoffs)["reducer"], (
-        "the batch offered the reducer surface after all, so the demand is vacuous"
+        "the batch offered the reducer surface after all, so the test is vacuous"
     )
     assert lane.tip() == head_before, (
         "the unoffered reducer edit reached a commit"

@@ -75,7 +75,7 @@ def test_the_threshold_gates_on_a_records_own_occurrences(scene, monkeypatch):
     assert len(records) == 1, "the three shim rows did not merge to one record"
     assert records[0]["occurrences"] == 3
     assert len(records) < pitfalls_threshold(), (
-        "the record-counting reading no longer refuses this batch, so the demand is vacuous"
+        "the record-counting reading no longer refuses this batch, so the test is vacuous"
     )
 
     assert drains._has_lead_author_work(open_state(paths)) is True, "the drain never wakes for it"
@@ -125,20 +125,17 @@ def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
     records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
     assert len(records) == 8
     assert max(r["occurrences"] for r in records) == 1, (
-        "a content-less digest accumulated, so PO-R2's invariant no longer holds and this "
-        "demand's whole ground is gone"
+        "content-less digests accumulated into one record, so this test's premise is gone"
     )
     assert drains._has_lead_author_work(open_state(paths)) is True, (
-        "the pre-existing distinct-count gate stopped opening — FK-3 adds a disjunct, it "
-        "does not remove the count"
+        "the distinct-count gate no longer opens on this batch"
     )
     offered = Spawn(None)
     assert _run(lane, offered) == 0
     assert offered.calls, "the tick gate refused a batch its own count clears"
     assert [e["surface"] for e in offered.calls[-1]["handoffs"]] == ["reducer"]
     assert len(queue_ids(paths)) == 8, (
-        "the undiagnosable batch was consumed on the tick it was merely offered — FK-7's "
-        "hold is what makes this round's noisier arrival safe rather than lossy"
+        "the undiagnosable batch was consumed on the tick it was only offered"
     )
     assert graveyard_by_id(paths) == {}
 

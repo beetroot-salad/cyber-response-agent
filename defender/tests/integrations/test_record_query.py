@@ -195,31 +195,31 @@ def _live():
     return rq
 
 
-def _bare_run(tmp_path, name: str = "run"):
+def _bare_run(tmp_path):
     """A run folder and a fresh state for it, as `run_investigation` starts one."""
     from defender.records import RunPaths
     from defender.investigation.run_state import RunState
 
     # A run id is a canonical UUID, so the folder is `fixture_uuid(<label>)`.
-    run_dir = tmp_path / fixture_uuid(name)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     return run_dir, RunState(run_dir, run_dir.name)
 
 
-def _append(rq, state, *, params, payload=_PAYLOAD, lead=LEAD):
+def _append(rq, state, *, params, payload=_PAYLOAD):
     """One executed row through the production writer, its digest derived from `payload`."""
     return rq.append_query_row(
-        state, run=fixture_run(state.run_dir), lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
+        state, run=fixture_run(state.run_dir), lead_id=LEAD, system="elastic", verb="query", query_id="elastic.probe",
         params=params, raw_command="elastic query", payload_text=payload, exit_code=0,
         payload_status="ok", payload_digest=rq.payload_digest(payload, "", 0), system_key="",
     )
 
 
-def _table_rows(run_dir, lead=LEAD):
+def _table_rows(run_dir):
     from defender.records import RunPaths
 
     return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
-            if r.get("lead_id") == lead]
+            if r.get("lead_id") == LEAD]
 
 
 def _write_table(run_dir, rows):

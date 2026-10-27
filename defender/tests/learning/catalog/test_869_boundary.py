@@ -15,7 +15,7 @@ import pytest
 from defender import _git
 from defender.learning.core import drains, persist
 from defender.learning.leads import lead_author, pitfalls_curator
-from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
+from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests.support.runtime.engine._declared869 import (
     LeadAuthorSpawn,
     Spawn,
@@ -37,16 +37,6 @@ from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import draft_lead_deps
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of
-
-
-def _lead(query_id: str, *, system: str = "elastic", verb: str = "esql") -> ExecutedLead:
-    return ExecutedLead(
-        lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
-        query_id=query_id, system=system, verb=verb, params={"query": "FROM logs"},
-        raw_command="", goal_text="probe the thing", what_to_summarize=(),
-        raw_ref=Path("gather_raw/l-001/0.json"), payload_status="ok",
-        payload_digest="2 bytes", error_class=None,
-    )
 
 
 def _run_dir() -> Path:

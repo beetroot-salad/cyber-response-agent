@@ -641,15 +641,6 @@ def test_hypothesis_rejects_edge_anchor():
     assert "??" in reason
 
 
-def _wrap_prologue(vertex_row: str) -> str:
-    return (
-        "```invlang\n"
-        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
-        f"{vertex_row}\n"
-        "```\n"
-    )
-
-
 def _mixed_corpus(tmp_path):
     """One clean case, one that loses a row to a parse warning, one that loads no rows at all."""
     case_a = tmp_path / "case-a"

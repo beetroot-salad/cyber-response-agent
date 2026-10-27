@@ -15,24 +15,13 @@ from defender.tests.support.learning.curation._curator1134 import author_trees
 from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV
 from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa: E402
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
+from defender.tests.support.learning.retrieval._lessons_corpus import _tenant_runs
 from defender.tests.support.learning.curation._curator1134 import open_state
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 
 #: The tenant whose runs the tracer walks.
 TID = H1105.T_ID
-
-
-def _tenant_runs() -> Path:
-    """The tenant's runs folder `<data root>/<T>/runs`, with its tenant record: the tracer takes a
-    required `--tenant` and walks that tenant's runs."""
-    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-
-    root = current_data_root()
-    H1105.tenant(root, TID)
-    runs = root / TID / "runs"
-    runs.mkdir(exist_ok=True)
-    return runs
 
 
 def _load_trace_lesson():

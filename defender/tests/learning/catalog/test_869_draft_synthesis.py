@@ -114,8 +114,7 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     assert [p.name for p in found] == ["lift-me.md"]
 
     assert log_lines_naming(loop_log(capsys), repr("gather")), (
-        "the undeclared directory was skipped with no trace at all — a refusal with zero "
-        "trace is what O3 forbids, and this is the fourth composition site FK-4 added"
+        "the undeclared directory was skipped with no trace in the log"
     )
     # The control on the same address: declare it, and the same walk says nothing.
     capsys.readouterr()

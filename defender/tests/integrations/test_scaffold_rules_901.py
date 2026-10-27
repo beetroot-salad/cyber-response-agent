@@ -9,11 +9,6 @@ from defender.systems import _scaffold_rules
 from defender.knowledge._corpus import iter_query_templates, read_query_template
 
 _DEFENDER = Path(__file__).resolve().parents[2]
-_CATALOG = _DEFENDER / "skills" / "gather" / "queries"
-_ADAPTERS = _DEFENDER / "integrations"
-_ALL_SEVEN = (
-    "elastic", "identity", "cmdb", "ticket", "change-mgmt", "threat-intel", "host-state",
-)
 
 
 @pytest.fixture(scope="module")
@@ -198,8 +193,7 @@ def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
         ]
     assert offenders == [], offenders
     assert drafts, (
-        "the corpus carries no `_draft/` template, so this sweep cannot show that drafts are in "
-        "scope — the assertion above would hold identically under the excluded-drafts rule"
+        "the corpus carries no `_draft/` template, so this sweep cannot show drafts are in scope"
     )
 
 

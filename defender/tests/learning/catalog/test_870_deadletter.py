@@ -27,17 +27,15 @@ from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 ADDON = FIXTURE_AGENT / "skills" / "gather" / "defender-sql.pitfalls.md"
 
 
-def _curate_execution_md(system: str, bullet: str = "use the key, not the id"):
+def _curate_execution_md(system: str):
     """`_declared870.curate_execution_md` at the draft's spelling: one bullet in
     `agent/skills/<system>/execution.md` under the root the spawn is handed."""
 
     def _edit(root: Path) -> None:
         C.put(root / "agent" / "skills" / system / "execution.md",
-              f"# {system}\n\n{PITFALLS_SECTION}\n\n- {bullet}\n")
+              f"# {system}\n\n{PITFALLS_SECTION}\n\n- use the key, not the id\n")
 
     return _edit
-
-REASONS = ("no-system", "malformed-system", "undeclared-system", "batch-error")
 
 
 @pytest.fixture
@@ -68,14 +66,14 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
 
     # Whitespace is stripped before the shape check, so this row is `no-system` under either
     # alphabet; the probe only keeps that traceable.
-    assert is_system_name("   ") is False, "#914's alphabet admits whitespace again"
+    assert is_system_name("   ") is False, "the name alphabet admits whitespace"
     assert _reason(paths, pitfall_row("w:l-000:0", "   ")) == "no-system"
 
     # Outside the alphabet: two homoglyphs, and the uppercase spelling #914 moved out.
     for i, outside in enumerate(("\u0435lastic", "\uff45lastic", "Elastic")):
         assert is_system_name(outside) is False, (
-            f"#914's alphabet admits {outside!r} again, so it is a well-formed name nothing "
-            f"declares and reads as an onboarding miss rather than as attacker-shaped"
+            f"the name alphabet admits {outside!r}, so it reads as an onboarding miss, "
+            f"not as attacker-shaped"
         )
         assert _reason(paths, pitfall_row(f"u:l-00{i}:0", outside)) == "malformed-system"
 
@@ -102,8 +100,8 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
     ) == 0
     survivors = persist.read_pitfalls(_state1135.state_for_paths(inert))
     assert [r.get("pitfall_id") for r in survivors] == [None], (
-        "RECORDED, NOT DEMANDED: the id-less row is inert — it survives the tick untouched "
-        "while every row with an id leaves. If this ever changes it is a decision, not a fix"
+        "the id-less row no longer survives the tick untouched (recorded, not demanded: "
+        "changing it is a decision, not a fix)"
     )
     assert "k:l-000:0" in consumed_by_id(inert)
     assert graveyard_by_id(inert) == {}

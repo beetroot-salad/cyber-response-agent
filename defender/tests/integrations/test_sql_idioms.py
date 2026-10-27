@@ -414,8 +414,7 @@ def test_the_note_keys_on_truncated_not_on_returned_being_short_of_total():
     assert short_but_complete.returncode == EXIT_OK
     assert json.loads(short_but_complete.stdout) == [{"n": 0}]
     assert short_but_complete.stderr.strip() == "", (
-        "`truncated: false` with `returned < total` fired the note — the note is keyed on the "
-        "arithmetic, so it will fire on every payload whose `total` is a wider-scope count"
+        "`truncated: false` with `returned < total` fired the note: it is keyed on the arithmetic"
     )
 
 
@@ -473,8 +472,7 @@ def test_the_adapter_emits_the_shape_this_fixture_has(esql):
     # `columns[i]`, so a transpose, a row reversal or a partial re-zip all fail here.
     assert payload["values"] == raw["values"], "the adapter re-shaped rows the wire had sent"
     assert all(isinstance(row, list) for row in payload["values"]), (
-        "rows arrived as dicts — the re-zip is back, and the declaration `defender-sql.md` "
-        "and sql.py's note teach (`--rows values`) now names a list that is not positional rows"
+        "rows arrived as dicts, so `--rows values` no longer names positional rows"
     )
     assert payload["columns"] == raw["columns"]
     assert payload["row_count"] == len(raw["values"]) == 3

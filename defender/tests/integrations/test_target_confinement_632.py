@@ -1,8 +1,6 @@
 """#632 target fidelity: a verb cannot be aimed outside the system it is declared under. Host-state refuses hosts outside its inventory; elastic refuses indices outside the configured patterns; every outbound request is confined to a declared (path, method) read endpoint, observed through the transport capture seam. Not covered: `elastic.esql` selects its target inside the FROM clause, which the verb-level check does not reach."""
 from __future__ import annotations
 
-import inspect
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -80,18 +78,6 @@ def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
 def _ctx(tmp_path: Path) -> VerbContext:
     return VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
                        run_dir=tmp_path / "run", env={})
-
-
-def _kibana_status_path() -> str:
-    """The second endpoint `elastic.health-check` reaches, recovered from the ADAPTER's own
-    source rather than restated here."""
-    src = inspect.getsource(elastic_adapter.health_check)
-    found = re.findall(r'KIBANA_URL"\]\.rstrip\("/"\)\s*\+\s*"([^"]+)"', src)
-    assert len(found) == 1, (
-        f"the elastic health-check verb no longer builds exactly one Kibana-host URL "
-        f"({found}) — the read allowlist's fourth entry is derived from that call site"
-    )
-    return found[0]
 
 
 def test_host_state_refuses_a_host_outside_its_inventory(tmp_path: Path):
@@ -228,8 +214,7 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
 
     assert TICKET_WRITER_SYSTEM not in READ_ENDPOINT_ALLOWLIST, (
         f"the read allowlist declares read endpoints for {TICKET_WRITER_SYSTEM}, the ticket "
-        f"WRITER's system identity — three of the four write refusals below then pass for a "
-        f"reason this test no longer controls"
+        f"writer's system, so the write refusals below pass for another reason"
     )
 
     for system, endpoint, method in WRITE_ENDPOINTS:
@@ -288,8 +273,7 @@ def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transpor
 def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
     assert isinstance(READ_ENDPOINT_ALLOWLIST, ReadEndpointAllowlist), (
         "the shipped read-endpoint allowlist is not a constructed allowlist, so nothing in "
-        "production refuses a method-less entry — the constructor is not on the path the "
-        "shipped table takes, which is the only path an author's mistake travels"
+        "production refuses a method-less entry"
     )
     assert isinstance(READ_ENDPOINT_ALLOWLIST, Mapping), (
         "the allowlist type is not a Mapping — the endpoint rule's own test reads this table "

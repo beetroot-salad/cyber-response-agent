@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -45,8 +46,14 @@ def _prompt(tmp_path: Path) -> Path:
     return write_prompt(tmp_path, "curator.md", "Curate. Emit AUTHOR_RESULT when done.\n")
 
 
-def _build_curator_agent(tmp_path):
-    return build_curator_agent(tmp_path, _prompt(tmp_path), _fake_model(_replay("")))
+@contextlib.contextmanager
+def _curator_agent(tmp_path):
+    """The curator agent over `tmp_path`; its logger is closed on exit."""
+    agent, logger = build_curator_agent(tmp_path, _prompt(tmp_path), _fake_model(_replay("")))
+    try:
+        yield agent
+    finally:
+        logger.close()
 
 
 def _deps(scene) -> CuratorDeps:
@@ -66,10 +73,9 @@ def _read(agent, deps, **kw) -> str:
     return asyncio.run(_tool(agent, "lesson_read").function(ctx, **kw))
 
 
-def _lesson(corpus: Path, stem: str, *, name_key: bool = True, body: str = "lesson body") -> str:
+def _lesson(corpus: Path, stem: str, *, body: str = "lesson body") -> str:
     """A minimal fenced lesson; returns the repo-relative operand the agent would type."""
-    fm = f"name: {stem}\n" if name_key else "techniques: [T1]\n"
-    (corpus / f"{stem}.md").write_text(f"---\n{fm}---\n{body}\n")
+    (corpus / f"{stem}.md").write_text(f"---\nname: {stem}\n---\n{body}\n")
     return f"defender/{corpus.name}/{stem}.md"
 
 
@@ -77,11 +83,8 @@ def test_l1_body_default_strips_frontmatter(tmp_path):
     """With `read_file` dropped, the curator still reads a lesson body through `lesson_read`."""
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l1", body="L1-BODY-SENTINEL")
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         out = _read(agent, _deps(scene), path=lp)
-    finally:
-        logger.close()
     assert "L1-BODY-SENTINEL" in out
     assert "name:" not in out
     assert "---" not in out
@@ -90,13 +93,10 @@ def test_l1_body_default_strips_frontmatter(tmp_path):
 def test_l2_full_returns_whole_file(tmp_path):
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l2", body="L2-BODY")
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         deps = _deps(scene)
         full = _read(agent, deps, path=lp, part="full")
         body = _read(agent, deps, path=lp)
-    finally:
-        logger.close()
     assert "name: l2" in full
     assert "name: l2" not in body
     assert full != body
@@ -104,11 +104,8 @@ def test_l2_full_returns_whole_file(tmp_path):
 
 def test_l4_part_enum_is_body_or_full(tmp_path):
     scene = _scene(tmp_path)
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         schema = _tool(agent, "lesson_read").tool_def.parameters_json_schema
-    finally:
-        logger.close()
     assert set(schema["properties"]["part"]["enum"]) == {"body", "full"}
 
 
@@ -117,13 +114,10 @@ def test_l5_non_fenced_file_degrades_to_whole_text(tmp_path):
     scene = _scene(tmp_path)
     (scene.corpus / "l5.md").write_text("PLAIN TEXT NO FENCE\nsecond line\n")
     lp = "defender/lessons/l5.md"
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         deps = _deps(scene)
         body = _read(agent, deps, path=lp)
         full = _read(agent, deps, path=lp, part="full")
-    finally:
-        logger.close()
     assert "PLAIN TEXT NO FENCE" in body
     assert "PLAIN TEXT NO FENCE" in full
 
@@ -135,13 +129,10 @@ def test_l6_pattern_grep_folds_the_selected_text(tmp_path):
         "SHARED-TOKEN in body\nother body line\n"
     )
     lp = "defender/lessons/l6.md"
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         deps = _deps(scene)
         folded = _read(agent, deps, path=lp, part="body", pattern="SHARED-TOKEN")
         unfolded = _read(agent, deps, path=lp, part="body")
-    finally:
-        logger.close()
     assert "in body" in folded
     assert "in fm" not in folded
     assert "other body line" not in folded
@@ -155,27 +146,21 @@ def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
     outside = scene.tmp / "outside.md"
     outside.write_text("OUTSIDE-SECRET-CONTENT\n")
     lp_ok = _lesson(scene.corpus, "l7-ok", body="IN-CORPUS-BODY")
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         deps = _deps(scene)
         for bad in (str(outside), "defender/lessons/../../../../etc/passwd"):
             with pytest.raises(ModelRetry) as ei:
                 _read(agent, deps, path=bad, part="full")
             assert "OUTSIDE-SECRET-CONTENT" not in str(ei.value)
         assert "IN-CORPUS-BODY" in _read(agent, deps, path=lp_ok)
-    finally:
-        logger.close()
 
 
 def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
     scene = _scene(tmp_path)
     cap = _rt_tools._read_char_cap()
     (scene.corpus / "big.md").write_text("---\nname: big\n---\n" + "X" * (cap + 5000) + "\n")
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         out = _read(agent, _deps(scene), path="defender/lessons/big.md", part="full")
-    finally:
-        logger.close()
     assert len(out) < cap + 5000
     assert "[lesson_read]" in out
     assert "too large" in out
@@ -188,12 +173,9 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l11", body="L11-RAW-BODY")
     assert permission.is_untrusted_read(scene.corpus / "l11.md") is False
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
+    with _curator_agent(scene.tmp) as agent:
         deps = _deps(scene)
         out = _read(agent, deps, path=lp, part="full")
-    finally:
-        logger.close()
     assert "L11-RAW-BODY" in out
     # The frame's salt is minted at wrap time, so it is read off the return, never predicted (#875).
     salt = frame_salt_of(out, "untrusted")
@@ -207,13 +189,10 @@ def test_t2_corpus_author_def_drops_read_adds_lesson_read(tmp_path):
 
 
 def test_t3_registers_lesson_read_not_read_file(tmp_path):
-    agent, logger = _build_curator_agent(tmp_path)
-    try:
+    with _curator_agent(tmp_path) as agent:
         tools = agent._function_toolset.tools
         assert "lesson_read" in tools
         assert "read_file" not in tools
-    finally:
-        logger.close()
     # The corpus author is the one role granted `lesson_read`.
     lesson_read_roles = {AgentRole.CORPUS_AUTHOR}
     for role, defn in AGENTS.items():

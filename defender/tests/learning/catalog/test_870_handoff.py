@@ -1,7 +1,6 @@
 """#870: one reducer surface, a handoff that tells reducer mistakes from a system's, and the gate."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -29,10 +28,6 @@ from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 DECLARED = frozenset({"elastic", "cmdb"})
-FAILURE_KEYS = {"query_id", "goal", "executed_query", "stderr_digest", "occurrences"}
-
-#: `defender/skills/<anything>.md`, as a prompt spells it — template slots included.
-_PROMPT_PATH = re.compile(r"defender/skills/[A-Za-z0-9_{}./-]+\.md")
 
 
 # The routing decision, at the shape seam.
@@ -63,7 +58,7 @@ def test_the_reducer_handoff_names_no_system():
     assert len(reducer_entries) == 1, "no reducer handoff entry was produced"
     reducer = reducer_entries[0]
 
-    assert "system" not in reducer, "F1 settled at FK-9: the key is omitted, not empty"
+    assert "system" not in reducer, "the `system` key is omitted, not empty"
     assert len(reducer["failures"]) == 2, "the entry is vacuous, so the negative is too"
     blob = repr(reducer)
     for name in ("elastic", "cmdb"):
@@ -106,10 +101,8 @@ def _lane(tmp_path: Path, base: str) -> C.DraftLane:
 def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
     """One REAL pitfalls tick at threshold 2 (two distinct reducer mistakes queued), the spawn
     faked as writing `text` over the add-on in the draft. Returns rc, or the refusal raised."""
-    from defender.tests.support.learning.curation._curator1134 import open_state
-
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    state = open_state(lane.paths)
+    state = C.open_state(lane.paths)
     persist.append_pitfalls([shim_row("r:l-003:0"),
                              shim_row("r:l-004:0", digest="exit=1; Parser Error: x")], state=state)
 

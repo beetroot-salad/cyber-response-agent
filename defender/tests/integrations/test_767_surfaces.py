@@ -57,13 +57,12 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
         grant = verb_dispositions.grant_for(role, rows)
         for system, verb, verb_class in grant.entries:
             assert verb_class == verb_dispositions.READ_CLASS, (
-                f"{role} holds {system}.{verb} at class {verb_class!r} — every shipped verb is "
-                "read-class, and a write class is what O6 forbids"
+                f"{role} holds {system}.{verb} at class {verb_class!r}; every shipped verb is "
+                "read-class"
             )
             if system == "ticket":
                 assert verb in ("health-check", "list-tickets"), (
-                    f"{role} holds an unexpected ticket verb {verb!r}; a write verb in the "
-                    "grant table is O6's own failure witness"
+                    f"{role} holds an unexpected ticket verb {verb!r}"
                 )
 
     for path in (TICKETS_PATH, f"{TICKETS_PATH}/SOC-1{COMMENTS_SUFFIX}",
@@ -86,8 +85,8 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
 
     policy = json.loads(_text(DEFENDER_DIR / "investigation" / "bash_policy.json"))
     assert set(policy) <= {"version", "read_deny", "_README"}, (
-        "bash_policy.json now carries a program set; D8 re-pointed this demand at "
-        "`_common.reader_grants` precisely because it did not (c2)"
+        "bash_policy.json carries a program set, which the `_common.reader_grants` check "
+        "above does not see"
     )
 
 
@@ -148,8 +147,7 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
     assert len(capture.requests) == 1, "a refused request was still recorded as sent"
 
     assert "case-history" not in confinement.READ_ENDPOINT_ALLOWLIST, (
-        "the host writer's system gained an allowlist entry; g2/g3 record that it consults "
-        "none, and RF4 bounds every witness in this file on that fact"
+        "the host writer's system has an allowlist entry; it must consult none"
     )
 
 
@@ -157,18 +155,16 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
     """A census of the shipped source."""
     consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get|release_list|release_get)\s*\(")
     assert consumers == {}, (
-        f"a shipped module still screens ticket replies: {consumers} — #1221 removed both "
-        "read screens"
+        f"a shipped module screens ticket replies: {consumers}"
     )
     assert not (DEFENDER_DIR / "investigation" / "ticket_screen.py").exists(), (
-        "investigation/ticket_screen.py survives #1221's removal of both read screens"
+        "the removed read screen investigation/ticket_screen.py exists"
     )
 
     forward_dir = DEFENDER_DIR / "learning" / "author" / "verify_forward"
     for p in sorted(forward_dir.rglob("*.py")):
         assert "ticket" not in _text(p).lower(), (
-            f"{p.name} still reaches the ticket store: D5 deletes the whole lane, and its "
-            "prompt section with it"
+            f"{p.name} reaches the ticket store"
         )
 
     subprocess_readers = _shipped_hits(r"get-ticket")
