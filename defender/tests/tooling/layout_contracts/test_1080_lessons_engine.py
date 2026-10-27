@@ -19,6 +19,7 @@ from defender.records import RunPaths
 from defender.investigation import orient
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.tooling.layout_contracts import _spec1080 as S
+from defender.tests.tooling.layout_contracts._spec1080 import agent_root
 
 GOLDEN = "lessons"
 
@@ -148,7 +149,7 @@ def write_corpus(corpus: Path, lessons: Mapping[str, str]) -> Path:
 
 
 def corpus_of(root: Path) -> Path:
-    return S.agent_root(root) / "lessons"
+    return agent_root(root) / "lessons"
 
 
 def tree_with(tmp: Path, name: str, *corpora: Mapping[str, str]) -> Path:
@@ -193,7 +194,7 @@ def box_lane_env(root: Path, tmp: Path) -> dict[str, str]:
     the shims first on PATH, the root on PYTHONPATH, the in-box mark set."""
     from defender import box as box_mod
 
-    env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(S.agent_root(root))}, root))
+    env = dict(box_mod._render_env({"DEFENDER_AGENT_DIR": str(agent_root(root))}, root))
     env["PATH"] = _after_bin(env["PATH"], tmp)
     env["COLUMNS"] = "80"
     return env
@@ -203,7 +204,7 @@ def host_lane_env(root: Path, run_dir: Path, tmp: Path) -> dict[str, str]:
     """The host bash lane's environment (`box_mod.run_env`, the real one)."""
     from defender import box as box_mod
 
-    env = dict(box_mod.run_env(root / "defender", run_dir, tenant_agent=S.agent_root(root)))
+    env = dict(box_mod.run_env(root / "defender", run_dir, tenant_agent=agent_root(root)))
     env["PATH"] = _after_bin(env["PATH"], tmp)
     env["COLUMNS"] = "80"
     env["LANG"] = "C.UTF-8"
@@ -221,7 +222,7 @@ def shim(root: Path, argv: Sequence[str], *, tmp: Path, cwd: Path | None = None,
     resolves, or another path)."""
     prog = program or str(root / SHIM_REL)
     if env is None:
-        env = bare_env(tmp, DEFENDER_AGENT_DIR=str(S.agent_root(root)))
+        env = bare_env(tmp, DEFENDER_AGENT_DIR=str(agent_root(root)))
     return S.run([prog, *subst(argv, root, tmp)], cwd=cwd or tmp, env=env, timeout=60)
 
 
@@ -366,7 +367,7 @@ def plant_links(root: Path, tmp: Path) -> None:
     (root / "README.md").write_text("readme\n", encoding="utf-8")
     # A sibling corpus beside the runtime one: a file there exists and is still no lesson
     # `--show` may print.
-    write_corpus(S.agent_root(root) / "lessons-questioner", {"_TEMPLATE.md": "---\nname: t\n---\n"})
+    write_corpus(agent_root(root) / "lessons-questioner", {"_TEMPLATE.md": "---\nname: t\n---\n"})
 
 
 def real_subst(argv: Sequence[str]) -> list[str]:
@@ -379,7 +380,7 @@ def observe_s021(tmp: Path) -> dict[str, Any]:
     away = tmp / "elsewhere"
     away.mkdir()
     real = S.REPO_ROOT / SHIM_REL
-    agent_env = bare_env(tmp, DEFENDER_AGENT_DIR=str(S.agent_root(root)))
+    agent_env = bare_env(tmp, DEFENDER_AGENT_DIR=str(agent_root(root)))
     jobs = {f"real {key(a)}": (lambda a=a: outcome(S.run([real, *real_subst(a)], cwd=away,
                                                           env=agent_env), tmp))
             for a in S021_REAL_ARGV}
@@ -406,7 +407,7 @@ def observe_s060(tmp: Path) -> dict[str, Any]:
         "link-outside, tree variable set": dict(
             program=str(linked_bin / "defender-lessons"),
             env=bare_env(tmp, DEFENDER_DIR=str(root / "defender"),
-                         DEFENDER_AGENT_DIR=str(S.agent_root(root)))),
+                         DEFENDER_AGENT_DIR=str(agent_root(root)))),
         "host lane, search path": dict(program="defender-lessons", cwd=run_dir,
                                        env=host_lane_env(root, run_dir, tmp)),
         "box lane, search path": dict(program="defender-lessons", cwd=run_dir,
@@ -424,7 +425,7 @@ CORPUS_VARIANTS = ("fixed", "missing", "empty", "linked", "malformed")
 
 def variant_tree(tmp: Path, variant: str) -> Path:
     root = code_tree(tmp / f"tree-{variant}")
-    S.agent_root(root).mkdir()
+    agent_root(root).mkdir()
     corpus = corpus_of(root)
     if variant == "missing":
         return root
@@ -499,7 +500,7 @@ def orient_once(root: Path, tmp: Path, label: str, sig: str | None,
     alert = RunPaths(run_dir).alert
     recorder = RecordingShim({"vocab": None, **spec})
     text = orient.orientation(run_dir, root / "defender", alert, systems=[], shim=recorder,
-                              tenant_agent=S.agent_root(root))
+                              tenant_agent=agent_root(root))
     section = lessons_section(text)
     return {"section": None if section is None else norm(section, tmp),
             "calls": recorder.calls,
@@ -633,7 +634,7 @@ def lane_trees(tmp: Path) -> tuple[Path, Path]:
     real = write_corpus(tmp / "real-corpus", FIXED_CORPUS)
     write_corpus(tmp / "corpus-sibling", {"x.md": "---\nname: x\n---\n"})
     (real / "out.md").symlink_to(tmp / "corpus-sibling" / "x.md")
-    S.agent_root(linked).mkdir()
+    agent_root(linked).mkdir()
     corpus_of(linked).symlink_to(real, target_is_directory=True)
     return root, linked
 
