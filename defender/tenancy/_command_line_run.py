@@ -32,10 +32,10 @@ def open_command_line_run(raw_tenant: str, raw_run_id: str, *,
         data_root = _tenant.resolve_data_root()
     except TenantRefused as no_root:
         return escaped(no_root)
-    return _open_requested_run(data_root, raw_tenant, raw_run_id, episode_id=episode_id)
+    return open_requested_run(data_root, raw_tenant, raw_run_id, episode_id=episode_id)
 
 
-def _open_requested_run(data_root: DataRoot, raw_tenant: str, raw_run_id: str, *,
+def open_requested_run(data_root: DataRoot, raw_tenant: str, raw_run_id: str, *,
                         episode_id: str | None = None) -> tuple[Tenant, Run] | str:
     """The run a command line's `--tenant T [--episode E] <run_id>` names, beside T as accepted
     — T accepted under `data_root` (the root its entry point resolved), then the run opened by
