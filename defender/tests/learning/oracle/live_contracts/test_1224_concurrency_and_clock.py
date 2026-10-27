@@ -291,16 +291,16 @@ def test_1224_oracle_latency_trips_no_investigator_time_limit(tmp_path, monkeypa
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
     oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
-                      fault=S.Fault(delay=1.0))
-    verifier = S.passing_verifier(fault=S.Fault(delay=1.0))
+                      fault=S.Fault(delay=3.0))
+    verifier = S.passing_verifier(fault=S.Fault(delay=3.0))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
     run_dir, router, summary = _drive(
-        tmp_path, verbs=reg, tenant=est.place(), limits=_limits(1.5),
+        tmp_path, verbs=reg, tenant=est.place(), limits=_limits(5.0),
         leads={"l-001": [_q(ALICE), _q(ALICE), S.done_turn()]})
 
     assert oracle.submissions() == 1, "no oracle turn was taken"
     assert verifier.requests >= 1, "no oracle turn was taken"
-    assert _held(oracle, verifier) >= 2.5, "the oracle and verifier held the turn too briefly"
+    assert _held(oracle, verifier) >= 7.5, "the oracle and verifier held the turn too briefly"
     assert _refusal_stem() not in router.shown("l-001"), (
         "the budget enforcer refused the next call because of oracle latency")
     assert _refused_queries(run_dir) == []
@@ -316,11 +316,11 @@ def test_1224_oracle_latency_trips_no_investigator_time_limit(tmp_path, monkeypa
                              verifier=S.passing_verifier(), retry_cap=3)
 
     def slow_investigator() -> Any:
-        time.sleep(2.5)
+        time.sleep(7.5)
         return _q(ALICE)
 
     run_c, router_c, _ = _drive(control, verbs=reg_c, tenant=est_c.place(),
-                                limits=_limits(1.5),
+                                limits=_limits(5.0),
                                 leads={"l-001": [_q(ALICE), slow_investigator, S.done_turn()]})
     assert _refusal_stem() in router_c.shown("l-001"), (
         "the investigator's own latency was not counted — the limit is dead, so the negative "
