@@ -3,44 +3,18 @@ A fold would delete text ahead of the decision, so a mis-read could only widen w
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.execution import bash_exec  # noqa: E402
 from defender.investigation import permission  # noqa: E402
 from defender.tests.support.sandbox import _baseline_959 as base
 
-CR = base.CR
 NBSP = base.NBSP
 REPORT = base.REPORT
-DEFENDER = Path(__file__).resolve().parents[2]
-TESTS = DEFENDER / "tests"
-
-
-def _bash(cmd: str, policy=None):
-    return permission.decide_bash(
-        cmd, policy=policy or base.MAIN, run_dir=base.RUN, defender_dir=base.DFN,
-    )
-
-
-def _argv(cmd: str):
-    d = _bash(cmd)
-    if d.pipelines is None:
-        return None
-    return [[list(st.argv) for st in pl.stages] for pl in d.pipelines]
-
-
-def _parsed(cmd: str):
-    return [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(cmd)]
-
-
-def _generic_lexing_reason() -> str:
-    """The reason an ordinary unbalanced quote earns - the 'generic parse failure' F5's
-    obligation says a design-introduced narrowing may not hide behind."""
-    return _bash("cat 'x").reason
+_bash = base.decide_bash
+_parsed = base.parsed_argv
 
 
 # #971 - no word is a wrapper, and what that leaves the parser doing.
@@ -68,9 +42,7 @@ def test_no_word_is_parsed_as_a_wrapper():
     ):
         d = _bash(cmd)
         assert not d.allow, f"{cmd!r} is allowed"
-        assert d.reason == base.MAIN.deny_reason, (
-            f"{cmd!r}: refused, but not on the reason that names the programs this lane has"
-        )
+        assert d.reason == base.MAIN.deny_reason, f"{cmd!r}: refused, but not with the capability reason"
     # ...and the parse reports what the text says, quotes and all - no payload is unpacked, and
     # the `|` inside a quoted argument is not a pipe.
     assert _parsed(f"bash -c 'cat {REPORT} | wc -l'") == [
@@ -83,10 +55,7 @@ def test_no_word_is_parsed_as_a_wrapper():
     )
     assert causes.count("(") >= 4, "the numbered causes stopped being parseable as a list"
     for word in ("bash -c", "wrapper", "-lc", "fold"):
-        assert word not in causes, (
-            f"a numbered lexing cause still describes a wrapper step ({word!r}) - the parser "
-            "does not take one, so no cause may be about one"
-        )
+        assert word not in causes, f"a numbered lexing cause still describes a wrapper step ({word!r})"
 
 
 def test_a_newline_inside_a_quoted_argument_is_the_unclosed_quote_it_looks_like():
@@ -100,16 +69,14 @@ def test_a_newline_inside_a_quoted_argument_is_the_unclosed_quote_it_looks_like(
         assert not d.allow, cmd
         assert d.reason == permission.UNTOKENIZABLE_REASON, cmd
     assert "newline INSIDE a quoted argument" in permission.UNTOKENIZABLE_REASON, (
-        "the reason no longer explains a newline inside a quoted argument, which is the one "
-        "thing a model that pretty-printed its payload needs told"
+        "the reason no longer explains a newline inside a quoted argument"
     )
 
 
 def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
     """`timeout` is an ordinary ungranted word: no prefix is stripped before the decision."""
     assert _parsed(f"timeout 5 cat {REPORT}") == [[["timeout", "5", "cat", REPORT]]], (
-        "the prefix is still in the argv - the parse reports what the text says, and the "
-        "capability question is asked about `timeout` itself"
+        "the parse dropped or rewrote the `timeout` prefix"
     )
     for cmd in (
         f"timeout 5 cat {REPORT}",             # the plain prefix
@@ -126,13 +93,9 @@ def test_a_timeout_prefix_is_not_a_wrapper_and_is_never_folded_away():
     ):
         d = _bash(cmd)
         assert not d.allow, f"{cmd!r} is allowed"
-        assert d.reason == base.MAIN.deny_reason, (
-            f"{cmd!r}: refused, but not on the reason that tells the model which programs this "
-            "lane actually has - which is the whole point of letting the word through"
-        )
+        assert d.reason == base.MAIN.deny_reason, f"{cmd!r}: refused, but not with the capability reason"
     assert "timeout" not in permission.UNTOKENIZABLE_REASON, (
-        "the lexing reason names a `timeout` prefix, and the parser has no opinion about one - "
-        "the only sentence the model is ever shown about this would be a sentence about nothing"
+        "the lexing reason names a `timeout` prefix, which the parser does not treat specially"
     )
 
 
@@ -141,14 +104,11 @@ def test_an_ungranted_first_word_answers_before_any_classification_of_the_rest()
     for policy in (base.MAIN, base.GATHER):
         bare = _bash("defender-elastic query foo", policy)
         assert bare.reason == permission.ADAPTER_RETIRED_REASON, (
-            "the adapter message no longer answers a bare adapter command - the classification "
-            "this test scopes has broken, not just its reach"
+            "a bare adapter command no longer gets the adapter message"
         )
         prefixed = _bash("timeout 60 defender-elastic query foo", policy)
         assert prefixed.reason == policy.deny_reason, (
-            "an ungranted first word stopped answering first. If this is now the adapter "
-            "message, something taught the classifier to look past a prefix - which is the "
-            "special casing #971 removed, rebuilt one layer down"
+            "an ungranted first word stopped answering first"
         )
 
 
@@ -168,30 +128,12 @@ def test_a_blank_glued_to_an_ungranted_word_is_not_blamed_for_the_refusal():
 
 
 # What the removal leaves behind.
-def _identifier_hits(name: str, *, skip: set[str]) -> dict[str, list[int]]:
-    """Every line under `defender/` naming `name`, by file - tests included, this file's own
-    suite excluded (it names the symbol in prose about its removal)."""
-    hits: dict[str, list[int]] = {}
-    pattern = re.compile(rf"\b{re.escape(name)}\b")
-    for path in DEFENDER.rglob("*.py"):
-        if path.name in skip or ".venv" in path.parts:
-            continue
-        lines = [
-            i for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-            if pattern.search(line)
-        ]
-        if lines:
-            hits[str(path.relative_to(DEFENDER))] = lines
-    return hits
-
-
 def test_the_paren_fall_through_still_fails_closed_a_layer_up():
     """`(`/`)` break words without being operators, so `cat <(id)` reaches argv as words and the argv guard refuses it."""
     assert _parsed("cat <(id)") == [[["cat", "<(", "id", ")"]]]
     assert _parsed("bash -c 'cat <(id)'") == [[["bash", "-c", "cat <(id)"]]]
     for cmd in ("cat <(id)", "bash -c 'cat <(id)'"):
         d = _bash(cmd)
-        why = (f"{cmd!r}: the parens reach argv as ordinary words and the argv-reading guard "
-               "is what refuses them - a capability refusal, not a lexing one")
+        why = f"{cmd!r}: expected the capability refusal, not a lexing one"
         assert not d.allow, why
         assert d.reason == base.MAIN.deny_reason, why

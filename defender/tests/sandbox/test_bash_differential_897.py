@@ -81,8 +81,8 @@ def _bash_accepts(commands: list[str]) -> list[bool]:
     )
     verdicts = proc.stdout.decode().split()
     assert len(verdicts) == len(commands), (
-        f"the bash oracle answered {len(verdicts)} of {len(commands)} candidates — "
-        f"a truncated oracle silently shrinks the corpus. stderr: {proc.stderr[:400]!r}"
+        f"the bash oracle answered {len(verdicts)} of {len(commands)} candidates; "
+        f"stderr: {proc.stderr[:400]!r}"
     )
     return [v == "y" for v in verdicts]
 
@@ -117,8 +117,7 @@ def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
     ]
 
     assert not unexplained, (
-        "these commands are bash syntax errors that `bash_exec.parse` accepts, and the "
-        "leading-`;` carve-out does not explain them:\n  "
+        "bash syntax errors that `parse` accepts, not explained by the leading-`;` carve-out:\n  "
         + "\n  ".join(repr(c) for c in sorted(unexplained)[:40])
     )
 
@@ -127,8 +126,7 @@ def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
         if not _parse_accepts(_render(_without_benign_semicolons(combo)) or "true")
     ]
     assert not load_bearing, (
-        "the benign-`;` exemption FLIPS this module's own verdict on these commands — `parse` "
-        "accepts them but refuses what they strip to, so the `;` is dropping something:\n  "
+        "`parse` accepts these but refuses them with the benign `;` stripped:\n  "
         + "\n  ".join(repr(c) for c in sorted(load_bearing)[:40])
     )
 
@@ -141,10 +139,7 @@ def test_the_corpus_actually_exercises_the_grammar(corpus):
     assert 0 < accepted < len(corpus), "the bash oracle is answering uniformly"
 
     refused = sum(1 for combo, _ in corpus if not _parse_accepts(_render(combo)))
-    assert refused > 1000, (
-        f"only {refused} candidates were refused by parse — the executor's own guards are "
-        "not being reached, so a passing differential says nothing"
-    )
+    assert refused > 1000, f"only {refused} candidates were refused by parse: its guards are not reached"
 
 
 def test_the_semicolon_exemption_does_not_cover_a_dropped_pipe():

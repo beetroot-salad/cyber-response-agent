@@ -15,21 +15,12 @@ from defender._io import bind
 from defender.records import RunPaths
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
+from defender.tests.support.presentation import _episode_1025 as E
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """Every configured root inside `tmp_path`, so a pass this file drives lands in this test's
-    own tree — never the checkout's runs base or its real `learning/_pending/`."""
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def _judge():
-    return J.mod("learning.judge")
+_tmp_roots = E.tmp_roots
 
 
 def _family():
@@ -48,10 +39,6 @@ def _render():
 
 def _io():
     return J.mod("_io")
-
-
-def _archive():
-    return J.mod("learning.branch.archive")
 
 
 def _refused():

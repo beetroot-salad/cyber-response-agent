@@ -1,4 +1,4 @@
-"""#959 - constants shared by the bash-scanner tests: policies, the divergent-blank alphabet, and the lexing-refusal arms.
+"""#959 - shared by the bash-scanner tests: policies, the decision and parse helpers, the divergent-blank alphabet, and the lexing-refusal arms.
 
 Every divergent blank is built from its CODEPOINT, never a literal character, so no editor or copy-paste can normalise it into a plain space.
 """
@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from defender.agents import MAIN_DEF
+from defender.execution import bash_exec
+from defender.investigation import permission
 from defender.investigation.agent_definition import compile_policy_for
 
 RUN = Path("/run")
@@ -21,8 +23,8 @@ MAIN = compile_policy_for(MAIN_DEF, run_dir=RUN, defender_dir=DFN)
 def _gather_policy() -> Any:
     """Gather's policy, from the playground tenant's grant (`GATHER_DEF` carries no table grant).
 
-    Compiled lazily, so importing this module reads no settings file; `GATHER` and `POLICIES`
-    resolve through the module `__getattr__`."""
+    Compiled lazily, so importing this module reads no settings file; `GATHER` resolves through
+    the module `__getattr__`."""
     from defender.tests.support.tenancy import _tenants1106
 
     return compile_policy_for(_tenants1106.fixture_gather_def(), run_dir=RUN, defender_dir=DFN)
@@ -31,9 +33,18 @@ def _gather_policy() -> Any:
 def __getattr__(name: str) -> Any:
     if name == "GATHER":
         return _gather_policy()
-    if name == "POLICIES":
-        return {"main": MAIN, "gather": _gather_policy()}
     raise AttributeError(name)
+
+
+def decide_bash(cmd: str, policy=None):
+    """`permission.decide_bash` over `RUN`/`DFN`, under MAIN's policy unless one is given."""
+    return permission.decide_bash(cmd, policy=policy or MAIN, run_dir=RUN, defender_dir=DFN)
+
+
+def parsed_argv(cmd: str) -> list[list[list[str]]]:
+    """`bash_exec.parse(cmd)` as nested argv: pipelines of stages of words."""
+    return [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(cmd)]
+
 
 DIVERGENT_BLANK_CODEPOINTS = (
     0x000B, 0x000C, 0x000D, 0x001C, 0x001D, 0x001E, 0x001F, 0x0085,

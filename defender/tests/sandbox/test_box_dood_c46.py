@@ -309,23 +309,6 @@ def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypa
         start_box(request, docker=_CapturingDocker())
 
 
-def _request_runtime_of(monkeypatch, value: str | None) -> str:
-    """The lever through a `BoxRequest` (the run-cycle's and drains' entry point), whose spec factory reads it."""
-    from defender.box import BoxRequest
-
-    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    if value is None:
-        monkeypatch.delenv(BoxSpec.ENV_VAR, raising=False)
-    else:
-        monkeypatch.setenv(BoxSpec.ENV_VAR, value)
-    rec = _CapturingDocker()
-    request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT)
-    with pytest.raises(BoxFault):
-        start_box(request, docker=rec)
-    assert rec.create_argv is not None
-    return rec.create_argv[rec.create_argv.index("--runtime") + 1]
-
-
 def test_the_discovered_table_reaches_the_run_dir_create_argv(tmp_path):
     workspace = tmp_path / "workspace"
     run_dir = workspace / ".defender-runs" / "r1"

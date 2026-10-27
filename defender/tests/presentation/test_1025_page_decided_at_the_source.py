@@ -9,7 +9,6 @@ import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -19,19 +18,9 @@ NOT_ROOT = pytest.mark.skipif(
 S = E.SAMPLE
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    return E.render(ep, module=visualize_episode())
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
 
 
 def _world(page: E.Page, label: str) -> str:

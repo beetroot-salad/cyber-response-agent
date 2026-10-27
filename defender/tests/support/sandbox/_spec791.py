@@ -14,43 +14,9 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFENDER = REPO_ROOT / "defender"
-RUN_PY = DEFENDER / "run.py"
-RUN_COMMON_PY = DEFENDER / "run_common.py"
-CLI_PY = DEFENDER / "learning" / "core" / "cli.py"
-SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
-VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
-
-RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
-# What the retirement orphans. NOT the retired package, whose symbols stay live (the secondary
-# eval still projects; the golden replay binds the per-lead seam).
-# #922 finished two of the original three off: `enqueue_learning` (the learning-queue write the  # lint-stale-ref: ok — naming the departed symbol IS the record this comment exists to keep
-# curation request replaced) and `parse_judge_verdict` (the A/B harness's verdict parser) are  # lint-stale-ref: ok — same
-# DELETED, not merely dead, so no baseline entry is left to carry a reason.
-#: Empty since #1135 deleted `core/markers.py`, home of the one symbol it held: a symbol that no
-#: longer exists has no dead-code record to name.
-RETIRED_DEAD_SYMBOLS: tuple[str, ...] = ()
-# The projected-telemetry writer, as the shared-root census spells it.
-RETIRED_TELEMETRY_WRITER = "_write_oracle_telemetry"
 
 # The investigation tail's undrivable dependencies; everything else in the tail runs for real.
 TAIL_SEAM = ("lifecycle", "visualize", "ticket_writer")
-
-# A leg's terminal status; `unrecorded` is what a run dir written before the field existed reads as.
-LEG_COMPLETED = "completed"
-LEG_NEVER_SELECTED = "never-selected"
-LEG_STARTED_AND_DIED = "started-and-died"
-LEG_UNRECORDED = "unrecorded"
-
-# Every spelling the retired projection stage's column reached the judge under.
-PROJECTION_WORDS = (
-    "oracle projection",
-    "projected telemetry",
-    "projected_telemetry",
-    "the oracle's projection",
-    "oracle's projected",
-    "projection",
-)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -59,12 +25,10 @@ def worktree_package_guard():
     imported a different checkout's copy of the package than the one holding these tests."""
     import defender.agents as agents_mod
 
-    here = Path(__file__).resolve().parents[4]
     loaded = Path(agents_mod.__file__).resolve()
-    assert here in loaded.parents, (
-        f"ENVIRONMENT: this suite lives under {here} but imported the package from "
-        f"{loaded} — a different checkout's installed copy. Run from a neutral directory "
-        f"with PYTHONPATH={here}; every all-roles claim below is meaningless otherwise."
+    assert REPO_ROOT in loaded.parents, (
+        f"ENVIRONMENT: this suite lives under {REPO_ROOT} but imported the package from "
+        f"{loaded}; run from a neutral directory with PYTHONPATH={REPO_ROOT}"
     )
 
 
@@ -75,10 +39,6 @@ def noop_start_box(request, **_kw):
 
 
 def noop_stop_box(_box, **_kw) -> None:
-    pass
-
-
-def noop_scrub(_path, **_kw) -> None:
     pass
 
 
@@ -153,18 +113,16 @@ def make_run_dir(
     *,
     name: str = "case-791",
     disposition: str = "inconclusive",
-    leads: tuple[str, ...] = ("l-001",),
-    payload: bool = True,
     alert_bytes: bytes | None = None,
 ) -> Path:
     """A finished investigation run dir the learning cycle accepts: the alert, the report
     whose disposition selects the legs, the invlang work log, and the two append-only
-    tables (one lead sidecar + one executed-query row + its raw payload per lead)."""
+    tables (lead `l-001`'s sidecar, its executed-query row and its raw payload)."""
     run_dir = tmp_path / name
     run_dir.mkdir(parents=True, exist_ok=True)
     plant_alert_in_run(run_dir, alert_bytes if alert_bytes is not None
                        else json.dumps({"rule": {"id": "5710", "key": "spec.rule"}}).encode("utf-8"))
-    populate_run_dir(run_dir, disposition=disposition, leads=leads, payload=payload)
+    populate_run_dir(run_dir, disposition=disposition)
     return run_dir
 
 
@@ -174,13 +132,7 @@ def plant_alert_in_run(run_dir: Path, raw: bytes) -> None:
     plant_in_run(run_dir, raw)
 
 
-def populate_run_dir(
-    run_dir: Path,
-    *,
-    disposition: str = "inconclusive",
-    leads: tuple[str, ...] = ("l-001",),
-    payload: bool = True,
-) -> Path:
+def populate_run_dir(run_dir: Path, *, disposition: str = "inconclusive") -> Path:
     """The same artifacts, written into a run dir that ALREADY EXISTS: in the tail scenarios
     that is the run dir `main` materializes, not one the test chose."""
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
@@ -190,26 +142,18 @@ def populate_run_dir(
     )
     run_dir.joinpath("investigation.md").write_text("+ spec791 investigation\n", encoding="utf-8")
 
-    rows = []
-    for i, lead_id in enumerate(leads):
-        (run_dir / "gather_raw" / lead_id).mkdir(parents=True, exist_ok=True)
-        (run_dir / "gather_raw" / f"{lead_id}.lead.json").write_text(
-            json.dumps({"goal": f"check {lead_id}", "what_to_summarize": ["accepted vs failed"]}),
-            encoding="utf-8",
-        )
-        rows.append(json.dumps({
-            "lead_id": lead_id, "seq": 0, "system": "elastic", "verb": "search",
-            "query_id": "elastic.auth", "params": {"host": f"h{i}"}, "raw_command": "x",
-            "exit_code": 0, "payload_status": "ok", "payload_digest": f"d{i}",
-            "payload_path": f"gather_raw/{lead_id}/0.json",
-        }))
-        if payload:
-            (run_dir / "gather_raw" / lead_id / "0.json").write_text(
-                LEAD_PAYLOAD, encoding="utf-8"
-            )
-    run_dir.joinpath("executed_queries.jsonl").write_text(
-        "".join(r + "\n" for r in rows), encoding="utf-8"
+    (run_dir / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)
+    (run_dir / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"goal": "check l-001", "what_to_summarize": ["accepted vs failed"]}),
+        encoding="utf-8",
     )
+    (run_dir / "gather_raw" / "l-001" / "0.json").write_text(LEAD_PAYLOAD, encoding="utf-8")
+    run_dir.joinpath("executed_queries.jsonl").write_text(json.dumps({
+        "lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search",
+        "query_id": "elastic.auth", "params": {"host": "h0"}, "raw_command": "x",
+        "exit_code": 0, "payload_status": "ok", "payload_digest": "d0",
+        "payload_path": "gather_raw/l-001/0.json",
+    }) + "\n", encoding="utf-8")
     return run_dir
 
 
@@ -230,15 +174,11 @@ class SpecTail:
         self,
         paths,
         *,
-        disposition: str = "benign",
-        leads: tuple[str, ...] = ("l-001",),
         truncated_by: str | None = None,
         closed_before_cut: bool = False,
         certify: bool = True,
     ) -> None:
         self._paths = paths
-        self._disposition = disposition
-        self._leads = leads
         self._truncated_by = truncated_by
         self._closed_before_cut = closed_before_cut
         self._certify = certify
@@ -259,7 +199,7 @@ class SpecTail:
 
         run_dir = run.run_dir
         self.run_dirs.append(run_dir)
-        populate_run_dir(run_dir, disposition=self._disposition, leads=self._leads)
+        populate_run_dir(run_dir, disposition="benign")
         if self._certify:
             scrub_mod.scrub(run_dir)
         self._note("lifecycle", run_dir)
@@ -310,11 +250,7 @@ def require_tail_seam(main) -> None:
     """The entrypoint's tail seam, checked up front so a missing seam fails by name rather than
     as an unexpected-keyword `TypeError` inside an unrelated scenario."""
     missing = [p for p in TAIL_SEAM if p not in inspect.signature(main).parameters]
-    assert not missing, (
-        f"the investigation entrypoint takes no {missing}: its tail has no injection seam, so "
-        "every demand about what the tail DOES can only be read off its source — and a test "
-        "that reads source cannot fail when the behaviour changes"
-    )
+    assert not missing, f"the investigation entrypoint takes no {missing}: its tail has no injection seam"
 
 
 def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
@@ -338,10 +274,9 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
                 visualize=tail.visualize, ticket_writer=tail, **publish)
 
 
-def plant_alert(tmp_path: Path, *, name: str = "alert.json",
-                alert_bytes: bytes | None = None) -> Path:
+def plant_alert(tmp_path: Path, *, alert_bytes: bytes | None = None) -> Path:
     """The operator's own alert file — the argv the entrypoint is handed."""
-    alert = tmp_path / name
+    alert = tmp_path / "alert.json"
     alert.parent.mkdir(parents=True, exist_ok=True)
     alert.write_bytes(
         alert_bytes if alert_bytes is not None

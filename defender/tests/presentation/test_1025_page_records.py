@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import time
-from pathlib import Path
 
 import pytest
 
@@ -13,7 +12,6 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.storage._alert_plant import plant_source_copy
-from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._state1135 import env_state
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -21,39 +19,12 @@ pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 NOT_ROOT = pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores permission bits — CI runs non-root (defender/CLAUDE.md)")
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
-PAGE_PATH = "presentation/visualize_episode.py"
-RECORD_NAMES = ("judge.yaml", "outcome.yaml", "samples.yaml", "family.yaml", "timing.json",
-                "provenance.json")
-PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "read_manifest",
-                   "read_outcome", "failed_worlds", "read_samples_record",
-                   "read_world_ledger", "read_investigation_facts",
-                   "leads_by_id", "lead_chain", "json_mapping", "read_family_stamp")
 MARKUP = "<script>alert(1)</script><img src=x onerror=alert(1)>"
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
-    the page it wrote, parsed."""
-    return E.render(ep, module=visualize_episode())
-
-
-def cli(argv, capsys):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured."""
-    return E.cli(argv, capsys, module=visualize_episode())
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
 
 
 def _records(page: E.Page) -> str:

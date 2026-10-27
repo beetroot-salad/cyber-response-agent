@@ -10,14 +10,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
-
 from defender import box as box_mod
+from defender.box import _image
+from defender.box import image_tag as image_tag
+from defender.box._image import box_closure as box_closure
 from defender.execution.bash_exec import parse
-from defender.execution.box_codec import BoxFault, BoxResult
-from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE as REPO_ROOT
+from defender.execution.box_codec import BoxResult
+from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE as REPO_ROOT  # noqa: F401 — REPO_ROOT re-exported for the test files
 from defender.tests.e2e._box665 import (  # noqa: F401 — re-exported for the test files
-    BoxLifecycleRecorder,
     DockerFault,
     RecordingDocker,
     _cp,
@@ -34,8 +34,6 @@ HASH_INPUTS: tuple[str, ...] = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 IMAGE_PY = DEFENDER / "box" / "_image.py"
 BOX_IMAGE_PY = DEFENDER / "box" / "image_cli.py"
 DOCKERFILE = DEFENDER / "box.Dockerfile"
-CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-README_RUNTIME = REPO_ROOT / ".devcontainer" / "README.runtime.md"
 
 #: The stock image a FAKE-DOCKER test pins when it needs one; real-daemon tests pin
 #: `image_tag(DEFENDER)`.
@@ -278,29 +276,10 @@ PLANTED_INPUT_BYTES: dict[str, bytes] = {
 }
 
 
-# ---- the resolver, reached lazily -------------------------------------------------------------
-def image_tag(tree: Path) -> str:
-    """`box/_image.py::image_tag(tree)`, through the package door."""
-    return box_mod.image_tag(tree)  # type: ignore[attr-defined]
-
-
-def image_module():
-    """`box/_image.py`, for the constants (`HASH_INPUTS`, `RECIPE_VERSION`) and `ImageInputError`
-    a test pins exactly; the one import site of the module here."""
-    from defender.box import _image  # type: ignore[attr-defined]
-
-    return _image
-
-
+# ---- the resolver -----------------------------------------------------------------------------
 def recipe_version() -> str:
     """`_image.RECIPE_VERSION` — the constant that prefixes the name."""
-    return str(image_module().RECIPE_VERSION)
-
-
-def box_closure(lock: dict, root_name: str) -> list[dict]:
-    """`_image.box_closure(lock, root_name)`: the lock entries reachable, by link name, from the
-    root's core + `box` links."""
-    return image_module().box_closure(lock, root_name)  # type: ignore[no-any-return]
+    return str(_image.RECIPE_VERSION)
 
 
 # ---- trees ------------------------------------------------------------------------------------
@@ -406,24 +385,6 @@ def env_pairs(argv: list[str]) -> list[tuple[str, str]]:
         if tok == "--env" and i + 1 < len(argv):
             k, _, v = argv[i + 1].partition("=")
             out.append((k, v))
-    return out
-
-
-def without_the_additions(argv: list[str]) -> list[str]:
-    """The create argv minus JF5's `--pull=never` token and M6's `--env DEFENDER_BOX=1` pair
-    — what must be byte-for-byte today's argv (d48)."""
-    out: list[str] = []
-    skip = False
-    for i, tok in enumerate(argv):
-        if skip:
-            skip = False
-            continue
-        if tok == "--pull=never":
-            continue
-        if tok == "--env" and i + 1 < len(argv) and argv[i + 1] == "DEFENDER_BOX=1":
-            skip = True
-            continue
-        out.append(tok)
     return out
 
 
@@ -593,9 +554,3 @@ def run_shim(shim: str, world: ShimWorld, *, marked: bool) -> str:
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("STUB:")]
     assert len(lines) == 1, (shim, proc.stdout, proc.stderr)
     return lines[0][len("STUB:"):]
-
-
-def raise_boxfault_message(fn, *args, **kwargs) -> str:
-    with pytest.raises(BoxFault) as e:
-        fn(*args, **kwargs)
-    return str(e.value)

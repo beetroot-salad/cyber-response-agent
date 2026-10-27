@@ -16,7 +16,6 @@ import pytest
 
 from defender import box as box_mod
 from defender.box import (
-    AliasBanNotInForce,
     BoxExecutor,
     BoxFault,
     BoxRequest,
@@ -43,14 +42,6 @@ POINTER = "origin/main @ "
 #: removal. Nothing between the post-create stop and the run's check: no call outside a run.
 REFUSED_FIRST_RUN = ["stop", "status", "status", "start", "status", "stop", "status", "rm"]
 
-#: What makes the real `start_box` fail at batch start (the `FakeDaemon` knob), and how main
-#: surfaces it: a `BoxFault` with the cut commit appended (`pointed`), or a link ban as
-#: `AliasBanNotInForce`, unpointed.
-BATCH_START_FAULTS = [
-    pytest.param("refuse_create", BoxFault, True, id="create"),
-    pytest.param("refuse_sentinel", BoxFault, True, id="sentinel"),
-    pytest.param("allow_an_alias", AliasBanNotInForce, False, id="link-ban"),
-]
 
 def spawn_timeout() -> subprocess.TimeoutExpired:
     """A spawn's own CLI timing out: a `SubprocessError`."""
@@ -157,12 +148,6 @@ def chain(exc: BaseException | None) -> list[BaseException]:
         out.append(exc)
         exc = exc.__cause__ or exc.__context__
     return out
-
-
-def carries(got: BaseException | None, fault: BaseException) -> bool:
-    """`got` is `fault`, or a `BoxFault` raised from it (main's batch-start unwind re-raises a
-    `BoxFault` with the cut commit appended, chained to the original)."""
-    return got is fault or (isinstance(got, BoxFault) and got.__cause__ is fault)
 
 
 def caught(fn: Callable[[], object]) -> BaseException | None:
@@ -528,27 +513,6 @@ class Journal(list):
                 assert running, f"a spawn ran with no box running: {kinds}"
             else:
                 assert running == [], f"{kind!r} ran beside a running box {running}: {kinds}"
-
-
-class ScanWatch:
-    """A `scrub=` seam over a `FakeDaemon`: for each tree it is asked to walk it records which
-    containers the daemon still holds at that moment (`held`), marks the daemon's log `scan`,
-    and appends `scrub:<tree>` to `events` when given."""
-
-    def __init__(self, daemon: FakeDaemon, events: list | None = None) -> None:
-        self.daemon, self.events = daemon, events
-        self.held: list[list[str]] = []
-
-    def __call__(self, tree: Path, *_a: Any, **_kw: Any) -> None:
-        self.held.append(self.daemon.names())
-        self.daemon.mark("scan")
-        if self.events is not None:
-            self.events.append(f"scrub:{tree}")
-
-    def assert_scanned_once_the_box_was_gone(self) -> None:
-        """The tree was scanned, and only after the batch-end removal: no container was left."""
-        assert self.held, "the tree was never scanned"
-        assert all(h == [] for h in self.held), f"a tree was scanned beside a box: {self.held}"
 
 
 class HeldStart:

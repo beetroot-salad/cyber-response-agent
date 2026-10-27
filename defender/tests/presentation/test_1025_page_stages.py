@@ -11,7 +11,6 @@ import pytest
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.presentation import test_1025_stage_timing as ST
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -19,27 +18,9 @@ S = E.SAMPLE
 LOWER_BOUND = f"≈ {S.lower_bound} lower bound on wall: model calls + longest world"
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
-    the page it wrote, parsed."""
-    return E.render(ep, module=visualize_episode())
-
-
-def cli(argv, capsys):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured."""
-    return E.cli(argv, capsys, module=visualize_episode())
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
 
 
 def _ordered(text: str, *needles: str) -> bool:

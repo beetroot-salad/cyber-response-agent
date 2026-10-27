@@ -5,10 +5,8 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import os
-import re
 import subprocess
 import sys
-import pathlib
 from pathlib import Path
 
 import pytest
@@ -17,7 +15,6 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.presentation import test_1025_stage_timing as ST
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -25,48 +22,12 @@ NOT_ROOT = pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores permission bits — CI runs non-root (defender/CLAUDE.md)")
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """Every configured root inside `tmp_path` — the launcher's episodes root, the runs base and
-    the learning state root the judge's enqueue appends to."""
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
-    the page it wrote, parsed."""
-    return E.render(ep, module=visualize_episode())
-
-
-def cli(argv, capsys):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured (an id names an
-    episode under its tenant's own `<T>/episodes/`; no episodes base is set)."""
-    return E.cli(argv, capsys, module=visualize_episode())
-
-
-def cli_on(episode_dir, capsys):
-    """`visualize_episode().main(["--tenant", T, <episode id>])` for the episode at
-    `episode_dir`: the CLI names an episode by id, not by folder path."""
-    return E.cli_on(episode_dir, capsys, module=visualize_episode())
-
-
-def hook_page(episode_dir) -> E.Page:
-    """The page the launcher's hook wrote, parsed — after checking it is byte-identical to a
-    standalone `visualize_episode().render_episode` over the same directory: the hook is a
-    plain call to the same function and the page is a pure function of the directory."""
-    page = pathlib.Path(episode_dir) / E.PAGE_NAME
-    assert page.is_file(), f"the launcher did not write {E.PAGE_NAME}"
-    written = page.read_bytes()
-    render(episode_dir)
-    assert page.read_bytes() == written, "the hook's page differs from a standalone render"
-    return E.Page.parse(written.decode("utf-8"))
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
+cli = E.cli
+cli_on = E.cli_on
+hook_page = E.hook_page
 
 
 def _cli():
@@ -247,20 +208,6 @@ def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, capsys):
     assert "missing" not in lines[0], lines[0]
 
 
-def _live996_shaped(tmp_path: Path, root: Path) -> E.Episode:
-    """The second archive's shape: no family draw, no `samples.yaml`, a grade with an
-    ungradable row, no family row (the family call never ran) and no questioner counts."""
-    ep = E.sample_episode(tmp_path, root=root, family_draw=False, samples=False, judge=False)
-    doc = E.sample_grade(family=False)
-    doc["worlds"] = [E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign"),
-                     E.world_row(E.GRADED_WORLD, declared="malicious")]
-    E.drop_lanes(doc, E.PASSTHROUGH_WORLD)
-    for key in ("world_enqueued_rows", "world_enqueued_to"):
-        del doc[key]
-    E.write_judge(ep.dir, doc)
-    return ep
-
-
 def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys, monkeypatch):
     from defender.tests.storage.ids_1187 import _spec1187 as R
 
@@ -412,18 +359,6 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
     assert not (launched / E.PAGE_NAME).exists()
 
 
-def _css_classes(css: str) -> set[str]:
-    """Every `.name` a stylesheet's selectors mention."""
-    return set(re.findall(r"\.([A-Za-z_][\w-]*)", re.sub(r"\{[^}]*\}", "", css)))
-
-
-def _page_classes(page: E.Page) -> set[str]:
-    out: set[str] = set()
-    for node in page.root.descendants():
-        out |= node.classes
-    return out
-
-
 def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path):
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)
@@ -517,7 +452,7 @@ def _assert_a_renamed_copy_is_refused(built: E.Episode, root: Path, name: str) -
         (renamed.dir / "family.yaml").read_text(encoding="utf-8"))["episode_id"]
     assert manifest_id != folder_id, "the scene needs a manifest naming another episode"
     err = R.raised(E.render_episode, renamed.dir, module=visualize_episode())
-    assert err is not None, f"{name}: a copy renamed to {folder_id} rendered (R5)"
+    assert err is not None, f"{name}: a copy renamed to {folder_id} rendered"
     text = R.message(err)
     assert manifest_id in text, f"{name}: the refusal does not name the manifest's id: {text}"
     assert folder_id in text, f"{name}: the refusal does not name the folder's id: {text}"

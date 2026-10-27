@@ -1,8 +1,6 @@
 """#959 - one scanner: the token record stream, the unquoter, the blanks and the `\\r`."""
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -15,51 +13,17 @@ from defender.tests.support.sandbox import _baseline_959 as base
 
 CR = base.CR
 NBSP = base.NBSP
-DEFENDER = Path(__file__).resolve().parents[2]
 REPORT = base.REPORT
-
-#: Production python under `defender/`, minus the test tree - the census surface for "one
-#: module decides where a bash word ends".
-PRODUCTION_FILES = tuple(
-    p for p in DEFENDER.rglob("*.py")
-    if "tests" not in p.relative_to(DEFENDER).parts
-    and ".venv" not in p.parts
-    and "fixtures" not in p.relative_to(DEFENDER).parts
-)
+_bash = base.decide_bash
+_parsed = base.parsed_argv
 
 
-def _bash(cmd: str, policy=None):
-    return permission.decide_bash(
-        cmd, policy=policy or base.MAIN, run_dir=base.RUN, defender_dir=base.DFN,
-    )
-
-
-def _argv(cmd: str, policy=None):
+def _argv(cmd: str):
     """The pipelines the gate authorised, as nested argv - `None` when it refused."""
-    d = _bash(cmd, policy)
+    d = _bash(cmd)
     if d.pipelines is None:
         return None
     return [[list(st.argv) for st in pl.stages] for pl in d.pipelines]
-
-
-def _parsed(cmd: str):
-    return [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(cmd)]
-
-
-def _records(line: str):
-    """`_scan`'s record stream for `line`, with the shape demanded of it asserted first."""
-    scanned = bash_exec._scan(line)
-    assert scanned is not None, f"{line!r} did not scan"
-    records = list(scanned)
-    for r in records:
-        missing = [f for f in ("value", "start", "end", "kind") if not hasattr(r, f)]
-        assert not missing, (
-            f"_scan({line!r}) yielded {r!r}, which is missing {missing}. The record stream is "
-            "M1: one frozen record per token carrying value, start, end and kind - not the "
-            "three index-aligned collections this returned before, where alignment between the "
-            "token stream and the raw text was exactly what #955 was about."
-        )
-    return records
 
 
 def test_a_quote_that_never_closes_still_ends_the_scan_with_no_tokens():
@@ -71,10 +35,7 @@ def test_a_quote_that_never_closes_still_ends_the_scan_with_no_tokens():
         d = _bash(cmd)
         assert not d.allow
         assert d.pipelines is None
-        assert d.reason == permission.UNTOKENIZABLE_REASON, (
-            f"{cmd!r} must keep the reason class it is refused for today - reason identity is "
-            "part of the verdict (F2) and this shape is not in the enumerated set"
-        )
+        assert d.reason == permission.UNTOKENIZABLE_REASON, f"{cmd!r} lost the lexing reason"
 
 
 def test_a_blank_command_is_answered_ahead_of_the_parse_not_by_its_result():
@@ -102,10 +63,7 @@ def test_a_command_of_only_bash_blanks_is_still_the_allowed_no_op(cmd):
                          ids=["nbsp", "vt", "ff", "u2028"])
 def test_a_command_of_only_unicode_blanks_is_a_word_bash_would_try_to_run(blank):
     d = _bash(blank)
-    assert not d.allow, (
-        f"a command that is nothing but U+{ord(blank):04X} was answered as blank; bash would "
-        "look that word up as a program name"
-    )
+    assert not d.allow, f"U+{ord(blank):04X} alone was answered as a blank command; bash runs it as a word"
 
 
 def test_a_no_break_space_at_either_end_is_part_of_the_word_it_touches():
@@ -208,7 +166,5 @@ def test_the_line_boundary_and_incomplete_connector_causes_still_name_what_they_
         d = _bash(cmd)
         assert not d.allow, f"{cmd!r} became an allow - a connector lost its right-hand side"
         assert d.reason != permission.UNTOKENIZABLE_REASON, (
-            f"{cmd!r} still answers the line-boundary cause. After M4+M6+M2 the blank is a word "
-            "after the connector, so cause (3) is not what refuses this any more, and a reason "
-            "that says 'rewrite as a SINGLE line' sends the model to fix the wrong thing"
+            f"{cmd!r} still gets the line-boundary reason; the blank after the connector is a word"
         )

@@ -16,16 +16,11 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared.contracts import _record_1049 as R
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+_tmp_roots = E.tmp_roots
 
 
 
@@ -134,10 +129,10 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
     renamed_id = str(uuid.uuid4())
     renamed = E.copy_episode(built, tmp_path / "root-three" / renamed_id)
     err = H5.raised(E.render_episode, renamed.dir)
-    assert err is not None, "a renamed copy rendered (R5)"
+    assert err is not None, "a renamed copy rendered"
     said = H5.message(err)
-    assert renamed_id in said, f"the R5 refusal does not name the folder's id: {said!r}"
-    assert E.EPISODE_ID in said, f"the R5 refusal does not name the manifest's id: {said!r}"
+    assert renamed_id in said, f"the refusal does not name the folder's id: {said!r}"
+    assert E.EPISODE_ID in said, f"the refusal does not name the manifest's id: {said!r}"
     assert not renamed.page.exists(), "a page was written for a renamed copy"
 
 

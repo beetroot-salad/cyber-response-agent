@@ -9,7 +9,6 @@ import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -17,24 +16,12 @@ S = E.SAMPLE
 LOWER_BOUND = f"≈ {S.lower_bound} lower bound on wall: model calls + longest world"
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def render(ep) -> E.Page:
-    return E.render(ep, module=E.page_module())
+_tmp_roots = E.tmp_roots
+render = E.render
 
 
 def _inverted_steps() -> list[tuple[str, str, str]]:
     return [(step, ended, started) for step, started, ended in E.every_step()]
-
-
-def _every_step_wall() -> str:
-    """The wall `E.every_step()` spans: one minute per step, two minutes apart, from 10:00."""
-    return f"{2 * (len(E.every_step()) - 1) + 1}m00s"
 
 
 def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_path):

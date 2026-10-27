@@ -10,7 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from defender.tests.support.shared.contracts._by_path import WORKTREE, load_module
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
@@ -38,8 +37,6 @@ from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
-SALT = "0011223344556677"
-
 
 def _visualize(run_dir: Path) -> None:
     """`run_common.visualize` over the fixture run, with its accepted `Tenant`."""
@@ -49,18 +46,13 @@ def _visualize(run_dir: Path) -> None:
     run_common.visualize(run, tenant=set_up_tenant(current_data_root()))
 
 
-def _load_run_stats():
-    """`tooling/analytics/run_stats.py` — outside `defender/` AND outside
-    `specGraph.codeRoots`, so nothing mechanical checks the demand bound to it."""
-    return load_module(WORKTREE / "tooling" / "analytics" / "run_stats.py", name="run_stats_705")
-
-
-def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
-    """One real driven run with the store attached, returning (run_dir, store, replay)."""
+def _driven_run(tmp_path: Path, *, run_id: str, text: str = "done"):
+    """One real driven run with the store attached, its last turn `text`; returns
+    (run_dir, store, replay)."""
     run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     inv = (GOLDEN / "investigation.md").read_text()
     rep = (GOLDEN / "report.md").read_text()
-    scripted = turns if turns is not None else [
+    scripted = [
         Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
                                          "content": inv})]),
         Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
@@ -201,38 +193,26 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
     assistant_events = [e for e in _trace_events(run_dir) if e.get("type") == "assistant"]
     assert assistant_events, "the run produced no projection for either driver to render from"
 
-    def pages() -> dict:
-        return {name: (run_dir / name).read_text()
-                for name in ("runtime.html",)}
+    page = run_dir / "runtime.html"
 
     # driver A — the standalone re-render, in-process
     assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0, (
         capsys.readouterr().err)
-    after_a = pages()
-    for name, page in after_a.items():
-        assert marker in page, (
-            f"positive control: {name} must carry the run's own final turn, or the "
-            f"no-clobber assertions below are satisfied by two empty pages")
-    shown_a = after_a["runtime.html"].count('class="tx-entry tx-assistant"')
-    assert shown_a, (
-        "positive control: runtime.html must render the run's assistant entries, or the "
-        "count comparison below is between two zeroes")
+    after_a = page.read_text()
+    assert marker in after_a, "positive control: runtime.html does not carry the run's final turn"
+    shown_a = after_a.count('class="tx-entry tx-assistant"')
+    assert shown_a, "positive control: runtime.html renders no assistant entries"
 
     # driver B — the post-run step `run.py main` takes, over the SAME run_id
     _visualize(run_dir)
-    after_b = pages()
-    for name, page in after_b.items():
-        assert marker in page, (
-            f"{name} was clobbered by the second driver under one run_id — a truncating "
-            f"write replaced the first driver's real content with a page that no longer "
-            f"carries the run")
-    assert after_b["runtime.html"].count('class="tx-entry tx-assistant"') == shown_a, (
-        "the second render shows fewer assistant entries than the first — a truncating "
-        "write replaced a full page with a partial one")
+    after_b = page.read_text()
+    assert marker in after_b, "runtime.html was clobbered by the second driver under one run_id"
+    assert after_b.count('class="tx-entry tx-assistant"') == shown_a, (
+        "the second render's assistant entries differ from the first's")
 
     assert _trace_events(run_dir), "the second render dropped the projection it renders from"
     assert sql(store, "SELECT COUNT(*) FROM message WHERE session_id = ?",
-               (session_id,))[0][0] > 0, "the store both drivers read is still populated"
+               (session_id,))[0][0] > 0, "the store both drivers read is empty"
 
 
 @pytest.mark.parametrize("breakage", ["missing-pointer", "stale-store-path"])
@@ -298,36 +278,19 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     """HTML/script-shaped model-authored payload text renders only escaped: no live `<script>`, no `onerror`."""
     payload = crafted_html_payload()
-    run_dir = materialize(tmp_path, GOLDEN, run_id='escaping')
-    inv = (GOLDEN / "investigation.md").read_text()
-    rep = (GOLDEN / "report.md").read_text()
-    replay = ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
-                                         "content": inv})]),
-        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
-                                         "content": rep})]),
-        Turn(text=payload),
-    ])
-    opened: list = []
-    drive(run_dir, run_id="escaping", main=replay,
-          store_factory=store_factory(tmp_path, sink=opened))
+    run_dir, store, _replay = _driven_run(tmp_path, run_id="escaping", text=payload)
 
-    bodies = "".join(row[0] for row in
-                     sql(reread(opened[0]), "SELECT payload FROM message_payload"))
-    assert "window.__pwned" in bodies, (
-        "the crafted payload never reached the store — the fixture, not the renderer, "
-        "would be what this test measured")
+    bodies = "".join(row[0] for row in sql(store, "SELECT payload FROM message_payload"))
+    assert "window.__pwned" in bodies, "the crafted payload never reached the store"
 
     _visualize(run_dir)
-    for page_name in ("runtime.html",):
-        page = (run_dir / page_name).read_text(encoding="utf-8")
-        assert html.escape(payload) in page or "&lt;script&gt;" in page, (
-            f"{page_name}: positive control — the payload must be RENDERED, escaped, or "
-            f"the absence assertions below are vacuous")
-        assert "<script>window.__pwned=1</script>" not in page, (
-            f"{page_name}: the crafted script element broke out of its container")
-        assert "onerror=alert(1)" not in page, (
-            f"{page_name}: the crafted event-handler attribute survived unescaped")
+    page = (run_dir / "runtime.html").read_text(encoding="utf-8")
+    assert html.escape(payload) in page or "&lt;script&gt;" in page, (
+        "positive control: runtime.html does not render the payload, escaped")
+    assert "<script>window.__pwned=1</script>" not in page, (
+        "runtime.html: the crafted script element broke out of its container")
+    assert "onerror=alert(1)" not in page, (
+        "runtime.html: the crafted event-handler attribute survived unescaped")
 
 
 @pytest.mark.parametrize("spelling", ["onerror", "ONERROR", "OnError", "oNeRrOr"])

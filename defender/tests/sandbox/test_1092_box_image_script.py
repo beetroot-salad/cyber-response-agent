@@ -1,4 +1,4 @@
-"""The image-name hash module and the stdlib-only build script (box_image.py)."""
+"""The image-name hash module and the stdlib-only build script (image_cli.py)."""
 from __future__ import annotations
 
 import json
@@ -155,19 +155,3 @@ def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_pat
     assert "uv.lock" in out.stderr, out.stderr
     assert HASH_INPUTS[0] not in out.stderr.split("cannot read", 1)[1], out.stderr
     assert recorded_docker_calls(log) == []
-
-
-_ALPHA_BETA_LINK = b'{ name = "beta", extra = ["speed"] }'
-_ALPHA_LINKS = (
-    b'dependencies = [\n    ' + _ALPHA_BETA_LINK + b',\n'
-    b'    { name = "winonly", marker = "sys_platform == \'win32\'" },\n]\n'
-)
-_UNUSABLE_LOCKS: dict[str, tuple[bytes, bytes]] = {
-    # case -> (the bytes replaced — b"" appends — , what replaces them)
-    "not TOML": (b"", b"[[package]\n"),
-    "a link with no name": (_ALPHA_BETA_LINK, b'{ extra = ["speed"] }'),
-    "dependencies a string": (_ALPHA_LINKS, b'dependencies = "beta"\n'),
-    "a value nested past the encoder": (b"", b"\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
-    "a nameless entry nested past repr": (b"", b"\n[[package]]\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
-    "an integer past the digit limit": (b"", b'\n[[package]]\nname = "zz"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n"),
-}

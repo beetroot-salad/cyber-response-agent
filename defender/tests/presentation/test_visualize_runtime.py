@@ -223,9 +223,7 @@ def test_transcript_from_messages(tmp_path):
     assert plan_calls[0]["phase"].startswith("PLAN")
 
     phases = {e["phase"] for e in entries}
-    assert len(phases) > 1, (
-        f"every entry carries one phase ({phases}) — the wire-id/coord join is dead and "
-        f"cur_phase never left its phase_order[0] seed")
+    assert len(phases) > 1, f"every entry carries one phase ({phases}): the wire-id/coord join is dead"
     assert phases == set(order), f"expected every tagged phase to reach the transcript, got {phases}"
 
 
@@ -239,9 +237,7 @@ def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
                 if r.get("kind") == "response" and r.get("agent_id", "main") == "main"]
     assert trace_ids
     assert wire_ids
-    assert not set(trace_ids) & set(wire_ids), (
-        "the fixture collapsed the two id spaces into one — production keeps them apart "
-        "and the join under test only exists because they differ")
+    assert not set(trace_ids) & set(wire_ids), "the fixture collapsed the two id spaces into one"
     assert all("/" in tid for tid in trace_ids), "a store coord carries its session prefix"
     assert all("/" not in wid for wid in wire_ids), "a wire id carries no session prefix"
 
@@ -250,9 +246,7 @@ def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
     coord_map = d.msg_phase_map(events, tags)
     wire_map = d.transcript_phase_map(events, tags, messages)
 
-    assert set(coord_map) == set(trace_ids), (
-        "the cost attribution's map must be keyed by coord — `_attribute_main_agent` "
-        "reads trace events and joins in that space")
+    assert set(coord_map) == set(trace_ids), "the cost attribution's map is not keyed by coord"
     assert set(wire_map) == set(wire_ids), (
         "the transcript's map must be keyed by wire id — `build_transcript` has nothing else")
     # Same turns, same phases, two spellings — the translation must not lose a phase.
@@ -278,8 +272,7 @@ def test_the_phase_join_survives_a_fold_that_left_the_trace_holding_only_the_tai
     phases = [e["phase"] for e in entries if e["kind"] == "assistant"]
 
     assert phases[0].startswith("ORIENT"), (
-        f"the folded-away turns must fall back to phase_order[0], got {phases[0]!r} — "
-        f"the join slid the surviving phases onto the wrong turns")
+        f"the folded-away turns must fall back to phase_order[0], got {phases[0]!r}")
     assert phases[-1].startswith("REPORT"), (
         f"the surviving turns must keep their own phases, got {phases!r}")
 
@@ -321,26 +314,22 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     # Asked of the rendered SPAN, not of the class name: the stylesheet is inlined into every
     # page, so `"ts-review" in html` is true whether or not anything was rendered with it.
     assert re.search(r'ts-review">', html) is None, (
-        "this fixture's gate made no model call, and a $0.0000 review term would read as "
-        "'the gate was free' rather than 'the gate did not run'"
+        "a review term is shown for a gate that made no model call"
     )
 
 
-def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
+def _append_review_calls(run: Path) -> float:
     """Give the fixture run a review gate that actually cost something, and return the total.
 
     Written as wire records under `review:{lens}`, where the gate's calls land (one shared
     `RequestLogger`, one `agent_id` namespace)."""
     from defender.configuration._pricing import usage_cost
 
-    rows = []
-    for lens in ("support", "ablation", "composer"):
-        for seq in range(n_per_lens):
-            rows.append({
-                "agent_id": f"review:{lens}", "seq": seq, "id": f"review:{lens}#{seq}",
-                "kind": "response", "model": "kimi-k3", "usage": _USAGE, "duration_ms": 900.0,
-                "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "read"}]},
-            })
+    rows = [{
+        "agent_id": f"review:{lens}", "seq": 0, "id": f"review:{lens}#0",
+        "kind": "response", "model": "kimi-k3", "usage": _USAGE, "duration_ms": 900.0,
+        "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "read"}]},
+    } for lens in ("support", "ablation", "composer")]
     with RunPaths(run).wire_log.open("a", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
@@ -369,10 +358,7 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
     assert named is not None, "the review's share is folded into the total unnamed"
     assert abs(float(named.group(1)) - review_total) < 0.0001
 
-    assert "kimi-k3" in html, (
-        "the by-model breakdown and the models byline must show the model the review "
-        "actually billed, not fold its spend into the investigator's row"
-    )
+    assert "kimi-k3" in html, "the page does not name the model the review billed"
 
 
 def _duplicate_the_gather_phase(run: Path) -> None:

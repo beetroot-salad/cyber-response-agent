@@ -18,7 +18,7 @@ PAGE_NAME = "learning.html"
 MODES = ("empty", "garbage", "skeleton")
 MODE_ENV = "GARBAGE_PAGE_1025"
 OUT_ENV = "GARBAGE_PAGE_1025_OUT"
-SUITE = tuple(f"defender/tests/test_1025_page_{part}.py"
+SUITE = tuple(f"defender/tests/presentation/test_1025_page_{part}.py"
               for part in ("contract", "verdict", "worlds", "stages", "records"))
 CONTENT_FILES = tuple(Path(p).name for p in SUITE) + ("_episode_1025.py",)
 STEPS = ("questioner", "preflight", "runs", "verify", "judge")

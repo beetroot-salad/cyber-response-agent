@@ -18,23 +18,14 @@ from defender.records._episode_paths import LAYOUT, EpisodePaths
 from defender._clock import now_iso, parse_iso_utc
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 #: The five steps, in the order the launcher runs them — the names a reader of the record keys on.
 EXPECTED_STEPS = ["questioner", "preflight", "runs", "verify", "judge"]
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """Every configured root points inside `tmp_path` — the launcher's, the sibling runs base's
-    and the learning state root the judge's enqueue appends to — so an episode this file drives
-    lands in this test's own tree and never in the checkout's."""
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    # The episodes variable is read by nothing (an episode lives at `<data root>/<T>/episodes/<uuid>`,
-    # see `_NextEpisode`); this and the per-arm settings below are inert.
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+_tmp_roots = E.tmp_roots
 
 
 def _cli():
@@ -44,11 +35,6 @@ def _cli():
 def _entry():
     """The command entry, whose `main` supplies the real preflight and page renderer."""
     return T.mod("cli.learning.branch")
-
-
-def _tenant_paths():
-    """The tenant `T.runs_base` (or `d9_tenant`) already created."""
-    return T.current_tenant()
 
 
 def _episodes_now() -> set[Path]:
@@ -307,8 +293,7 @@ def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tm
     with record.open("r", encoding="utf-8") as held_open:
         second = clock.record("preflight", started_at=now_iso(), ended_at=now_iso())
         assert held_open.read() == before_text, (
-            "a handle opened before the write saw the new bytes — the existing file was written "
-            "in place rather than replaced")
+            "a handle opened before the write saw the new bytes: the file was written in place")
     assert os.stat(record).st_ino != before_inode, "the write reused the existing file"
     assert json.loads(record.read_text(encoding="utf-8")) == {"steps": [first, second]}
     assert _read(episode_dir) == [first, second]
@@ -518,20 +503,17 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
         "`verify` started before `runs` ended — a `started_at` that is not the step's own")
 
 
-def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_raised(
-        tmp_path, monkeypatch):
+def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_raised(tmp_path):
     """An episode that aborts MID-STEP leaves the rows for the steps that completed and no row for
     the step that raised."""
     cli = _cli()
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
     questioner = _Interrupting(_NextEpisode())
     ep, _before, _after = _abort(tmp_path, cli.LauncherRefused, questioner=questioner)
     assert questioner.calls > 0, "the control failed: the questioner seam was never reached"
     assert questioner.seen == [[]], f"the questioner saw {questioner.seen} before it ran"
     assert _raw_rows(ep) == [], "a step that raised was recorded"
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
     oracle_seam = _Interrupting(_NextEpisode())
     ep, before, after = _abort(tmp_path, cli.LauncherRefused,
                                oracle=S.oracle(then=S.Move(None, raises=oracle_seam)))
@@ -541,7 +523,6 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     assert [row["step"] for row in _raw_rows(ep)] == ["questioner"]
     _clocked(_raw_rows(ep), before=before, after=after)
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-runs"))
     family = _Interrupting(_NextEpisode())
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, spawn=family)
     assert family.calls > 0, "the control failed: the process seam was never reached"
@@ -551,7 +532,6 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
         "the record does not stop at the last step that completed")
     _clocked(_raw_rows(ep), before=before, after=after)
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-verify"))
     outside = tmp_path / "outside-verify"
     outside.mkdir()
     planting = _PlantingSibling(outside=outside)
@@ -563,7 +543,6 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
         "a `verify` that raised was recorded, or a step before it was not")
     _clocked(_raw_rows(ep), before=before, after=after)
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-judge"))
     judge = _Interrupting(_NextEpisode())
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, judge=judge)
     assert judge.calls > 0, "the control failed: the judge seam was never reached"

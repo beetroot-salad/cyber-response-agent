@@ -71,9 +71,9 @@ def _batch(base: Path) -> Iterator[Any]:
         yield delivery.start_batch(f"t1195-{uuid.uuid4().hex[:8]}", lanes=LANES), built[0]
 
 
-def _grew(path: Path, past: int, *, within: float = 10.0) -> bool:
-    """Whether `path` grows past `past` bytes within `within` seconds."""
-    deadline = time.monotonic() + within
+def _grew(path: Path, past: int) -> bool:
+    """Whether `path` grows past `past` bytes within ten seconds."""
+    deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         if path.stat().st_size > past:
             return True

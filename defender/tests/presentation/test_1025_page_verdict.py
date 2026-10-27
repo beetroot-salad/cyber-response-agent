@@ -4,7 +4,6 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 import re
 import shutil
-import pathlib
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,6 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.presentation import test_1025_stage_timing as ST
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -24,39 +22,10 @@ LEDE_LINE = f"{S.queued} findings queued"
 TILE_ONE = f"{S.graded} worlds judged · verdict = declared on 0 of {S.graded}"
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time."""
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
-    the page it wrote, parsed."""
-    return E.render(ep, module=visualize_episode())
-
-
-def cli(argv, capsys):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured."""
-    return E.cli(argv, capsys, module=visualize_episode())
-
-
-def hook_page(episode_dir) -> E.Page:
-    """The page the launcher's hook wrote, parsed — after checking it is byte-identical to a
-    standalone `visualize_episode().render_episode` over the same directory: the hook is a
-    plain call to the same function and the page is a pure function of the directory."""
-    page = pathlib.Path(episode_dir) / E.PAGE_NAME
-    assert page.is_file(), f"the launcher did not write {E.PAGE_NAME}"
-    written = page.read_bytes()
-    render(episode_dir)
-    assert page.read_bytes() == written, "the hook's page differs from a standalone render"
-    return E.Page.parse(written.decode("utf-8"))
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
+hook_page = E.hook_page
 
 
 def _rows(page: E.Page) -> list[str]:
@@ -82,12 +51,11 @@ def _heading(group: E.Node) -> str:
     return group.text()
 
 
-def _draw_findings(ep: E.Episode, label: str, draw: int = 0) -> list[dict]:
-    """The findings a draw document on disk files, in filing order (investigator findings, then
-    world findings), each tagged with its `subject` so `E.draw_doc` files it back in the same
-    list — read back so a scenario can extend them."""
-    doc = yaml.safe_load(
-        (ep.world(label) / "judge" / f"{draw}.yaml").read_text(encoding="utf-8"))
+def _draw_findings(ep: E.Episode, label: str) -> list[dict]:
+    """The findings draw 0's document on disk files, in filing order (investigator findings,
+    then world findings), each tagged with its `subject` so `E.draw_doc` files it back in the
+    same list — read back so a scenario can extend them."""
+    doc = yaml.safe_load((ep.world(label) / "judge" / "0.yaml").read_text(encoding="utf-8"))
     return ([dict(f, subject="defender") for f in doc.get("investigator_findings") or []]
             + [dict(f, subject="world") for f in doc.get("world_findings") or []])
 
@@ -533,11 +501,6 @@ def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path)
     assert "unqueueable" in heading, heading
     assert reason in heading, heading
     assert "world author" in heading, heading
-
-
-def _class_carries(page: E.Page, word: str) -> list[str]:
-    return [n.attrs["class"] for n in page.root.descendants()
-            if word.lower() in (n.attrs.get("class") or "").lower()]
 
 
 def test_1025_judge_yaml_is_a_symlink_whose_target_is_a_different_episodes_judge_yaml(tmp_path):

@@ -14,6 +14,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+import pytest
 
 from defender import _yaml
 
@@ -22,6 +23,7 @@ from defender.records._episode_paths import EpisodePaths
 from defender._io import bind, write_guarded
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.core import _state1135
 
 mod = T.mod
 sym = T.sym
@@ -231,15 +233,11 @@ def trace_stem(agent_id: str) -> str:
 
 
 def write_trace(episode_dir: Path, agent_id: str, rows: list[dict[str, Any]] | None = None,
-                *, raw: str | None = None, **kw: Any) -> Path:
-    """`wire_logs/<stem>.jsonl` — what `run_stage`'s `RequestLogger` leaves for one call. `raw=`
-    writes the bytes verbatim (a torn tail, an empty file)."""
+                **kw: Any) -> Path:
+    """`wire_logs/<stem>.jsonl` — what `run_stage`'s `RequestLogger` leaves for one call."""
     d = Path(episode_dir) / "wire_logs"
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{trace_stem(agent_id)}.jsonl"
-    if raw is not None:
-        path.write_text(raw, encoding="utf-8")
-        return path
     if rows is None:
         rows = trace_rows(agent_id, **kw)  # lint-default: ok — the default is a fresh per-call row set built from the other keywords, not a constant
     path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
@@ -305,15 +303,6 @@ def load_episode(episode_dir: Path, *, module: Any = None) -> Any:
         return target.load_episode(view)
 
 
-def build_page(episode_dir: Path, *, module: Any = None) -> str:
-    """The page's HTML for the episode at `episode_dir` (`build_page(view)`), the view opened by
-    id the way `render_episode` opens it; nothing is written."""
-    d = Path(episode_dir).absolute()
-    target = module if module is not None else page_module()
-    with target.open_episode_view(J.episode_runs_for(d), d.name) as view:
-        return target.build_page(view)
-
-
 def cli_on(episode_dir: Path, capsys, *, module: Any = None) -> tuple[int, str, str]:
     """`cli` for the episode at `episode_dir`, by id: `--tenant T <episode_id>`, T the tenant
     whose `<T>/episodes/` holds it."""
@@ -336,8 +325,7 @@ def cli_argv(episode_dir: Path) -> list[str]:
 
 
 def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,  # noqa: PLR0913 — one switch per record a page scenario varies
-            duration_ms: int | Any = 180_000, result: bool = True, runtime_html: bool = True,
-            events: list[dict[str, Any]] | None = None, arm_id: str | None = None) -> Path:
+            duration_ms: int | Any = 180_000, arm_id: str | None = None) -> Path:
     """`runs/<arm id>/` — the sibling's run dir at the id the episode's arm roster holds for
     `label` (read-only), or at `arm_id` when given (a stray arm no roster entry names), plus its
     scrub sidecar (`_triplet_947.sibling_run_dir`), with `tool_trace.jsonl` ending in a result
@@ -345,21 +333,19 @@ def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,  # noqa:
     runs = Path(episode_dir) / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     rd = T.sibling_run_dir(runs, label, arm_id=arm_id)
-    rows = list(events or [{"type": "assistant", "message": {"content": [{"type": "text",
-                                                                         "text": "hello"}]}}])
-    if result:
-        rows.append(result_event(cost=cost, duration_ms=duration_ms))
-    write_tool_trace(rd, rows)
-    if runtime_html:
-        (rd / "runtime.html").write_text("<!doctype html><title>run</title>", encoding="utf-8")
+    write_tool_trace(rd, [
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}},
+        result_event(cost=cost, duration_ms=duration_ms),
+    ])
+    (rd / "runtime.html").write_text("<!doctype html><title>run</title>", encoding="utf-8")
     return rd
 
 
 def write_timing(episode_dir: Path, steps: list[tuple[str, str, str]] | None = None, *,
-                 raw: str | None = None, check: bool = True) -> Path:
+                 raw: str | None = None) -> Path:
     """`timing.json` in `StageClock`'s shape — `{"steps": [{step, started_at, ended_at}]}` —
-    through the guarded replace lane, read back through `read_stage_timings` unless the
-    scenario wants a record the reader refuses (`check=False`, or `raw=`)."""
+    through the guarded replace lane, read back through `read_stage_timings`; `raw=` plants
+    bytes the reader may refuse."""
     timing = J.mod("learning.branch.timing")
     path = EpisodePaths(Path(episode_dir)).timing
     if raw is not None:
@@ -367,42 +353,39 @@ def write_timing(episode_dir: Path, steps: list[tuple[str, str, str]] | None = N
         return path
     rows = [{"step": s, "started_at": a, "ended_at": b} for s, a, b in (steps or [])]
     write_guarded(path, json.dumps({"steps": rows}, indent=2) + "\n", mode="replace")
-    if check:
-        # the reader takes the BOUND primitive, never a root it could format
-        assert timing.read_stage_timings(J.mod("_io").bind(episode_dir)) == rows
+    # the reader takes the BOUND primitive, never a root it could format
+    assert timing.read_stage_timings(J.mod("_io").bind(episode_dir)) == rows
     return path
 
 
-def every_step(*, minute: int = 0) -> list[tuple[str, str, str]]:
+def every_step() -> list[tuple[str, str, str]]:
     """A complete record, one row per `STEPS` member in launch order, one minute per step from
-    `10:0<minute>`."""
+    10:00."""
     out = []
     for i, step in enumerate(J.mod("learning.branch.steps").STEPS):
-        m = minute + i * 2
+        m = i * 2
         out.append((str(step), f"2026-09-09T10:{m:02d}:00Z", f"2026-09-09T10:{m + 1:02d}:00Z"))
     return out
 
 
-def write_stamp(episode_dir: Path, *, commit: str = LESSONS_COMMIT, dirty: bool = False,
-                dirty_paths: list[str] | None = None, allow_dirty: bool = False) -> Path:
+def write_stamp(episode_dir: Path) -> Path:
     """The episode-root family stamp `provenance.json` as `cli._write_family_stamp` leaves it:
     `{agreed: {commit, dirty, dirty_path_count, dirty_paths, model, scope, unavailable},
     allow_dirty}` — a DIFFERENT shape from the per-world run stamp."""
-    paths = dirty_paths or []
-    doc = {"agreed": {"commit": commit, "dirty": dirty, "dirty_path_count": len(paths),
-                      "dirty_paths": paths, "model": "glm-5.2", "scope": "defender",
+    doc = {"agreed": {"commit": LESSONS_COMMIT, "dirty": False, "dirty_path_count": 0,
+                      "dirty_paths": [], "model": "glm-5.2", "scope": "defender",
                       "unavailable": None},
-           "allow_dirty": allow_dirty}
+           "allow_dirty": False}
     path = Path(episode_dir) / "provenance.json"
     write_guarded(path, json.dumps(doc, indent=2, sort_keys=True) + "\n", mode="replace")
     return path
 
 
-def write_samples(episode_dir: Path, doc: dict[str, Any] | None = None) -> Path:
+def write_samples(episode_dir: Path) -> Path:
     """`samples.yaml` — the questioner's real example answers per served system:
     `{<system>: {verbs: {<verb>: [<answer>, ...]}}}` or `{<system>: {unavailable: <reason>}}`,
     read back through `family.read_samples_record`."""
-    doc = doc if doc is not None else {
+    doc = {
         SYSTEM: {"verbs": {"esql": ['{"user.name": "root", "event.outcome": "success"}']}},
         "identity": {"unavailable": "the adapter answered no example"},
     }
@@ -445,16 +428,13 @@ def write_world_record(episode_dir: Path, label: str, reason: str = "oracle unse
     return Path(episode_dir) / "world_records" / f"{T.world_id(episode_dir, label)}.yaml"
 
 
-def served_row(label: str | None, source: str, *, system: str = SYSTEM, verb: str = "esql",
-               params: dict[str, Any] | None = None,
-               payload: str = '{"hits": []}', **extra: Any) -> dict[str, Any]:
+def served_row(label: str | None, source: str, **extra: Any) -> dict[str, Any]:
     """One served-ledger row in `ServedCall.row()`'s shape, its `source` one of the decision
     words (`passthrough`, `oracle`, `real-error`, `refused`, `fault`). `extra` carries an
     `oracle` row's own fields (`claim`, `verifier_verdict`, `attempts`)."""
     row: dict[str, Any] = {
-        "system": system, "verb": verb,
-        "params": params if params is not None else {"query": "FROM logs-system.auth-* | LIMIT 5"},
-        "payload_text": payload, "source": source,
+        "system": SYSTEM, "verb": "esql", "params": {"query": "FROM logs-system.auth-* | LIMIT 5"},
+        "payload_text": '{"hits": []}', "source": source,
         "world_id": None if label is None else T.fixture_world_id(label),
     }
     row.update(extra)
@@ -791,21 +771,40 @@ def copy_episode(ep: Episode, dest: Path) -> Episode:
 # --------------------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def tmp_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every configured root inside `tmp_path` (the sibling runs base, the learning state root the
+    judge's enqueue appends to), so an episode a test drives never lands in the checkout. A page
+    test module binds it as `_tmp_roots = E.tmp_roots`."""
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+
+
 def page_module():
     return mod(PAGE_MODULE)
 
 
 def render(ep: Episode | Path, *, module: Any = None) -> Page:
     """`render_episode(runs, episode_id)` — the real entry point, by id (`render_episode` here)
-    — then the page it wrote, parsed. `module` is the page module a test file resolved through
-    its own `visualize_episode()` helper (so the static reach check sees the target from the
-    test); default: imported here."""
+    — then the page it wrote, parsed. `module` defaults to the page module."""
     d = ep.dir if isinstance(ep, Episode) else Path(ep)
     out = render_episode(d, module=module)
     # The id door resolves the episode under the configured (absolute) episodes base, so a
     # cwd-relative `ep` is compared by its absolute spelling.
     assert Path(out) == d.absolute() / PAGE_NAME, f"render_episode returned {out!r}"
     return read_page(d)
+
+
+def hook_page(episode_dir: Path) -> Page:
+    """The page the launcher's hook wrote, parsed — after checking it is byte-identical to a
+    standalone render over the same directory: the hook is a plain call to the same function
+    and the page is a pure function of the directory."""
+    page = Path(episode_dir) / PAGE_NAME
+    assert page.is_file(), f"the launcher did not write {PAGE_NAME}"
+    written = page.read_bytes()
+    render(episode_dir)
+    assert page.read_bytes() == written, "the hook's page differs from a standalone render"
+    return Page.parse(written.decode("utf-8"))
 
 
 def read_page(ep: Episode | Path) -> Page:
@@ -880,16 +879,16 @@ PAGE_FILE = "visualize_episode.py"
 
 
 @contextlib.contextmanager
-def when_inside(act: Callable[[], Any], *, at: str, marker: str = PAGE_FILE) -> Iterator[dict[str, Any]]:
-    """Run `act()` the first time function `at` of `marker` is entered on this thread — an
+def when_inside(act: Callable[[], Any], *, at: str) -> Iterator[dict[str, Any]]:
+    """Run `act()` the first time function `at` of `PAGE_FILE` is entered on this thread — an
     interrupt, a rewrite or a raise landing INSIDE the render, with no seam on the render
     itself (the renderer is a plain call). A profile hook, not a timer: a timer only
-    landed when the render happened to be in a `marker` frame at the tick (#1325)."""
+    landed when the render happened to be in a page frame at the tick (#1325)."""
     seen = {"hit": False}
 
     def hook(frame: Any, event: str, _arg: Any) -> None:
         code = frame.f_code
-        if event == "call" and code.co_name == at and code.co_filename.endswith(marker):
+        if event == "call" and code.co_name == at and code.co_filename.endswith(PAGE_FILE):
             sys.setprofile(previous)
             seen["hit"] = True
             act()

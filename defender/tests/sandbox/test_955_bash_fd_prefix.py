@@ -43,11 +43,7 @@ def _single(cmd: str):
     """`_parsed(cmd)` for a caller that means a SINGLE-STAGE candidate: the multi-stage report
     becomes a failure here rather than silently taking the "we refused it" branch."""
     result = _parsed(cmd)
-    assert result is not MULTI_STAGE, (
-        f"{cmd!r} parses to more than one stage, so this differential compared nothing. One "
-        "stage becoming two is a word boundary that moved — the defect class this file is "
-        "about — and reading it as a refusal is how that regression would stay green."
-    )
+    assert result is not MULTI_STAGE, f"{cmd!r} parses to more than one stage: a word boundary moved"
     return result
 
 
@@ -56,8 +52,7 @@ def _single(cmd: str):
 def test_the_verdict_does_not_depend_on_the_value_of_an_operand(operand):
     """The headline property, stated over values rather than over the one value that broke."""
     assert _single(f"head -c {operand} >/dev/null") is None, (
-        f"a spaced `>` redirect was accepted after the operand {operand!r} — the fd prefix is "
-        "being read off the previous token, so the verdict moves with an argument's value"
+        f"a spaced `>` redirect was accepted after the operand {operand!r}"
     )
     assert _single(f"head -c {operand} >& 1") is None
 
@@ -190,20 +185,14 @@ def test_our_word_boundary_is_bash_s_word_boundary(shim_dir, blank):
         pytest.skip("bash will not run this shape, so it makes no claim about the boundary")
     ours = _parsed(cmd)
     assert ours is not None, f"U+{ord(blank):04X} made an ordinary command untokenizable"
-    assert ours[0] == theirs[0], (
-        f"U+{ord(blank):04X}: we would run {ours[0]}, bash runs {theirs[0]} — the gate "
-        "authorises our argv and the executor runs it, so this IS the divergence"
-    )
+    assert ours[0] == theirs[0], f"U+{ord(blank):04X}: we would run {ours[0]}, bash runs {theirs[0]}"
 
 
 @pytest.mark.parametrize("blank", _NOT_SHELL_BLANKS)
 def test_a_character_the_shell_does_not_split_on_stays_inside_its_word(blank):
     result = _parsed(f"w -n a{blank}b")
     assert result is not None, f"U+{ord(blank):04X} made an ordinary command untokenizable"
-    assert result[0] == ["w", "-n", f"a{blank}b"], (
-        f"U+{ord(blank):04X} split a word bash keeps whole — the executor would run an argv "
-        "the model did not write, and the gate would have authorised that one"
-    )
+    assert result[0] == ["w", "-n", f"a{blank}b"], f"U+{ord(blank):04X} split a word bash keeps whole"
 
 
 @pytest.mark.parametrize("blank", [" ", "\t"])
@@ -247,9 +236,7 @@ def test_the_gate_does_not_rewrite_the_command_before_it_parses_it(tmp_path):
         gate_argv = [s.argv for p in decision.pipelines for s in p.stages]
         scanner_argv = [s.argv for p in bash_exec.parse(cmd) for s in p.stages]
         assert gate_argv == scanner_argv, (
-            f"U+{ord(blank):04X}: the gate authorised {gate_argv} while the scanner reads "
-            f"{scanner_argv} — the command was rewritten between the two, so the argv that "
-            "runs is not the one the scanner's word-boundary rule was verified against"
+            f"U+{ord(blank):04X}: the gate authorised {gate_argv} but the scanner reads {scanner_argv}"
         )
 
 
@@ -347,10 +334,7 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
     assert theirs is not None, f"we accepted {cmd!r} and bash will not even parse it"
     argv, where = theirs
     assert argv is not None, f"we accepted {cmd!r} but bash never ran the command in it"
-    assert ours[0] == argv, (
-        f"{cmd!r}: we would run {ours[0]}, bash runs {argv} — the executor and the gate share "
-        "this parse, so neither can see the substitution"
-    )
+    assert ours[0] == argv, f"{cmd!r}: we would run {ours[0]}, bash runs {argv}"
     assert ours[1] == where, (
         f"{cmd!r}: we route stderr to {ours[1]!r}, bash routes it to {where!r}"
     )
@@ -360,8 +344,6 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
 
 
 _CR = chr(0x000D)
-_NBSP = chr(0x00A0)
-_THIS_FILE = Path(__file__).resolve()
 
 # No wrapper shapes here: the parse folds none, so bash has nothing to answer for. That they
 # deny is pinned in `test_959_wrapper_fold.py`.
@@ -404,12 +386,9 @@ def test_the_scanner_ends_a_word_exactly_where_bash_ends_one(shim_dir):
     ):
         ours = _single(cmd)
         assert ours is not None, f"{cmd!r} was refused — a carriage return is an ordinary byte"
-        theirs = (_bash_argv_bytes(shim_dir, cmd), None)
-        assert theirs[0] is not None, f"bash never ran the shim for {cmd!r}"
-        assert ours[0] == theirs[0], (
-            f"{cmd!r}: we would run {ours[0]}, bash runs {theirs[0]} — the scanner ends a word "
-            "where bash does not, so the argv the gate authorises is not the argv the text names"
-        )
+        theirs = _bash_argv_bytes(shim_dir, cmd)
+        assert theirs is not None, f"bash never ran the shim for {cmd!r}"
+        assert ours[0] == theirs, f"{cmd!r}: we would run {ours[0]}, bash runs {theirs}"
     # A line that is one carriage return is a one-character word, not zero tokens.
     assert _stages(_CR) == [[_CR]]
 

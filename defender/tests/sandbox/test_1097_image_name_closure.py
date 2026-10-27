@@ -1,6 +1,7 @@
 """The image name digests the Dockerfile plus the lock's core + box dependency closure (box/_image.py::box_closure)."""
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import re
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.box import _image
 from defender.tests.support.sandbox._spec1092 import (
     HASH_INPUTS,
     PLANTED_INPUT_BYTES,
@@ -17,7 +19,6 @@ from defender.tests.support.sandbox._spec1092 import (
     PLANTED_PYPROJECT,
     TAG_RE,
     box_closure,
-    image_module,
     image_tag,
     plant_tree,
 )
@@ -51,7 +52,7 @@ def _key(k: str) -> str:
     return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k, ensure_ascii=False)
 
 
-def _value(v, *, multiline: bool, reverse_keys: bool) -> str:
+def _value(v, *, multiline: bool) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, int):
@@ -61,13 +62,12 @@ def _value(v, *, multiline: bool, reverse_keys: bool) -> str:
         # `\\u` escape, which TOML forbids).
         return json.dumps(v, ensure_ascii=False)
     if isinstance(v, list):
-        items = [_value(x, multiline=False, reverse_keys=reverse_keys) for x in v]
+        items = [_value(x, multiline=False) for x in v]
         if multiline and items:
             return "[\n" + "".join(f"    {item},\n" for item in items) + "]"
         return "[" + ", ".join(items) + "]"
     if isinstance(v, dict):
-        keys = list(v)[::-1] if reverse_keys else list(v)
-        body = ", ".join(f"{_key(k)} = {_value(v[k], multiline=False, reverse_keys=reverse_keys)}" for k in keys)
+        body = ", ".join(f"{_key(k)} = {_value(x, multiline=False)}" for k, x in v.items())
         return "{ " + body + " }"
     raise TypeError(f"no TOML spelling for {type(v).__name__}")
 
@@ -78,30 +78,22 @@ def _canonical(lock: dict) -> tuple[str, list[str]]:
     return top, sorted(json.dumps(p, sort_keys=True) for p in lock.get("package", []))
 
 
-def _lock_toml(lock: dict, *, multiline: bool = True, reverse_keys: bool = False,
-               reverse_entries: bool = False, comments: bool = False) -> str:
+def _lock_toml(lock: dict) -> str:
     """`lock` written as uv-shaped TOML (`[[package]]` tables, `[package.optional-dependencies]`
-    / `[package.metadata]` subtables, inline tables for edges and artifacts). The knobs change
-    only the SPELLING: one-line arrays, every table's keys in reverse, the entries in reverse,
-    comment lines between them. The text is re-parsed here and must be the same lock."""
+    / `[package.metadata]` subtables, inline tables for edges and artifacts). The text is
+    re-parsed here and must be the same lock."""
     def table(pairs: dict) -> list[str]:
-        keys = list(pairs)[::-1] if reverse_keys else list(pairs)
-        lines = [f"{_key(k)} = {_value(pairs[k], multiline=multiline, reverse_keys=reverse_keys)}"
-                 for k in keys if not (k in _SUBTABLES and isinstance(pairs[k], dict))]
-        for k in keys:
-            if k in _SUBTABLES and isinstance(pairs[k], dict):
+        lines = [f"{_key(k)} = {_value(v, multiline=True)}"
+                 for k, v in pairs.items() if not (k in _SUBTABLES and isinstance(v, dict))]
+        for k, sub in pairs.items():
+            if k in _SUBTABLES and isinstance(sub, dict):
                 lines += ["", f"[package.{_key(k)}]"]
-                sub = pairs[k]
-                sub_keys = list(sub)[::-1] if reverse_keys else list(sub)
-                lines += [f"{_key(s)} = {_value(sub[s], multiline=multiline, reverse_keys=reverse_keys)}"
-                          for s in sub_keys]
+                lines += [f"{_key(s)} = {_value(v, multiline=True)}" for s, v in sub.items()]
         return lines
 
     head = table({k: v for k, v in lock.items() if k != "package"})
-    entries = lock["package"][::-1] if reverse_entries else lock["package"]
-    sep = "\n\n# reformatted: a comment the resolver must not read\n\n" if comments else "\n\n"
-    text = "\n".join(head) + "\n\n" + sep.join(
-        "\n".join(["[[package]]", *table(entry)]) for entry in entries
+    text = "\n".join(head) + "\n\n" + "\n\n".join(
+        "\n".join(["[[package]]", *table(entry)]) for entry in lock["package"]
     ) + "\n"
     assert _canonical(tomllib.loads(text)) == _canonical(lock), "the writer changed the lock"
     return text
@@ -155,18 +147,6 @@ def _set(path: list, value) -> Callable[[dict], None]:
 def _append(path: list, item) -> Callable[[dict], None]:
     """An edit appending `item` to the list at `path` (entry name, then keys)."""
     return lambda lock: _walk_to(lock, path)[path[-1]].append(copy.deepcopy(item))
-
-
-def _reverse_every_list(node) -> None:
-    """Every list at every depth of `node` reversed in place — entries, links, wheels,
-    resolution-markers, metadata rows, the lot."""
-    if isinstance(node, dict):
-        for value in node.values():
-            _reverse_every_list(value)
-    elif isinstance(node, list):
-        node.reverse()
-        for value in node:
-            _reverse_every_list(value)
 
 
 def _two_wheels(lock: dict) -> None:
@@ -450,10 +430,8 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     # A NaN or infinity in a hashed value names an image or faults — never another exception.
     for i, special in enumerate(("nan", "inf")):
         text = _replace_once(PLANTED_PYPROJECT, "package = false\n", f"package = false\nx = {special}\n")
-        try:
+        with contextlib.suppress(_image.ImageInputError):
             image_tag(_plant(tmp_path, f"special-{i}", pyproject=text))
-        except image_module().ImageInputError:
-            pass
 
 
 def test_a_package_split_across_two_lock_entries_renames_the_image_whichever_entry_changes(tmp_path):
@@ -487,7 +465,6 @@ def _named(project_name: str) -> str:
 
 
 def test_the_root_is_the_lock_entry_the_pep503_normalised_project_name_names(tmp_path):
-    image = image_module()
     baseline = image_tag(_plant(tmp_path, "baseline"))
     for i, spelling in enumerate(("Planted", "PLANTED")):
         got = image_tag(_plant(tmp_path, f"case-{i}", pyproject=_named(spelling)))
@@ -501,8 +478,8 @@ def test_the_root_is_the_lock_entry_the_pep503_normalised_project_name_names(tmp
         assert got == base_x, f"[project].name {spelling!r} did not find the root `planted-x`"
 
     absent = _plant(tmp_path, "absent", lock=lock_x, pyproject=_named("plantedx"))
-    with pytest.raises(image.ImageInputError) as e:
-        image.image_tag(absent)
+    with pytest.raises(_image.ImageInputError) as e:
+        _image.image_tag(absent)
     message = str(e.value)
     assert str(absent) in message, message
     assert "uv.lock" in message, message
@@ -640,16 +617,15 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
 
 @pytest.mark.parametrize("case", list(_FAULTS))
 def test_a_tree_the_resolver_cannot_read_parse_or_walk_raises_image_input_error_naming_the_file(tmp_path, case):
-    image = image_module()
-    assert tuple(image.HASH_INPUTS) == HASH_INPUTS == ("box.Dockerfile", "uv.lock", "pyproject.toml")
-    assert image.RECIPE_VERSION == "v2"
+    assert tuple(_image.HASH_INPUTS) == HASH_INPUTS == ("box.Dockerfile", "uv.lock", "pyproject.toml")
+    assert _image.RECIPE_VERSION == "v2"
 
     named, verb, reason, not_said, breaks = _FAULTS[case]
     defender_dir = _plant(tmp_path, "tree")
     assert TAG_RE.match(image_tag(defender_dir)), "the positive control: the complete tree names an image"
     breaks(defender_dir)
-    with pytest.raises(image.ImageInputError) as e:
-        image.image_tag(defender_dir)
+    with pytest.raises(_image.ImageInputError) as e:
+        _image.image_tag(defender_dir)
     message = str(e.value)
     assert str(defender_dir) in message, message
     assert named in message, message
