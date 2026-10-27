@@ -811,8 +811,8 @@ def test_the_run_process_reads_nothing_from_the_tenant_clone():
 
 
 def _planted_clone_reads(source: str) -> list[int]:
-    tree = _astlib.parse_source(source, "runtime/planted.py")
-    reads = _clone_reads("runtime/planted.py", tree, "defender.investigation.planted", "defender.investigation")
+    tree = _astlib.parse_source(source, "investigation/planted.py")
+    reads = _clone_reads("investigation/planted.py", tree, "defender.investigation.planted", "defender.investigation")
     return sorted({int(r.split(":")[1].split()[0]) for r in reads})
 
 

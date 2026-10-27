@@ -22,7 +22,7 @@ _GATE = load_lint_gate("lint_working_io")
     "from defender._io import write_guarded\ndef f(run_dir):\n return write_guarded",
 ])
 def test_every_swept_io_shape_is_rejected_without_residue(body):
-    hits = _GATE.census_source("runtime/planted.py", body)
+    hits = _GATE.census_source("investigation/planted.py", body)
     assert hits, "the architectural check must observe the planted bypass"
     assert _GATE.deviations(hits, {})
 
@@ -36,7 +36,7 @@ def f(run):
     run.documents.report.write('report')
     run.observability.wire_log.append_text('line\\n')
 """
-    assert _GATE.census_source("runtime/planted.py", body) == []
+    assert _GATE.census_source("investigation/planted.py", body) == []
 
 
 def test_resolved_record_byte_reads_are_allowed_but_path_and_unknown_receivers_are_not():
@@ -54,7 +54,7 @@ def f(run: Investigation, record: Record, mystery):
     record.path.replace("outside")
     mystery.replace("outside")
 """
-    hits = _GATE.census_source("runtime/planted.py", source)
+    hits = _GATE.census_source("investigation/planted.py", source)
     assert len(hits) == 4
     assert {hit.expression for hit in hits} == {"record.path", "mystery"}
     assert _GATE.deviations(hits, {})
@@ -62,23 +62,23 @@ def f(run: Investigation, record: Record, mystery):
 
 def test_duplicate_bypass_in_an_allowed_scope_is_not_collapsed():
     body = "from defender._io import read_text_utf8\ndef f(path):\n return read_text_utf8(path)\n"
-    hits = _GATE.census_source("runtime/planted.py", body)
+    hits = _GATE.census_source("investigation/planted.py", body)
     assert len(hits) == 1
     allowed = {hits[0].key: (1, "nonrecord", ("path",))}
     assert _GATE.deviations(hits, allowed) == []
     doubled = body.replace(" return read_text_utf8(path)",
                            " read_text_utf8(path)\n return read_text_utf8(path)")
-    violations = _GATE.deviations(_GATE.census_source("runtime/planted.py", doubled), allowed)
+    violations = _GATE.deviations(_GATE.census_source("investigation/planted.py", doubled), allowed)
     assert any("duplicate" in violation for violation in violations)
     assert any("stale" in violation for violation in _GATE.deviations([], allowed))
 
 
 def test_nonrecord_residue_cannot_be_reused_for_a_run_record():
     plain = "from defender._io import read_text_utf8\ndef f(path):\n return read_text_utf8(path)\n"
-    hits = _GATE.census_source("runtime/planted.py", plain)
+    hits = _GATE.census_source("investigation/planted.py", plain)
     residue = {hits[0].key: (1, "nonrecord", ("path",))}
     changed = plain.replace("read_text_utf8(path)", "read_text_utf8(run_dir / 'x')")
-    assert _GATE.deviations(_GATE.census_source("runtime/planted.py", changed), residue)
+    assert _GATE.deviations(_GATE.census_source("investigation/planted.py", changed), residue)
 
 
 def test_unknown_target_inside_an_existing_nonrecord_scope_is_not_exempt():
@@ -101,13 +101,13 @@ def f(run_dir):
     alias = target
     write_guarded(alias, 'report')
 """
-    hits = _GATE.census_source("runtime/planted.py", source)
+    hits = _GATE.census_source("investigation/planted.py", source)
     assert len(hits) == 1
     assert hits[0].target == "record"
 
 
 def test_unclassified_target_is_still_reported():
-    hits = _GATE.census_source("runtime/planted.py",
+    hits = _GATE.census_source("investigation/planted.py",
                            "from defender._io import write_guarded\ndef f(mystery):\n write_guarded(mystery, 'x')")
     assert len(hits) == 1
     assert hits[0].target == "unresolved"
@@ -115,7 +115,7 @@ def test_unclassified_target_is_still_reported():
 
 
 def test_pure_json_parsing_is_not_io():
-    assert _GATE.census_source("runtime/planted.py",
+    assert _GATE.census_source("investigation/planted.py",
                            "from defender._io import load_json_artifact\ndef f(text):\n return load_json_artifact(text)") == []
 
 
@@ -123,7 +123,7 @@ def test_missing_sweep_directory_and_unparseable_modules_fail(tmp_path):
     with pytest.raises(ValueError, match="missing swept directory"):
         _GATE.collect(tmp_path)
     with pytest.raises(SyntaxError):
-        _GATE.census_source("runtime/broken.py", "def !")
+        _GATE.census_source("investigation/broken.py", "def !")
     assert _GATE.main(["--root", str(tmp_path)]) == 2
 
 
@@ -136,10 +136,10 @@ def f(run_dir):
     alias = inv
     read_text_utf8(alias)
 """
-    hits = _GATE.census_source("runtime/planted.py", body)
-    key = ("runtime.planted", "f", "read_text_utf8")
+    hits = _GATE.census_source("investigation/planted.py", body)
+    key = ("investigation.planted", "f", "read_text_utf8")
     assert _GATE.deviations(hits, {key: (1, "m_read")}) == []
-    fact = _GATE.census_source("runtime/planted.py", body.replace(".investigation", ".alert_record"))
+    fact = _GATE.census_source("investigation/planted.py", body.replace(".investigation", ".alert_record"))
     assert _GATE.deviations(fact, {key: (1, "m_read")})
 
 

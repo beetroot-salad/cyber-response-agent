@@ -166,7 +166,7 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
         "read screens"
     )
     assert not (DEFENDER_DIR / "investigation" / "ticket_screen.py").exists(), (
-        "runtime/ticket_screen.py survives #1221's removal of both read screens"
+        "investigation/ticket_screen.py survives #1221's removal of both read screens"
     )
 
     forward_dir = DEFENDER_DIR / "learning" / "author" / "verify_forward"

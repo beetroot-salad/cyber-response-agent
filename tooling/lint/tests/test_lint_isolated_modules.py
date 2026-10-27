@@ -86,12 +86,12 @@ def test_a_budget_enforcer_read_of_the_environment_or_a_file_is_found(tmp_path, 
 
 
 @pytest.mark.parametrize("rel, body", [
-    ("runtime__ticket_writer.py", "process_defender_dir()"),
-    ("runtime__ticket_writer.py", "Path.cwd()"),
-    ("runtime__ticket_writer.py", "run_env(x)"),
-    ("runtime__ticket_writer.py", "os.environ['X']"),
-    ("runtime__lead_zero__run.py", "os.getenv('X')"),
-    ("runtime__lead_zero__run.py", "run_env(x)"),
+    ("investigation__ticket_writer.py", "process_defender_dir()"),
+    ("investigation__ticket_writer.py", "Path.cwd()"),
+    ("investigation__ticket_writer.py", "run_env(x)"),
+    ("investigation__ticket_writer.py", "os.environ['X']"),
+    ("investigation__lead_zero__run.py", "os.getenv('X')"),
+    ("investigation__lead_zero__run.py", "run_env(x)"),
     ("systems__correlation.py", "os.getenv('X')"),
     ("systems__correlation.py", "run_env(x)"),
 ])
@@ -103,7 +103,7 @@ def test_a_module_that_finds_its_own_environment_is_found(tmp_path, rel, body):
 
 def test_cwd_is_allowed_in_lead_zero(tmp_path):
     src = "from pathlib import Path\ndef f():\n    return Path.cwd()\n"
-    assert _GATE.scan(_tree(tmp_path, **{"runtime__lead_zero__run.py": src})) == []
+    assert _GATE.scan(_tree(tmp_path, **{"investigation__lead_zero__run.py": src})) == []
 
 
 def test_a_missing_file_is_a_finding(tmp_path):

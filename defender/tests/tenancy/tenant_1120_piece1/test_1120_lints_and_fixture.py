@@ -88,7 +88,7 @@ def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_se
         f"def row_only(tenant: Tenant) -> Path:\n    return tenant.{H.ROW_PATH_PROPERTY}\n\n"
         "def control(ep: Path, run_id: str) -> Path:\n"
         "    return EpisodePaths(ep).runs / run_id\n")
-    displays = _scan_planted(tmp_path, "runtime/tenant_joins.py", source)
+    displays = _scan_planted(tmp_path, "investigation/tenant_joins.py", source)
     assert _in(displays, "control"), f"the join arm is not live:\n{displays}"
     unflagged = [p for p in RECORD_LOCATIONS
                  if not any("owner-only record location" in d for d in _in(displays, f"join_{p}"))]
@@ -166,7 +166,7 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
         def control(ep: Path, run_id: str) -> Path:
             return EpisodePaths(ep).runs / run_id
         """)
-    displays = _scan_planted(tmp_path, "runtime/factory_joins.py", source)
+    displays = _scan_planted(tmp_path, "investigation/factory_joins.py", source)
     assert _in(displays, "control"), f"the join arm is not live:\n{displays}"
     untagged = [fn for fn in ("local_runs", "call_runs", "chain_learning")
                 if not any("owner-only record location" in d for d in _in(displays, fn))]

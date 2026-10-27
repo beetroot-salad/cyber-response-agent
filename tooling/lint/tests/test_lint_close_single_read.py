@@ -27,7 +27,7 @@ _GATE_SRC = "def check(document):\n    return document.rows\n"
 
 def _tree(tmp_path: Path, close: str = _CLOSE, gate: str = _GATE_SRC) -> Path:
     root = tmp_path / "defender"
-    (root / "runtime").mkdir(parents=True)
+    (root / "investigation").mkdir(parents=True)
     (root / "investigation/close_tool.py").write_text(close, encoding="utf-8")
     (root / "investigation/challenge_gate.py").write_text(gate, encoding="utf-8")
     return root
