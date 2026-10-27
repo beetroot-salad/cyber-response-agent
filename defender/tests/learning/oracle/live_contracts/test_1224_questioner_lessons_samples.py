@@ -71,8 +71,8 @@ def _default_samples(served: Iterable[str], tag: str = "1224") -> dict:
 
 
 def _author(tmp_path: Path, *, served: Iterable[str] = S.SYSTEMS, samples: Any = None,
-            lessons: Iterable[Path] = (), agent: Any = None, leads: Any = _LEADS,
-            alert: Any = _ALERT, frontier: str = _FRONTIER) -> tuple[Any, dict]:
+            lessons: Iterable[Path] = (), leads: Any = _LEADS, alert: Any = _ALERT,
+            frontier: str = _FRONTIER) -> tuple[Any, dict]:
     """Drive the REAL `questioner.author_family` through its `invoke` seam with the v2 inputs
     (served systems, the per-system samples document, candidate lesson paths)."""
     served = list(served)
@@ -81,7 +81,7 @@ def _author(tmp_path: Path, *, served: Iterable[str] = S.SYSTEMS, samples: Any =
     src.mkdir(parents=True, exist_ok=True)
     ep = tmp_path / "episodes" / S.EPISODE_ID
     ep.mkdir(parents=True, exist_ok=True)
-    agent = agent if agent is not None else S.questioner_for(S.family_v2(served_systems=served))  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
+    agent = S.questioner_for(S.family_v2(served_systems=served))
     document = questioner.author_family(
         source_run_dir=src, episode_dir=ep, invoke=agent, leads=leads, alert=alert,
         frontier=frontier, served_systems=served,
@@ -405,7 +405,7 @@ def test_judge_reply_names_systems_the_tenant_does_not_serve(tmp_path):
     assert row_b is not None, f"judge.yaml records no row for world b: {record}"
     assert set(row_b.get("systems") or []) == {"idp", "cmdb"}, (
         f"judge.yaml records world b's systems as {row_b.get('systems')!r}, not the reply's "
-        "[idp, cmdb] — an unserved system the facts touched is a legitimate entry")
+        "[idp, cmdb]")
     queued = [r for r in _world_queue(paths) if r.get("world") == "b"]
     assert queued, f"no world b row reached the questioner queue: {_world_queue(paths)}"
     assert all(set(r.get("systems") or []) == {"idp", "cmdb"} for r in queued), (

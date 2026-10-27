@@ -297,7 +297,7 @@ def test_1224_served_verb_returns_the_verified_answer_and_rows_it(tmp_path):
         "a base-equal submission must hand back the base answer's canonical bytes")
     assert [r["source"] for r in rows] == [S.ORACLE_DECISION, S.PASSTHROUGH]
     assert rows[1]["payload_text"] == _text(SIEM_BASE)
-    assert verifier.requests >= 2, "both calls went through a verifier pass (M01=A)"
+    assert verifier.requests >= 2, "a call skipped its verifier pass"
     assert not oracle.overrun
 
 
@@ -435,7 +435,7 @@ def test_1224_oracle_row_carries_call_digest_answer_claim_verdict_and_attempts(t
     assert not oracle.overrun
 
 
-def test_1224_world_with_no_facts_serves_base_with_no_oracle_turn(tmp_path):
+def test_1224_world_with_no_facts_serves_every_base_as_passthrough(tmp_path):
     """A no-facts world serves every base as `passthrough`; only a call the source never made goes to its oracle."""
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
@@ -451,7 +451,7 @@ def test_1224_world_with_no_facts_serves_base_with_no_oracle_turn(tmp_path):
     live_call = S.call(control, "idp", "query", ctx, **BOB)
     assert _text(live_call) == _text(BOB_BASE)
     assert control_oracle.requests >= 1, (
-        "the control world served a question the source never asked as a raw live read (D3)")
+        "the control world served a question the source never asked as a raw live read")
     assert "user:bob" in control_oracle.all_seen(), "the oracle was not handed the live call"
     assert _decisions(ep, "a") == [S.PASSTHROUGH, S.PASSTHROUGH]
     assert not control_oracle.overrun

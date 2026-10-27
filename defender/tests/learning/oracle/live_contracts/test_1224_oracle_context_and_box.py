@@ -460,11 +460,11 @@ def _start_oracle_box_recorded(where: Path, run_dir: Path,
 def _drive(  # noqa: PLR0913 — one keyword per piece of investigator text a scenario plants
         where: Path, reg: Any, est: S.Estate, *, params: dict, main_text: str = "",
            goal: str = "measure the idp lead", gather_text: str = "",
-           query_id: str | None = None, box: Any = None,
-           holder: list | None = None, bash: str | None = None) -> tuple[Path, Any]:
+           box: Any = None, holder: list | None = None,
+           bash: str | None = None) -> tuple[Path, Any]:
     """`S.drive_gather`'s whole investigation, with investigator TEXT the scripted turns carry
-    beside the calls (the main loop's reply, the lead's goal, the gather agent's reasoning, a
-    query's free-text `query_id`) — `S.query_turn` has no slot for any of it. `holder`
+    beside the calls (the main loop's reply, the lead's goal, the gather agent's reasoning) —
+    `S.query_turn` has no slot for any of it. `holder`
     receives the gather recorder before the run starts, so a run that raises can still be
     read. `bash` is a command the main loop runs through its own bash tool before it
     dispatches the lead — through `box`, the investigator's executor (the harness's third
@@ -480,8 +480,6 @@ def _drive(  # noqa: PLR0913 — one keyword per piece of investigator text a sc
         H.Turn(text="Investigation complete."),
     ])
     args: dict[str, Any] = {"system": "idp", "verb": "query", "params": dict(params)}
-    if query_id is not None:
-        args["query_id"] = query_id
     gather = H.ReplayFn([H.Turn(text=gather_text, tool_calls=[("query", args)]),
                          H.Turn(text="Summary: measured the lead.")])
     if holder is not None:
@@ -500,33 +498,19 @@ def _launch(where: Path, est: S.Estate, *, doc: dict, calls: list[S.Call],
                     questioner=S.questioner_for(doc))
 
 
-class _Judge:
-    """The judge's model seam: records every prompt and answers a world-scope call with a v2
-    world reply (top-level bucket and systems) and the family-scope call with a family word.
-    Scripted content only; it decides nothing."""
-
-    def __init__(self, *, bucket: str = "lead-quality", systems: tuple[str, ...] = ("idp",)):
-        self.prompts: list[str] = []
-        self.agent_ids: list[str] = []
-        self.world_reply = S.as_reply_text(J.reply_doc(
-            findings=[J.finding_doc(bucket=bucket, topic="idp coverage",
-                                    claim="the analyst never re-queried idp after the branch")],
-            bucket=bucket, systems=list(systems)))
-        self.family_reply = S.as_reply_text(J.reply_doc(findings=[], verdict_word="caught"))
-
-    def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **_kw: Any) -> str:
-        self.prompts.append(prompt)
-        self.agent_ids.append(agent_id)
-        scope = agent_id.split(":")
-        return self.world_reply if len(scope) > 1 and scope[1] in S.WORLDS else self.family_reply
-
-    def world_prompts(self, label: str) -> str:
-        return "\n".join(p for p, a in zip(self.prompts, self.agent_ids, strict=True)
-                         if f":{label}:" in f"{a}:")
+def _judge() -> S.FakeJudge:
+    """The judge's model seam, recording every prompt: a world-scope call gets a v2 world reply
+    (top-level bucket and systems), the family-scope call a family reply. Scripted content
+    only; it decides nothing."""
+    world = J.reply_doc(findings=[J.finding_doc(
+        bucket="lead-quality", topic="idp coverage",
+        claim="the analyst never re-queried idp after the branch")],
+        bucket="lead-quality", systems=["idp"])
+    return S.FakeJudge(default=S.as_reply_text(world),
+                       family_default=S.as_reply_text(J.family_reply()))
 
 
-def _grade(ep: Path, judge: _Judge, where: Path) -> BaseException | None:
+def _grade(ep: Path, judge: S.FakeJudge, where: Path) -> BaseException | None:
     """`grade_episode` over the episode; a failure AFTER the judge was asked is returned (the
     payload demands read the prompts), one before it is raised."""
     grade = J.grade_at
@@ -1292,7 +1276,7 @@ def test_1224_hostile_fact_statement_stays_inside_its_frame_in_oracle_verifier_a
     assert _ask(reg, est, tmp_path) == _valid()
 
     judged = S.judged_episode(tmp_path / "judged", doc=doc)
-    judge = _Judge()
+    judge = _judge()
     _grade(judged, judge, tmp_path / "judged")
 
     for text, who in ((o.all_seen(), "oracle"), (v.all_seen(), "verifier"),
@@ -1326,7 +1310,7 @@ def test_1224_claim_text_cannot_close_the_verifiers_or_the_judges_frame(tmp_path
                        base_digest=S.digest(json.dumps(_answer(*BASE_ROWS), sort_keys=True)),
                        verifier_verdict={"passed": True, "reason": "plausible"}, attempts=1)
     judged = S.judged_episode(tmp_path / "judged", ledgers={"b": [row]})
-    judge = _Judge()
+    judge = _judge()
     _grade(judged, judge, tmp_path / "judged")
     assert judge.prompts, "the judge was never asked"
     prompts = "\n".join(judge.prompts)

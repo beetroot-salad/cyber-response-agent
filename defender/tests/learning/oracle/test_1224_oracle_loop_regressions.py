@@ -1031,7 +1031,6 @@ def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path):
 ])
 def test_a_bad_oracle_setting_is_refused_before_the_question_writer(tmp_path, monkeypatch, knob,
                                                                      value, named):
-    monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv(knob, value)
     est = S.estate(tmp_path)

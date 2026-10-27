@@ -19,10 +19,6 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
-#: The retired episodes-root knob (launches use the tenant's own `episodes/` folder).
-EPISODES_ENV = "DEFENDER_EPISODES_BASE"
-
-
 def _names(root: Path) -> set[str]:
     """The entries of `root` (none when it does not exist yet: the tenant's `episodes/` is made
     by the first launch)."""
@@ -32,9 +28,8 @@ def _names(root: Path) -> set[str]:
 
 @pytest.fixture(autouse=True)
 def episodes_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The retired episodes-root knob pointed outside the data root and a learning-state
-    scratch root; returns the tenant's episodes folder, where every launch here lands."""
-    monkeypatch.setenv(EPISODES_ENV, str(tmp_path / "episodes-root"))
+    """A learning-state scratch root; returns the tenant's episodes folder, where every launch
+    here lands."""
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     return S.tenant_episodes()
 
@@ -386,23 +381,16 @@ def _store_text(ep: Path, *, under: str, glob: str = "*.jsonl") -> str:
 def _new_episode(root: Path, before: set[str]) -> Path:
     fresh = sorted(p for p in Path(root).iterdir() if p.is_dir() and p.name not in before)
     assert len(fresh) == 1, (
-        f"a relaunch must get exactly one episode directory of its own (N17); new: {fresh}")
+        f"a relaunch must get exactly one episode directory of its own; new: {fresh}")
     return fresh[0]
 
 
-def _dead_launch(root: Path, *, est: S.Estate, manifest: bool = True, outcome: str | None = None,
-                 forged: Iterable[Mapping[str, Any]] = ()) -> Path:
+def _dead_launch(root: Path, *, est: S.Estate, forged: Iterable[Mapping[str, Any]] = ()) -> Path:
     """The state a killed launcher leaves at the derived episode directory."""
     est.place()
     root.mkdir(parents=True, exist_ok=True)
-    if manifest:
-        ep = S.episode_v2(root.parent, root=root, doc=_family(), base_rows=[
-            S.captured("idp", "query", _Q1, _BASE)])
-    else:
-        ep = root / S.EPISODE_ID
-        (ep / "served").mkdir(parents=True, exist_ok=True)
-    if outcome is not None:
-        S.outcome_record(ep, outcome)
+    ep = S.episode_v2(root.parent, root=root, doc=_family(), base_rows=[
+        S.captured("idp", "query", _Q1, _BASE)])
     rows = list(forged)
     if rows:
         store = S.oracle_dir(ep, "b")
@@ -427,25 +415,18 @@ def _snapshot(ep: Path) -> dict[str, str]:
 
 
 #: A well-formed world-scope judge reply carrying one finding (top-level `bucket` and
-#: `systems`), and a family-scope reply.
+#: `systems`).
 _WORLD_REPLY = S.as_reply_text(J.reply_doc(
     findings=[J.finding_doc(bucket="lead-quality", topic="the lead was never revisited")],
     bucket="lead-quality", systems=["idp"]))
-_FAMILY_REPLY = S.as_reply_text(J.reply_doc(findings=[], verdict_word="survived"))
 
 
-class _LaunchJudge(S.FakeJudge):
+def _launch_judge() -> S.FakeJudge:
     """The launch's judge seam: #921's recording `FakeJudge` answering a world-scope call with
-    `_WORLD_REPLY` and the family-scope call (`judge:family:<n>`) with `_FAMILY_REPLY`, so a
+    `_WORLD_REPLY` and the family-scope call (`judge:family:<n>`) with a family reply, so a
     judge pass that reaches a world records that world's agent id and moves on. Scripted
     content only: it decides nothing."""
-
-    def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
-        self.prompts.append(prompt)
-        self.agent_ids.append(agent_id)
-        self.kwargs.append({"role": role, "agent_id": agent_id, **kw})
-        return _FAMILY_REPLY if str(agent_id).startswith("judge:family") else _WORLD_REPLY
+    return S.FakeJudge(default=_WORLD_REPLY, family_default=S.as_reply_text(J.family_reply()))
 
 
 def _judge_rows(ep: Path) -> dict[str, dict]:
@@ -518,8 +499,8 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
 
     _assert_routed(oracle)
     assert S.oracle_rows(run.ep, "b", "forged"), "positive control: pre-flight wrote b's state"
-    assert S.oracle_rows(run.ep, "b", "answers") == [], "pre-flight caches no served answer (S1)"
-    assert S.ledger_rows(run.ep, "b") == [], "pre-flight writes no world-ledger row (S1)"
+    assert S.oracle_rows(run.ep, "b", "answers") == [], "pre-flight caches no served answer"
+    assert S.ledger_rows(run.ep, "b") == [], "pre-flight writes no world-ledger row"
 
     sib = S.oracle(S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])),
                    S.submit(_BASE, S.EMPTY_CLAIM))
@@ -529,9 +510,9 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
     S.call(reg, "idp", "query", ctx, **_QP)
     S.call(reg, "edr", "query", ctx, **_Q2)
 
-    assert sib.submissions() == 2, "each first issue is a fresh turn (S3)"
+    assert sib.submissions() == 2, "each first issue is a fresh turn"
     assert not sib.overrun
-    assert sv.answered >= 2, "each first issue gets a verifier pass (S3)"
+    assert sv.answered >= 2, "each first issue gets a verifier pass"
     assert len(S.ledger_rows(run.ep, "b")) == 2, "one ledger row per investigator call"
     assert _keys(S.oracle_rows(run.ep, "b", "answers")) == {
         _key("idp", "query", _QP), _key("edr", "query", _Q2)}, "the channel: now cached"
@@ -659,8 +640,8 @@ def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, re
     assert run.spawn.launches == []
 
 
-def test_provider_key_for_the_oracle_is_absent_only_where_the_oracle_runs(tmp_path,
-                                                                         episodes_root):
+def test_a_sibling_exiting_2_at_start_with_no_record_is_recorded_did_not_finish(tmp_path,
+                                                                                 episodes_root):
     """A sibling exiting 2 at start with no record (a missing provider key) is recorded `did not finish`."""
     est = S.estate(tmp_path)
     spawn = _Spawn(root=episodes_root, exits={"b": 2})
@@ -1025,7 +1006,7 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
         linked.append(report)
 
     spawn = _Spawn(root=episodes_root, plant=True, hook=link_cs_report)
-    judge = _LaunchJudge()
+    judge = _launch_judge()
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn,
                   judge=judge)
 
@@ -1042,7 +1023,7 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
 
     assert S.judge_called_for(judge, T.world_id(run.ep, "b")), (
         f"positive control: the judge never graded archived world b ({judge.agent_ids})")
-    assert not S.judge_called_for(judge, T.world_id(run.ep, "c")), "the world whose archive failed was graded (S10)"
+    assert not S.judge_called_for(judge, T.world_id(run.ep, "c")), "the world whose archive failed was graded"
     assert not _judge_rows(run.ep).get("c", {}).get("findings"), "world c carries findings"
     archived = _snapshot(run.ep / "worlds") if (run.ep / "worlds").is_dir() else {}
     assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-REPORT" in body], (
@@ -1195,8 +1176,8 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
     assert sib.submissions() == 1, "one fresh turn, then the stored answer"
     assert not sib.overrun
     assert sv.answered >= 1
-    assert first == again, "a repeat is the sibling's own stored answer, byte for byte (S5)"
-    assert S.oracle_rows(run.ep, "b", "forged") == frozen, "the frozen row is reused (S4)"
+    assert first == again, "a repeat is the sibling's own stored answer, byte for byte"
+    assert S.oracle_rows(run.ep, "b", "forged") == frozen, "the frozen row is reused"
     rows = S.ledger_rows(run.ep, "b")
     assert rows
     assert rows[0]["source"] == S.ORACLE_DECISION

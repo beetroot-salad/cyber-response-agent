@@ -223,12 +223,12 @@ def _mark(lead: str) -> str:
 
 def _drive(tmp_path: Path, *, verbs: Any, tenant: Any, leads: dict[str, list[Any]],
            limits: dict | None = None, run_id: str = "run-1224",
-           run_dir: Path | None = None, system: str = "idp") -> tuple[Path, _Router, dict]:
+           system: str = "idp") -> tuple[Path, _Router, dict]:
     """One investigation through the real driver: MAIN dispatches every lead in `leads` in ONE
     turn (parallel gather leads), each lead runs its own scripted turns. Returns the run dir,
     the router (what each lead was shown) and the run's summary."""
     H = S.replay_harness()
-    run_dir = run_dir if run_dir is not None else H.materialize(tmp_path / run_id, H.GOLDEN_AB3)  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
+    run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3)
     marks = {lead: _mark(lead) for lead in leads}
     main = H.ReplayFn([
         H.Turn(tool_calls=[("gather", {"lead_id": lead, "system": system, "goal": marks[lead],
@@ -659,8 +659,7 @@ def test_conc_18_lead_ended_mid_serve(tmp_path, monkeypatch):
         "l-001's call never entered the live read, or l-002's query reached the tenant")
     assert oracle.started, "the worker never reached the oracle turn after its lead ended"
     assert oracle.started[0] > run["marks"]["killing_turn"], (
-        "the oracle turn began before l-002's killing query: the lead was not ended while its "
-        "call was inside serve_one's live read, so the scenario is moot")
+        "the oracle turn began before l-002's killing query, so the lead was not ended mid-read")
     assert oracle.submissions() == 1
     assert not oracle.overrun
     assert [r for r in _own_rows(run["run_dir"]) if r["lead_id"] == "l-001"] == [], (

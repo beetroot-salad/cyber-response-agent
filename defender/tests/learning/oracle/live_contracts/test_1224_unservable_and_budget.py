@@ -664,8 +664,7 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
     with pytest.raises(S.unservable_cls()):
         S.call(reg2, "idp", "query", est.ctx(tmp_path / "inv-b"), q="user:alice")
     assert o2.submissions() == 2, (
-        f"{o2.submissions()} oracle submissions under retry_cap=2: each attempt's verifier "
-        "failure (after its one re-ask) must fail exactly that attempt")
+        f"{o2.submissions()} oracle submissions under retry_cap=2, not one per failed attempt")
     assert v2.requests == 4, (
         f"{v2.requests} verifier requests: expected 2 attempts x (1 request + 1 re-ask)")
     assert _served_rows(ep2, "b", "user:alice") == []
@@ -735,7 +734,7 @@ def test_python_runs_past_its_time_limit(tmp_path):
                            retry_cap=1)
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == served, (
-        "the cut-off run was charged as a failed attempt (M03=A: it is in-turn feedback)")
+        "the cut-off run was charged as a failed attempt")
     assert o.submissions() == 1
     assert not o.overrun
     stored = [r for r in S.ledger_rows(ep, "b") if r.get("source") == S.ORACLE_DECISION]
@@ -747,8 +746,8 @@ def test_python_runs_past_its_time_limit(tmp_path):
     python_tool = S.COINED["tool.python"]
     told = _tool_result(o, 1, python_tool).lower().replace("-", " ")
     assert told.strip(), (
-        "the oracle was not told, as the python tool's own result in the turn, about its "
-        f"cut-off run (host text appended instead: {_appended(o, 1)[:400]!r})")
+        "the python tool's result did not tell the oracle of its cut-off run "
+        f"(host text: {_appended(o, 1)[:400]!r})")
     assert any(w in told for w in ("timed out", "timeout", "time limit", "time bound",
                                    "deadline", "cut off")), (
         f"the python result does not say the run outlived its time bound: {told[:400]!r}")
@@ -922,7 +921,6 @@ def test_oracle_ledger_append_fails_after_a_good_answer(tmp_path):
 def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path, monkeypatch):
     """One budget per world spans pre-flight and its sibling, which starts already unservable once pre-flight spent it."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     monkeypatch.setenv(S.KNOB_BUDGET, str(TINY_BUDGET))
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "3")
     est = S.estate(tmp_path)
@@ -953,8 +951,8 @@ def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path
         S.call(fresh, "idp", "query", est.ctx(tmp_path / "inv-t"), q="user:bob")
     assert fresh_stopped.value.reason == S.REASON_BUDGET
     assert o4.requests >= 1, (
-        "a world with nothing spent made no oracle request under the tiny budget: the "
-        "pre-flighted world's zero requests do not show carried pre-flight spend")
+        "positive control: a world with nothing spent made no oracle request under the tiny "
+        "budget")
 
     monkeypatch.delenv(S.KNOB_BUDGET)
     o3 = S.oracle(S.submit(BOB_ROWS))

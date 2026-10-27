@@ -156,8 +156,8 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
                           source_dir=source_dir)
     gather_saw = "\n".join(configured["gather"].seen)
     assert CAPTURE_MARK in gather_saw, (
-        "premise: the configured sibling's call was not answered from the source run's capture "
-        f"(the gather agent saw {len(configured['gather'].seen)} requests)")
+        "premise: the configured sibling's call was not answered from the capture "
+        f"({len(configured['gather'].seen)} gather requests)")
     assert _served_cmdb(configured), (
         "premise: the configured sibling's world ledger records no served cmdb call")
     seen = configured["gather"].seen
@@ -182,7 +182,7 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
         f"{len(seen)} times)")
     assert _down_lines(seen[0]), (
         "the resumed sibling's rebuilt system index (the lead's first prompt) does not name "
-        f"cmdb as not configured with {DROPPED} on any line (resume non-obligation, O-3)")
+        f"cmdb as not configured with {DROPPED}")
     assert _down_lines(_answer(seen, 1)), (
         f"list_verbs(cmdb) in the resumed sibling does not name cmdb not configured with "
         f"{DROPPED}: {_answer(seen, 1)!r}")
@@ -191,7 +191,7 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
     gather_saw = "\n".join(down["gather"].seen)
     assert CAPTURE_MARK not in main_saw + gather_saw, (
         "the sibling was answered from the source run's capture for a system its own settings "
-        "do not configure (#1256 O-9: down in the sibling)")
+        "do not configure")
     assert _served_cmdb(down) == [], (
         f"the sibling's world served cmdb though cmdb is down at its start: "
         f"{_served_cmdb(down)}")
@@ -200,9 +200,7 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
     told = [text for text in (main_saw, gather_saw)
             if "cmdb" in text and "not configured" in text.lower() and DROPPED in text]
     assert told, (
-        "the sibling's agent was never told cmdb is not configured and why (neither MAIN's "
-        "dispatch return nor the gather agent's call return names 'not configured' and "
-        f"{DROPPED})")
+        f"neither MAIN nor the gather agent was told cmdb is not configured ({DROPPED})")
     assert down["state"].breaker_failures("cmdb") == 0, (
         f"the breaker was charged for a system down at the sibling's start: "
         f"{down['state'].breaker_snapshot()!r}")
@@ -259,7 +257,7 @@ def test_o8_o9_a_sibling_with_every_granted_system_down_at_its_start_is_refused(
         tmp_path, "all-down", source, monkeypatch, down=ALL_DOWN)
     assert refused is not None, (
         f"the sibling started though every granted system is down at its start (rc={rc}, "
-        f"seams reached: {rec.order}) — #1256 O-8 holds for a sibling's own start (O-9)")
+        f"seams reached: {rec.order})")
     text = H78.refusal_text(refused)
     for system, key in ALL_DOWN:
         assert re.search(rf"(?<![\w-]){system}(?![\w-])", text, re.IGNORECASE), (

@@ -47,13 +47,12 @@ DEPT_FACT = S.fact("f1", "alice moved to the finance department and logged on to
 C_FACT = S.fact("f2", "bob reset carol's password from 10.0.0.9", ("bob", "carol", "10.0.0.9"))
 
 
-def _doc(*b_facts: dict, source_run_dir: str | None = None) -> dict:
+def _doc(*b_facts: dict) -> dict:
     """A v2 family whose world b carries `b_facts` (default: the one default fact f1)."""
     worlds = [S.control_world("a"),
               S.world_v2("b", facts=list(b_facts) if b_facts else None),
               S.world_v2("c", facts=[C_FACT])]
-    kw: dict[str, Any] = {} if source_run_dir is None else {"source_run_dir": source_run_dir}
-    return S.family_v2(worlds=worlds, **kw)
+    return S.family_v2(worlds=worlds)
 
 
 @dataclass
@@ -213,8 +212,7 @@ def _assert_handed(v: S.ScriptedModel, k: int, *, framed: dict[str, str] | None 
     shown = v.seen[k] + "\n" + S.all_parts_text(v.messages[k])
     for token in never:
         assert token not in shown, (
-            f"verifier pass #{k + 1} was handed {token!r}: the oracle's own transcript, or an "
-            "earlier pass's verdict (each pass is cold, M17=A)")
+            f"verifier pass #{k + 1} was handed {token!r}, though each pass is cold")
 
 
 def _assert_scratched(o: S.ScriptedModel) -> None:
@@ -663,7 +661,7 @@ def test_input_oracle_forges_for_a_fact_the_call_does_not_cover_or_that_does_not
                                  "the world's fact": F1_STATEMENT})
     _assert_handed(v, 1, never=(SCRATCH, reason))
     _assert_scratched(o)
-    assert sc.rows("forged") == [], "no row of a failed attempt is frozen (M15=B)"
+    assert sc.rows("forged") == [], "a failed attempt's row was frozen"
     assert [_payload(r) for r in sc.ledger()] == [bob_base], sc.ledger()
 
     # Control: the verifier-refused (third) submission, alone, under a passing verifier.
@@ -859,7 +857,7 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
     assert o.submissions() == 3, "no attempt failed on the frozen row's id"
     assert sc.rows("forged") == frozen, "the frozen row is not rewritten or dropped"
     assert all("dave" not in r["payload_text"] for r in sc.ledger()), (
-        "the exploration's row reached the sibling's ledger (O9)")
+        "the exploration's row reached the sibling's ledger")
 
     # The collision, recorded for the judge: grade THIS episode and read world b's prompt.
     _judged_in_place(sc.ep)
@@ -869,14 +867,11 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
                         if a.startswith(f"judge:{T.fixture_world_id('b')}:"))
     assert world_b, f"world b was never graded (agent ids: {judge.agent_ids})"
     assert S.ORACLE_DECISION in world_b, (
-        "world b's ledger rows (two `oracle` rows) reached the judge (positive control, PCO-08)")
+        "positive control: world b's `oracle` rows never reached the judge")
     assert "e-9f01" in world_b or "fg-1" in world_b, (
-        "M12=A: world b's judge prompt names neither the frozen row's colliding id e-9f01 nor "
-        "its forged_id fg-1: the collision was not recorded for the judge")
+        "world b's judge prompt names neither the colliding id e-9f01 nor its forged_id fg-1")
     assert "dave" in world_b, (
-        "M12=A: the collision of the frozen row's id e-9f01 with this world's real row (dave's, "
-        "read by the oracle's exploration) was not recorded for the judge: world b's judge "
-        "prompt does not carry the colliding real row")
+        "world b's judge prompt does not carry the colliding real row (dave's)")
 
 
 def test_1224_forged_row_must_reuse_a_real_entitys_identifier(tmp_path):

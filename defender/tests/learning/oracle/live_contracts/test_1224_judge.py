@@ -27,9 +27,7 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     """`env_state()` (the default state of `_grade` and `_queue`) opens this test's own
-    learning-state root. `DEFENDER_EPISODES_BASE` is retired in production; it is still pointed
-    outside the data root."""
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    learning-state root."""
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -94,9 +92,7 @@ def _text(doc: Any) -> str:
     return S.as_reply_text(doc)
 
 
-def _judge(worlds: dict[str, Any] | None = None, *,
-           family_text: str | None = None, default: str | None = None,
-           fault: Any = S.CLEAN) -> _JudgeByScope:
+def _judge(worlds: dict[str, Any] | None = None, *, fault: Any = S.CLEAN) -> _JudgeByScope:
     """A by-scope judge double. Unscripted worlds answer an explicit `none` with no finding."""
     def as_text(value: Any) -> Any:
         if isinstance(value, list):
@@ -105,9 +101,8 @@ def _judge(worlds: dict[str, Any] | None = None, *,
 
     return _JudgeByScope(
         worlds={T.fixture_world_id(label): as_text(v) for label, v in (worlds or {}).items()},
-        family=family_text if family_text is not None else _text(_family_reply()),
-        default=default if default is not None else _text(
-            _world_reply("none", (), findings=[])),
+        family=_text(_family_reply()),
+        default=_text(_world_reply("none", (), findings=[])),
         fault=fault)
 
 
@@ -260,7 +255,7 @@ def test_1224_family_with_one_unservable_sibling_is_graded_on_the_rest(tmp_path)
     assert "b-healthy" in _topics(_filed(ep, "b")), (
         "the healthy world's model finding was not recorded")
     assert rec.get("validity") == "usable", (
-        f"one unservable sibling made the family {rec.get('validity')!r}, not usable (O5)")
+        f"one unservable sibling made the family {rec.get('validity')!r}, not usable")
     unservable = rows.get("c", {})
     assert not unservable.get("bucket"), f"the unservable world was bucketed: {unservable!r}"
     assert not unservable.get("findings"), f"the unservable world carries findings: {unservable!r}"
@@ -298,7 +293,7 @@ def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_find
     assert judge.calls == 0, f"an unusable family bought model calls: {judge.agent_ids}"
     assert rec.get("validity") == "unusable", (
         f"two unservable worlds (pre-flight's plus a sibling's own record) left the family "
-        f"{rec.get('validity')!r} (S9)")
+        f"{rec.get('validity')!r}")
     assert all(not r.get("bucket") and not r.get("findings") for r in _rows(ep).values()), (
         "an unusable family carries a bucket or findings")
     assert not _draws_of(ep), "an unusable family left draw files"
@@ -326,7 +321,7 @@ def test_1224_world_bucket_is_the_judge_models_output(tmp_path):
             f"{_row(ep, 'b').get('bucket')!r} — a bucket that did not come from the reply")
         if bucket == "none":
             assert all(r.get("type") != "none" for r in _queue(state)), (
-                "`none` was enqueued as a finding type (M19=A: recorded, never enqueued)")
+                "`none` was enqueued as a finding type")
         else:
             assert [r["type"] for r in _from_world(_queue(state), "b")] == [bucket], (
                 f"the {bucket!r} finding did not reach the defender queue as written")
@@ -477,15 +472,13 @@ def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
         assert isinstance(word, str), f"{case}: the stamp names no word: {stamp!r}"
         assert word, f"{case}: the stamp names an empty word: {stamp!r}"
         assert word not in (*S.OUTCOMES, S.RETIRED_OUTCOME), (
-            f"{case}: a missing outcome record was stamped {word!r} — a word of the record's own "
-            f"vocabulary or the retired one, not the distinct 'no record' state (M05=A)")
+            f"{case}: a missing outcome record was stamped {word!r}, an outcome word")
         assert S.OUTCOME_NAME in str(stamp.get("reason")), (
             f"{case}: the reason does not say the outcome record is missing: {stamp!r}")
         assert judge.calls == 0, f"{case}: the gate let a model call through"
         no_record[case] = word
     assert len(set(no_record.values())) == 1, (
-        f"absent, empty and torn records are one 'no record' state (M05=A) but were stamped "
-        f"{no_record}")
+        f"absent, empty and torn records are one 'no record' state but were stamped {no_record}")
 
     ep, judge = _gate_case(tmp_path / "accepted", "accepted")
     assert S.judge_called_for(judge, T.fixture_world_id("b")), "the positive control: an accepted episode was not graded"
@@ -582,7 +575,7 @@ def test_served_system_grants_only_health_checks(tmp_path, monkeypatch):
     recorded = _yaml.safe_load((launch.ep / "family.yaml").read_text(encoding="utf-8"))
     assert sorted(recorded.get("served_systems") or []) == est.served_systems() == ["edr", "idp"], (
         f"the launcher recorded {recorded.get('served_systems')!r}; a health-check-only system "
-        "is not served (M20=A)")
+        "is not served")
 
     graded = S.judged_episode(tmp_path / "judged", doc=S.family_v2(served_systems=("edr", "idp")))
     judge = _judge({"b": _world_reply("lead-set", ("idp",),
@@ -779,7 +772,7 @@ def test_judge_reply_gives_a_bucket_outside_the_five(tmp_path):
             _validate(_text(_world_reply(bad, ("idp",))))
         assert "bucket" in str(refusal.value), f"the refusal of {bad!r} does not name the field"
     admitted = _validate(_text(_world_reply("none", ())))
-    assert admitted.bucket == "none", "`none` is not admitted as an explicit bucket (M19=A)"
+    assert admitted.bucket == "none", "`none` is not admitted as an explicit bucket"
 
     ep = S.judged_episode(tmp_path)
     judge = _judge({
@@ -912,8 +905,7 @@ def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_pat
     monkeypatch.setenv(J.CAP_KNOB, str(10**7))
     _ep, open_judge = graded(tmp_path / "uncapped")
     assert blob_bytes(_prompt_for(open_judge, "b")) > cap, (
-        "the positive control: with no binding cap the served answers still never reached the "
-        "judge, so the capped bound above measured an absent channel")
+        "positive control: with no binding cap the served answers still never reached the judge")
 
 
 def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
@@ -988,9 +980,9 @@ def test_1224_curator_gate_authors_a_row_built_from_the_judge_models_output(tmp_
         for word in ("survived", "caught", "undecidable"):
             routed = gate({**row, "judge_outcome": word})
             assert routed is not None, (
-                f"a pre-#1234 row carrying judge_outcome={word!r} was admitted for authoring")
+                f"a row carrying the retired judge_outcome={word!r} was admitted for authoring")
             assert routed[0] == "held", (
-                f"a pre-#1234 row carrying judge_outcome={word!r} was not held: {routed!r}")
+                f"a row carrying the retired judge_outcome={word!r} was not held: {routed!r}")
             assert "judge_outcome" in routed[1].get("held_reason", ""), routed
 
 

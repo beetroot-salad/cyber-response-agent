@@ -10,7 +10,7 @@ import math
 import sys
 import threading
 import types
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -173,9 +173,9 @@ def _narrow(est: S.Estate, withheld: Iterable[tuple[str, str]]) -> Any:
     return est.run_tenant()
 
 
-def _plain_registry(est: S.Estate, tenant: Any = None) -> ModuleVerbRegistry:
+def _plain_registry(est: S.Estate) -> ModuleVerbRegistry:
     """A real run's registry over the fixture tenant: no world, no oracle (the control)."""
-    rt = tenant if tenant is not None else est.run_tenant()
+    rt = est.run_tenant()
     return ModuleVerbRegistry(est.roster(), rt.grants.gather, grant_home=rt.table_pointer)
 
 
@@ -206,33 +206,12 @@ def _ask(reg: Any, est: S.Estate, run_dir: Path, system: str = "idp", verb: str 
 
 def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.ScriptedModel,
             verifier: S.ScriptedModel | None = None, calls: Iterable[S.Call] = (CALL_IDP,),
-            rate: float = FAST, before: Callable[[], None] | None = None) -> S.Launch:
-    """The real launcher over the fixture tenant with the episode rate `rate`. `before` runs
-    after the source run is planted and before the launcher starts (to move the live estate);
-    without it this is `S.launch` itself."""
+            rate: float = FAST) -> S.Launch:
+    """`S.launch` over the fixture tenant with the episode rate `rate`."""
     monkeypatch.setenv(S.KNOB_RATE, f"{rate:g}")
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
     verifier = verifier if verifier is not None else S.passing_verifier()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    if before is None:
-        return S.launch(tmp_path, est, calls=list(calls), oracle=oracle, verifier=verifier)
-    _base, src = S.source_run(tmp_path, est, calls=list(calls))
-    before()
-    spawn = S.FakeSpawn()
-    cli = S.mod("cli.learning.branch")
-    message = ""
-    root = S.tenant_episodes(src.parent.parent.name)
-    already = {p.name for p in root.iterdir()} if root.is_dir() else set()
-    try:
-        # The tenant and the source run by id.
-        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
-                       *T.retired_continuation_argv()],
-                      spawn=spawn, questioner=S.questioner_for(), preflight=S.no_preflight,
-                      live_tree=T.source_capture(), roster=est.roster(),
-                      oracle=oracle.model, verifier=verifier.model)
-    except SystemExit as stop:
-        rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
-    ep = S.new_episode(root, already)
-    return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
+    return S.launch(tmp_path, est, calls=list(calls), oracle=oracle, verifier=verifier)
 
 
 def _gather(tmp_path: Path, reg: Any, est: S.Estate, *turns: Any) -> tuple[Path, Any]:
@@ -936,7 +915,7 @@ def test_1224_exploration_result_never_reaches_another_worlds_oracle(tmp_path):
         assert sum(1 for r in exploration_cache if r["params"] == EXPLORE) == 1
 
 
-def test_1224_shared_exploration_result_carries_another_worlds_fact_entities(tmp_path):
+def test_1224_world_bs_facts_and_exploration_never_reach_world_cs_oracle(tmp_path):
     """Nothing of world b (fact, fact-naming query, its result, forged row) reaches world c's oracle."""
     est = _estate(tmp_path)
     ep = S.episode_v2(tmp_path, base_rows=[])

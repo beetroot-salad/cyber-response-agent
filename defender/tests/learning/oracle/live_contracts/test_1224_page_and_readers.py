@@ -20,9 +20,8 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
-    """The runs base, the episodes root and the learning state root, all per test."""
+    """The runs base and the learning state root, both per test."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -222,9 +221,8 @@ def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_p
     counts = _malformed_counts(torn)
     assert counts, "a torn row raised no malformed-row note (dead channel)"
     assert counts == [1], (
-        f"the page's malformed-row count is {counts}, not exactly 1 for one torn line beside "
-        f"two served `oracle` rows and one `real-error` row — the served rows were counted as "
-        f"malformed (or the oracle-side store's rows were read as the world's)")
+        f"the page's malformed-row count is {counts}, not 1 for the one torn line: served or "
+        "oracle-side rows were counted as malformed")
     assert "TORN-MARKER-1224" not in torn.text, "the page showed a torn partial row"
     assert "ORACLE-SIDE-MARKER" not in torn.text, (
         "an oracle-side store row was shown as the sibling's own ledger")

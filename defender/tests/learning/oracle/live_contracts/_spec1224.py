@@ -50,13 +50,10 @@ LEDGER = "learning.branch.ledger"
 FAMILY = "records._family"
 CLI = "learning.branch.cli"
 EPISODE = "learning.branch.episode"
-STEPS = "learning.branch.steps"
 QUESTIONER = "learning.branch.questioner"
 JUDGE = "learning.judge"
 JUDGE_RUN = "learning.judge.run"
-JUDGE_RENDER = "learning.judge.render"
 JUDGE_ENQUEUE = "learning.judge.enqueue"
-VOCAB = "_vocab"
 RUN = "run"
 QUERY_TOOL = "investigation.query_tool"
 VERBS = "systems.verbs"
@@ -67,14 +64,9 @@ LESSONS_RUN = "learning.author.lessons.run"
 
 #: Every production spelling the suite depends on: a rename changes it here, and only here.
 COINED = {
-    "module.oracle": f"defender.{ORACLE}",
-    "module.limiter": f"defender.{LIMITER}",
     "exc.unservable": "OracleUnservable",
     "exc.sandbox": "OracleSandboxError",
-    "fn.start_box": "start_box",
     "fn.settings": "oracle_settings",
-    "fn.check": "check_submission",
-    "cls.limiter": "RateLimiter",
     "tool.run_query": "run_query",
     "tool.forge": "forge",
     "tool.record_fact": "record_fact",
@@ -85,29 +77,17 @@ COINED = {
     "record.outcome": "outcome.yaml",
     "record.world_dir": "world_records",
     "record.oracle_dir": "oracle",
-    "record.forged": "forged.jsonl",
-    "record.facts": "facts.jsonl",
-    "record.answers": "answers.jsonl",
-    "record.oracle_ledger": "ledger.jsonl",
-    "record.world_base": "base.jsonl",
     "record.samples": "samples.yaml",
     "decision.oracle": "oracle",
     "decision.real_error": "real-error",
-    "role.oracle": "oracle",
-    "role.oracle_check": "oracle_check",
-    "step.preflight": "PREFLIGHT",
     "knob.model": "ORACLE_MODEL",
     "knob.check_model": "ORACLE_CHECK_MODEL",
     "knob.retry_cap": "ORACLE_RETRY_CAP",
     "knob.rate": "ORACLE_RATE",
     "knob.budget": "ORACLE_BUDGET",
-    "knob.turn_deadline": "ORACLE_TURN_DEADLINE",
     "knob.effort": "ORACLE_EFFORT",
-    "knob.check_effort": "ORACLE_CHECK_EFFORT",
     "fn.preflight": "preflight_replay",
     "fn.samples": "system_samples",
-    "kw.served_systems": "served_systems",
-    "kw.samples": "samples",
     "reason.unservable": "oracle unservable",
     "reason.did_not_finish": "did not finish",
     "reason.budget": "budget",
@@ -129,10 +109,6 @@ RETIRED_OUTCOME = "incomplete"
 REASON_UNSERVABLE = COINED["reason.unservable"]
 REASON_DID_NOT_FINISH = COINED["reason.did_not_finish"]
 REASON_BUDGET = COINED["reason.budget"]
-BUCKETS = ("lead-set", "lead-quality", "analyze-discipline", "decision-discipline",
-           "observability", "none")
-OLD_MANIFEST_KEYS = ("overlay", "discriminator.holding_system", "discriminator.envelope",
-                     "captured_patterns", "configured_patterns")
 PREDATES = "predates the oracle"
 
 KNOB_MODEL = COINED["knob.model"]
@@ -140,9 +116,7 @@ KNOB_CHECK_MODEL = COINED["knob.check_model"]
 KNOB_RETRY_CAP = COINED["knob.retry_cap"]
 KNOB_RATE = COINED["knob.rate"]
 KNOB_BUDGET = COINED["knob.budget"]
-KNOB_TURN_DEADLINE = COINED["knob.turn_deadline"]
 KNOB_EFFORT = COINED["knob.effort"]
-KNOB_CHECK_EFFORT = COINED["knob.check_effort"]
 UNSANDBOXED_ENV = "DEFENDER_ALLOW_UNSANDBOXED"
 
 
@@ -216,9 +190,8 @@ def double_model_name(role: str) -> str:
     the part after the last `/` (it strips a registry path), so the double is priced, and the
     `fake-<role>` head still marks its traffic in any log a test reads."""
     return f"fake-{role}/{PRICED_MODEL}"
-#: HTTP statuses of a provider outage (5xx) and a rate limit (429).
+#: The HTTP status of a provider outage (5xx).
 OUTAGE = 503
-RATE_LIMITED = 429
 
 
 def provider_outage(status: int | None = OUTAGE, *,
@@ -441,22 +414,22 @@ class Estate:
                    tenant_id: str = FIXTURE_TENANT) -> Any:
         return T6.run_tenant(self.place(data_root, tenant_id))
 
-    def grant(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT) -> Any:
+    def grant(self) -> Any:
         """The tenant's gather `VerbGrant` — the grant every branching query goes through."""
-        return self.run_tenant(data_root, tenant_id).grants.gather
+        return self.run_tenant().grants.gather
 
     def served_systems(self) -> list[str]:
         """The served set: a system with at least one non-health-check read verb granted."""
         return sorted(s for s in self.systems
                       if any((s, v) not in self.withheld for v in ("query", "lookup")))
 
-    def ctx(self, run_dir: Path, *, tenant: Any = None, **kw: Any) -> Any:
+    def ctx(self, run_dir: Path, **kw: Any) -> Any:
         """A `VerbContext` for the investigator's side of a call."""
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         return sym(VERBS, "VerbContext")(
-            defender_dir=self.defender_dir, run_dir=run_dir, env={},
-            tenant=tenant if tenant is not None else self.run_tenant(), **kw)
+            defender_dir=self.defender_dir, run_dir=run_dir, env={}, tenant=self.run_tenant(),
+            **kw)
 
 
 def estate(tmp_path: Path, **kw: Any) -> Estate:
@@ -804,7 +777,7 @@ def host_tail(messages: list[Any]) -> str:
 
 
 # --------------------------------------------------------------------------------------
-# The oracle's box: sandboxed and recording, or the real unsandboxed executor.
+# The oracle's box: sandboxed and recording.
 # --------------------------------------------------------------------------------------
 
 
@@ -818,14 +791,14 @@ class BoxLog:
         return [decode(f) for f in self.frames]
 
 
-def sandboxed_box(log: BoxLog | None = None, *, out: bytes = b"", rc: int = 0,
+def sandboxed_box(*, out: bytes = b"", rc: int = 0,
                   kill_after: int | None = None) -> tuple[Callable[[], Any], BoxLog]:
     """A box FACTORY whose executors are sandboxed (`_DockerTransport`) and record each frame.
     `kill_after=n` makes the n+1-th frame on one box fail as a dead container does (`BoxFault`),
     so a fresh box started after a kill shows in `log.starts`."""
     spec_mod = mod("box._spec")
     codec = mod("execution.box_codec")
-    log = log if log is not None else BoxLog()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
+    log = BoxLog()
 
     @dataclass(frozen=True)
     class _Recording(spec_mod._DockerTransport):
@@ -846,19 +819,6 @@ def sandboxed_box(log: BoxLog | None = None, *, out: bytes = b"", rc: int = 0,
                                sink=log, served=[])
         return spec_mod.BoxExecutor(spec=spec_mod.BoxSpec(), transport=transport,
                                     name=transport.name)
-
-    return factory, log
-
-
-def unsandboxed_box() -> tuple[Callable[[], Any], BoxLog]:
-    """A box factory handing out the REAL default executor: `BoxExecutor()`, `sandboxed`
-    False. It records the factory starts; it has no frames to record, because its
-    transport is the real `_unattached` one, which raises `BoxFault` on any frame."""
-    log = BoxLog()
-
-    def factory() -> Any:
-        log.starts += 1
-        return sym("box._spec", "BoxExecutor")()
 
     return factory, log
 
@@ -926,8 +886,8 @@ def family_v2(*, worlds: list[dict] | None = None,
     return doc
 
 
-def old_manifest(key: str, *, value: Any = None) -> dict:
-    """A v2 document carrying ONE pre-oracle key. `key` is one of `OLD_MANIFEST_KEYS`."""
+def old_manifest(key: str) -> dict:
+    """A v2 document carrying ONE pre-oracle key, `key` (one of `defaults` below)."""
     doc = family_v2()
     defaults = {
         "overlay": {"patches": {"identity": {"web-1": {"owner": "platform"}}}},
@@ -937,7 +897,7 @@ def old_manifest(key: str, *, value: Any = None) -> dict:
         "captured_patterns": ["logs-*"],
         "configured_patterns": ["logs-*"],
     }
-    v = defaults[key] if value is None else value
+    v = defaults[key]
     if key == "overlay":
         doc["worlds"][1]["overlay"] = v
     elif key.startswith("discriminator."):
@@ -957,21 +917,12 @@ def episode_v2(tmp_path: Path, *, doc: dict | None = None, root: Path | None = N
     return ep
 
 
-def write_manifest(ep: Path, doc: dict) -> Path:
-    return T.write_family(ep, doc)
-
-
-def captured(system: str, verb: str, params: Mapping[str, Any], payload: Any, *,
-             key: str | None = None) -> dict:
+def captured(system: str, verb: str, params: Mapping[str, Any], payload: Any) -> dict:
     """One captured row of the family's base recording (the source run's own call)."""
     return {"system": system, "verb": verb,
-            "correlation_key": key or f"{system}|{verb}|{canonical(params)}",
+            "correlation_key": f"{system}|{verb}|{canonical(params)}",
             "params": dict(params), "payload_text": json.dumps(payload, sort_keys=True),
             "source": "captured", "world_id": None}
-
-
-def base_recording(ep: Path, rows: list[dict]) -> Path:
-    return T.base_capture(ep, rows)
 
 
 def outcome_record(ep: Path, outcome: str = "accepted", *, reason: str = "",
@@ -1133,8 +1084,8 @@ def strings_in(value: Any) -> list[str]:
 def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                    labels: tuple[str, ...] = WORLDS, outcome: str | None = "accepted",
                    ledgers: dict[str, list[dict]] | None = None,
-                   root: Path | None = None, samples: bool = True,
-                   episode_id: str = EPISODE_ID, **world_kw: Any) -> Path:
+                   root: Path | None = None, episode_id: str = EPISODE_ID,
+                   **world_kw: Any) -> Path:
     """A fully archived v2 episode — the judge's and the page's whole input: v2 manifest, a
     base recording, every world archived under `worlds/<X>/` (`J.archived_judge_world`), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
@@ -1157,10 +1108,9 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
             # A planted world's built layer (`oracle/<X>/`) is part of what it is judged on:
             # no directory is a malformed world; an empty one is an empty store.
             oracle_dir(ep, label).mkdir(parents=True, exist_ok=True)
-    if samples:
-        # Every served system has a samples section (one example per system here).
-        samples_record(ep, {system: {"verbs": {"query": [json.dumps({"rows": []})]}}
-                            for system in manifest.get("served_systems") or []})
+    # Every served system has a samples section (one example per system here).
+    samples_record(ep, {system: {"verbs": {"query": [json.dumps({"rows": []})]}}
+                        for system in manifest.get("served_systems") or []})
     if outcome is not None:
         outcome_record(ep, outcome)
     if labels:
@@ -1347,32 +1297,30 @@ def lead_rows(run_dir: Path) -> list[dict]:
 
 
 def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                 run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
-                 **kw: Any) -> tuple[Path, Any]:
+                 run_id: str = RUN_ID, tenant: Any = None, **kw: Any) -> tuple[Path, Any]:
     """A whole investigation through the replay harness (the `test_1106_query_lane` shape):
     the main loop dispatches ONE gather lead on `system`, whose scripted turns are
     `gather_turns` (`query_turn(...)`s then `DONE`), with the registry injected as `verbs=`.
     Returns `(run dir, the gather ReplayFn)` — `gather.seen` is what the investigator saw."""
     run_dir, gather, _summary = _drive_one_gather(
         tmp_path, verbs=verbs, gather_turns=gather_turns, system=system, run_id=run_id,
-        limits=limits, tenant=tenant, **kw)
+        tenant=tenant, **kw)
     return run_dir, gather
 
 
 def drive_gather_run(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                     run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
-                     **kw: Any) -> tuple[Path, Any, Any]:
+                     run_id: str = RUN_ID, tenant: Any = None, **kw: Any) -> tuple[Path, Any, Any]:
     """`drive_gather`, also handing back the run's one `RunState` (`drive()`'s
     `["run_state"]`) — where a scenario reads the run's budget or breaker, which no file in the
     run dir holds."""
     run_dir, gather, summary = _drive_one_gather(
         tmp_path, verbs=verbs, gather_turns=gather_turns, system=system, run_id=run_id,
-        limits=limits, tenant=tenant, **kw)
+        tenant=tenant, **kw)
     return run_dir, gather, summary["run_state"]
 
 
 def _drive_one_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str,
-                      run_id: str, limits: Any, tenant: Any, **kw: Any) -> tuple[Path, Any, dict]:
+                      run_id: str, tenant: Any, **kw: Any) -> tuple[Path, Any, dict]:
     H = replay_harness()
     run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3, run_id=run_id)
     main = H.ReplayFn([
@@ -1383,7 +1331,7 @@ def _drive_one_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], sy
     ])
     gather = H.ReplayFn(gather_turns)
     summary = H.drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs,
-                      limits=limits, tenant=tenant, **kw)
+                      tenant=tenant, **kw)
     return run_dir, gather, summary
 
 
