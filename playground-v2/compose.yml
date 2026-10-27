@@ -182,7 +182,10 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - "curl -fsS --cacert /usr/share/elasticsearch/config/certs/ca/ca.crt -u elastic:$$ELASTIC_PASSWORD https://localhost:9200/_cluster/health | grep -qE '\"status\":\"(yellow|green)\"'"
+        # The credential reaches curl as config on stdin (-K -), never as an argument: an
+        # argument is readable by every process monitor on the host (metricbeat's
+        # system.process samples full command lines into Elasticsearch).
+        - "printf 'user = \"elastic:%s\"\\n' \"$$ELASTIC_PASSWORD\" | curl -fsS -K - --cacert /usr/share/elasticsearch/config/certs/ca/ca.crt https://localhost:9200/_cluster/health | grep -qE '\"status\":\"(yellow|green)\"'"
       interval: 10s
       timeout: 10s
       retries: 30
@@ -218,7 +221,7 @@ services:
         echo "-> setting kibana_system password";
         ok=0;
         for i in $$(seq 1 60); do
-          if curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:$${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"$${KIBANA_PASSWORD}\"}" | grep -q "^{}"; then ok=1; break; fi;
+          if printf "user = \"elastic:%s\"\ndata = {\"password\":\"%s\"}\n" "$${ELASTIC_PASSWORD}" "$${KIBANA_PASSWORD}" | curl -s -K - -X POST --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/kibana_system/_password | grep -q "^{}"; then ok=1; break; fi;
           sleep 5;
         done;
         [ "$$ok" = 1 ] || { echo "FAIL: kibana_system password not set after 5m - check V2_ELASTIC_PASSWORD against the elastic user stored in es_data"; exit 1; };
@@ -235,17 +238,26 @@ services:
       # Kibana authenticates as kibana_system, whose password es-init sets.
       es-init:
         condition: service_completed_successfully
-    image: docker.elastic.co/kibana/kibana:${STACK_VERSION}
+    build:
+      context: ./kibana
+      args:
+        STACK_VERSION: ${STACK_VERSION}
+    image: soc-playground/kibana:${STACK_VERSION}
     container_name: kibana
     environment:
       - SERVERNAME=kibana
       - ELASTICSEARCH_HOSTS=https://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=kibana_system
-      - ELASTICSEARCH_PASSWORD=${V2_KIBANA_PASSWORD}
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca/ca.crt
-      - XPACK_SECURITY_ENCRYPTIONKEY=${V2_KIBANA_ENCRYPTION_KEY}
-      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${V2_KIBANA_ENCRYPTION_KEY}
-      - XPACK_REPORTING_ENCRYPTIONKEY=${V2_KIBANA_ENCRYPTION_KEY}
+      # Secrets go through kibana/kibana.yml's ${VAR} substitution, under names the image
+      # entrypoint does not recognise: it turns ELASTICSEARCH_PASSWORD and XPACK_*_ENCRYPTIONKEY
+      # into --flags on Kibana's command line, which host process monitoring then ships into
+      # Elasticsearch. Never put a secret back in a recognised name.
+      - KBN_ES_PASSWORD=${V2_KIBANA_PASSWORD}
+      - KBN_ENCRYPTION_KEY=${V2_KIBANA_ENCRYPTION_KEY}
+      # The key saved objects were encrypted with before the last rotation (decrypt-only).
+      # Unset on a stack that never rotated; kibana/with-previous-key.sh declares it only when set.
+      - KBN_ENCRYPTION_KEY_PREVIOUS=${V2_KIBANA_ENCRYPTION_KEY_PREVIOUS:-}
     volumes:
       - certs:/usr/share/kibana/config/certs:ro
       - kibana_data:/usr/share/kibana/data
@@ -291,9 +303,10 @@ services:
       sh -c '
         set -e;
         echo "-> fleet setup";
-        curl -fsS -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" -X POST http://kibana:5601/api/fleet/setup > /dev/null;
+        cred() { printf "user = \"elastic:%s\"\n" "$$ELASTIC_PASSWORD"; };
+        cred | curl -fsS -K - -H "kbn-xsrf: x" -X POST http://kibana:5601/api/fleet/setup > /dev/null;
         echo "-> fleet-server-policy (idempotent: 409 on re-run is fine)";
-        HTTP=$$(curl -sS -o /tmp/resp.json -w "%{http_code}" -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" -H "Content-Type: application/json" -X POST "http://kibana:5601/api/fleet/agent_policies?sys_monitoring=true" -d "{\"id\":\"fleet-server-policy\",\"name\":\"Fleet Server policy\",\"namespace\":\"default\",\"has_fleet_server\":true,\"monitoring_enabled\":[\"logs\",\"metrics\"]}");
+        HTTP=$$(cred | curl -sS -K - -o /tmp/resp.json -w "%{http_code}" -H "kbn-xsrf: x" -H "Content-Type: application/json" -X POST "http://kibana:5601/api/fleet/agent_policies?sys_monitoring=true" -d "{\"id\":\"fleet-server-policy\",\"name\":\"Fleet Server policy\",\"namespace\":\"default\",\"has_fleet_server\":true,\"monitoring_enabled\":[\"logs\",\"metrics\"]}");
         case "$$HTTP" in
           200|201) echo "created" ;;
           409) echo "already exists" ;;
@@ -333,11 +346,12 @@ services:
       sh -c '
         set -eu;
         ROLES="web db jump-box dev-ws office-ws canary config-mgmt ci-host scanner-host";
+        cred() { printf "user = \"elastic:%s\"\n" "$$ELASTIC_PASSWORD"; };
         for role in $$ROLES; do
           policy_id="host-$${role}-policy";
           echo "-> creating policy $${policy_id}";
-          HTTP=$$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
-            -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" \
+          HTTP=$$(cred | curl -sS -K - -o /tmp/resp.json -w "%{http_code}" \
+            -H "kbn-xsrf: x" \
             -H "Content-Type: application/json" \
             -X POST "http://kibana:5601/api/fleet/agent_policies?sys_monitoring=true" \
             -d "{\"id\":\"$${policy_id}\",\"name\":\"Host role: $${role}\",\"namespace\":\"default\",\"monitoring_enabled\":[\"logs\",\"metrics\"]}");
@@ -347,7 +361,7 @@ services:
             *)       echo "   FAIL http=$$HTTP"; cat /tmp/resp.json; exit 1 ;;
           esac;
           echo "-> fetching enrollment token for $${policy_id}";
-          TOKEN=$$(curl -fsS -u "elastic:$$ELASTIC_PASSWORD" -H "kbn-xsrf: x" \
+          TOKEN=$$(cred | curl -fsS -K - -H "kbn-xsrf: x" \
             "http://kibana:5601/api/fleet/enrollment_api_keys?kuery=policy_id:$${policy_id}" \
             | sed -n "s/.*\"api_key\":\"\\([^\"]*\\)\".*/\\1/p" | head -n1);
           if [ -z "$$TOKEN" ]; then
@@ -397,6 +411,9 @@ services:
         set -eu
         apk add --no-cache curl openssl >/dev/null
         log() { printf "%s %s\n" "$$(date -u +%FT%TZ)" "$$*"; }
+        # Credential as curl config on stdin, never an argument: this loop runs every
+        # INTERVAL_S forever, and an argument lands in Falco and process metrics each time.
+        cred() { printf 'user = "elastic:%s"\n' "$$ELASTIC_PASSWORD"; }
         log "reconciler starting; interval=$${INTERVAL_S}s ca=$${CA_PATH}"
         while true; do
           if [ ! -f "$$CA_PATH" ]; then
@@ -405,7 +422,7 @@ services:
           fi
           WANT_FP=$$(openssl x509 -in "$$CA_PATH" -fingerprint -sha256 -noout \
             | sed 's/.*=//; s/://g' | tr '[:upper:]' '[:lower:]')
-          GOT=$$(curl -fsS -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+          GOT=$$(cred | curl -fsS -K - -H 'kbn-xsrf: x' \
             "$$KIBANA_URL/api/fleet/outputs/fleet-default-output" 2>/dev/null || true)
           if [ -z "$$GOT" ]; then
             log "kibana fleet output endpoint unreachable; retrying"
@@ -423,8 +440,8 @@ services:
           log "drift detected — want_fp=$$WANT_FP got_fp=$$GOT_FP hosts=$$GOT_HOSTS"
           BODY=$$(printf '{"hosts":["%s"],"ca_trusted_fingerprint":"%s"}' \
             "$$ES_URL" "$$WANT_FP")
-          HTTP=$$(curl -sS -o /tmp/resp -w '%{http_code}' \
-            -u "elastic:$$ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
+          HTTP=$$(cred | curl -sS -K - -o /tmp/resp -w '%{http_code}' \
+            -H 'kbn-xsrf: x' \
             -H 'Content-Type: application/json' \
             -X PUT "$$KIBANA_URL/api/fleet/outputs/fleet-default-output" \
             -d "$$BODY")

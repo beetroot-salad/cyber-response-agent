@@ -121,14 +121,14 @@ class DockerExecSeam:
         return self._parse(proc, f"cmdb {method.upper()} {path}")
 
     def es_request(self, method: str, path: str, body: Any = None) -> Any:
-        parts = ["curl", "-s", "-k", "-u", "elastic:$ELASTIC_PASSWORD", "-X", method.upper(),
+        parts = ["curl", "-s", "-k", "-K", "-", "-X", method.upper(),
                  "-w", "\n%{http_code}", f"https://localhost:9200{path}"]
         if body is not None:
             parts += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
-        quoted = " ".join(
-            '"elastic:$ELASTIC_PASSWORD"' if part == "elastic:$ELASTIC_PASSWORD" else shlex.quote(part)
-            for part in parts
-        )
+        # The credential is expanded from the container's env into curl config on stdin, never
+        # onto curl's command line, where Falco and host process monitoring would read it.
+        quoted = ('printf \'user = "elastic:%s"\\n\' "$ELASTIC_PASSWORD" | '
+                  + " ".join(shlex.quote(part) for part in parts))
         # A plain (non-login) shell: `docker exec` already carries the
         # container's environment, and a login profile that prints anything
         # would land in the body this parses.

@@ -65,8 +65,7 @@ def load_api_key() -> str:
 
 def _curl_command(method: str, path: str, has_body: bool) -> str:
     parts = [
-        "curl -ks",
-        '-H "Authorization: Bearer $SHUFFLE_KEY"',
+        "curl -ks -K -",
         '-H "Content-Type: application/json"',
         f"-X {method}",
         f'"{SHUFFLE_URL}{path}"',
@@ -80,11 +79,14 @@ def _curl_command(method: str, path: str, has_body: bool) -> str:
 
 def shuffle_curl(key: str, method: str, path: str, body: str | None = None) -> tuple[int, str]:
     """Run curl inside the kibana container against Shuffle, return (http_code, body)."""
-    args = ["docker", "--context", DOCKER_CONTEXT, "exec", "-e", f"SHUFFLE_KEY={key}"]
+    # The API key reaches curl as a config `header` on stdin, never as an argument: an
+    # argument inside the container is read by Falco and host process monitoring.
+    args = ["docker", "--context", DOCKER_CONTEXT, "exec", "-i"]
     if body is not None:
         args += ["-e", f"BODY={body}"]
     args += [CURL_CONTAINER, "sh", "-c", _curl_command(method, path, body is not None)]
-    proc = subprocess.run(args, capture_output=True, text=True)
+    proc = subprocess.run(args, input=f'header = "Authorization: Bearer {key}"\n',
+                          capture_output=True, text=True)
     if proc.returncode != 0:
         sys.exit(f"docker exec failed (rc={proc.returncode}): {proc.stderr.strip()}")
     out = proc.stdout

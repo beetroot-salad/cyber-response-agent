@@ -372,7 +372,7 @@ curl -sk -u "elastic:$V2_ELASTIC_PASSWORD" \
 
 ### Shipping Postgres + Nginx logs to Elastic — manual attach (one-time)
 
-Each role host runs its own embedded `elastic-agent` enrolled into a role policy (`host-db-policy`, `host-web-policy`), so attaching the official integrations to those policies gets the agents reading the in-container log paths directly. No file bind-mounts needed — the agent is *inside* the container. Default `paths` in both packages already match the in-container layout (`/var/log/postgresql/postgresql-*-*.log*` matches Ubuntu's `postgresql-14-main.log`; `/var/log/nginx/{access,error}.log*` is the nginx default). Metrics inputs are left disabled — they require credentials we don't surface to the agents.
+Each role host runs its own embedded `elastic-agent` enrolled into a role policy (`host-db-policy`, `host-web-policy`), so attaching the official integrations to those policies gets the agents reading the in-container log paths directly. No file bind-mounts needed — the agent is *inside* the container. Default `paths` in both packages already match the in-container layout (`/var/log/postgresql/postgresql-*-*.log*` matches Ubuntu's `postgresql-14-main.log`; `/var/log/nginx/{access,error}.log*` is the nginx default). The metrics inputs are disabled explicitly: they require credentials we don't surface to the agents, and Fleet enables them by default when a request leaves them out. Left on, they log in to Postgres as `root` about 24 times a minute and probe nginx's `/nginx_status` (404) about 12 times a minute, noise inside the very logs the attacks are detected in.
 
 ```bash
 # Install packages (idempotent on re-runs).
@@ -390,7 +390,8 @@ curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
     "policy_id": "host-db-policy",
     "package": {"name": "postgresql", "version": "1.32.1"},
     "name": "postgresql-logs", "namespace": "default",
-    "inputs": {"postgresql-logfile": {"enabled": true, "streams": {"postgresql.log": {"enabled": true}}}}
+    "inputs": {"postgresql-logfile": {"enabled": true, "streams": {"postgresql.log": {"enabled": true}}},
+               "postgresql-postgresql/metrics": {"enabled": false}}
   }'
 
 # Nginx access + error → host-web-policy (two agents: web-1, web-2).
@@ -400,7 +401,8 @@ curl -sS -u "elastic:$V2_ELASTIC_PASSWORD" -H 'kbn-xsrf: x' \
     "policy_id": "host-web-policy",
     "package": {"name": "nginx", "version": "3.1.0"},
     "name": "nginx-logs", "namespace": "default",
-    "inputs": {"nginx-logfile": {"enabled": true, "streams": {"nginx.access": {"enabled": true}, "nginx.error": {"enabled": true}}}}
+    "inputs": {"nginx-logfile": {"enabled": true, "streams": {"nginx.access": {"enabled": true}, "nginx.error": {"enabled": true}}},
+               "nginx-nginx/metrics": {"enabled": false}}
   }'
 ```
 
