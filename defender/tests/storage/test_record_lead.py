@@ -70,13 +70,13 @@ def test_reused_id_returns_already_claimed_with_remediation(tmp_path, capsys):
     assert "l-001" in err
     assert "append a new :L" in err
     assert json.loads((run_dir / "gather_raw" / "l-001.lead.json").read_text())["goal"] == "first"
+    # The refusal is per key: another lead id still wins its own claim.
+    assert claim_lead(_dispatch(run_dir, "l-002", "other", ["d"]), run=fixture_run(run_dir)) == CLAIMED
 
 
 def test_the_three_codes_are_distinct(tmp_path):
-    """#855 F-12, at the seam that caused it: a caller must be able to write "the row is on
-    disk" as a check, and it can only do that if SUCCESS has a code no skip shares. One run
-    over the three domains — a good claim, a refused one, a reused one — and the three answers
-    are three."""
+    """A caller can check "the row is on disk" only if SUCCESS has a code no skip shares (#855):
+    a good claim, a refused one and a reused one answer three different codes."""
     run_dir = tmp_path / fixture_uuid("run")
     good = claim_lead(_dispatch(run_dir, "l-001", "g", ["d"]), run=fixture_run(run_dir))
     refused = claim_lead(_dispatch(run_dir, "l-002", "", ["d"]), run=fixture_run(run_dir))
@@ -87,10 +87,8 @@ def test_the_three_codes_are_distinct(tmp_path):
 
 
 def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
-    """The leads row records the STRIPPED goal, so `"   "` used to claim the id and write a
-    row whose goal is `""` — the same empty row the falsy arm refuses, reached by a string
-    that merely is not falsy. Both spellings now leave the id unclaimed AND unburnt: the
-    corrected re-dispatch of the same id must still be able to take it."""
+    """The leads row records the STRIPPED goal, so a whitespace goal is the empty goal: each
+    leaves the id unclaimed AND unburnt, so a corrected re-dispatch can still take it."""
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     for empty in ("", "   ", "\n\t"):
@@ -100,10 +98,9 @@ def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
 
 
 def test_an_overlong_lead_id_is_refused_before_os_open(tmp_path):
-    """A well-shaped but unbounded id spent as a filename component fails the create with
-    ENAMETOOLONG, and "the write failed" is the outcome a caller has the least to say about.
-    `LEAD_ID_RE` bounds the body, so the refusal happens at the shape check — and the same
-    bound is what `tools_gather`'s own seam check reads."""
+    """A well-shaped but unbounded id would fail the create with ENAMETOOLONG, the outcome a
+    caller can do least with. `LEAD_ID_RE` bounds the body, so the shape check refuses it —
+    the same bound `tools_gather`'s own seam check reads."""
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-" + "a" * 300, "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
@@ -176,7 +173,7 @@ def test_fdopen_failure_removes_empty_sidecar_and_allows_retry(tmp_path, monkeyp
 
 
 def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, monkeypatch):
-    """#878 F-36 — the rooted named-create backend must not double-close on failure."""
+    """The rooted named-create backend must not double-close on a failed write (#878)."""
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(run_dir, "l-001", "g", ["d"])
@@ -239,10 +236,9 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
 
 
 def test_a_planted_alias_refuses_with_the_same_remedy_the_reuse_gate_gives(tmp_path, capsys):
-    """#1077 D7 review: the owner's containment check moved the alias refusal ahead of the
-    `O_EXCL` create, and the new arm answered `ALREADY_CLAIMED` in SILENCE. Both arms tell the
-    model the same thing — the id is held — so both owe it the same correctable instruction.
-    A refusal carrying only a code is one the model can do nothing with but repeat."""
+    """The alias refusal (the owner's containment check, ahead of the `O_EXCL` create) answers
+    `ALREADY_CLAIMED` as a reuse does, so it owes the model the same correctable instruction:
+    a bare code is one the model can do nothing with but repeat."""
     run_dir = tmp_path / fixture_uuid("run-alias")
     (run_dir / "gather_raw").mkdir(parents=True)
     outside = tmp_path / "elsewhere.json"
@@ -258,20 +254,18 @@ def test_a_planted_alias_refuses_with_the_same_remedy_the_reuse_gate_gives(tmp_p
 
 
 def test_a_lead_id_that_is_not_a_plain_string_claims_nothing_and_does_not_raise(tmp_path):
-    """`claim_lead`'s contract is "never raises: the contract is a code". The shape half of
-    the owner's check (`_check_component`) raises `ValueError` for a component that is not a
-    plain string, and the id regex runs on `str(lead_id)` — so an object whose `str()` looks
-    like an id reaches the owner as itself. The old hand-composed f-string accepted it.
-
-    NOT_CLAIMED, not ALREADY_CLAIMED: nothing holds the name. This is the caller handing us an
-    id we cannot compose, which is a refusal, not a taken id."""
+    """`claim_lead` never raises. The id regex runs on `str(lead_id)`, so an object whose
+    `str()` looks like an id reaches the owner's `_check_component`, which raises `ValueError`
+    for a non-string. The answer is NOT_CLAIMED (an id we cannot compose), not ALREADY_CLAIMED:
+    nothing holds the name."""
     run_dir = tmp_path / fixture_uuid("run-shape")
     assert claim_lead(_dispatch(run_dir, Path("l-a1"), "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not list((run_dir / "gather_raw").glob("*.lead.json")), "a row was written anyway"
 
 
 def test_parent_alias_is_not_a_taken_lead_and_claim_recovers_when_restored(tmp_path, capsys):
-    """#1165: parent preparation failure retains NOT_CLAIMED, unlike a held leaf."""
+    """A linked `gather_raw/` fails the parent preparation: NOT_CLAIMED with no remedy line
+    (unlike a held leaf), and the claim succeeds once the folder is restored."""
     run_dir = tmp_path / fixture_uuid("run-parent-alias")
     run_dir.mkdir()
     outside = tmp_path / "outside-claims"

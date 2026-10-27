@@ -157,7 +157,7 @@ def test_r1_the_views_read_of_a_plant_is_refused_promptly_and_changes_nothing(
         assert view.read_jsonl(rel)[0] == [{"k": 1}]
 
 
-# ---- the view under a close race (the E-race shape) --------------------------------------
+# ---- the view under a close race -------------------------------------------------------
 
 _RACE_OPS = ("read-top", "read-deep", "read_jsonl", "entries-root", "entries-under")
 
@@ -415,8 +415,8 @@ def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, 
     def load() -> Any:
         if via == "delta_o":
             return J.through_view(ep, episode_mod().delta_o)
-        # #1187 (R5, declared change 10): the loader is told the episode's id (its folder's
-        # name) and refuses a manifest naming another; `expected_episode_id=` is required.
+        # The loader is told the episode's id (its folder's name); it refuses a manifest
+        # naming another.
         if via == "bind":
             with _io.bind(ep) as view:
                 return fam.load_family(view, expected_episode_id=ep.name)
@@ -487,11 +487,11 @@ def test_r2_a_linked_or_non_directory_folder_on_the_way_is_not_the_leaf_class(tm
     assert (root / rel).read_text(encoding="utf-8") == "x\n"
 
 
-# ---- R2 at the judge's stale-draw removal (S1) -------------------------------------------
+# ---- a linked folder at the judge's stale-draw removal ----------------------------------
 
 def _draw0_asks() -> list[str]:
-    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply (N22,
-    `judge._REPLY_ATTEMPTS` asks per draw)."""
+    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply
+    (`judge._REPLY_ATTEMPTS` asks per draw)."""
     attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
     return [f"judge:{T.fixture_world_id('b')}:0", *(f"judge:{T.fixture_world_id('b')}:0:{a}" for a in range(1, attempts))]
 
@@ -564,7 +564,7 @@ def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_d
     assert sorted(p.name for p in judge_dir.iterdir()) == ["1.yaml"]
 
 
-# ---- R2 at the priming claim and the primed base -----------------------------------------
+# ---- a linked served/ at the priming claim and the primed base -------------------------
 
 def _swap_served_before(ep: Path, rel: PurePosixPath, *, reach: str, host: Path,
                         state: dict[str, Any]) -> Any:
@@ -726,7 +726,7 @@ def test_r3_anything_at_the_base_is_already_primed_before_the_capture_is_read(tm
     sidecar, payload = fifo_sidecar(run_dir)
     ep = bare_episode(tmp_path)
     planted = _plant_base(ep, kind, host)
-    before = S.census(ep.parent)
+    before = S.census(tmp_path)
     spy = S.OsSpy()
     io = S.RecordingIo(os_=spy)
 
@@ -738,7 +738,7 @@ def test_r3_anything_at_the_base_is_already_primed_before_the_capture_is_read(tm
     opened = [o for o in spy.opens if PurePosixPath(o.path).name == LAYOUT.served_base.name]
     assert opened == [], f"the base was opened: {opened}"
     assert [c for c in io.calls if c.method == "write"] == [], "the held root was written"
-    assert S.census(ep.parent) == before, f"priming over a {kind} changed the tree"
+    assert S.census(tmp_path) == before, f"priming over a {kind} changed the tree"
 
     planted.remove()
     io = S.RecordingIo()
@@ -777,10 +777,7 @@ def test_r3_zero_rows_are_refused_by_default_and_primed_empty_with_allow_empty(t
 
 
 def _launcher(tmp_path: Path) -> tuple[Any, Path, Any]:
-    """`(cli, the source run dir, T's runs repository)` — the launcher's entry
-    `cli.prepare_episode(runs, source, *, prime=)` (#1187 declared change 3, review-4 F37: the
-    episode is claimed by `runs.create_episode()`, a fresh UUID under `<T>/episodes/`; the
-    retired `episode_dir` resolver names nothing)."""
+    """`(cli, the source run dir, T's runs repository)` for `cli.prepare_episode(runs, source)`."""
     cli = mod("learning.branch.cli")
     _base, src = location_path(T.runs_base)(tmp_path)
     return cli, src, T.current_tenant().runs_repository()
@@ -788,11 +785,9 @@ def _launcher(tmp_path: Path) -> tuple[Any, Path, Any]:
 
 def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
         tmp_path, roots, caplog):
-    """The launcher's default primer is `prime_base(..., allow_empty=True)`: a source whose
-    capture yields no row gets an EMPTY base (a plain file), with a warning that every key
-    reaches the live estate; there is no message-matched downgrade left to create it a second
-    time (`_is_empty_capture` is removed). Through `prepare_episode(runs, source)` with no
-    `prime=` (review-4 F37), the episode it claimed is under `<T>/episodes/`."""
+    """The launcher's default primer is `prime_base(..., allow_empty=True)`: a capture with no
+    row gets an EMPTY base (a plain file) and a warning that every key reaches the live estate;
+    no message-matched downgrade (`_is_empty_capture`) is left to create it a second time."""
     cli, src, runs = _launcher(tmp_path)
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     caplog.set_level(logging.WARNING)
@@ -805,8 +800,8 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
     assert base.read_bytes() == b""
     assert stat.S_ISREG(os.lstat(base).st_mode)
     assert os.lstat(base).st_nlink == 1
-    # The warning's wording is the implementer's: any WARNING that speaks of the base, the
-    # prime, the capture or its emptiness counts.
+    # The wording is free: any WARNING about the base, the prime, the capture or its emptiness
+    # counts.
     assert S.warned(caplog, "base", "primed", "prime", "capture", "empty", "EMPTY", "rows"), (
         "an empty prime was not warned about")
     assert not hasattr(cli, "_is_empty_capture"), (

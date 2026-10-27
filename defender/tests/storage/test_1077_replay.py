@@ -1,10 +1,8 @@
-"""#1077 — the properties that must survive the migration, driven through the real run."""
+"""Run-record properties the #1077 name move must keep, driven through the real run."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
-from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import json
 import subprocess
@@ -44,7 +42,7 @@ def _read_rows(path: Path) -> list[dict]:
             if line.strip()]
 
 
-# O5 — append-only, readable mid-run, forkable at turn N
+# append-only, readable mid-run
 
 def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_handle(
         tmp_path: Path):
@@ -55,15 +53,14 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
     leads = S.member(handle, "tables", "leads", S.LEAD_ID)
 
     queries.append([{"seq": 0, "system": "elastic"}])
-    # A lead claim is an EXCLUSIVE-CREATE sidecar (the design's own words for `tables`:
-    # "append-only; exclusive-create claims"): written once, and a second claim on the same
-    # lead id collides — which is what keeps two dispatches of one lead from being one row.
+    # A lead claim is an EXCLUSIVE-CREATE sidecar: written once, so a second claim on the same
+    # lead id collides instead of merging two dispatches into one row.
     leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "first"}))
     with pytest.raises(Exception, match="write-once"):
         leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "second"}))
     assert json.loads(leads.read())["goal"] == "first", "the second claim overwrote the first"
 
-    # A SECOND PROCESS reads the tables while the run is still going — the property O5 names.
+    # A SECOND PROCESS reads the tables while the run is still going.
     reader = subprocess.run(
         [sys.executable, "-c",
          "import json,sys,pathlib\n"
@@ -119,27 +116,6 @@ def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: P
             joiner.connection.close()
 
 
-def test_a_second_claim_on_one_lead_still_loses_the_exclusive_create(tmp_path: Path):
-    from defender.hooks import record_lead
-    run_dir = S.seed_run_tree(S.make_run_dir(S.make_runs_base(tmp_path)))
-    dispatch = {"run_dir": str(run_dir), "lead_id": S.LEAD_ID, "goal": "first claim",
-                "what_to_summarize": ["a"]}
-
-    first = record_lead.claim_lead(dispatch, run=fixture_run(run_dir))
-    second = record_lead.claim_lead({**dispatch, "goal": "second claim"}, run=fixture_run(run_dir))
-
-    assert first == record_lead.CLAIMED
-    assert second == record_lead.ALREADY_CLAIMED, (
-        "claim C19: the exclusive create sits under a `guarded_mkdir` anchored at run_dir and "
-        "`write_guarded` stages with O_CREAT|O_EXCL|O_NOFOLLOW; exactly one claim wins")
-    sidecar = S.RunPaths(run_dir).lead_claim(S.LEAD_ID)
-    assert sidecar.is_file()
-    assert "first claim" in sidecar.read_text(encoding="utf-8"), (
-        "the loser overwrote the winner's row")
-    # A DIFFERENT lead id still wins its own claim — the refusal is per key, not a blanket one.
-    assert record_lead.claim_lead({**dispatch, "lead_id": "l-other1"}, run=fixture_run(run_dir)) == record_lead.CLAIMED
-
-
 def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
     from defender._io import append_jsonl
     base = S.make_runs_base(tmp_path)
@@ -163,17 +139,14 @@ def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-outside")))
 
-    # (1) THE HOOK's arm retired with #1235: the accounting-failures sidecar it wrote is gone
-    # (the budget is counted in the run process's memory, and nothing writes the sidecar).
-
-    # (2) THE ALIAS PROBE, host-initiated INSIDE the box: claim C14 is REFUTED-as-stated —
-    # the model's bash is NOT the only in-box run-dir writer, this probe is the second.
+    # (1) THE ALIAS PROBE, host-initiated INSIDE the box: the model's bash is NOT the only
+    # in-box run-dir writer.
     probe_entry = run_dir / ".alias-probe-deadbeefdeadbeef-symlink"
     probe_entry.write_text("", encoding="utf-8")
     assert probe_entry.is_relative_to(run_dir)
     probe_entry.unlink()
 
-    # (3) THE MODEL'S OWN SHELL: the run dir is the box's one rw bind (N1), so a write from
+    # (2) THE MODEL'S OWN SHELL: the run dir is the box's one rw bind, so a write from
     # inside it lands in the same tree the handle names — unchanged by the migration.
     from_bash = run_dir / "scratch.txt"
     from_bash.write_text("written by the model's shell\n", encoding="utf-8")
@@ -187,7 +160,7 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     handle = S.Run().under(fixture_runs_base(base), run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     # A REAL obstruction through the REAL primitive: the record's own path is occupied by a
-    # directory, so today's append seam raises on disk. No exception is injected.
+    # directory, so the append seam raises on disk. No exception is injected.
     trace = S.member(handle, "observability", "tool_trace")
     trace.path.mkdir(parents=True)
 
@@ -206,10 +179,8 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     assert _read_rows(trace.path) == [{"row": 2}]
     assert clean.partial_failures == ()
 
-    # THE CONTRAST, in one test: the SAME obstruction on a decision-bearing write fails loudly
-    # rather than being recorded and shrugged off. #1187 (R1): the runs-base record this used
-    # to obstruct is retired (and `Run.under` reads none), so the obstructed write is the
-    # run's own report — a record the run's verdict is read from, never best-effort.
+    # THE CONTRAST: the SAME obstruction on a decision-bearing write (the run's report, which
+    # the verdict is read from) fails loudly rather than being recorded and shrugged off.
     report = S.member(clean, "documents", "report")
     report.path.mkdir(parents=True)
     with pytest.raises(OSError, match="non-plain or aliased"):
@@ -218,7 +189,7 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
         "a failed report write was recorded as a partial failure and shrugged off")
 
 
-# g01 / g05 / h49 — the payloads the run writes, and who wrote each wire-log line
+# who wrote each wire-log line
 
 
 def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_subagent(
@@ -229,9 +200,9 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     from defender.investigation.observe import POLICY_DENIAL_EVENT_TYPE
     rows = _read_rows(S.RunPaths(run_dir).wire_log)
     assert rows, "the replay produced no wire-log records"
-    # Every AGENT-produced record: a message, a budget refusal. A policy denial is the host's
-    # bounded projection of a call, keyed by `role`, whose exact key set #632 pins
-    # (`test_denial_audit_632`) — it names its writer already and gains no second field.
+    # Every AGENT-produced record (a message, a budget refusal). A policy denial is the host's
+    # projection of a call, keyed by `role` (`test_denial_audit_632` pins its key set): it
+    # names its writer already and gains no second field.
     rows = [r for r in rows if r.get("event_type") != POLICY_DENIAL_EVENT_TYPE]
     missing = [i for i, r in enumerate(rows) if not r.get("writer_id")]
     assert missing == [], (
@@ -240,7 +211,7 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
         "individually attributable inside the one file they share (flagged fact F5)")
     assert any(r["writer_id"] == "MAIN" or r["writer_id"].lower() == "main" for r in rows), (
         f"no record names MAIN as its writer: {sorted({r['writer_id'] for r in rows})}")
-    # And this is the trade-off O3's second exemption pays for: the wire log's BYTES change.
+    # The trade-off: the wire log's BYTES change.
     assert "writer_id" in S.RunPaths(run_dir).wire_log.read_text(encoding="utf-8")
 
     # The reader retains writer IDs on every record in the shared wire log.

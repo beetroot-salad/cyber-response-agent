@@ -16,7 +16,7 @@ TENANT_ID = fixture_uuid("tenant:t658")
 
 
 def _set_up_tenant(tmp_path, monkeypatch):
-    """A fresh, accepted tenant under its own data root — every run names its tenant, and there"""
+    """A fresh, accepted tenant under its own data root (every run names its tenant)."""
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
     return set_up_tenant(data_root, TENANT_ID)
@@ -63,10 +63,7 @@ def test_run_id_slug_rejects_values_outside_the_container_name_grammar(run_id):
 
 @pytest.mark.parametrize("extra", ["positional", "run_id", "pinned"])
 def test_materialize_takes_no_run_id_and_writes_nothing_for_one(tmp_path, monkeypatch, extra):
-    """#1279 A3 (conflict updated): run setup is handed no id, so the old "refuse an invalid
-    explicit id before writing" cases (invalid slug, mixed case, absolute path, `../escape`) are
-    unrepresentable. What is left of their point: an id offered in any form is refused before
-    anything is written."""
+    """Run setup takes no id: one offered in any form is refused before anything is written."""
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)
@@ -82,9 +79,9 @@ def test_materialize_takes_no_run_id_and_writes_nothing_for_one(tmp_path, monkey
 
 
 def test_materialize_mints_a_canonical_run_id_inside_the_runs_base(tmp_path, monkeypatch):
-    """#1279 A3 (conflict updated from `test_materialize_accepts_a_valid_run_id` and the
-    mixed-case test's tail): the id is the system's own mint — canonical lowercase UUID text,
-    different per call, the run dir directly under the runs base with only setup's entries."""
+    """The id is the system's own mint: canonical lowercase UUID text (by the test's own oracle
+    and by `RunId.parse`), different per call, the run dir directly under the runs base holding
+    only setup's entries."""
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)
@@ -96,6 +93,7 @@ def test_materialize_mints_a_canonical_run_id_inside_the_runs_base(tmp_path, mon
     assert first != second
     for run_dir in (first, second):
         assert run_dir.parent == runs_base
+        assert S.is_canonical_uuid(run_dir.name), f"the minted run folder is named {run_dir.name!r}"
         assert is_valid_run_id(run_dir.name)
         assert run_dir.name == run_dir.name.casefold()
         assert str(RunId.parse(run_dir.name)) == run_dir.name
