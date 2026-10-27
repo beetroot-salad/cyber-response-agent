@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.records import RUN_LAYOUT
 from defender.records import _artifact_schema as schema
 
 # The child is a fresh interpreter: it finds `defender` only through this checkout's root.
@@ -27,8 +28,23 @@ def unregistered():
 
 
 def test_investigation_write_gate_refuses_until_the_validator_registers(unregistered):
-    with pytest.raises(schema.ValidatorNotRegistered):
-        schema.validate_investigation("anything", None)
+    reason = schema.validate_investigation("anything", None)
+    assert reason is not None
+    assert "not loaded" in reason
+
+
+def test_writers_outside_the_permission_gate_get_a_refusal_not_a_raise(unregistered):
+    # Lead-zero and the record handles reach the gate through `validate_artifact`.
+    reason = schema.validate_artifact(RUN_LAYOUT.investigation.name, "anything", None)
+    assert reason is not None
+    assert "not loaded" in reason
+
+
+def test_an_oversize_write_without_the_validator_names_the_missing_validator(unregistered):
+    oversize = "x" * (schema.INVESTIGATION_FILE_MAX + 1)
+    reason = schema.validate_investigation(oversize, "committed")
+    assert reason is not None
+    assert "not loaded" in reason
 
 
 def test_close_gate_does_not_fail_open_without_the_validator(unregistered):

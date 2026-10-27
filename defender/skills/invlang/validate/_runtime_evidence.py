@@ -12,6 +12,7 @@ from typing import Any
 from defender import _clock
 
 from defender._model import model
+from defender.records._artifact_schema import REPORT_CLOSE_DELIMITER
 
 
 
@@ -29,10 +30,9 @@ RUNTIME_EVIDENCE = "runtime-evidence"
 
 
 
-#: `_artifact_schema.REPORT_CLOSE_DELIMITER`, duplicated because that module imports this
-#: package. Text carrying it would break the report block boundary once rendered into
-#: `report.md`'s body, so it is refused before the document lands.
-_REPORT_CLOSE_DELIMITER = "</report>"
+#: Text carrying the report's closing delimiter would break the report block boundary once
+#: rendered into `report.md`'s body, so it is refused before the document lands.
+_REPORT_CLOSE_DELIMITER = REPORT_CLOSE_DELIMITER
 
 
 

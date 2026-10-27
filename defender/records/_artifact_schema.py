@@ -215,6 +215,18 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
 
     Every refusal states that nothing was written. Warnings do not refuse and are not returned
     here; the tool bodies handle that repair window."""
+    # Before the size branch, whose remedy depends on the validator too. A refusal, not a
+    # raise: the permission gate's callers expect a deny reason, and this still writes nothing.
+    if _diagnose is None or _warn_diagnostics is None:
+        _logger.error(
+            "investigation.md write refused: the invlang validator is not registered — "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            "this process never loaded `defender.skills.invlang.validate`"
+        )
+        return (
+            "investigation.md cannot be validated in this process: the invlang validator is "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            f"not loaded. {UNCHANGED_NOTICE} This is a deployment fault, not a fault in your "
+            "text — re-sending will not help."
+        )
     if _utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
         # The bound covers the whole append-only document, so name the committed share: the
         # model must tell "send less" from "out of room".
