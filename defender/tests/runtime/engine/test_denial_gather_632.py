@@ -35,12 +35,12 @@ DENIED_PAIR = ("elastic", "esql")
 DECLARED = ("query", "esql", "alerts", "health-check")
 
 
-def _registry(rec: VerbRecorder, *, granted=(GRANTED_PAIR,), declared=DECLARED,
+def _registry(rec: VerbRecorder, *, granted=(GRANTED_PAIR,),
               systems=("elastic",), raises: BaseException | None = None,
               call_run: str | None = None) -> ScopedFakeVerbs:
-    """One system declaring `declared`, a grant naming only `granted` — so `elastic.esql` is
+    """Each system declaring `DECLARED`, a grant naming only `granted` — so `elastic.esql` is
 DECLARED AND WITHHELD (a denial) while `elastic.nosuch` is undeclared (the unknown-verb path)."""
-    table = recording_table(rec, {s: declared for s in systems}, raises=raises)
+    table = recording_table(rec, {s: DECLARED for s in systems}, raises=raises)
     return ScopedFakeVerbs(table, grant_of("gather", granted), call_run=call_run)
 
 
@@ -52,7 +52,7 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
     assert rec.calls == [], "the denied verb body ran"
     assert r.gather.calls >= 2, "the refusal did not come back as a result the loop continued past"
     assert r.own_evidence == [], "a denied call wrote an evidence row"
-    assert len(r.own_denied_rows) == 1, "the denial left no `∅.denied` sentinel row (#860)"
+    assert len(r.own_denied_rows) == 1, "the denial left no `∅.denied` sentinel row"
     assert r.breaker.get("total_failures", 0) == 0
     assert "esql" in r.gather_saw
 
@@ -378,9 +378,7 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
     assert reg.decide("elastic", "esql").outcome == DENIED
     assert reg.decide("elastic", "query").outcome == GRANTED
     assert reg.decide("cmdb", "list-hosts").outcome == DENIED, (
-        "a verb withheld on a system whose adapter cannot be imported was not denied — the "
-        "decision reached for the module instead of the grant, or swallowed the import error "
-        "and downgraded the denial to unresolvable"
+        "a verb withheld on a system whose adapter cannot be imported was not denied"
     )
 
     # The run starts over the importable file; the lead's call meets it broken.

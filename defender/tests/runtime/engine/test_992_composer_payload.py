@@ -48,8 +48,6 @@ from defender.tests.support.runtime.engine._spec992 import (
     sparse_companion,
 )
 
-_SALT = "5a" * 8
-
 
 def _composer_host(stages) -> str:
     """The composer's HOST text — its user message with every untrusted frame cut out."""

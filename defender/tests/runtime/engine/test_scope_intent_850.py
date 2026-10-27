@@ -16,7 +16,6 @@ pytest.importorskip("pydantic_ai")
 
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import CLAIMED, claim_lead  # noqa: E402
-from defender.learning.core import persist  # noqa: E402
 from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import (  # noqa: E402
     compile_policy_for,
@@ -47,11 +46,8 @@ def _bash(env, cmd, policy):
     return permission.decide_bash(cmd, policy=policy, run_dir=env.run, defender_dir=env.dfn)
 
 
-def _read(env, path, policy, *, run_dir=None):
-    return permission.decide_read(
-        Path(path), run_dir=run_dir if run_dir is not None else env.run,
-        defender_dir=env.dfn, policy=policy,
-    )
+def _read(env, path, policy):
+    return permission.decide_read(Path(path), run_dir=env.run, defender_dir=env.dfn, policy=policy)
 
 
 def _gather(env):
@@ -76,7 +72,7 @@ def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
 
     gather = _gather(env)
     assert _bash(env, f"cat {payload}", gather).allow, (
-        "gather is denied the payload its own query tool just wrote for it (#850 F-09)")
+        "gather is denied the payload its own query tool just wrote for it")
     assert _read(env, payload, gather).allow, (
         "read_file and the cat grant share the shape OBJECT — they cannot disagree here")
 
@@ -106,16 +102,6 @@ def test_f09_main_is_still_denied_the_payload_either_way(env):
 
 
 # F-19 — a confined agent's own run dir is not a hole in its confine
-
-def _staged(env, run_dir):
-    """A learning run dir as a second pass over a run id finds it: the previous pass already staged
-    the case into it (through the real `_copy_shared_inputs`)."""
-    persist._copy_shared_inputs(env.run, run_dir)
-    (run_dir / "source_refs.yaml").write_text("normalized_disposition: malicious\n",
-                                              encoding="utf-8")
-    (run_dir / "executed_queries.jsonl").write_text("{}\n", encoding="utf-8")
-    return run_dir
-
 
 def test_f19_main_still_reads_its_own_run_artifacts(env):
     """MAIN declares no confine, so it still reads its own run's investigation and report on both

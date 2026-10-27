@@ -70,9 +70,7 @@ def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
     )
     assert receipt.window_start == _utc("2026-04-04T00:00:00Z")
     assert receipt.window_end == _utc("2026-05-04T00:00:00Z"), (
-        "the window's END is not parsed — it is the endpoint mechanism A's guard compares "
-        "against the alerted event, and a receipt that never parsed it cannot have been "
-        "produced by a check that did"
+        "the window's end is not parsed, though the guard compares it against the alerted event"
     )
 
 
@@ -161,9 +159,7 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     wire = json.dumps(payload, sort_keys=True)
     for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
         assert crossed in wire, (
-            f"{crossed!r} did not reach the outbound comment — #767 D3 carries the whole "
-            f"report body into it now, deliberately, gated by D4's approval screen on the "
-            f"read side rather than by anything withheld on the write side"
+            f"{crossed!r} did not reach the outbound comment, which carries the whole report body"
         )
 
 

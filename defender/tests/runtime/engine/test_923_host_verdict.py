@@ -61,13 +61,11 @@ def test_a_host_terminated_close_commits_the_fifth_member_verbatim(tmp_path):
     frontmatter = committed(run_dir)
     assert frontmatter["disposition"] == MEMBER
     assert frontmatter["outcome"] == FORCED_INCONCLUSIVE, (
-        "the OUTCOME name moved with the verdict — it is a different vocabulary, spanning a "
-        "different sink, and moving it silently re-keys every reader of a close attempt"
+        "the outcome name moved with the verdict, re-keying every reader of a close attempt"
     )
     assert MEMBER in DISPOSITION_VALUES
     assert DISPOSITION_VALUES[-1] == MEMBER, (
-        "the member was inserted rather than appended — the refusal text and the tool schema "
-        "are read in one round trip, so its place in the ordered tuple is load-bearing"
+        "the member was inserted rather than appended to the ordered tuple"
     )
 
 
@@ -268,15 +266,13 @@ def test_the_frameworks_forced_close_is_not_refused_by_the_new_price(tmp_path):
     )
 
 
-def test_the_no_review_bypass_matches_both_verdicts_and_no_others(tmp_path):
+def test_the_no_review_bypass_matches_the_host_verdict_and_no_other(tmp_path):
     """The no-review bypass skips exactly the members `BYPASS_BY_MEMBER` marks and keys on the
     verdict, not on `forced`: a confident forced close still spends its review."""
     assert set(BYPASS_BY_MEMBER) == set(DISPOSITION_ENUM), (
-        f"the vocabulary and this expectation disagree: "
+        f"BYPASS_BY_MEMBER and the enum disagree: "
         f"+{sorted(set(DISPOSITION_ENUM) - set(BYPASS_BY_MEMBER))} "
-        f"-{sorted(set(BYPASS_BY_MEMBER) - set(DISPOSITION_ENUM))} — a member joined the enum "
-        f"without anyone deciding whether the no-review bypass matches it, which is exactly "
-        f"the drift a two-literal expectation cannot see"
+        f"-{sorted(set(BYPASS_BY_MEMBER) - set(DISPOSITION_ENUM))}"
     )
 
     observed: dict[str, bool] = {}
@@ -300,7 +296,6 @@ def test_the_no_review_bypass_matches_both_verdicts_and_no_others(tmp_path):
     close(deps, "malicious", stages=forced_stages.bundle(), forced=True)
     assert (run_dir / "report.md").is_file()
     assert forced_stages.calls, (
-        "a confident close spent no review because it was FORCED — the bypass is keyed on the "
-        "flag as well as on the verdict, which is the disjunct J4 rejected: it makes the host "
-        "able to commit any verdict unreviewed, and it is invisible to every case above"
+        "a forced confident close spent no review: the bypass is keyed on `forced`, not only "
+        "on the verdict"
     )

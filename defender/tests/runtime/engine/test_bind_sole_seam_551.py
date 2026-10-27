@@ -50,26 +50,6 @@ _CORPUS_MD = _DEFENDER / "lessons" / "_probe_551.md"
 _NON_MD = _DEFENDER / "skills" / "gather" / "run.py"   # a non-.md path under the corpus
 
 
-def _grant(g: Grant) -> tuple:
-    """One `Grant` as a comparable tuple, every field included: without `scope`, policies anchored on
-    different trees would compare equal."""
-    return (
-        g.program, g.pattern.pattern, tuple(s.pattern for s in g.scope), g.route, g.pins_path,
-    )
-
-
-def _policy_full(p) -> tuple:
-    """Every `AgentPolicy` field as a comparable tuple."""
-    return (
-        tuple(_grant(g) for g in p.bash_allow),
-        tuple(pat.pattern for pat in p.read_allow),
-        tuple(str(r) for r in p.read_roots),
-        tuple(str(r) for r in p.read_confine),
-        tuple(pat.pattern for pat in p.write_allow),
-        p.deny_reason,
-    )
-
-
 def _reader_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     """The production main-shaped reader grant builder (`_common.reader_grants`), so a def compiled
     here carries the real reader lane."""

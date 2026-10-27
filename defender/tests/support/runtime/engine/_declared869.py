@@ -12,34 +12,11 @@ from defender import _git
 #: Re-exported: the #869 suites import the shape predicate from here.
 from defender.systems.verbs import is_system_name  # noqa: F401  (re-exported)
 
-# The surface under test (it exists; the `except` arm is a leftover pre-implementation fallback).
-try:  # pragma: no cover — the post-implementation branch
-    from defender.learning.leads.declared_systems import (  # type: ignore[import-not-found]
-        adapter_declared_systems,
-        declared_systems,
-    )
-except ImportError as _err:  # pragma: no cover — the pre-implementation state
-    # Rebound: Python unbinds the `except` name at block end, so a closure reading it would
-    # raise NameError.
-    _missing_target = _err
-
-    def _not_yet_written(symbol: str):
-        """Stand in for a missing symbol: calling it raises, so each test fails on its own
-        instead of the import aborting collection."""
-
-        def _raise(*_a, **_k):
-            raise ImportError(
-                f"defender.learning.leads.declared_systems.{symbol} does not exist yet — "
-                f"this suite is the executable spec for it (spec_graph_869.yaml). "
-                f"Original: {_missing_target}"
-            )
-
-        return _raise
-
-    declared_systems = _not_yet_written("declared_systems")  # type: ignore[assignment]
-    adapter_declared_systems = _not_yet_written(  # type: ignore[assignment]
-        "adapter_declared_systems"
-    )
+#: Re-exported: the #869 suites import the resolver under test from here.
+from defender.learning.leads.declared_systems import (  # noqa: F401  (re-exported)
+    adapter_declared_systems,
+    declared_systems,
+)
 
 
 #: The source directories, spelled once so a fixture cannot disagree with the resolver about
@@ -48,18 +25,12 @@ ADAPTERS_REL = "defender/integrations/"
 SKILLS_REL = "defender/skills/"
 CATALOG_REL = "defender/skills/gather/queries/"
 
-#: Two nested `execution.md` addresses whose parent directory name is model-chosen (one under a
-#: system's `_draft/`, one under the catalog). Spelled once because two tests approach them from
-#: opposite ends: the resolver must not read them as markers, the commit gate must not let them land.
-NESTED_MARKER_RELS = (
-    "defender/skills/elastic/_draft/mcpsys/execution.md",
-    "defender/skills/gather/queries/elastic/mcpsys/execution.md",
-)
-
-#: The same addresses as a tenant repo or batch draft (`<T>/drafts/<id>/`, holding `agent/`)
+#: The same directories as a tenant repo or batch draft (`<T>/drafts/<id>/`, holding `agent/`)
 #: spells them; adapters stay in the product checkout (`ADAPTERS_REL`).
 AGENT_SKILLS_REL = "agent/skills/"
 AGENT_CATALOG_REL = "agent/skills/gather/queries/"
+#: Two nested `execution.md` addresses whose parent directory name is model-chosen (one under a
+#: system's `_draft/`, one under the catalog): the resolver must not read them as markers.
 AGENT_NESTED_MARKER_RELS = (
     "agent/skills/elastic/_draft/mcpsys/execution.md",
     "agent/skills/gather/queries/elastic/mcpsys/execution.md",
@@ -80,12 +51,8 @@ GIT_IGNORE = (
     "state/\n"
 )
 
-#: An import-safe adapter body: the ordinary case beside `RAISING_ADAPTER_BODY`.
+#: An import-safe adapter body.
 ADAPTER_BODY = "VERBS = {}\n"
-
-#: An adapter module whose import RAISES. `declared_systems` must still yield its system name:
-#: the adapter half is a cold glob over filenames, never a load.
-RAISING_ADAPTER_BODY = 'raise RuntimeError("this adapter must never be imported")\n'
 
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -131,45 +98,35 @@ def write_marker(repo: Path, system: str, *, body: str = "# execution\n") -> Pat
     return write(marker_file(repo, system), body)
 
 
-def write_skill_md(repo: Path, system: str, *, name: str | None = None) -> Path:
-    front = f"---\nname: defender-{system if name is None else name}\n---\n"
-    return write(skill_md(repo, system), f"{front}# {system}\n")
+def _skill_md_text(system: str) -> str:
+    return f"---\nname: defender-{system}\n---\n# {system}\n"
 
 
-def write_template(
-    repo: Path, system: str, stem: str, *, tid: str | None = None,
-    status: str = "established", draft: bool = False,
-) -> Path:
-    """One catalog template under `gather/queries/<system>/` (or its `_draft/`); `tid` defaults
-    to the directory-agreeing id, so a disagreeing one must be explicit."""
-    parent = repo / CATALOG_REL / system / ("_draft" if draft else "")
-    ident = f"{system}.{stem}" if tid is None else tid
-    return write(
-        parent / f"{stem}.md",
-        f"---\nid: {ident}\nstatus: {status}\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n",
-    )
+def _template_text(system: str, stem: str) -> str:
+    """An established catalog template whose id agrees with its directory."""
+    return f"---\nid: {system}.{stem}\nstatus: established\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n"
+
+
+def write_skill_md(repo: Path, system: str) -> Path:
+    return write(skill_md(repo, system), _skill_md_text(system))
+
+
+def write_template(repo: Path, system: str, stem: str) -> Path:
+    """One catalog template under `gather/queries/<system>/`."""
+    return write(repo / CATALOG_REL / system / f"{stem}.md", _template_text(system, stem))
 
 
 def write_agent_marker(root: Path, system: str, *, body: str = "# execution\n") -> Path:
     return write(agent_marker_file(root, system), body)
 
 
-def write_agent_skill_md(root: Path, system: str, *, name: str | None = None) -> Path:
-    front = f"---\nname: defender-{system if name is None else name}\n---\n"
-    return write(agent_skill_md(root, system), f"{front}# {system}\n")
+def write_agent_skill_md(root: Path, system: str) -> Path:
+    return write(agent_skill_md(root, system), _skill_md_text(system))
 
 
-def write_agent_template(
-    root: Path, system: str, stem: str, *, tid: str | None = None,
-    status: str = "established", draft: bool = False,
-) -> Path:
+def write_agent_template(root: Path, system: str, stem: str) -> Path:
     """`write_template` under `agent/skills/gather/queries/<system>/` of `root`."""
-    parent = root / AGENT_CATALOG_REL / system / ("_draft" if draft else "")
-    ident = f"{system}.{stem}" if tid is None else tid
-    return write(
-        parent / f"{stem}.md",
-        f"---\nid: {ident}\nstatus: {status}\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n",
-    )
+    return write(root / AGENT_CATALOG_REL / system / f"{stem}.md", _template_text(system, stem))
 
 
 def seed_agent_files(
@@ -250,7 +207,6 @@ def seed_tree(
     catalog: tuple[str, ...] = ("elastic",),
     non_systems: tuple[str, ...] = (),
     name: str = "repo",
-    commit: bool = True,
 ) -> Path:
     """A committed git repo standing in for a fresh `lead-author/<id>` worktree."""
     repo = tmp_path / name
@@ -268,8 +224,7 @@ def seed_tree(
     for system in catalog:
         write_template(repo, system, "auth-events")
     write(repo / CATALOG_REL / "SCHEMA.md", "# template schema\n")
-    if commit:
-        commit_all(repo, "seed")
+    commit_all(repo, "seed")
     return repo
 
 
@@ -298,7 +253,7 @@ def pitfall_row(pid: str, system: str, *, digest: str | None = None, **extra) ->
 
 def seed_executed_query(
     run_dir: Path, *, query_id: str, lead_id: str = "l-001", system: str = "elastic",
-    verb: str = "esql", goal: str = "probe the thing",
+    verb: str = "esql",
 ) -> dict:
     """Append one row to the run's queries table through the production writer
     (`append_query_row`), so it is a real historical row, not the test's idea of one."""
@@ -311,7 +266,7 @@ def seed_executed_query(
     gather.mkdir(parents=True, exist_ok=True)
     write(
         gather / f"{lead_id}.lead.json",
-        json.dumps({"goal": goal, "what_to_summarize": []}) + "\n",
+        json.dumps({"goal": "probe the thing", "what_to_summarize": []}) + "\n",
     )
     # The writer takes its seq from the run's state, which must hold the rows already in the
     # table as an inherited prefix.
@@ -391,39 +346,6 @@ def log_lines_naming(log: str, *needles: object) -> list[str]:
     return [ln for ln in log.splitlines() if all(w in ln for w in wanted)]
 
 
-def unreadable_dir_verdict(root: Path, target: Path) -> bool:
-    """Does `declared_systems(root)` RAISE when `target` is a directory it cannot read?"""
-    from defender.learning.leads.lead_extraction import LeadAuthorError
-
-    def _probe() -> bool:
-        try:
-            declared_systems(root)
-        except LeadAuthorError:
-            return True
-        return False
-
-    if os.geteuid() != 0:
-        mode = target.stat().st_mode
-        target.chmod(0o000)
-        try:
-            return _probe()
-        finally:
-            target.chmod(mode & 0o7777)
-
-    _hand_tree_to_nobody(root)
-    target.chmod(0o000)
-    try:
-        code = _verdict_from_child(_probe)
-    finally:
-        target.chmod(0o755)
-        _reclaim_tree(root)
-    assert code in (0, 1), (
-        f"the unreadable-source probe child failed to set up (exit {code}); it never reached "
-        f"the resolver, so neither answer would be about the resolver"
-    )
-    return code == 0
-
-
 #: `nobody`. Named once because the chown and the setuid must agree, or the child fails setup
 #: instead of meeting the fault.
 _NOBODY = 65534
@@ -447,26 +369,3 @@ def _hand_tree_to_nobody(root: Path) -> None:
 def _reclaim_tree(root: Path) -> None:
     for path in (root, *root.rglob("*")):
         os.chown(path, 0, 0)
-
-
-def _verdict_from_child(probe) -> int:
-    """Run `probe` as `nobody` in a forked child; return its exit status.
-
-    0 = the resolver refused, 1 = it returned, 2 = the child never got that far. The child
-    reports through its exit status because an exception raised after `setuid` cannot cross
-    back any other way."""
-    pid = os.fork()
-    if pid == 0:  # pragma: no cover — the child never returns to pytest
-        code = 2
-        try:
-            os.setgroups([])
-            os.setgid(_NOBODY)
-            os.setuid(_NOBODY)
-            code = 0 if probe() else 1
-        except BaseException:  # noqa: BLE001 — the child reports through its exit status
-            code = 2
-        finally:
-            os._exit(code)
-    _, status = os.waitpid(pid, 0)
-    assert os.WIFEXITED(status), f"the unreadable-source probe child did not exit: {status}"
-    return os.WEXITSTATUS(status)

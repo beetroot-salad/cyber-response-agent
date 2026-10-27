@@ -35,11 +35,10 @@ _RUN_COPY_CATALOG = Path("/data/t/run-knowledge/r/agent/skills/gather/queries")
 _DECOY_ID = "elastic.falco-alerts"
 
 
-def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "", query: str = "",
-         fm: str | None = None) -> str:
-    """A template file body. `fm=None` emits the canonical frontmatter; pass a string to
-    author a malformed / partial fence."""
-    head = fm if fm is not None else f"---\nid: {system}.{tid}\nstatus: {status}\n---\n"
+def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "",
+         query: str = "") -> str:
+    """A template file body with the canonical frontmatter."""
+    head = f"---\nid: {system}.{tid}\nstatus: {status}\n---\n"
     return f"{head}\n## Goal\n\n{goal or f'measures {tid} on {system}'}\n\n## Query\n\n```esql\n{query or f'FROM {system} | LIMIT 1'}\n```\n"
 
 
@@ -78,15 +77,15 @@ def _code_tree(tmp_path: Path) -> Path:
     return code
 
 
-def _deps(tmp_path: Path, agent_root: Path, *, role=None) -> tools.AgentDeps:
-    """Bind `role` (default: gather with the fixture tenant's grant, as `GATHER_DEF` carries none)
-    over the run's agent root `agent_root` (`RunScope(tenant_agent=...)`, as the real dispatch
-    binds) and a code tree holding only a decoy catalog."""
+def _deps(tmp_path: Path, agent_root: Path) -> tools.AgentDeps:
+    """Bind gather with the fixture tenant's grant (`GATHER_DEF` carries none) over the run's
+    agent root `agent_root` (`RunScope(tenant_agent=...)`, as the real dispatch binds) and a code
+    tree holding only a decoy catalog."""
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.investigation.agent_definition import RunScope, bind
     from defender.tests.support.tenancy import _tenants1106 as T1106
-    return bind(role if role is not None else T1106.fixture_gather_def(), run_dir,
+    return bind(T1106.fixture_gather_def(), run_dir,
                 defender_dir=_code_tree(tmp_path), scope=RunScope(tenant_agent=agent_root))
 
 
@@ -314,8 +313,8 @@ def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path)
     assert "identity.only-one" not in prompt_a
     assert "identity.only-one" in prompt_b
     assert "elastic.sshd-auth-history" not in prompt_b
-    assert _DECOY_ID not in prompt_a, "tree A's index read the code tree's catalog (O2, O4)"
-    assert _DECOY_ID not in prompt_b, "tree B's index read the code tree's catalog (O2, O4)"
+    assert _DECOY_ID not in prompt_a, "tree A's index read the code tree's catalog"
+    assert _DECOY_ID not in prompt_b, "tree B's index read the code tree's catalog"
 
 
 class _ToolRecorder:
@@ -407,9 +406,9 @@ def test_d0b_a_hit_carries_the_template_id_and_its_path(tmp_path):
 
     assert "elastic.sshd-auth-history" in out
     assert "/agent/skills/gather/queries/elastic/sshd-auth-history.md" in out, \
-        "a hit is named by its model-view path under the run's agent root (O-TEXT)"
+        "a hit is not named by its model-view path under the run's agent root"
     assert "Failed password" in out
-    assert _DECOY_ID not in out, "template_search walked the checkout's catalog (O2, O4)"
+    assert _DECOY_ID not in out, "template_search walked the checkout's catalog"
 
 
 def test_d9_search_admits_drafts_while_the_index_excludes_them(tmp_path):

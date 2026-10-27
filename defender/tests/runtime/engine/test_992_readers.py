@@ -3,10 +3,8 @@ dir driven through the real close, and a pre-#992 one written by hand (no `revie
 traces). Every reader keyed on the split must agree within each population."""
 from __future__ import annotations
 
-import re
 import shutil
 from pathlib import Path
-from typing import Any
 
 from defender.investigation.challenge_gate import REVIEW_ROLES
 from defender.investigation.close_tool import (
@@ -24,7 +22,6 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-
 )
 from defender.tests.support.runtime.engine._spec992 import (
     CEILING_EXAMINED,
-    DEFENDER,
     CONFIDENT,
     GAP,
     bounds,
@@ -41,37 +38,6 @@ from defender.tests.support.runtime.engine._spec992 import (
     reviewed_inconclusive_dir,
     trace_files,
 )
-
-SKILL_MD = DEFENDER / "SKILL.md"
-
-#: Sentences that described the retired `inconclusive` no-review bypass.
-BYPASS_PHRASES = (
-    "Commits immediately, no review",
-    "anything but `inconclusive`",
-    "A confident disposition passes a live challenge gate",
-)
-
-
-def _bullet(skill: str, member: str) -> str:
-    """One member's own paragraph in SKILL.md §REPORT's roster, whitespace-folded."""
-    m = re.search(rf"- `{member}` — (?P<body>.*?)(?=\n- `|\n\n)", skill, re.DOTALL)
-    assert m, f"SKILL.md no longer carries a `{member}` roster entry"
-    return " ".join(m.group("body").split())
-
-
-class _ToolRecorder:
-    """The `agent` argument `register_close_tool` decorates onto: records the function it
-    registers, so the tool's description can be read without a provider."""
-
-    def __init__(self) -> None:
-        self.registered: list[Any] = []
-
-    def tool(self, **_kw):
-        def decorate(fn):
-            self.registered.append(fn)
-            return fn
-
-        return decorate
 
 
 def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
@@ -97,7 +63,7 @@ def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
     historical = pre_change_inconclusive_dir(tmp_path)
     assert frontmatter(historical)["cause"] == CAUSE_NOT_REVIEWED
     html, n = render_review_gate(historical, parsed_report(historical))
-    assert n == 0, "a pre-#992 inconclusive dir counts as reviewed"
+    assert n == 0, "an unreviewed inconclusive dir (no `reviewed` field) counts as reviewed"
     assert "not reviewed" in html
     assert "rv-stands" not in html
     assert "not reviewed" in _gate_badge_html(parsed_report(historical))

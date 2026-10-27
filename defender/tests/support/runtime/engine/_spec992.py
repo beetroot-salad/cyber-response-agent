@@ -360,13 +360,13 @@ def reviewed_inconclusive_dir(tmp_path: Path, *, name: str = "reviewed") -> Path
     return run_dir
 
 
-def pre_change_inconclusive_dir(tmp_path: Path, *, name: str = "historical") -> Path:
+def pre_change_inconclusive_dir(tmp_path: Path) -> Path:
     """A pre-#992 `inconclusive` run dir as the old no-review bypass wrote it: an unreviewed
     `review_record.1.json`, the not-reviewed cause, the priced receipts and no `wire_logs/`.
     Current code cannot produce one, so it is written by hand."""
     from defender.records import RunPaths
 
-    run_dir = tmp_path / name
+    run_dir = tmp_path / "historical"
     (run_dir / "gather_raw").mkdir(parents=True)
     run_dir.joinpath("investigation.md").write_text(ceiling_companion(), encoding="utf-8")
     run_dir.joinpath("alert.json").write_text(

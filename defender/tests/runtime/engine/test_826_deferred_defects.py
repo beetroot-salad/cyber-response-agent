@@ -269,7 +269,7 @@ def test_the_fingerprint_gives_three_answers_and_each_one_is_a_decision():
     assert rq.system_fingerprint("ghostone", "elastic") == "", \
         "a row that kept its system took a fingerprint too, splitting that system's count"
     assert rq.system_fingerprint("elastic", "elastic") == ""
-    assert rq.system_fingerprint("", "") == "", "a blank system was given an identity (N5)"
+    assert rq.system_fingerprint("", "") == "", "a blank system was given an identity"
     assert rq.system_fingerprint("   ", "") == "", "whitespace was read as a readable system"
 
     fp = rq.system_fingerprint("ghostone", "")
@@ -368,7 +368,7 @@ def test_a_call_with_no_readable_system_inherits_no_ghosts_count():
               dict(_above(1, system=""), system_key="")]
     assert rq.rejection_trip(blanks, LEAD, system="", verb="query", params=params,
                              system_key="") is not None, \
-        "two unreadable calls stopped being one mistake (N5), so the negative above is vacuous"
+        "two unreadable calls stopped being one mistake, so the negative above is vacuous"
 
 
 def test_an_invisible_system_string_is_no_more_readable_than_an_empty_one():
@@ -412,8 +412,8 @@ def test_readability_is_a_fixed_function_of_the_string_not_of_the_interpreter():
     both): a private-use name is visible, and what is unassigned moves with the Unicode database."""
     for raw in ("\ue000", "\uf8ff", "\U000f0000", "\u0378", "\U0002fffe"):
         assert rq.names_something_readable(raw), \
-            f"{raw!r} was folded into the no-readable-system group; if it is unassigned today " \
-            "that answer changes under a newer Unicode database, and the recorded key with it"
+            f"{raw!r} was folded into the no-readable-system group, an answer that moves with " \
+            "the Unicode database"
         assert rq.system_fingerprint(raw, "") != "", \
             f"{raw!r} minted no identity, so two calls naming two of these are one repeat group"
 

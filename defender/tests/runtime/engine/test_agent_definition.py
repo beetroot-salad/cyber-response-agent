@@ -18,7 +18,6 @@ from pydantic_ai.usage import UsageLimits  # noqa: E402
 
 from defender.configuration._env import FatalConfigError  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
-from defender.learning.core import config  # noqa: E402
 from defender.agents import QUESTIONER_DEF  # noqa: E402
 from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.investigation import driver, observe, permission  # noqa: E402
@@ -56,24 +55,21 @@ from defender.agents import (  # noqa: E402
     MAIN_DEF,
 )
 
-_CONFINE_A = config.REPO_ROOT / "defender" / "lessons"
-_CONFINE_B = config.REPO_ROOT / "defender" / "skills"
-
 _ORACLE_YAML = 'events:\n  - Computer: "FINANCE-DB"\n    EventID: 4624\n'
 
 
-def _text_fn(text: str = "ok"):
-    return lambda messages, info: ModelResponse(parts=[TextPart(content=text)])
+def _text_fn():
+    return lambda messages, info: ModelResponse(parts=[TextPart(content="ok")])
 
 
-def _capture_make_model(settings=None):
+def _capture_make_model():
     """A `make_model` fake for the (name, effort) seam: records every call and returns a hermetic
-    FunctionModel paired with `settings`. Returns (fake, calls)."""
+    FunctionModel with no settings. Returns (fake, calls)."""
     calls: list[tuple[str, object]] = []
 
     def fake(model: str, effort):
         calls.append((model, effort))
-        return BuiltModel(FunctionModel(_text_fn()), settings)
+        return BuiltModel(FunctionModel(_text_fn()), None)
 
     return fake, calls
 
@@ -109,16 +105,11 @@ def _glm_thunk() -> str:
 _EMPTY_TOOLSET = ToolSet()
 
 
-def _defn(
-    *, role=AgentRole.MAIN, model=_glm_thunk, effort=None, tools=_EMPTY_TOOLSET,
-    corpus_dirs=(), bash_shapes=(), write_shapes=(), deps_cls=None,
-):
-    """An AgentDefinition for a shape test (model defaults to a glm thunk). `bash_shapes` defaults
-    empty: an agent may hold the bash tool and be granted nothing."""
-    return AgentDefinition(
-        role=role, model=model, effort=effort, tools=tools, corpus_dirs=corpus_dirs,
-        bash_shapes=bash_shapes, write_shapes=write_shapes, deps_cls=deps_cls,
-    )
+def _defn(*, role=AgentRole.MAIN, model=_glm_thunk, effort=None, tools=_EMPTY_TOOLSET,
+          deps_cls=None):
+    """An AgentDefinition for a shape test (model defaults to a glm thunk). Every shape field keeps
+    its empty default: an agent may hold the bash tool and be granted nothing."""
+    return AgentDefinition(role=role, model=model, effort=effort, tools=tools, deps_cls=deps_cls)
 
 
 def _scope_patterns(policy) -> list[str]:
@@ -127,12 +118,9 @@ def _scope_patterns(policy) -> list[str]:
     return [p.pattern for p in policy.read_allow]
 
 
-_DEFAULT_SCOPE = RunScope()
-
-
-def _compile(defn, run_dir, scope=_DEFAULT_SCOPE):
+def _compile(defn, run_dir):
     """Drive the real `resolve_roots` → `compile_policy` composition."""
-    return compile_policy(defn, resolve_roots(run_dir, defn.corpus_dirs, scope))
+    return compile_policy(defn, resolve_roots(run_dir, defn.corpus_dirs, RunScope()))
 
 
 def test_read_surface_is_the_cat_grants_scope(tmp_path):

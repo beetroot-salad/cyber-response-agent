@@ -81,9 +81,3 @@ def test_a_naive_origin_is_read_as_utc_not_dropped(tmp_path):
     assert origin is not None, "the naive stamp was dropped instead of read as UTC"
     assert origin.tzinfo is not None
     assert origin.isoformat() == "2026-08-13T00:00:00+00:00"
-
-
-def _state(tmp_path):
-    from defender.investigation.run_state import RunState
-
-    return RunState(tmp_path, "run-878")

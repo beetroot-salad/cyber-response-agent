@@ -34,15 +34,8 @@ from defender.tests.support.storage._store_owner import owned_store
 
 _DEFENDER = Path(__file__).resolve().parents[3]
 
-_CACHE = {
-    "anthropic_cache_instructions": "1h",
-    "anthropic_cache_tool_definitions": "1h",
-    "anthropic_cache": "5m",
-}
-
-
-def _text_fn(text: str = "ok"):
-    return lambda messages, info: ModelResponse(parts=[TextPart(content=text)])
+def _text_fn():
+    return lambda messages, info: ModelResponse(parts=[TextPart(content="ok")])
 
 
 def _capture_make_model(settings=None):

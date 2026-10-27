@@ -36,9 +36,6 @@ from defender.tests.e2e._replay_harness import (
 )
 from defender.tests.support.storage._store_owner import reread
 
-REPO_ROOT = WORKTREE
-SALT = "0011223344556677"
-
 
 def _load_dryrun():
     """Import `tooling/testing/compaction_dryrun.py` by path: it sits outside the `defender` package."""
@@ -100,9 +97,8 @@ def test_wire_log_encoder_fails_loudly_on_a_non_json_native_value(tmp_path):
                                    "message": {"parts": []}}, (
         "positive control: an ordinary record still encodes")
     assert observe.WIRE_LOG_ENSURE_ASCII is True, (
-        "the encoding must be stated: with ensure_ascii=False a lone surrogate raises "
-        "UnicodeEncodeError, turning attacker text into a run-halting availability bug "
-        "(adv:PO4)")
+        "with ensure_ascii=False a lone surrogate in attacker text raises UnicodeEncodeError "
+        "and halts the run")
     assert "NotJson" not in encoded
 
 
@@ -157,9 +153,8 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
         assert line is not None, (
             f"store row ({session_id}, {run_step}) has no wire line to join to")
         assert line.get("wire_sha"), (
-            "the wire side must record its OWN digest — one digest cannot name a drift "
-            "that happens after it is taken (auth:P1)")
-        assert renderer_sha, "the renderer's stamp must survive (O4 forbids updating it)"
+            "the wire side records no digest of its own, so a later drift cannot be named")
+        assert renderer_sha, "the renderer's stamp did not survive"
 
     assert ss.SCHEMA_VERSION is not None  # the join is a store contract, not a log one
 

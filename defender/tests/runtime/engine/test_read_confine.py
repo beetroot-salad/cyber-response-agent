@@ -32,11 +32,9 @@ _MALICIOUS_CONFINE = (_CONFINE_A, _CONFINE_B)
 _BENIGN_CONFINE = (_CONFINE_B,)
 
 
-def _policy(*, read_confine=(), bash_allow=(), read_roots=()):
+def _policy(*, read_confine=(), bash_allow=()):
     """An AgentPolicy for gate tests."""
-    return AgentPolicy(
-        read_roots=read_roots, read_confine=read_confine, bash_allow=bash_allow,
-    )
+    return AgentPolicy(read_confine=read_confine, bash_allow=bash_allow)
 
 
 @pytest.mark.parametrize("path", [_CONFINE_A / "T1078.md", _CONFINE_B / "svc-monitoring.md"])

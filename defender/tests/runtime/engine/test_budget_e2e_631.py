@@ -30,7 +30,6 @@ from defender.tests.e2e._replay_harness import (
 pytestmark = pytest.mark.e2e
 
 FLAG = "DEFENDER_BUDGET_ENFORCE"
-SALT = "0011223344556677"
 
 
 @pytest.fixture
@@ -61,10 +60,6 @@ def own_rows(run_dir: Path) -> list[dict]:
             if r["lead_id"] not in RESERVED_LEAD_IDS]
 
 
-def report_text() -> str:
-    return "---\ncase_id: c-1\ndisposition: benign\nconfidence: low\n---\n\nDone.\n"
-
-
 def tail_turns(run_dir: Path, n: int) -> list[Turn]:
     """`n` tail-tier `read_file` turns: each executes and advances `tool_calls` even after the trip,
     so the kill tests reach exhaustion deterministically rather than through wall-clock timing."""
@@ -76,9 +71,8 @@ def refusal_stem() -> str:
     """The placeholder-free literal prefix of the refusal message, GUARDED non-empty."""
     stem = BUDGET_REFUSAL_MESSAGE.split("{", 1)[0].strip()
     assert stem, (
-        "BUDGET_REFUSAL_MESSAGE begins with an interpolated field — its literal prefix "
-        "is empty, so every 'a refusal was delivered' check would pass vacuously. "
-        "Author the constant with a literal lead-in (blind reader R5)."
+        "BUDGET_REFUSAL_MESSAGE has no literal prefix, so every refusal check would pass "
+        "vacuously"
     )
     return stem
 
@@ -235,6 +229,17 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     assert budget(summary)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"]
     engaged = summary["run_state"].breaker_snapshot()
     assert engaged["total_failures"] > 0, "the breaker never engaged, so arm 2 controls nothing"
+
+
+def _recording_esql() -> tuple[VerbRecorder, FakeVerbs]:
+    """An `elastic.esql` verb that records each call and answers one row."""
+    recorder = VerbRecorder()
+
+    def esql(ctx, *, index: str) -> dict:
+        recorder.record("esql", ctx, {"index": index})
+        return {"rows": [1]}
+
+    return recorder, FakeVerbs({"elastic": {"esql": esql}})
 
 
 def _dead_verb():
@@ -453,7 +458,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
 
     assert not list(run_dir.glob("**/budget.json"))
     state = budget(summary)
-    assert state["subagent_spawns"] == 2, "the pool: the correlation lead (#1222) plus the one lead"
+    assert state["subagent_spawns"] == 2, "the pool: the correlation lead plus the one lead"
     assert state["tool_calls"] >= 3, (
         f"the gather subagent's own query did not spend the shared pool: {state}"
     )
@@ -540,13 +545,7 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
     """A gather dispatched into a tripped pool is refused at MAIN's seam before any subagent exists.
     `gather.calls == 0` is the discriminator: the absence checks also hold for a subagent
     dispatched and then refused."""
-    recorder = VerbRecorder()
-
-    def esql(ctx, *, index: str) -> dict:
-        recorder.record("esql", ctx, {"index": index})
-        return {"rows": [1]}
-
-    verbs = FakeVerbs({"elastic": {"esql": esql}})
+    recorder, verbs = _recording_esql()
     run_dir = materialize(tmp_path, GOLDEN, run_id='stopped')
     limits = caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600)
 
@@ -583,13 +582,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
     """A query the budget stops writes no queries-table row (the budget hook runs before
     `QueryCapture`) but leaves a refusal record. The subagent's first query executes and crosses
     the cap, so the stopped second one really reached the seam."""
-    recorder = VerbRecorder()
-
-    def esql(ctx, *, index: str) -> dict:
-        recorder.record("esql", ctx, {"index": index})
-        return {"rows": [1]}
-
-    verbs = FakeVerbs({"elastic": {"esql": esql}})
+    recorder, verbs = _recording_esql()
     run_dir = materialize(tmp_path, GOLDEN, run_id='phantom')
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
@@ -624,13 +617,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
 def test_executed_query_writes_a_row(tmp_path, unenforced):
     """An executed query writes its queries-table row: the control for
     `test_stopped_query_writes_no_row`."""
-    recorder = VerbRecorder()
-
-    def esql(ctx, *, index: str) -> dict:
-        recorder.record("esql", ctx, {"index": index})
-        return {"rows": [1]}
-
-    verbs = FakeVerbs({"elastic": {"esql": esql}})
+    recorder, verbs = _recording_esql()
     run_dir = materialize(tmp_path, GOLDEN, run_id='row')
     drive(run_dir, run_id="row",
           main=ReplayFn([

@@ -123,11 +123,6 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
     return doc
 
 
-def tenant_of(root: Path) -> Path:
-    """The data root `plant_tenant` sets `TENANT_ID` up under."""
-    return Path(root)
-
-
 def settings_of(root: Path) -> Path:
     """The settings folder `write_mapping` plants under `root` (`<root>/<T>/knowledge/settings`)."""
     return Path(root) / TENANT_ID / "knowledge" / "settings"
@@ -204,7 +199,7 @@ def shipped_comment_author() -> str:
     file so whole-run scenarios assert about the file an operator edits, not a literal."""
     comment_section = shipped_mapping_doc().get("comment") or {}
     assert isinstance(comment_section.get("author"), str), (
-        "the shipped mapping has no `comment: {author}` section (D1)"
+        "the shipped mapping has no `comment: {author}` section"
     )
     return comment_section["author"]
 
@@ -381,22 +376,16 @@ class FakeStore:
 
     def comment_body(self) -> str:
         """The rendered comment below the agent tag line."""
-        from defender.tenancy import case_ticket
+        from defender.tenancy.case_ticket import AGENT_TAG_PREFIX
 
-        prefix = require(
-            case_ticket, "AGENT_TAG_PREFIX",
-            "#1221 M1: every comment the host posts opens with the agent tag line",
-        )
         wire = self.wire_body()
         tag_line, newline, rest = wire.partition("\n")
         assert newline, f"the posted comment is one line, with no comment below a tag: {wire!r}"
-        assert tag_line.startswith(prefix), (
-            f"the posted comment does not open with the agent tag line ({prefix!r}): "
+        assert tag_line.startswith(AGENT_TAG_PREFIX), (
+            f"the posted comment does not open with the agent tag line ({AGENT_TAG_PREFIX!r}): "
             f"{wire[:160]!r}"
         )
         return rest
-
-
 
 
 def writer_deps(store: FakeStore):
@@ -419,20 +408,15 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | o
     """Drive the writer (`record_case_ticket`) over one run dir, through the real seam."""
     from defender.investigation import ticket_writer
 
-    fn = require(
-        ticket_writer, "record_case_ticket",
-        "D2 renames `close_case_ticket` to `record_case_ticket`: one POST "
-        "/tickets/{key}/comments, no transition",
-    )
-    return fn(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config), **kw)
+    return ticket_writer.record_case_ticket(
+        _run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config), **kw)
 
 
-def open_ticket(
-    run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
-) -> Any:
+def open_ticket(run_dir: Path, store: FakeStore) -> Any:
     from defender.investigation import ticket_writer
 
-    return ticket_writer.open_case_ticket(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config))
+    return ticket_writer.open_case_ticket(
+        _run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, _CONFIG_UNSET))
 
 
 def receipt_path(run_dir: Path) -> Path:
@@ -452,63 +436,30 @@ def receipt(run_dir: Path) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------
 
 
-def comment(body: str = "a prior run's notes", *, author: str | None = AGENT_AUTHOR,
-            created: str = "2026-09-16T12:00:00Z", drop_author: bool = False) -> dict[str, Any]:
-    out: dict[str, Any] = {"body": body, "created": created}
-    if not drop_author:
-        out["author"] = author
-    return out
+def comment(body: str) -> dict[str, Any]:
+    return {"body": body, "created": "2026-09-16T12:00:00Z", "author": AGENT_AUTHOR}
 
 
-def ticket(key: str, *, labels: Any = (), comments: Any = (), summary: str = "a prior case",  # noqa: PLR0913 — one keyword per FIELD a demand drives, drop_* included
-           status: Any = OPEN_STATUS, resolution: str | None = None,
-           drop_labels: bool = False, drop_comments: bool = False,
-           drop_status: bool = False) -> dict[str, Any]:
-    out: dict[str, Any] = {
+def ticket(key: str, *, labels: Any = (), comments: Any = (),
+           status: Any = OPEN_STATUS) -> dict[str, Any]:
+    return {
         "key": key,
-        "summary": summary,
+        "summary": "a prior case",
         "description": "",
-        "resolution": resolution,
+        "resolution": None,
         "reporter": AGENT_AUTHOR,
+        "status": status,
+        "labels": list(labels),
+        "comments": list(comments),
     }
-    if not drop_status:
-        out["status"] = status
-    if not drop_labels:
-        out["labels"] = labels if labels is None or isinstance(labels, str) else list(labels)
-    if not drop_comments:
-        out["comments"] = (
-            comments if comments is None or isinstance(comments, str) else list(comments)
-        )
-    return out
 
 
 def listing(*tickets: dict[str, Any], source: str = "ticket-store") -> dict[str, Any]:
     return {"total": len(tickets), "tickets": list(tickets), "source": source}
 
 
-SELF_KEY = "20260917t000000z-the-current-case"
-OTHER_KEY = "20260101T000000Z-a-prior-case"
-
-
-def served_tickets(payload: Any) -> list[dict[str, Any]]:
-    assert isinstance(payload, dict), (
-        f"the reply is not a ticket listing envelope: {payload!r}"
-    )
-    assert isinstance(payload.get("tickets"), list), (
-        f"the listing envelope carries no ticket list: {payload!r}"
-    )
-    return payload["tickets"]
-
-
-def served_comments(t: dict[str, Any]) -> list[Any]:
-    """The comment list a served record carries — the test's own reading of the wire, never
-    the predicate under test. A record with no list serves no comments."""
-    comments = t.get("comments")
-    return list(comments) if isinstance(comments, list) else []
-
-
-def rendered(payload: Any, tmp_path: Path, *, ceiling: int | None = None) -> str:
+def rendered(payload: Any, tmp_path: Path) -> str:
     """What gather's payload view hands the model for this payload."""
     from defender.investigation.payload_view import render
 
-    return render(json.dumps(payload), None, tmp_path, ceiling=ceiling)
+    return render(json.dumps(payload), None, tmp_path)

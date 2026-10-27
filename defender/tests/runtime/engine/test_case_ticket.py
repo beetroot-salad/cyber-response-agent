@@ -29,12 +29,12 @@ NO_FACTS = AlertFacts(signature=None, event_time=None, summary=None)
 
 
 def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Routine.",
-               confidence: str = "high", with_alert: bool = True) -> Path:
+               with_alert: bool = True) -> Path:
     run_dir = tmp_path / fixture_uuid("20260620t000000z-sshd")
     run_dir.mkdir()
     run_dir.joinpath("report.md").write_text(
         f"---\ncase_id: {run_dir.name}\ndisposition: {disposition}\n"
-        f"confidence: {confidence}\n---\n{reason}\n"
+        f"confidence: high\n---\n{reason}\n"
     )
     if with_alert:
         plant_alert(run_dir, ALERT, mapping={

@@ -41,10 +41,10 @@ _CACHE = {
 }
 
 
-def _role_settings(provider, role, name="kimi-k3"):
-    """A role's settings: its default effort for model `name` (default: one with no effort floor),
-    mapped to settings."""
-    return provider.settings_for_effort(provider.effort_for_role(name, role))
+def _role_settings(provider, role):
+    """A role's settings: its default effort for `kimi-k3` (a model with no effort floor), mapped
+    to settings."""
+    return provider.settings_for_effort(provider.effort_for_role("kimi-k3", role))
 
 
 def test_role_model_defaults(monkeypatch):

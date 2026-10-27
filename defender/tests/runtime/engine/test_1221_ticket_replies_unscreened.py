@@ -49,13 +49,13 @@ GET_TICKET_TABLE = """dispositions:
 """
 
 
-def _ticket(key: str, note: str, *, status: str = "open") -> dict[str, Any]:
-    return {"key": key, "summary": f"case {key}", "status": status, "labels": ["sig:5710"],
+def _ticket(key: str, note: str) -> dict[str, Any]:
+    return {"key": key, "summary": f"case {key}", "status": "open", "labels": ["sig:5710"],
             "comments": [{"author": "analyst", "body": note, "created": "2026-10-08T11:00:00Z"}]}
 
 
-def _capture(run_dir: Path, seq: int = 0) -> Any:
-    return json.loads((run_dir / "gather_raw" / LEAD / f"{seq}.json").read_text(encoding="utf-8"))
+def _capture(run_dir: Path) -> Any:
+    return json.loads((run_dir / "gather_raw" / LEAD / "0.json").read_text(encoding="utf-8"))
 
 
 def _list_registry(rec: VerbRecorder, answer: Any) -> ScopedFakeVerbs:

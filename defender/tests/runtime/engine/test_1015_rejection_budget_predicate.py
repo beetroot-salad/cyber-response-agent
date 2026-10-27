@@ -85,20 +85,12 @@ def _ghosts(n: int, *, lead: str = LEAD) -> list[dict]:
     ]
 
 
-def _same(n: int, *, lead: str = LEAD) -> list[dict]:
+def _same(n: int) -> list[dict]:
     """`n` rows in the budget's domain that are identical in every identity element — the table
     the REPEAT guard already bounds. The budget must answer these exactly as it answers
     `_ghosts`, which is the whole of "identity-blind"."""
     key = rq.system_fingerprint("ghostone", "")
-    return [_above(i, lead=lead, system_key=key) for i in range(n)]
-
-
-def _code_of(fn) -> str:
-    """`fn`'s shipped source with its DOCSTRING removed — the CODE, which is what a "who derives
-    this" question is about."""
-    doc = fn.__doc__
-    src = inspect.getsource(fn)
-    return src.replace(doc, "") if doc else src
+    return [_above(i, system_key=key) for i in range(n)]
 
 
 # ── the predicate ──────────────────────────────────────────────────────────────────────────
@@ -307,4 +299,4 @@ def test_the_dead_end_dispatcher_hands_the_budget_no_target_to_leak():
         "the model's own verb crossed into main's context through the budget stop"
     assert LOUD_VERB not in b.escape
     assert "turned back at seq" not in b.reason, \
-        "a budget stop tells main the request repeated one already turned back — O2"
+        "a budget stop tells main the request repeated one already turned back"

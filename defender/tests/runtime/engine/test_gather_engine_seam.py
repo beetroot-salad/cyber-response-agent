@@ -215,10 +215,8 @@ def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp
         ))
 
     assert handed == [40, 8], (
-        f"the factory was handed {handed} for dispatches ceilinged at [40, 8] — it is reading "
-        "a ceiling of its own rather than this run's, which is the shape of #880 F-19: the "
-        "recorder it builds then withholds the doomed round against a number no dispatch here "
-        "will enforce"
+        f"the factory was handed {handed} for dispatches ceilinged at [40, 8], a ceiling of "
+        "its own rather than this run's"
     )
 
 
@@ -258,15 +256,14 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
         ))
     handed, none = prompts
     assert index.renders, (
-        "the dispatch never rendered the index it was handed (#1256 r4: it is rendered at use, "
-        "against the run's current down map)")
+        "the dispatch never rendered the index it was handed")
     assert sentinel in handed, "the index this dispatch was handed is not in its prompt"
     assert "## Systems of record" in handed
     assert "## Systems of record" not in none, \
         "handed no catalog, the dispatch rendered one anyway — it built its own from the tree"
 
 
-def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
+def test_a_claim_that_could_not_be_written_is_a_run_fault_not_a_dispatch(tmp_path):
 
     from defender.hooks.record_lead import NOT_CLAIMED
     from defender.investigation import tools_gather

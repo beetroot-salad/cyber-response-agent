@@ -47,7 +47,6 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
-CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 FLAG = "DEFENDER_BUDGET_ENFORCE"
 
 
@@ -495,7 +494,3 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
                                 enforce=False, state=_state(run_dir))
     assert model.calls >= 3, "the loop did not reach its stopping turn — a denial aborted it"
     assert result.output is not None, "two consecutive denials aborted — retries was not pinned"
-
-
-def _markers(root: Path) -> set[str]:
-    return {str(p) for p in root.rglob("*") if p.is_file() and "queue" in str(p)}

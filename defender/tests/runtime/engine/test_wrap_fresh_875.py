@@ -73,12 +73,12 @@ def _main_deps(tmp_path: Path):
 
 
 
-def _drive(tmp_path: Path, lead_id: str = "l-001"):
+def _drive(tmp_path: Path):
     run_dir, deps = _main_deps(tmp_path)
     agent = _InjectedGather()
     out = asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: agent, 40,
-        tools_gather.GatherRequest(lead_id, "elastic", "who logged in", ("accepted vs failed",)),
+        tools_gather.GatherRequest("l-001", "elastic", "who logged in", ("accepted vs failed",)),
         T1106.fixture_grants().gather, catalog=None,
     ))
     assert agent.calls == 1, "the gather agent never ran — the observation below is vacuous"
