@@ -26,12 +26,12 @@ concurrency:
 # stall in any of them still runs to GitHub's 6-hour job default.
 #
 # 10 minutes, and the bound NESTS over the step bound the same way the step bound nests over
-# its commands. `test` is the binding job: 250s at its slowest over the last 12 runs on main,
-# of which 222s is outside the gVisor step (199s of unit tests + ~23s of setup). A stall that
-# burns the step's full 5-minute bound lands at 222 + 300 = 522s, inside 600s — so the step's
-# own timeout fires first and names the command, and this bound stays what it is for: the
-# backstop under the steps that carry no bound of their own. Raising the step bound without
-# raising this one inverts that and hands every stall to GitHub's generic job cancel.
+# its commands. `test` is the binding job and carries 12: its heavier shard ran ~9m50s on main
+# by run 40495781426 (8m20s of unit tests on a stale cost table, plus ~1 min of tool suites),
+# and two PR runs were cancelled at 10 minutes with every test passed. Rebalanced, each shard
+# runs ~7-8 min, so a stall that burns the gVisor step's full 5-minute bound still lands
+# inside 12 and the step's own timeout fires first, naming the command. Raising the step bound
+# without raising this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
   # Two shards of the unit suite, run in parallel: this job was the critical path (~6-8 min against
   # <2.5 min for every other job), and its CPU time is balanced across the runner's four cores, so
@@ -43,7 +43,7 @@ jobs:
   test:
     name: test (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -196,7 +196,19 @@ jobs:
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25
           --shard ${{ matrix.shard }}/2
+          --shard-durations test-durations-${{ matrix.shard }}.json
           --ignore tests/e2e/test_540_box_boundary.py
+
+      # What each test file cost on this shard, the input that rebalances the split: download
+      # both shards' files and run `python -m defender.tests._shard merge <files>` (tests/_shard.py).
+      - name: Upload the test file durations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-durations-${{ matrix.shard }}
+          path: defender/test-durations-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       # write-tests' suite checks (check_calls, check_stub) ship with the contract-first
       # plugin. Defender's tests and the path-scoped tooling/lint gates don't scope to the
@@ -213,8 +225,9 @@ jobs:
       # test, not in the defender suite: the lints are standalone programs that do not import the
       # product. Same idiom as the step above: the defender venv's pytest, from the repo root.
       - name: Run lint tool tests
-        # Once, not per shard: a separate suite (tooling/lint/tests), not part of the split.
-        if: matrix.shard == 1
+        # Once, not per shard: a separate suite (tooling/lint/tests), not part of the split. On
+        # shard 2, beside the eval tool tests, so the one-off suites do not all land on shard 1.
+        if: matrix.shard == 2
         run: defender/.venv/bin/python -m pytest tooling/lint/tests -q
 
       # The eval tooling's own tests live beside it in evaluations/tests, not in the defender
@@ -223,7 +236,7 @@ jobs:
       # their only collection — the gap #720 found when they sat uncollected in evaluations/.
       - name: Run eval tool tests
         # Once, not per shard: a separate suite (evaluations/tests), not part of the split.
-        if: matrix.shard == 1
+        if: matrix.shard == 2
         run: defender/.venv/bin/python -m pytest evaluations/tests -q
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to

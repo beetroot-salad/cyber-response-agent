@@ -1,9 +1,14 @@
-"""Split one pytest run into N shards by whole test files, balanced by what each file cost."""
+"""Split one pytest run into N shards by whole test files, balanced by what each file cost.
+
+The costs are worker-seconds per file, measured: `--shard-durations PATH` makes a run write
+what each of its files took, CI uploads that file from every shard, and
+`python -m defender.tests._shard merge <file>...` rebuilds the weights table from them."""
 from __future__ import annotations
 
 import json
+import sys
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 WEIGHTS = Path(__file__).with_name("_shard_weights.json")
@@ -47,3 +52,27 @@ def shard_of_files(nodeids: Sequence[str], index: int, count: int,
         tests[file_of(nodeid)] += 1
     cost = {f: table.get(f, DEFAULT_SECONDS_PER_TEST * n) for f, n in tests.items()}
     return {f for f, shard in assign(cost, count).items() if shard == index - 1}
+
+
+def merge(measured: Iterable[Mapping[str, float]]) -> dict[str, float]:
+    """One weights table from several runs' per-file durations: a file measured twice (it ran in
+    two of them) keeps its larger cost. Rounded to a tenth of a second, sorted by file."""
+    table: dict[str, float] = {}
+    for durations in measured:
+        for name, seconds in durations.items():
+            table[name] = max(table.get(name, 0.0), seconds)
+    return {name: round(table[name], 1) for name in sorted(table)}
+
+
+def main(argv: Sequence[str]) -> int:
+    if len(argv) < 2 or argv[0] != "merge":  # noqa: PLR2004 — `merge` and at least one file
+        print("usage: python -m defender.tests._shard merge <durations.json>...", file=sys.stderr)
+        return 2
+    table = merge(json.loads(Path(name).read_text(encoding="utf-8")) for name in argv[1:])
+    WEIGHTS.write_text(json.dumps(table, indent=1) + "\n", encoding="utf-8")
+    print(f"{WEIGHTS}: {len(table)} files, {sum(table.values()):.0f} worker-seconds")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
