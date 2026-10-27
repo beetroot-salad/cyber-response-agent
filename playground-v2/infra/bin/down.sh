@@ -13,6 +13,16 @@ fi
 
 SERVER_NAME="${SERVER_NAME:-soc-playground}"
 
+# Terraform state is a local, gitignored file, so it exists only in the checkout that first ran
+# `terraform apply` (the main checkout). A worktree has none: down.sh would wrongly report "already
+# levered down" and up.sh would try to recreate the firewall and SSH key. Point at the real one.
+if [ ! -f terraform.tfstate ]; then
+    MAIN_INFRA="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/playground-v2/infra"
+    echo "No Terraform state in $(pwd) — it lives in the main checkout." >&2
+    echo "Run ${MAIN_INFRA}/bin/$(basename "$0") instead." >&2
+    exit 1
+fi
+
 if ! terraform state show hcloud_server.main >/dev/null 2>&1; then
     echo "Server not in Terraform state — already levered down?" >&2
     exit 1
