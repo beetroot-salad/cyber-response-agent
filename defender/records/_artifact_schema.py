@@ -13,15 +13,66 @@ this stays a neutral leaf both the gate and read-side validators can import.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
+from typing import Protocol
 
 from defender.records import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._yaml import duplicate_top_level_key
 # Not the normalizer: the write gate tests the value exactly (see `validate_report`).
 from defender._vocab import DISPOSITION_ENUM
-from defender.skills.invlang.validate import Diagnostic, diagnose, warn_diagnostics
 
 _logger = logging.getLogger(__name__)
+
+
+class _Locus(Protocol):
+    @property
+    def row_text(self) -> str: ...
+
+
+class Diagnostic(Protocol):
+    """What this gate reads of one invlang finding; `skills.invlang.validate.Diagnostic` is it."""
+
+    @property
+    def message(self) -> str: ...
+    @property
+    def locus(self) -> _Locus | None: ...
+    @property
+    def fix(self) -> tuple[str, ...]: ...
+    @property
+    def severity(self) -> str: ...
+
+
+# The invlang validator lives above this layer, so it is handed in rather than imported: the
+# `skills.invlang.validate` package registers itself when it loads, and the `investigation`
+# package, home of every writer and closer, loads it. Until it has, a write is refused and a
+# close raises, rather than either passing text unvalidated.
+_diagnose: Callable[[str, str | None], Sequence[Diagnostic]] | None = None
+_warn_diagnostics: Callable[[str], Sequence[Diagnostic]] | None = None
+
+
+class ValidatorNotRegistered(RuntimeError):
+    """The invlang validator never registered: the process did not load `skills.invlang.validate`."""
+
+
+def register_invlang_validator(
+    diagnose: Callable[[str, str | None], Sequence[Diagnostic]],
+    warn_diagnostics: Callable[[str], Sequence[Diagnostic]],
+) -> None:
+    """Hand this gate the invlang validator. Called once by the validator's own package."""
+    global _diagnose, _warn_diagnostics
+    _diagnose, _warn_diagnostics = diagnose, warn_diagnostics
+
+
+def _validator() -> tuple[
+    Callable[[str, str | None], Sequence[Diagnostic]], Callable[[str], Sequence[Diagnostic]]
+]:
+    if _diagnose is None or _warn_diagnostics is None:
+        raise ValidatorNotRegistered(
+            "the invlang validator is not registered — import `defender.skills.invlang.validate` "
+            "at startup; an unvalidated investigation is neither written nor closed"
+        )
+    return _diagnose, _warn_diagnostics
 
 # Volume bounds on bytes that leave the system, in UTF-8 bytes — not a content check.
 REPORT_FRONTMATTER_MAX = 512
@@ -153,7 +204,7 @@ def _warns_quietly(current: str) -> bool:
     """Is a row flagged on the on-disk document? Only picks which remedy the size refusal
     names, so a validator error is swallowed — the write is denied either way."""
     try:
-        return bool(warn_diagnostics(current))
+        return bool(_validator()[1](current))
     except Exception:  # noqa: BLE001 — a prose choice must not decide the gate's control flow
         return False
 
@@ -165,6 +216,18 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
 
     Every refusal states that nothing was written. Warnings do not refuse and are not returned
     here; the tool bodies handle that repair window."""
+    # Before the size branch, whose remedy depends on the validator too. A refusal, not a
+    # raise: the permission gate's callers expect a deny reason, and this still writes nothing.
+    if _diagnose is None or _warn_diagnostics is None:
+        _logger.error(
+            "investigation.md write refused: the invlang validator is not registered — "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            "this process never loaded `defender.skills.invlang.validate`"
+        )
+        return (
+            "investigation.md cannot be validated in this process: the invlang validator is "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            f"not loaded. {UNCHANGED_NOTICE} This is a deployment fault, not a fault in your "
+            "text — re-sending will not help."
+        )
     if _utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
         # The bound covers the whole append-only document, so name the committed share: the
         # model must tell "send less" from "out of room".
@@ -190,8 +253,9 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         )
     # Fail closed on an internal validator error. (The adapter roster was read at run start,
     # so an unreadable adapters dir cannot surface here.)
+    diagnose = _validator()[0]
     try:
-        found = diagnose(proposed_text, current)
+        found = list(diagnose(proposed_text, current))
     except Exception as e:  # noqa: BLE001 — a blocking gate must fail closed
         return (
             f"investigation.md validation errored — failing closed: {e!r}. "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
@@ -207,7 +271,7 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
     return None
 
 
-def _rendered_errors(found: list[Diagnostic]) -> str | None:
+def _rendered_errors(found: Sequence[Diagnostic]) -> str | None:
     """The error-severity findings rendered for the model, or `None`. Shared by the write and
     close gates, which differ only in framing. Warnings are `investigation.tools`' repair window."""
     errors = [d for d in found if d.severity != "warning"]
@@ -220,8 +284,9 @@ def committed_investigation_reason(text: str) -> str | None:
     """Is `investigation.md` as it stands well-formed enough to publish? The deny reason, or
     `None`. The close publishes without going through `permission.decide_write`, so it needs
     its own check."""
+    diagnose = _validator()[0]
     try:
-        found = diagnose(text, text)
+        found = list(diagnose(text, text))
     except Exception as e:  # noqa: BLE001 — fail open; an unclosable run is worse
         _logger.warning(
             f"investigation.md could not be validated for the close, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path

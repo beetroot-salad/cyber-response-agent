@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.knowledge import _scaffold_rules
+from defender.systems import _scaffold_rules
 from defender.knowledge._corpus import iter_query_templates, read_query_template
 
 _DEFENDER = Path(__file__).resolve().parents[2]

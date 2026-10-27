@@ -16,7 +16,7 @@ from defender.knowledge._corpus import iter_query_templates  # noqa: E402
 from defender.knowledge._knowledge import KnowledgePaths  # noqa: E402
 from defender._io import TEXT_READ_ERRORS, read_plain, read_text_soft  # noqa: E402
 from defender._paths import adapters_under, process_defender_dir  # noqa: E402
-from defender.knowledge._scaffold_rules import (  # noqa: E402
+from defender.systems._scaffold_rules import (  # noqa: E402
     ScaffoldRuleError,
     VerbResolver,
     check_system_skill,

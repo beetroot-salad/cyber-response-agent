@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.knowledge import _scaffold_rules  # noqa: E402
+from defender.systems import _scaffold_rules  # noqa: E402
 from defender.tests.learning.oracle.live_contracts._spec1224 import build_registry  # noqa: E402
 from defender.systems import verbs  # noqa: E402
 from defender.investigation.query_tool import QueryCapture  # noqa: E402
