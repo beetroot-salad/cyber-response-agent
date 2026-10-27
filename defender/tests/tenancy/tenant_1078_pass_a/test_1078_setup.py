@@ -17,11 +17,11 @@ O10_TEXT = "the data root is not empty"
 TID = H.VALID_ID
 
 
-def _refused_writing_nothing(root: Path, tenant_id: str = TID, *, names: str) -> str:
+def _refused_writing_nothing(root: Path, *, names: str) -> str:
     """Run setup against `root`, and assert it REFUSED (exit 1, output naming `names`) and
     wrote nothing (the census of `root` is unchanged). Returns the setup's output."""
     before = H.census(root)
-    proc = H.run_setup(root, tenant_id)
+    proc = H.run_setup(root, TID)
     H.assert_setup_ran(proc)
     out = H.setup_output(proc)
     assert proc.returncode == 1, f"setup exited {proc.returncode}, not 1 (refused):\n{out}"
@@ -30,11 +30,11 @@ def _refused_writing_nothing(root: Path, tenant_id: str = TID, *, names: str) ->
     return out
 
 
-def _verbatim_owner(out: str, root: Path, tenant_id: str = TID) -> BaseException:
+def _verbatim_owner(out: str, root: Path) -> BaseException:
     """The setup output passed `create_tenant`'s own refusal through verbatim — the owner is
     asked AFTER the process, on the same untouched root, and must refuse the same way."""
     before = H.census(root)
-    owner = H.owner_refusal(H.create_tenant, root, tenant_id)
+    owner = H.owner_refusal(H.create_tenant, root, TID)
     assert H.census(root) == before, "the refusing create_tenant wrote into the data root"
     H.assert_verbatim(out, owner, entry="tenant.py setup")
     return owner
@@ -50,7 +50,7 @@ def test_o10_rowless_folder_refused(tmp_path, shape):
         (root / "old" / "runs" / "r1").mkdir(parents=True)
         (root / "old" / "runs" / "r1" / "report.md").write_text("x\n", encoding="utf-8")
     out = _refused_writing_nothing(root, names="old")
-    assert O10_TEXT in out, f"the refusal is not O10's:\n{out}"
+    assert O10_TEXT in out, f"the refusal is not the non-empty data root's:\n{out}"
     _verbatim_owner(out, root)
 
 
@@ -200,12 +200,12 @@ def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
             text = H.setup_output(proc)
             assert proc.returncode == 1, f"setup accepted a planted row alias:\n{text}"
         assert O10_TEXT not in text, (
-            f"O10 short-circuited the plant ({driver}); the guarded write was never reached:\n"
-            f"{text}")
+            f"the non-empty-root check short-circuited the plant ({driver}); the guarded write "
+            f"was never reached:\n{text}")
         assert target.read_text(encoding="utf-8") == "ORIGINAL OUTSIDE\n", (  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
             f"the {alias} plant was written through ({driver})")
         assert os.lstat(target).st_mtime_ns == before.st_mtime_ns
-        assert os.path.lexists(plant), "the refusal removed the plant (sanitizing, D1)"
+        assert os.path.lexists(plant), "the refusal removed the plant"
 
     control = tmp_path / "control" / "data"
     H.tenant_dir(control, TID).mkdir(parents=True)

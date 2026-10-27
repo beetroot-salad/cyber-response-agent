@@ -57,7 +57,6 @@ REFUSED_IDS = [
     pytest.param("1abc", id="1abc"),
     pytest.param("acme\n", id="trailing-newline"),
 ]
-REFUSED_ID_VALUES = ["../x", "A", "a/b", "", "a" * 64, "1abc", "acme\n"]
 
 #: Refused ids carrying control or separator content: a refusal must render them confined,
 #: never let them forge a line.
@@ -334,7 +333,7 @@ def assert_setup_ran(proc: subprocess.CompletedProcess) -> None:
     """The setup PROGRAM ran: a missing `tenant.py` exits 2 with the interpreter's own
     "can't open file", which a refusal assertion must never read as setup refusing."""
     assert "can't open file" not in (proc.stderr or ""), (
-        f"{TENANT_PY} does not exist — D10's setup command is missing:\n{proc.stderr}")
+        f"{TENANT_PY} does not exist — the setup command is missing:\n{proc.stderr}")
 
 
 # ======================================================================================

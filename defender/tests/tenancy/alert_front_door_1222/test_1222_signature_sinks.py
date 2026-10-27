@@ -96,8 +96,8 @@ def _comment_signature(store: S.TicketStore) -> str:
     return found.group(1)
 
 
-def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR0913 — one run's inputs
-              mapping: Mapping[str, Any] | None = MAPPING, tenant: S.Planted | None = None,
+def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,
+              mapping: Mapping[str, Any] | None = MAPPING,
               shim: S.RecordingShim | None = None, main: Any = None,
               before: Callable[[Path], None] | None = None,
               lessons: Mapping[str, Sequence[str]] | None = None,
@@ -105,8 +105,7 @@ def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR0
     """One run through `run.main` with `--update-ticket`: the open leg, the driver, the record
     leg — the REAL ticket writer over `store` (default a fresh `TicketStore`), which records each
     outbound body."""
-    planted = tenant if tenant is not None else S.plant_tenant(
-        alert_mapping=mapping, case_mapping=_signed_case_mapping())
+    planted = S.plant_tenant(alert_mapping=mapping, case_mapping=_signed_case_mapping())
     for name, entries in (lessons or {}).items():
         S.plant_lesson(name, source_signature=list(entries))
     sink = store if store is not None else S.TicketStore()
@@ -199,10 +198,9 @@ GOLDEN_INVESTIGATION = (S.H.GOLDEN / "investigation.md").read_text(encoding="utf
 
 
 def _plant_past(runs_base: Path, run_id: str, *, alert: Mapping[str, Any] | bytes,
-                record: bool | Mapping[str, Any] = True,
                 facts: Mapping[str, str | None] | None = None) -> Path:
     """A finished past run the corpus can load: an alert, a record, the golden investigation."""
-    return S.plant_run(runs_base, run_id, alert=alert, record=record, facts=facts,
+    return S.plant_run(runs_base, run_id, alert=alert, facts=facts,
                        files={"investigation.md": GOLDEN_INVESTIGATION,
                               "report.md": J.report_text("benign")})
 
@@ -220,10 +218,10 @@ def _runs_for(corpus: list[Any], signature: str) -> set[str]:
 # The judge and the lesson author
 
 
-def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR0913 — one pass's inputs
+def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,
             facts: Mapping[str, str | None] | None = None,
             record: bool | Mapping[str, Any] = True,
-            runs_base: Path | None = None, worlds_alert: bool = True,
+            runs_base: Path | None = None,
             alter: Callable[[Path], None] | None = None) -> tuple[Path, J.FakeJudge, list[dict]]:
     """An accepted episode carrying the launch's copies of the source run's alert and record,
     graded end to end; returns the episode, the judge seam (holding every prompt it was shown)
@@ -231,7 +229,7 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
     # Separate episode roots still share finding identity on the queue (#1241), so each pass
     # gets an episode id of its own (a manifest's `episode_id` must be its folder's name).
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
-                            alert=worlds_alert,
+                            alert=True,
                             episode_id=fixture_uuid(f"1222-signature-sinks:{tmp_path}"))
     (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     S.plant_episode_copy(ep, alert=alert, record=record, facts=facts)
@@ -538,7 +536,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
     label = f"evt:{SPACED_EVENT_TIME}"
     assert refusing.refused == [label], (
         "the store never refused the create: the evt: label did not carry the event time "
-        f"as-is (C16): {refusing.calls!r}")
+        f"as-is: {refusing.calls!r}")
     assert d.rc == 0, f"a refused ticket changed the run's exit: rc={d.rc}"
     assert d.report is not None, "the investigation did not end normally: no report.md"
     reason = refusing.refusal_reason(label)
@@ -571,7 +569,7 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
         d, store = _ticketed(tmp_path / f"nonkey-{i}", alert=S.generic_alert(rule_id=value),
                              mapping=S.DEFAULT_MAPPING_GENERIC)
         assert _sig_label(store.only_open()) == S.CASE_FALLBACK_SIGNATURE, (
-            f"{value!r} (not a key under A6) became a ticket label")
+            f"{value!r}, not a valid signature, became a ticket label")
         assert d.recorded("signature") is None
     base = tmp_path / "past"
     _plant_past(base, "past-upper", alert=S.generic_alert(rule_id=upper), facts={"signature": upper})

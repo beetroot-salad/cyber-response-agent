@@ -122,9 +122,8 @@ def _assert_nothing_later(d: S.Drive, *needles: str) -> None:
     opening = d.opening_message
     for i, prompts in enumerate(_later_user_prompts(d), start=2):
         assert prompts == [opening], (
-            f"MAIN's request {i} carries {len(prompts)} user prompt(s) — something besides the "
-            "opening message was added to MAIN's session after its first request (A4 retires the "
-            "late correlation entry)")
+            f"MAIN's request {i} carries {len(prompts)} user prompt(s): something besides the "
+            "opening message was added to MAIN's session after its first request")
     for i, seen in enumerate(d.main.seen[1:], start=2):
         rest = "\n".join(t for k, t in seen.parts if t != opening)
         for needle in needles:
@@ -137,8 +136,7 @@ def _assert_summary_in_opening(d: S.Drive, marker: str) -> None:
     opening = d.opening_message
     framed = _framed_with(opening, marker)
     assert len(framed) == 1, (
-        f"MAIN's opening message carries l-00c's summary in {len(framed)} frame(s); exactly one "
-        "framed copy is the contract (A4: the lead finishes before the opening message is built)")
+        f"MAIN's opening message carries l-00c's summary in {len(framed)} frame(s), not one")
     assert marker not in S.harness_text(opening), (
         "l-00c's summary text also reaches MAIN's opening message outside its frame")
     _head, body = S.correlation_section(opening)
@@ -230,19 +228,17 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
     assert marker not in opening, "a lead whose dispatch raised still had text framed for MAIN"
     head, body = S.correlation_section(opening)
     assert not S.outer_frames(body), (
-        "the correlation section of a lead that produced nothing carries a frame — its ending "
-        "is one host sentence outside any frame (A2)")
+        "the correlation section of a lead that produced nothing carries a frame")
     ending = (_section_lines(raised, head, body)
               - _section_lines(told, *S.correlation_section(told.opening_message)))
     assert ending, (
         "the correlation section of a lead whose dispatch raised says nothing the summary run's "
-        "does not — the ending is never named to MAIN (never neither)")
+        "does not: its ending is not named to MAIN")
     assert "request refused by provider" not in opening, (
-        "the provider's error text reached MAIN's opening message (the ending is a fixed sentence)")
+        "the provider's error text reached MAIN's opening message")
     told_lines = _prose_lines(told, told.opening_message)
     assert not (ending & told_lines), (
-        f"the summary run's opening message also carries the ending sentence {ending & told_lines}"
-        " — never both")
+        f"the summary run's opening message also carries the ending sentence {ending & told_lines}")
     _assert_nothing_later(raised, *ending)
 
 
@@ -252,7 +248,7 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
 def test_o1_non_elastic_tenant_gets_correlation_without_kibana_fields(tmp_path):
     marker = "CORR-O1-CMDB-5a"
     alert = S.generic_alert()
-    assert not set(S.KIBANA_KEYS) & set(alert), "the O1 alert must carry no Kibana field"
+    assert not set(S.KIBANA_KEYS) & set(alert), "premise: the alert must carry no Kibana field"
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), table=S.TABLE_NON_ELASTIC, omit_systems=("elastic",))
     d = S.run_alert(tmp_path, alert=alert, tenant=planted,
                     leads={S.L3: [S.query("cmdb", "list-hosts", {}),
@@ -315,15 +311,14 @@ def test_o3_only_l00c_backend_calls_precede_mains_first_request(tmp_path):
     assert main.rows is not None, "MAIN was never asked for a turn"
     before = {r.get("lead_id") for r in main.rows}
     assert before <= {S.L3}, (
-        f"queries rows under {sorted(map(str, before - {S.L3}))} exist before MAIN's first request — only "
-        "l-00c may call a backend before MAIN starts (O3)")
+        f"queries rows under {sorted(map(str, before - {S.L3}))} exist before MAIN's first "
+        "request: only l-00c may call a backend before MAIN starts")
     assert len(main.calls) == len(main.rows), (
         f"{len(main.calls)} backend call(s) but {len(main.rows)} queries row(s) before MAIN's first "
         "request — a call reached the backend that no lead's row accounts for")
     # Controls: the snapshot channel sees l-00c's call, and attributes MAIN's lead's call later.
     assert [c.params.get("native_query") for c in main.calls] == [corr_q], (
-        "l-00c's scripted call is not what reached the backend before MAIN's first request — the "
-        "lead had not finished (A4) or the channel cannot see it")
+        "l-00c's scripted call is not what reached the backend before MAIN's first request")
     assert [r.get("lead_id") for r in d.rows if r not in main.rows] == ["l-001"]
 
 
@@ -473,8 +468,8 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
     # MAIN's opening names elastic as not configured, with the check's reason (the blank key).
     opening = _opening(faulted, fixture_uuid("tenant:tfault1222"))
     assert _names_down_as_not_configured(opening, "elastic"), (
-        "MAIN's opening message does not name elastic as not configured on a tenant whose "
-        "elastic settings fail its check at run start (#1256 O-3)")
+        "MAIN's opening message does not name elastic as not configured though its settings "
+        "fail the start check")
     assert "ELASTICSEARCH_URL" in opening, (
         "MAIN's opening message names elastic down without the check's reason (the blank key)")
 
@@ -622,8 +617,8 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
     main_rows = by_agent["main"]
     carrying = [i for i, p in enumerate(main_rows) if marks[S.L3] in p]
     assert carrying == [0], (
-        f"l-00c's summary appears in MAIN's session rows {carrying} — it belongs to MAIN's opening "
-        "message alone, with no injected correlation entry after it")
+        f"l-00c's summary appears in MAIN's session rows {carrying}, not in its opening message "
+        "alone (row 0)")
     for lead, other in (("l-001", "l002"), ("l-002", "l001")):
         text = "\n".join(by_agent[f"gather:{lead}"])
         assert f"r2:{lead.replace('-', '')}" in text, (
@@ -669,15 +664,14 @@ def test_p033_mains_first_request_retried_before_correlation_i(tmp_path):
     _run_with_turns(d)
     assert len(d.main.seen) >= 2, "MAIN made no second request"
     assert d.main.seen[1].of_kind("retry-prompt"), (
-        "MAIN's second request is not a retry — the scenario does not exercise PR-15")
+        "premise: MAIN's second request is not a retry")
     retry = d.main.seen[1]
     assert retry.user_prompts == [d.opening_message], (
         "the retried first request does not resend exactly the opening message — something "
         f"arrived at the retry: {len(retry.user_prompts)} user prompt(s)")
     copies = sum(t.count(marker) for _k, t in retry.parts)
     assert copies == 1, (
-        f"the retried request carries l-00c's summary {copies} time(s); exactly the one in the "
-        "resent opening message is the contract")
+        f"the retried request carries l-00c's summary {copies} time(s), not once")
     _assert_summary_in_opening(d, marker)
 
 
@@ -699,9 +693,7 @@ def _plant_sibling(source_dir: Path, sibling_dir: Path) -> Path:
 
 def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
                          corr: list[S.Turn], capture: tuple[str, str, dict],
-                         sibling_turns: list[S.Turn],
-                         before: Callable[[Path], None] | None = None,
-                         ) -> tuple[S.Drive, S.Drive]:
+                         sibling_turns: list[S.Turn]) -> tuple[S.Drive, S.Drive]:
     """A source run through `run.main` (production's default store), branched at MAIN's `echo`
     call, and a sibling resumed there. A branch point must be a tool-calling MAIN response that
     is not the gather turn (an arm re-runs a gather against its own backend); the `echo` follows
@@ -710,7 +702,7 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
     system, verb, params = capture
     src = S.run_alert(
         tmp_path / "source", alert=S.fixture_alert(), tenant=planted,
-        backend=_resolving_backend(), before=before,
+        backend=_resolving_backend(),
         main=[S.call("append_block", text=golden),
               S.gather("l-009", system, "capture one fact"), S.call("bash", command="echo held"),
               S.text(S.DONE)],

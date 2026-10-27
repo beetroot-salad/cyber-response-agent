@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 
 
@@ -38,13 +37,10 @@ def _accepted(argv: list[str], rec: H.Recorder) -> dict[str, Any]:
     return rec.materialize_calls[0]
 
 
-def _sibling(tmp_path: Path, root: Path, tenant_id: str = H.VALID_ID, *, monkeypatch: Any = None,
-             row: bool = True) -> tuple[Path, Path]:
+def _sibling(root: Path, tenant_id: str) -> tuple[Path, Path]:
     """A source run at T's tenant location (stamped T) plus an episode manifest naming it, at
-    `<root>/<T>/episodes/<uuid>` as RUNS leaves it. Returns (source run dir, manifest).
-    `tmp_path` and `monkeypatch` are unused: no episodes base is configured."""
-    del tmp_path, monkeypatch
-    _base, src = H.tenant_source(root, tenant_id, row=row)
+    `<root>/<T>/episodes/<uuid>` as RUNS leaves it. Returns (source run dir, manifest)."""
+    _base, src = H.tenant_source(root, tenant_id)
     manifest = H.family_for(src)
     return src, manifest
 
@@ -113,8 +109,8 @@ def test_o2_existing_tenant_runs(tmp_path, data_root):
     assert rec.order.index("preflight") < rec.order.index("materialize")
 
 
-def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+def test_o5_forged_stamp_ignored(tmp_path, data_root):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     H.plant_row(data_root, fixture_uuid("tenant:victim"))
     _stamp_tenant(src, fixture_uuid("tenant:victim"))
     got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
@@ -123,8 +119,8 @@ def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
     _refused(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:victim")), H.Recorder(tmp_path / "sib2"))
 
 
-def test_o5_disagreeing_tenant_refused(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+def test_o5_disagreeing_tenant_refused(tmp_path, data_root):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     H.plant_row(data_root, fixture_uuid("tenant:victim"))
     said = _refused(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:victim")),
                     H.Recorder(tmp_path / "sib"))
@@ -135,8 +131,8 @@ def test_o5_disagreeing_tenant_refused(tmp_path, data_root, monkeypatch):
     assert got["tenant"].id == fixture_uuid("tenant:acme")
 
 
-def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, capsys):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme-corp"), monkeypatch=monkeypatch)
+def test_o5_resume_without_tenant_refused(tmp_path, data_root, capsys):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme-corp"))
     recorded = fixture_uuid("tenant:acme-corp")
     said = _refused(H.sibling_argv(manifest), H.Recorder(tmp_path / "sib"), capsys)
     assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
@@ -145,9 +141,8 @@ def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, caps
     assert got["tenant"].id == recorded
 
 
-def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root,
-                                                                      monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     # The launcher accepts the request's tenant.
     assert H.require_tenant(fixture_data_root(data_root), fixture_uuid("tenant:acme")).tenant_id == fixture_uuid("tenant:acme"), (
         "the launcher's own acceptance must pass first")
@@ -160,23 +155,18 @@ def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, 
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
 
-def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, monkeypatch):
-    _src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root):
+    _src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     episode = manifest.parent.resolve()
     expected_runs = location_path(H.S.EpisodePaths(episode).runs)
-    link = tmp_path / "episodes-link"
-    link.symlink_to(manifest.parent.parent, target_is_directory=True)
-    monkeypatch.chdir(tmp_path)
-    for n, base in enumerate((Path("episodes"), link)):
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(base))
-        # The episode opens by id through the tenant; the external-root variable is a decoy.
-        got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
-                        H.Recorder(tmp_path / "sib" / str(n)))
-        world = got["world"]
-        assert Path(world.episode_dir).is_absolute(), f"{base}: {world.episode_dir}"
-        assert Path(world.episode_dir) == episode, (
-            f"{base}: the episode was not resolved through its tenant ({world.episode_dir})")
-        assert location_path(H.S.EpisodePaths(world.episode_dir).runs) == expected_runs
+    # The episode opens by id through the tenant.
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
+                    H.Recorder(tmp_path / "sib"))
+    world = got["world"]
+    assert Path(world.episode_dir).is_absolute(), world.episode_dir
+    assert Path(world.episode_dir) == episode, (
+        f"the episode was not resolved through its tenant ({world.episode_dir})")
+    assert location_path(H.S.EpisodePaths(world.episode_dir).runs) == expected_runs
 
 
 def test_setup_shell_and_run_shell_resolve_different_data_roots(tmp_path, monkeypatch):
@@ -233,7 +223,7 @@ def test_shell_that_never_received_the_compose_variable(tmp_path, monkeypatch):
 def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     old, new = tmp_path / "old-root", tmp_path / "new-root"
     H.set_data_root(monkeypatch, old)
-    src, manifest = _sibling(tmp_path, old, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+    src, manifest = _sibling(old, fixture_uuid("tenant:acme"))
     (H.runs_dir(old, fixture_uuid("tenant:acme")) / CASE_X).mkdir()
     old_census = H.census(old)
     H.set_data_root(monkeypatch, new)

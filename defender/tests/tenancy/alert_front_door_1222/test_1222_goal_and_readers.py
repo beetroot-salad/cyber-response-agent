@@ -84,10 +84,10 @@ def _alert(**over: Any) -> dict[str, Any]:
     return S.kibana_alert(**{"message": HOSTILE, "forged_entries": FORGED_ENTRY, **over})
 
 
-def _other_alert(**over: Any) -> dict[str, Any]:
+def _other_alert() -> dict[str, Any]:
     """A second alert differing from `_alert()` in every distinctive value (time, ids, host,
     user, rule id, the marker) — for "the goal does not vary with the alert"."""
-    doc = _alert(**over)
+    doc = _alert()
     doc["alert_id"] = "0" * 63 + "1"
     doc["alert_timestamp"] = "2026-06-01T08:00:00.000Z"
     doc["host"] = {**doc["host"], "name": "s07-other-host", "hostname": "s07-other-host"}
@@ -130,7 +130,7 @@ def _answer(system: str, verb: str, params: dict) -> Any:
     return {"system": system, "verb": verb, "result": []}
 
 
-def _l3_turns(summary: str = L3_SUMMARY, *, extra: Sequence[S.Turn] = ()) -> list[S.Turn]:
+def _l3_turns(summary: str = L3_SUMMARY) -> list[S.Turn]:
     """l-00c reads its alert by the pointer, runs the catalog template, a coined query and one
     that fails on a missing index, then states its summary."""
     return [
@@ -139,7 +139,6 @@ def _l3_turns(summary: str = L3_SUMMARY, *, extra: Sequence[S.Turn] = ()) -> lis
         S.query("elastic", "alerts", {"native_query": 'user.name: "s07-user"', **WINDOW}, COINED_ID),
         S.query("elastic", "alerts", {"native_query": "user.name: s07-missing",
                                       "index": MISSING_INDEX, **WINDOW}, FAILING_ID),
-        *extra,
         S.text(summary),
     ]
 
@@ -149,11 +148,11 @@ def _tenant() -> S.Planted:
     return S.plant_tenant(alert_mapping=S.DEFAULT_MAPPING)
 
 
-def _run(  # noqa: PLR0913 — one scenario's inputs, each defaulted
+def _run(
         tmp_path: Path, *, alert: Mapping[str, Any] | bytes | None = None,
          l3: Sequence[S.Turn] | None = None, tenant: S.Planted | None = None,
          sub: str = "run", main: Any = None, faults: Mapping[str, S.LeadFault] | None = None,
-         defender_dir: Path | None = None, leads: Mapping[str, Sequence[S.Turn]] | None = None,
+         leads: Mapping[str, Sequence[S.Turn]] | None = None,
          ) -> S.Drive:
     """One production run of `alert` (default `_alert()`), l-00c scripted with `l3` (default
     `_l3_turns()`), under its own run id so two runs of one test never share a folder."""
@@ -162,7 +161,7 @@ def _run(  # noqa: PLR0913 — one scenario's inputs, each defaulted
     d = S.run_alert(tmp_path / sub, alert=alert if alert is not None else _alert(),
                     tenant=tenant if tenant is not None else _tenant(),
                     main=main, leads=scripts, lead_faults=faults,
-                    backend=S.Backend(answer=_answer), defender_dir=defender_dir)
+                    backend=S.Backend(answer=_answer))
     assert d.raised is None, f"the run raised: {d.raised!r}"
     assert d.run_dir is not None, f"the run never got a folder (refusal={d.refusal!r})"
     return d
@@ -184,12 +183,12 @@ def _assert_contract_and_pointer(goal: str, alert: Mapping[str, Any], *roots: Pa
     path."""
     pointer = S.alert_rel()
     assert pointer in goal, (
-        f"l-00c's stored goal carries no pointer to this run's alert ({pointer!r}, relative to "
-        f"the run folder) — A3. Goal: {goal[:400]!r}")
+        f"l-00c's stored goal carries no run-relative pointer {pointer!r} to this run's alert: "
+        f"{goal[:400]!r}")
     leaked = [v for v in (*_alert_values(alert), *HOSTILE_PIECES) if v in goal]
-    assert not leaked, f"l-00c's stored goal holds alert bytes {leaked!r} (A3: none)"
+    assert not leaked, f"l-00c's stored goal holds alert bytes {leaked!r}"
     hosts = S.host_paths_in(goal, S.DEFENDER, S.REPO_ROOT, *roots)
-    assert not hosts, f"l-00c's stored goal spells host paths {hosts!r} (A3: run-relative only)"
+    assert not hosts, f"l-00c's stored goal spells host paths {hosts!r}"
 
 
 def _dispatch(d: S.Drive) -> dict[str, Any]:

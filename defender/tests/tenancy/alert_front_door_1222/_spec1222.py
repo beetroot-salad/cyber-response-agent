@@ -57,7 +57,7 @@ REPO_ROOT = DEFENDER.parent
 IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 #: Root ignores permission bits, so a chmod-000 "unreadable" shape reads fine as root; CI runs
 #: non-root. A test that needs the shape marks itself with this, never weakens its assertion.
-needs_non_root = pytest.mark.skipif(IS_ROOT, reason="root ignores permission bits (RJ-02)")
+needs_non_root = pytest.mark.skipif(IS_ROOT, reason="root ignores permission bits")
 
 # =================================================================================================
 # 1. Names: spec-fixed, and the suite's coinages (`COINED`: spec name -> production attribute)
@@ -141,9 +141,7 @@ def _coined_path(run_dir: Path, key: str) -> Path:
     attr = COINED[key]
     paths = RunPaths(Path(run_dir))
     value = getattr(paths, attr, None)
-    assert value is not None, (
-        f"RunPaths has no `{attr}` — the coined accessor for {key!r} (A1). RED until the "
-        "implementation adds it (or renames it in _spec1222.COINED)")
+    assert value is not None, f"RunPaths has no `{attr}`, the accessor COINED names for {key!r}"
     return Path(value)
 
 
@@ -163,7 +161,7 @@ def input_dir(run_dir: Path) -> Path:
 def read_record(run_dir: Path) -> dict[str, Any]:
     """The run's record as written; asserts it exists and is a JSON object."""
     path = record_file(run_dir)
-    assert path.is_file(), f"the run has no record at {path} (A1: written at run start)"
+    assert path.is_file(), f"the run has no record at {path}"
     doc = json.loads(path.read_bytes().decode("utf-8"))
     assert isinstance(doc, dict), f"the record is not a JSON object: {doc!r}"
     return doc
@@ -206,17 +204,8 @@ def plant_run(runs_base: Path, run_id: str, *, alert: Mapping[str, Any] | bytes 
     run-relative files (a report)."""
     run_dir = Path(runs_base) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    raw = alert if isinstance(alert, bytes) else alert_bytes(
-        alert if alert is not None else generic_alert())
-    target = alert_file(run_dir)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(raw)
-    if record is not False:
-        doc = dict(record) if isinstance(record, Mapping) else record_doc(
-            raw, digest=digest, **dict(facts or {}))
-        rec = record_file(run_dir)
-        rec.parent.mkdir(parents=True, exist_ok=True)
-        rec.write_bytes(json.dumps(doc, indent=1, ensure_ascii=False).encode("utf-8"))
+    _write_alert_and_record(alert_file(run_dir), record_file(run_dir), alert, record, digest,
+                            facts)
     for rel, text_ in (files or {}).items():
         path = run_dir / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,9 +217,7 @@ def _episode_path(episode_dir: Path, key: str) -> Path:
     attr = COINED[key]
     paths = sym("records._episode_paths", "EpisodePaths")(Path(episode_dir))
     value = getattr(paths, attr, None)
-    assert value is not None, (
-        f"EpisodePaths has no `{attr}` — the coined accessor for {key!r} (A1: launch copies the "
-        "source run's alert and record into the episode). RED until the implementation adds it")
+    assert value is not None, f"EpisodePaths has no `{attr}`, the accessor COINED names for {key!r}"
     return Path(value)
 
 
@@ -248,17 +235,25 @@ def plant_episode_copy(episode_dir: Path, *, alert: Mapping[str, Any] | bytes | 
     """The copies a launch puts in an episode, planted directly — for judge-leg tests over
     an episode a builder (`_judge_921.accepted_episode`, `_spec1224.episode_v2`) made. Returns
     the alert bytes planted."""
+    return _write_alert_and_record(episode_alert_file(episode_dir),
+                                   episode_record_file(episode_dir), alert, record, digest, facts)
+
+
+def _write_alert_and_record(alert_path: Path, record_path: Path,
+                            alert: Mapping[str, Any] | bytes | None,
+                            record: bool | Mapping[str, Any], digest: str | None,
+                            facts: Mapping[str, str | None] | None) -> bytes:
+    """`alert`'s bytes (default `generic_alert()`) at `alert_path` and, unless `record` is
+    False, a record at `record_path`: a mapping verbatim, else `record_doc` of those bytes."""
     raw = alert if isinstance(alert, bytes) else alert_bytes(
         alert if alert is not None else generic_alert())
-    target = episode_alert_file(episode_dir)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(raw)
+    alert_path.parent.mkdir(parents=True, exist_ok=True)
+    alert_path.write_bytes(raw)
     if record is not False:
         doc = dict(record) if isinstance(record, Mapping) else record_doc(
             raw, digest=digest, **dict(facts or {}))
-        rec = episode_record_file(episode_dir)
-        rec.parent.mkdir(parents=True, exist_ok=True)
-        rec.write_bytes(json.dumps(doc, indent=1, ensure_ascii=False).encode("utf-8"))
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        record_path.write_bytes(json.dumps(doc, indent=1, ensure_ascii=False).encode("utf-8"))
     return raw
 
 
@@ -1165,12 +1160,6 @@ def upstream_fault(detail: str = "index_not_found_exception") -> BaseException:
     return sym("kit.faults", "UpstreamFault")(detail)
 
 
-def confinement_fault(index: str = ".ds-logs-system.auth-default-2026.05.24-000002") -> BaseException:
-    """`confine_index`'s refusal of an index outside the configured patterns."""
-    return sym("integrations.confinement", "ConfinementFault")(
-        f"index '{index}' falls outside the configured patterns")
-
-
 @dataclass
 class Backend:
     """The injected verb registry's behaviour: what each call returns, which calls fail, and the
@@ -1919,8 +1908,8 @@ def correlation_section(opening: str) -> tuple[str, str]:
     ending's sentence). Two `l-00c`-named headings fail here."""
     found = correlation_sections(opening)
     assert len(found) == 1, (
-        f"MAIN's opening message holds {len(found)} sections whose heading names {L3} "
-        f"({[h for h, _ in found]}) — exactly one correlation section is the contract (A4)")
+        f"MAIN's opening message holds {len(found)} sections whose heading names {L3}, "
+        f"not one: {[h for h, _ in found]}")
     return found[0]
 
 

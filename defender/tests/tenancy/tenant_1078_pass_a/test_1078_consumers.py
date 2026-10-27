@@ -18,36 +18,37 @@ from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 TENANT = H.VALID_ID
 #: The family's branch-point clock pre-flight's context carries.
 _AS_OF = datetime.fromisoformat(T.AS_OF)
+#: The one held-out fixture's slug: its alert's rule id and its launch-index key.
+SLUG = "slug-one"
 
 
 def _held_out():
     return importlib.import_module("evaluations.held_out")
 
 
-def _fixtures(tmp_path: Path, slug: str = "slug-one", disposition: str = "benign") -> Path:
-    """One labeled held-out fixture: `<fixtures>/<slug>/{alert.json, ground_truth.yaml}`."""
-    fx = tmp_path / "fixtures" / slug
+def _fixtures(tmp_path: Path) -> Path:
+    """One labeled held-out fixture (benign): `<fixtures>/<SLUG>/{alert.json, ground_truth.yaml}`."""
+    fx = tmp_path / "fixtures" / SLUG
     fx.mkdir(parents=True)
-    (fx / "alert.json").write_text(json.dumps({"rule": {"id": slug}}), encoding="utf-8")
-    (fx / "ground_truth.yaml").write_text(
-        f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
+    (fx / "alert.json").write_text(json.dumps({"rule": {"id": SLUG}}), encoding="utf-8")
+    (fx / "ground_truth.yaml").write_text("held_out: true\ndisposition: benign\n",
+                                          encoding="utf-8")
     return fx.parent
 
 
-def _scored_run(runs: Path, disposition: str, run_id: str, slug: str = "slug-one") -> Path:
+def _scored_run(runs: Path, disposition: str, run_id: str) -> Path:
     run = runs / run_id
     run.mkdir(parents=True, exist_ok=True)
-    plant_alert(run, {"rule": {"id": slug}})
+    plant_alert(run, {"rule": {"id": SLUG}})
     (run / "report.md").write_text(T.report_text(disposition), encoding="utf-8")
     return run
 
 
-
-def _held_out_index(tmp_path: Path, run_id: str, slug: str = "slug-one") -> Path:
+def _held_out_index(tmp_path: Path, run_id: str) -> Path:
     """Write the operator's launch-index input independently of the production writer."""
     index = tmp_path / "ops" / "held-out-index.jsonl"
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(json.dumps({"slug": slug, "run_id": run_id}) + "\n", encoding="utf-8")
+    index.write_text(json.dumps({"slug": SLUG, "run_id": run_id}) + "\n", encoding="utf-8")
     return index
 
 

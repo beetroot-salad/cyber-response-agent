@@ -243,12 +243,12 @@ def _answer_to(seen: list, turn: int, what: str) -> str:
 
 
 def _drive(tmp_path: Path, root: Path, *, main: Any, leads: Mapping[str, list],
-           behaviour: Mapping[str, Any], run_id: str = "r1256") -> _Run:
+           behaviour: Mapping[str, Any]) -> _Run:
     rec = VerbRecorder()
     script = main if isinstance(main, R.MainScript) else R.MainScript(main)
     router = R.LeadRouter(leads)
-    run_dir = materialize(tmp_path / "replay", GOLDEN_AB3, run_id=run_id)
-    summary = drive(run_dir, run_id=run_id, main=script, gather=router,
+    run_dir = materialize(tmp_path / "replay", GOLDEN_AB3, run_id="r1256")
+    summary = drive(run_dir, run_id="r1256", main=script, gather=router,
                     verbs=_verbs(rec, behaviour), tenant=S.tenant_folder_of(root))
     return _Run(run_dir=run_dir, main=script, router=router, rec=rec, summary=summary)
 
@@ -379,20 +379,20 @@ def test_a_system_down_at_start_is_refused_at_every_gate_without_running_its_ada
         f"control: the configured system's call must write its row: {run.rows}"
 
     assert run.calls_to("cmdb") == [], \
-        f"a system down at start had its adapter run (O-1): {run.calls_to('cmdb')}"
+        f"a system down at start had its adapter run: {run.calls_to('cmdb')}"
     for turn, what in ((0, "cmdb.get-host, the lead's first call"),
                        (2, "cmdb.health-check, after a configured call")):
         _assert_not_configured_refusal(run.lead_answer("l-001", turn), token, what)
 
     _assert_not_configured_refusal(run.main_answer(1), token, "MAIN's dispatch to cmdb")
     assert not run.router.dispatched("l-002"), \
-        "a dispatch to a system down at start ran a gather conversation (O-1)"
+        "a dispatch to a system down at start ran a gather conversation"
 
     assert run.rows_for("cmdb") == [], \
         f"a refused call to a system down at start wrote a query row: {run.rows_for('cmdb')}"
     assert run.state.breaker_failures("cmdb") == 0, \
-        f"a system down at start was charged (O-2): {run.breaker}"
-    assert run.total_failures == 0, f"the run was charged (O-2): {run.breaker}"
+        f"a system down at start was charged: {run.breaker}"
+    assert run.total_failures == 0, f"the run was charged: {run.breaker}"
 
 
 def test_the_agent_is_told_at_start_which_systems_are_not_configured_and_why(tmp_path):
@@ -469,7 +469,7 @@ def test_a_not_configured_reason_names_the_settings_pointer_never_the_host_path(
             f"{what} does not name the missing file by its settings pointer ({pointer}): {shown!r}"
         for host_path in host_paths:
             assert host_path not in whole, \
-                f"{what} carries the host data root path (#1106): {host_path}"
+                f"{what} carries the host data root path: {host_path}"
 
 
 def test_three_unconfigured_systems_never_charge_and_the_run_reaches_its_close(tmp_path):
@@ -492,9 +492,9 @@ def test_three_unconfigured_systems_never_charge_and_the_run_reaches_its_close(t
     }, behaviour={"cmdb": REAL, "identity": REAL, "change-mgmt": REAL, CONFIGURED: OK})
 
     assert run.failures(*THREE_DOWN, CONFIGURED) == dict.fromkeys((*THREE_DOWN, CONFIGURED), 0), \
-        f"a not-configured system's failure was charged (O-2): {run.breaker}"
+        f"a not-configured system's failure was charged: {run.breaker}"
     assert run.total_failures == 0, \
-        f"a not-configured system's failure was charged to the run (O-2): {run.breaker}"
+        f"a not-configured system's failure was charged to the run: {run.breaker}"
     assert run.summary.get("exit_reason") is None, \
         f"the run did not end normally (RunAborted?): {run.summary.get('exit_reason')!r}"
     assert run.summary.get("truncated_by") is None, \
@@ -529,8 +529,7 @@ def test_only_failures_of_configured_systems_are_charged(tmp_path):
 
     assert run.failures("cmdb", "identity", "change-mgmt", CONFIGURED) == {
             "cmdb": 0, "identity": 0, "change-mgmt": 2, CONFIGURED: 2}, (
-        "only the configured systems' failures may be charged, each one counted "
-        f"(O-2): {run.breaker}")
+        f"only the configured systems' failures may be charged, each one counted: {run.breaker}")
     assert run.total_failures == 4, \
         f"the run total must count exactly the configured failures: {run.breaker}"
     assert run.summary.get("exit_reason") is None, \
@@ -600,15 +599,15 @@ def test_a_tripped_systems_refusal_names_its_count_not_configuration(tmp_path, c
     assert f"{circuit_breaker.PER_SYSTEM_FAIL_LIMIT} infra failures" in refused.lower(), \
         f"a tripped system's refusal keeps its count: {refused!r}"
     assert not _NOT_CONFIGURED.search(refused), \
-        f"a tripped system's refusal still names 'not configured' as a cause (DP2): {refused!r}"
+        f"a tripped system's refusal still names 'not configured' as a cause: {refused!r}"
 
     kills = [r.getMessage() for r in caplog.records if "run aborted" in r.getMessage().lower()]
     assert kills, "precondition: the run's abort is logged with its message"
     for message in kills:
         assert "unconfigured" not in message.lower(), \
-            f"the run-kill message still blames configuration (DP2): {message!r}"
+            f"the run-kill message still blames configuration: {message!r}"
         assert not _NOT_CONFIGURED.search(message), \
-            f"the run-kill message still names 'not configured' (DP2): {message!r}"
+            f"the run-kill message still names 'not configured': {message!r}"
 
 
 #: The reason an escaped call-time `ConfigFault` carries, and its distinctive token.
@@ -639,11 +638,11 @@ def test_a_config_fault_at_call_time_marks_its_system_not_configured_uncharged(t
         f"control: the configured cmdb call runs and writes its row: {run.rows}"
     assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.health-check"], (
         "after a call-time ConfigFault the system must be down: no later call may run its "
-        f"verb (O-5b): {run.calls_to(CONFIGURED)}")
+        f"verb: {run.calls_to(CONFIGURED)}")
     assert run.state.breaker_failures(CONFIGURED) == 0, \
-        f"a call-time ConfigFault was charged to its system (O-5b): {run.breaker}"
+        f"a call-time ConfigFault was charged to its system: {run.breaker}"
     assert run.total_failures == 0, \
-        f"a call-time ConfigFault was charged to the run (O-5b): {run.breaker}"
+        f"a call-time ConfigFault was charged to the run: {run.breaker}"
 
     _assert_not_configured_refusal(run.lead_answer("l-001", 1), ESCAPED_TOKEN,
                                    "the lead's next call after the escaped ConfigFault")
@@ -659,7 +658,7 @@ def test_a_config_fault_at_call_time_marks_its_system_not_configured_uncharged(t
                if r.levelno >= logging.ERROR and _names(r.getMessage(), CONFIGURED)]
     assert defects, (
         "the escaped ConfigFault was not logged as an adapter defect at ERROR or above naming "
-        f"{CONFIGURED} (K3): {[(r.levelname, r.getMessage()) for r in caplog.records]}")
+        f"{CONFIGURED}: {[(r.levelname, r.getMessage()) for r in caplog.records]}")
 
 
 class _AtFirstRequest:
@@ -699,14 +698,13 @@ def test_the_operator_log_names_each_down_system_and_why_at_start(tmp_path, capl
                  if _names(r.getMessage(), system) and token.lower() in r.getMessage().lower()]
         assert len(lines) == 1, (
             f"the start log must carry one line naming {system} and its reason ({token}) at "
-            f"WARNING or above (O-7); found {len(lines)} among {shown}")
+            f"WARNING or above; found {len(lines)} among {shown}")
         per_system[system] = lines[0]
     assert len({id(r) for r in per_system.values()}) == len(THREE_DOWN), (
-        f"O-7: one line PER down system — these systems share one record: {shown}")
+        f"down systems share one start-log record: {shown}")
     for system, record in per_system.items():
         others = [s for s in THREE_DOWN if s != system and _names(record.getMessage(), s)]
         assert others == [], (
-            f"O-7: {system}'s start line also names {others} — one line per system: "
-            f"{record.getMessage()!r}")
+            f"{system}'s start line also names {others}: {record.getMessage()!r}")
     assert [m for _lvl, m in shown if _names(m, CONFIGURED)] == [], \
         f"the start log names a configured system as if it were down: {shown}"

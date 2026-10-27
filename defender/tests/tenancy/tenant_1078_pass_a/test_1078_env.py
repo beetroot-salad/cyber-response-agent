@@ -18,20 +18,13 @@ TENANT = H.VALID_ID
 R1 = fixture_uuid("1078-env-r1")
 
 
-def _fresh_run(root: Path, tenant_id: str = TENANT) -> Path:
-    """A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the data root this process resolves."""
-    if not location_path(H.row_path)(root, tenant_id).is_file():
-        H.make_tenant(root, tenant_id)
-    alert = H.plant_alert(root.parent / f"alert-{tenant_id}")
-    tenant = H.accept(H.resolve_data_root(), tenant_id)
+def _fresh_run(root: Path) -> Path:
+    """A fresh run of `TENANT` materialised by the REAL `materialize_run` under the data root this process resolves."""
+    if not location_path(H.row_path)(root, TENANT).is_file():
+        H.make_tenant(root, TENANT)
+    alert = H.plant_alert(root.parent / f"alert-{TENANT}")
+    tenant = H.accept(H.resolve_data_root(), TENANT)
     return H.run_common().materialize_run(alert, tenant=tenant).run_dir
-
-
-
-def _box_env(run_dir: Path) -> dict[str, str]:
-    """The env a run's box is created with, read off the real `docker run` argv builder."""
-    argv = H.mod("box")._create_argv("defender-r1", Path(run_dir), H.DEFENDER, H.mod("box._spec").DEFAULT_SPEC, lane=H.mod("box")._run_lane_mounts(Path(run_dir), H.DEFENDER, None)).argv
-    return dict(argv[i + 1].partition("=")[::2] for i, a in enumerate(argv) if a == "--env")
 
 
 def _corpus_paths(corpus_root: str | Path) -> set[Path]:

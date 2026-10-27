@@ -64,7 +64,7 @@ def test_rename_proof_with_a_new_row_constant(tmp_path):
     proof = load_module(DEFENDER / "tests" / "storage" / "test_1077_rename_proof.py",
                         name=f"rename_proof_1078_{uuid.uuid4().hex}")
     assert "DEFAULT_TENANT_ID" not in proof._SKIP_NAMES, (
-        "the rename proof still skips DEFAULT_TENANT_ID, which D2 deletes")
+        "the rename proof still skips the deleted DEFAULT_TENANT_ID")
     source = (DEFENDER / "tenancy/_tenant.py").read_text(encoding="utf-8")
     rewritten, _count = proof._rewrite_owner(source)
     before = _upper_str_constants(source)

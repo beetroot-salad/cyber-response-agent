@@ -122,16 +122,15 @@ def test_an_escaped_fault_naming_an_out_of_tree_roster_reaches_the_model_with_th
         f"{len(gather.seen)} times):\n{after[-2000:]}")
     leaked = [s for s in spellings if s in after]
     assert not leaked, (
-        f"an escaped call-time fault reached the model naming the adapters roster {leaked} — the "
-        f"one maker hides it, as it does a start-time reason (r4, A6)")
+        f"an escaped call-time fault reached the model naming the adapters roster {leaked}")
     for where, text in (("MAIN's opening message", main.seen[0]),
                         ("gather's system index", gather.seen[0])):
         shown = [ln for ln in text.splitlines() if "elastic" in ln and START_MARK in ln]
         assert shown, (
             f"{where} does not show elastic down with its start-time reason ({START_MARK}) on "
-            f"its line (O-5a, flow step 4)")
+            f"its line")
         leaked = [s for s in spellings if s in text]
-        assert not leaked, f"{where} names the adapters roster {leaked} (A6)"
+        assert not leaked, f"{where} names the adapters roster {leaked}"
 
 
 #: What a sibling's folder name adds to the name it shares a prefix with: a word character, a
@@ -173,8 +172,7 @@ def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
         bounded = f"/{prefix.name}{tail}"
         assert after.count(tail) == after.count(bounded), (
             f"a path sharing {whose} prefix reached the model partly rewritten — its tail "
-            f"{tail!r} no longer follows its own directory name {prefix.name!r} (r4: the one "
-            f"maker hides whole paths): "
+            f"{tail!r} no longer follows its own directory name {prefix.name!r}: "
             f"{[ln for ln in after.splitlines() if tail in ln][:3]}")
     assert shim.calls() == [], shim.calls()
 
@@ -209,7 +207,7 @@ def test_an_escaped_fault_naming_a_data_root_path_reaches_the_model_with_no_host
     spelled = sorted({str(p) for p in (host_only, host_only.resolve())})
     assert not [s for s in spelled if s in after], (
         f"an escaped call-time fault reached the model naming the host file it read, under the "
-        f"data root (r4: the one maker hides it, as at start; #1106): {carrying[:3]}")
+        f"data root: {carrying[:3]}")
     roots = sorted({p for base in (root, folder) for p in (base, base.resolve())}, key=str)
     leaked = sorted({hit for ln in carrying for hit in host_paths_in(ln, *roots)})
     assert not leaked, (

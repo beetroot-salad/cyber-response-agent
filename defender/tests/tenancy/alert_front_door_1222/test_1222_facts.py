@@ -163,15 +163,15 @@ def _unlike_unmapped(case: S.Drive, ref: S.Drive, label: str) -> list[str]:
     return problems
 
 
-def _carries(d: S.Drive, signature: str, label: str, *, decoy: str | None = DECOY) -> list[str]:
+def _carries(d: S.Drive, signature: str, label: str) -> list[str]:
     """Every reader that did NOT yield `signature` — the orientation lookups (one whole argument),
     the ticket's one `sig:` label — or that yielded the decoy `rule.id` instead."""
     problems: list[str] = []
     if not _hands(d, signature):
         problems.append(f"[{label}] no orientation lookup was handed {signature!r}: {_argvs(d)!r}")
-    if decoy is not None and _hands(d, decoy):
+    if _hands(d, DECOY):
         problems.append(f"[{label}] an orientation lookup was handed the alert's rule.id "
-                        f"{decoy!r} instead: {_argvs(d)!r}")
+                        f"{DECOY!r} instead: {_argvs(d)!r}")
     if _labels(d, "sig:") != [f"sig:{signature}"]:
         problems.append(f"[{label}] the case ticket's sig: labels are {_labels(d, 'sig:')!r}, "
                         f"not ['sig:{signature}']")
@@ -258,9 +258,9 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
     ]
     reals = [(name, _drive(tmp_path, planted, _literal(_alert(vendor=_HOLE), lit),
                            mapping=VENDOR), want)
-             for i, (name, lit, want) in enumerate(real)]
+             for name, lit, want in real]
     bads = [(name, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit), mapping=SHIPPED), leaked)
-            for i, (name, lit, leaked) in enumerate(bad)]
+            for name, lit, leaked in bad]
     # rule.name over the committed fixture alerts; each against its own fixture's reference.
     by_name = {**SHIPPED, "signature": "rule.name"}
     names = []
@@ -309,7 +309,7 @@ def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
         ("object at the end", {**mapping, "signature": "vendor"}, {"rule": {"key": "LK-7731"}}),
     ]
     runs = [(name, _drive(tmp_path, planted, {**_alert(), "vendor": value}, mapping=m))
-            for i, (name, m, value) in enumerate(shapes)]
+            for name, m, value in shapes]
 
     problems: list[str] = []
     for name, d in runs:
@@ -333,7 +333,7 @@ def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
              ("negative number as text", json.dumps("-7731"), "-7731")]
     runs = [(name, value, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit),
                                  mapping=SHIPPED))
-            for i, (name, lit, value) in enumerate(cases)]
+            for name, lit, value in cases]
 
     # Positive control: a valid rule.id IS handed to the lookups as one argument.
     problems = [] if _hands(valid, VALID) else [
@@ -355,7 +355,7 @@ def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
     controls = [("NUL", "Zq7731\u0000nul"), ("escape", "Zq7731\u001b[31mred"),
                 ("DEL", "Zq7731\u007fdel"), ("tab", "Zq7731\ttab"), ("bell", "Zq7731\u0007")]
     runs = [(name, value, _drive(tmp_path, planted, _alert(value), mapping=SHIPPED))
-            for i, (name, value) in enumerate(controls)]
+            for name, value in controls]
     nul_data = _drive(tmp_path, planted, S.generic_alert(
         rule={"id": VALID, "description": "first part\u0000second part"},
         detected_at="2026-09-30T08:15:00Z\u0000"), mapping=SHIPPED)
@@ -398,9 +398,9 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
             ("12345678901234567890.5", "1.2345678901234567e+19"))]
     reals = [(name, _drive(tmp_path, planted, _literal(_alert(vendor=_HOLE), lit),
                            mapping=VENDOR), want)
-             for i, (name, lit, want) in enumerate(real)]
+             for name, lit, want in real]
     bads = [(name, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit), mapping=SHIPPED), leaked)
-            for i, (name, lit, leaked) in enumerate(bad)]
+            for name, lit, leaked in bad]
 
     problems: list[str] = []
     for name, d, want in reals:
@@ -451,14 +451,14 @@ def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> No
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=S.DEFAULT_MAPPING)
     fixtures = [(slug, S.fixture_alert(slug)["alert_timestamp"],
                  _drive(tmp_path, planted, S.fixture_alert_bytes(slug)))
-                for i, slug in enumerate(S.FIXTURE_SLUGS)]
+                for slug in S.FIXTURE_SLUGS]
     shapes = [("integer", "1727683200", "1727683200"), ("zero", "0", "0"),
               ("text", '"now"', "now"), ("object", '{"t": 1727683200}', None),
               ("list", '["2026-09-30T08:15:00Z"]', None), ("float", "1727683200.5", None)]
     generic = [(name, want, _drive(tmp_path, planted,
                                    _literal(_alert("R-EVT-1", detected_at=_HOLE), lit),
                                    mapping=SHIPPED))
-               for i, (name, lit, want) in enumerate(shapes)]
+               for name, lit, want in shapes]
 
     problems: list[str] = []
     for slug, stamp, d in fixtures:
@@ -496,7 +496,7 @@ def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> 
               ("curly quotes", "\u201cZq7731\u201d"), ("guillemets", "\u00abZq7731\u00bb"),
               ("fullwidth quote", "Zq7731\uff02fw")]
     runs = [(name, value, _drive(tmp_path, planted, _alert(value), mapping=SHIPPED))
-            for i, (name, value) in enumerate(values)]
+            for name, value in values]
 
     problems: list[str] = []
     for name, value, d in runs:

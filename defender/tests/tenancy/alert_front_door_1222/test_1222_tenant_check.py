@@ -432,18 +432,6 @@ def assert_no_parser_text(v: Verdict, fragments: Iterable[str]) -> None:
             f"{v.site}'s refusal carries the parser's own text {fragment!r}: {v.text!r}")
 
 
-def carried_values(doc: Any) -> set[str]:
-    """Every scalar an alert document carries, as text (a fact a mapping names is one of these,
-    carried as-is)."""
-    if isinstance(doc, dict):
-        return set().union(*(carried_values(v) for v in doc.values())) if doc else set()
-    if isinstance(doc, list):
-        return set().union(*(carried_values(v) for v in doc)) if doc else set()
-    if isinstance(doc, (str, int)) and not isinstance(doc, bool):
-        return {str(doc)}
-    return set()
-
-
 @pytest.mark.parametrize("shape", FAULT_PARAMS)
 def test_bad_alert_mapping_is_refused_by_the_tenant_check(tmp_path: Path, capsys: Any,
                                                           shape: str) -> None:
@@ -575,14 +563,6 @@ def test_p095_case_mapping_carries_source_and_an_alert_mapping(tmp_path: Path,
     ok = at_run_start(w, alert=alert)
     assert_passed(ok)
     assert ok.detail.recorded("signature") == "U-7f3a"
-
-
-P098_FAULTS: dict[str, tuple[str | None, str | None, str]] = {
-    "alert-mapping-missing": ("missing_file", None, ALERT_MAPPING),
-    "alert-mapping-malformed": ("null_entry", None, ALERT_MAPPING),
-    "alert-mapping-unknown-key": ("unknown_key", None, ALERT_MAPPING),
-    "case-mapping-top-level-source": (None, "top_level_source_populated", CASE_MAPPING),
-}
 
 
 #: The fault shapes p102 runs through the run's own channels — one of each kind.

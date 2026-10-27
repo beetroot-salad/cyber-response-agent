@@ -40,11 +40,6 @@ BASE_RULE = {"id": "R-1001", "name": "Generic outbound beacon",
 EVENT_TIME = "2026-09-30T08:15:00Z"
 
 
-class _StoppedAfterSetup(Exception):
-    """Raised from `before=` — the run stops after setup wrote its folder and before the driver
-    (and with it the box) starts: an interrupted run whose folder holds only what setup wrote."""
-
-
 # Local helpers (scenario plumbing only; every decision is production's)
 
 def _rule(**members: Any) -> dict[str, Any]:
@@ -106,23 +101,6 @@ def _host_rewrite(path: Path, data: bytes | None) -> None:
         path.chmod(file_mode)
     finally:
         parent.chmod(parent_mode)
-
-
-def _stopped_after_setup(tmp_path: Path, planted: S.Planted, alert: Any) -> Path:
-    """Drive `alert` until setup has written the run folder, then stop it there (an
-    interrupted run). Returns the folder."""
-    folder: dict[str, Path] = {}
-
-    def stop(run_dir: Path) -> None:
-        folder["run_dir"] = Path(run_dir)
-        raise _StoppedAfterSetup("stopped after setup")
-
-    d = _drive(tmp_path, planted, alert=alert, before=stop)
-    assert isinstance(d.raised, _StoppedAfterSetup), (
-        f"the interrupted run never reached the point after setup (rc={d.rc!r}, "
-        f"refusal={d.refusal!r}, raised={d.raised!r})")
-    assert "run_dir" in folder
-    return folder["run_dir"]
 
 
 def _failed_shims() -> S.RecordingShim:

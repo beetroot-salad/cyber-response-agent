@@ -11,7 +11,6 @@ import os
 import sys
 from pathlib import Path
 from defender.records import RunPaths
-from typing import Any
 
 import pytest
 
@@ -82,13 +81,11 @@ def _golden_alert(tmp_path: Path) -> Path:
     return alert
 
 
-def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
+def _sibling_world(root: Path, label: str = "b"):
     """An episode at `<root>/<T>/episodes/<uuid>` whose manifest names a source at T's tenant
-    location, and the `ResumeWorld` a sibling resolves from it. `family` passes through to
-    `H.family_for`."""
-    del tmp_path
+    location, and the `ResumeWorld` a sibling resolves from it."""
     _base, src = H.tenant_source(root, T_ID, row=False)
-    manifest = H.family_for(src, **family)
+    manifest = H.family_for(src)
     ep = manifest.parent
     world = H.run_py().resume_world(
         Episode.open(manifest.parent), label,
@@ -172,15 +169,15 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
         run_dir = Path(_materialize(alert, T_ID))
     finally:
         sys.setprofile(previous)
-    assert fired, "the pipeline never ran defender.tenancy._tenant.accept_tenant (D2 step 1)"
+    assert fired, "the pipeline never ran defender.tenancy._tenant.accept_tenant"
     assert not row.exists()
     assert run_dir.parent == tenant_root / T_ID / "runs"
     assert run_dir.is_dir()
     assert _stamp(run_dir)["tenant_id"] == T_ID
 
 
-def test_d2_sibling_runs_base(tmp_path, tenant_root):
-    src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b")
+def test_d2_sibling_runs_base(tenant_root):
+    src, ep, world_b = _sibling_world(tenant_root, "b")
     world_c = H.run_py().resume_world(
         Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
     arm_b, arm_c = H.T.roster_arm_id(ep, H.T.world_id(ep, "b")), H.T.roster_arm_id(ep, H.T.world_id(ep, "c"))
@@ -201,7 +198,7 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
 @pytest.mark.parametrize("state_location", ["root", "inside", "ancestor", "disjoint"])
 def test_1186_sibling_ignores_legacy_state_override(
         tmp_path, monkeypatch, tenant_root, state_location):
-    src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
+    src, ep, world = _sibling_world(tenant_root, "b")
     alert = RunPaths(src).alert
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
     with Episode.open(ep) as episode:

@@ -92,12 +92,11 @@ def _assert_timed_out_member(value: str | None, *, who: str) -> str:
     """`value` is the timed-out member: a `truncated_by` member that reads back as itself, and
     none of the six base endings (its spelling is the implementer's)."""
     assert value is not None, (
-        f"{who}'s session carries no ending: a timed-out lead reads back as one that finished "
-        "(RJ-10: stamped nothing at base)")
+        f"{who}'s session carries no ending: a timed-out lead reads back as one that finished")
     read_back = _run_end().normalized_truncated_by(value)
     assert read_back == value, (
         f"{who}'s session is stamped {value!r}, which normalized_truncated_by reads back as "
-        f"{read_back!r} — not a member of the truncated_by vocabulary (RJ-10, RF-S3)")
+        f"{read_back!r}: not a truncated_by member")
     assert value not in _base_members(), (
         f"{who}'s timed-out session reads back as the base ending {value!r}: 'timed out' is "
         "named as something else")
@@ -107,8 +106,7 @@ def _assert_timed_out_member(value: str | None, *, who: str) -> str:
 def _assert_lead_ran(d: S.Drive) -> None:
     """The precondition every test here rides on: `l-00c` was dispatched on this fresh run."""
     assert d.router.dispatched(L3), (
-        f"l-00c never ran: the correlation lead is dispatched on every fresh run, before MAIN's "
-        f"opening message is built (A4, D3); gather conversations: {d.router.leads()}")
+        f"l-00c never ran on a fresh run; gather conversations: {d.router.leads()}")
 
 
 def _assert_main_never_asked(d: S.Drive, why: str) -> None:
@@ -133,8 +131,7 @@ def _prose(d: S.Drive) -> str:
 def _assert_summary_delivered(d: S.Drive, text: str) -> None:
     opening = d.opening_message
     assert any(text in body for body in S.framed_bodies(opening)), (
-        "the correlation lead's summary is not inside a frame of MAIN's opening message — MAIN's "
-        "first request did not follow the lead's end (A4)")
+        "the correlation lead's summary is not inside a frame of MAIN's opening message")
     assert text not in S.harness_text(opening), "the summary sits outside its frame"
 
 
@@ -188,7 +185,7 @@ def _alerts_call(i: int = 0) -> S.Turn:
     return S.query("elastic", "alerts", {"native_query": f'host.hostname:"app-7" AND seq:{i}'})
 
 
-def _parallel(system: str, verb: str, n: int, *, start: int = 0) -> S.Turn:
+def _parallel(system: str, verb: str, n: int) -> S.Turn:
     """ONE model response carrying `n` concurrent calls with distinct params."""
     def params(i: int) -> dict:
         if (system, verb) == ("elastic", "alerts"):
@@ -199,7 +196,7 @@ def _parallel(system: str, verb: str, n: int, *, start: int = 0) -> S.Turn:
 
     return S.Turn(tool_calls=tuple(
         ("query", {"system": system, "verb": verb, "params": params(i)})
-        for i in range(start, start + n)))
+        for i in range(n)))
 
 
 def _kill_limit() -> int:
@@ -287,22 +284,20 @@ def _assert_budget_kill_during_lead(d: S.Drive, stores: list) -> None:
         "one of the lead's own endings")
 
 
-def _kill_by_mains_failures(tmp: Path, tenant: S.Planted, *, stores: list,
-                            correlation: list[S.Turn] | None = None) -> S.Drive:
+def _kill_by_mains_failures(tmp: Path, tenant: S.Planted, *, stores: list) -> S.Drive:
     """MAIN's own lead (`l-001`, cmdb) fails RUN_FAIL_KILL_LIMIT calls in one response."""
     return S.run_alert(
         tmp, tenant=tenant,
         main=[S.gather("l-001", "cmdb"), S.text(S.DONE)],
-        leads={L3: correlation or [S.text(SUMMARY)],
+        leads={L3: [S.text(SUMMARY)],
                "l-001": [_parallel("cmdb", "get-host", _kill_limit()), S.text("no host")]},
         backend=S.Backend(fault=T.Fault(fail_on=("cmdb.",))),
         store_factory=S.store_factory(tmp, sink=stores), stores=stores)
 
 
-def _store_fault_after_lead_output(tmp: Path, tenant: S.Planted, *,
-                                   stores: list, **kw: Any) -> S.Drive:
+def _store_fault_after_lead_output(tmp: Path, tenant: S.Planted, *, stores: list) -> S.Drive:
     return S.run_alert(tmp, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
-                       store_factory=_main_append_fault_store(tmp, stores), stores=stores, **kw)
+                       store_factory=_main_append_fault_store(tmp, stores), stores=stores)
 
 
 def _assert_store_fault_stopped_the_run(d: S.Drive) -> None:
@@ -315,14 +310,13 @@ def _assert_store_fault_stopped_the_run(d: S.Drive) -> None:
     stopped = escaped or (d.summary or {}).get("truncated_by") == store_member
     assert stopped, (
         f"a store fault after the lead's output did not stop the run: raised {d.raised!r}, "
-        f"summary {d.summary!r} (RJ-01: truncated_by {store_member!r})")
+        f"summary {d.summary!r} (expected truncated_by {store_member!r})")
     assert d.main.requests <= 1, "MAIN went on past a refused store write"
 
 
-def _setup_fault_after_lead(tmp: Path, tenant: S.Planted, *, stores: list,
-                            before: Callable[[Path], None] | None = None) -> S.Drive:
+def _setup_fault_after_lead(tmp: Path, tenant: S.Planted, *, stores: list) -> S.Drive:
     return S.run_alert(tmp, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
-                       defender_dir=_tree_without_main_prompt(tmp), before=before,
+                       defender_dir=_tree_without_main_prompt(tmp),
                        store_factory=S.store_factory(tmp, sink=stores), stores=stores)
 
 
@@ -353,8 +347,8 @@ def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
     _assert_killed(failures, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
     assert _session_ending(stores, "l-001") == _run_end().TRUNCATED_BY_ABORTED
     assert _session_ending(stores, L3) is None, (
-        "the correlation lead finished with its summary, yet its session reads as ended by "
-        "something — MAIN's kill was laid onto the correlation lead")
+        "the correlation lead finished with its summary, but its session reads as ended by "
+        "MAIN's kill")
 
     stores = []
     store = _store_fault_after_lead_output(tmp_path / "store", tenant,

@@ -311,7 +311,7 @@ def test_data_root_itself_is_a_symlink(tmp_path, monkeypatch):
     resolved = H.resolve_data_root()
     assert resolved == target.resolve()
     refusal = H.owner_refusal(H.create_tenant, resolved, fixture_uuid("tenant:playground"))
-    assert "stray" in str(refusal), f"O10's scan did not list the target's entry: {refusal}"
+    assert "stray" in str(refusal), f"the non-empty-root scan did not list the target's entry: {refusal}"
     assert str(link) not in str(refusal), "the refusal names the unresolved link"
     assert H.entries(target) == ["stray"], "the refused create wrote into the target"
 
@@ -331,7 +331,7 @@ def test_1186_legacy_state_override_cannot_refuse_the_data_root(tmp_path, monkey
         learning.symlink_to(data, target_is_directory=True)
     H.set_data_root(monkeypatch, data)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
-    assert H.resolve_data_root() == data.resolve(), "O1: the retired state override is inert"
+    assert H.resolve_data_root() == data.resolve(), "the retired state override moved the data root"
     # Both overlapping and disjoint stale overrides are ignored.
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "elsewhere" / "learning"))
     assert H.resolve_data_root() == data.resolve()

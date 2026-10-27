@@ -28,12 +28,12 @@ from defender.tests.tenancy.alert_front_door_1222.test_1256_down_at_start import
     _CMDB_QUERY,
     _PLANTED_CMDB,
     BROKEN_MARK,
-    PLANTED_CALLS,
     TABLE_THREE,
     _drop,
     _import_state_restored,
     _names_system,
     _planted_calls,
+    _planted_elastic,
     _planted_tree,
     _tree_with_broken_elastic,
 )
@@ -86,12 +86,11 @@ def test_a_system_downed_during_lead_zero_is_shown_down_to_main_and_to_the_first
     view = _outside_correlation(d.opening_message)
     assert _down_lines(view, "elastic", LIVE_KEY), (
         f"MAIN's opening view does not show elastic as not configured with its reason "
-        f"({LIVE_KEY}) though lead zero downed it before the view was built (r4: surfaces read "
-        f"the current status, not a copy taken at start):\n{view}")
+        f"({LIVE_KEY}) though lead zero downed it before the view was built:\n{view}")
     index = _index_of(d, "l-001")
     assert _down_lines(index, "elastic", LIVE_KEY), (
         f"the system index of the first lead MAIN dispatched does not show elastic as not "
-        f"configured with its reason ({LIVE_KEY}) (r4):\n{index}")
+        f"configured with its reason ({LIVE_KEY}):\n{index}")
 
 
 def _index_of(d: S.Drive, lead_id: str) -> str:
@@ -133,8 +132,7 @@ def test_a_system_downed_by_a_main_lead_is_shown_down_in_the_next_leads_index(
     index = _index_of(d, "l-002")
     assert _down_lines(index, "cmdb", CMDB_LIVE_KEY), (
         f"the system index of the lead MAIN dispatched after cmdb went down does not show cmdb as "
-        f"not configured with its reason ({CMDB_LIVE_KEY}) (r4: every surface reads the current "
-        f"status when it is rendered, not a copy taken earlier):\n{index}")
+        f"not configured with its reason ({CMDB_LIVE_KEY}):\n{index}")
 
 
 class _ProbingMain(S.MainScript):
@@ -195,7 +193,7 @@ def _assert_gate_before_claim(d: S.Drive, main: _ProbingMain, system: str, what:
     assert len(main.probed) >= 2, f"{what}: MAIN was never asked after its first dispatch"
     assert main.probed[1] == [], (
         f"{what}: the dispatch of l-001 to {system}, which is down, wrote a lead record before "
-        f"MAIN read its refusal (r4: the down gate comes before the lead claim): {main.probed[1]}")
+        f"MAIN read its refusal: {main.probed[1]}")
     assert d.has_sidecar("l-001"), (
         f"{what}: l-001 dispatched again on cmdb was never claimed: {_first_answer(d)!r}")
     goal = str(d.sidecar("l-001").get("goal"))
@@ -209,16 +207,15 @@ def _assert_gate_before_claim(d: S.Drive, main: _ProbingMain, system: str, what:
         f"{d.router.dispatch_block('l-001')}")
     answer = _first_answer(d)
     assert _names_system(answer, system), (
-        f"{what}: the refusal MAIN got for its dispatch to {system} does not name it (O-4): "
-        f"{answer!r}")
+        f"{what}: the refusal MAIN got for its dispatch to {system} does not name it: {answer!r}")
     missing = [w for w in said if w.lower() not in answer.lower()]
     assert not missing, (
-        f"{what}: the refusal MAIN got for its dispatch to {system} does not carry {missing} — "
-        f"its down cause (O-4): {answer!r}")
+        f"{what}: the refusal MAIN got for its dispatch to {system} does not carry its down "
+        f"cause {missing}: {answer!r}")
     wrong = [w for w in unsaid if w.lower() in answer.lower()]
     assert not wrong, (
         f"{what}: the refusal MAIN got for its dispatch to {system} names another cause "
-        f"({wrong}) (DP4): {answer!r}")
+        f"({wrong}): {answer!r}")
 
 
 def test_a_dispatch_to_a_system_down_at_start_claims_no_lead_id(tmp_path: Path) -> None:
@@ -292,38 +289,10 @@ _NO_CHECK = "def check_settings(*_a, **_k):\n    return None\n"
 
 _COUNTED_CMDB = _PLANTED_CMDB.replace(_NO_CHECK, _counted("cmdb"))
 
-#: A planted elastic with the real verbs' signatures (run.py's lead-zero agreement check reads the
-#: checkout's declared `alerts`; the driver dispatches l-00c on this one).
-_COUNTED_ELASTIC = f'''\
-"""#1256 planted: an elastic adapter whose settings check counts its calls."""
-from pathlib import Path
-
-
-def _record_planted_call(verb):
-    with open(Path(__file__).parents[3] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
-        print(f"elastic.{{verb}}", file=log)
-
-
-{_counted("elastic")}
-
-def _search(ctx, *, native_query: str, start=None, end=None, limit: int = 20, index=None,
-            sort: str = "desc") -> dict:
-    _record_planted_call("search")
-    return {{"hits": [], "planted": True}}
-
-
-def esql(ctx, *, query: str) -> dict:
-    _record_planted_call("esql")
-    return {{"values": [], "planted": True}}
-
-
-def health_check(ctx) -> dict:
-    _record_planted_call("health-check")
-    return {{"ok": True, "planted": True}}
-
-
-VERBS = {{"health-check": health_check, "query": _search, "alerts": _search, "esql": esql}}
-'''
+#: A planted elastic (the driver dispatches l-00c on this one) whose settings check counts its
+#: calls.
+_COUNTED_ELASTIC = _planted_elastic("an elastic adapter whose settings check counts its calls",
+                                    _counted("elastic"))
 
 
 class _UnboxedStart:
@@ -389,9 +358,8 @@ def test_each_granted_system_is_judged_once_per_run_and_that_verdict_is_the_runs
     log = root / CHECKS
     judged = Counter(log.read_text(encoding="utf-8").split()) if log.is_file() else Counter()
     assert judged == Counter({"cmdb": 1, "elastic": 1}), (
-        f"each granted system's settings check must run exactly once per run (r4: run.py judges "
-        f"once and hands the result to the run): {dict(judged)} (rc={out['rc']!r}, "
-        f"raised={out['raised']!r}, refusal={out['refusal']!r})")
+        f"each granted system's settings check must run exactly once per run: {dict(judged)} "
+        f"(rc={out['rc']!r}, raised={out['raised']!r}, refusal={out['refusal']!r})")
     assert out["raised"] is None, f"the run crashed under run.py's verdict (all usable): {out}"
     assert out["refusal"] is None, f"the run was refused though run.py found all usable: {out}"
     assert out["rc"] == 0, f"the run did not end cleanly under run.py's verdict: {out}"

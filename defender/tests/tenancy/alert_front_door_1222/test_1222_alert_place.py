@@ -120,20 +120,6 @@ def _assert_read_whole_and_framed(ret: str, text: str, what: str) -> None:
     assert MARK not in S.harness_text(ret), f"{what}: alert text sits OUTSIDE the frame"
 
 
-@dataclass(frozen=True)
-class _HostStep(S.Turn):
-    """A scripted model answer that first runs a host-side step (the host replacing a file while
-    the run is live): `step` changes real bytes on the real filesystem, then the scripted answer
-    follows."""
-
-    step: Callable[[], None] | None = None
-
-    def response(self) -> Any:
-        if self.step is not None:
-            self.step()
-        return super().response()
-
-
 def _replace_alert(run_dir: Path, data: bytes = DECOY_BYTES) -> None:
     """The host replaces the stored alert by an atomic rename inside its own directory, keeping
     the record — the alert's bytes no longer match the recorded digest."""
@@ -145,12 +131,12 @@ def _replace_alert(run_dir: Path, data: bytes = DECOY_BYTES) -> None:
     os.replace(tmp, alert)
 
 
-def _replace_alert_and_record(run_dir: Path, data: bytes = DECOY_BYTES) -> None:
-    """The host replaces the alert AND rewrites the record's digest to match it: a folder that
-    is self-consistent but no longer holds the alert an episode copied from it."""
+def _replace_alert_and_record(run_dir: Path) -> None:
+    """The host replaces the alert with the decoy AND rewrites the record's digest to match it:
+    a folder that is self-consistent but no longer holds the alert an episode copied from it."""
     doc = S.read_record(run_dir)
-    doc[S.COINED["record.digest"]] = S.sha256_hex(data)
-    _replace_alert(run_dir, data)
+    doc[S.COINED["record.digest"]] = S.sha256_hex(DECOY_BYTES)
+    _replace_alert(run_dir)
     record = S.record_file(run_dir)
     tmp = record.with_name(f".s08-replace-{uuid.uuid4().hex[:8]}")
     tmp.write_bytes(json.dumps(doc).encode("utf-8"))
@@ -176,20 +162,6 @@ def _assert_names_the_run_and_carries_no_byte(text: str, run_dir: Path, what: st
     or the record (the decoy's marker, the recorded digest)."""
     assert text, f"{what}: nothing refused"
     assert Path(run_dir).name in text, f"{what}: the refusal does not name the run: {text[:400]!r}"
-    assert DECOY not in text, f"{what}: the refusal carries the replaced alert's bytes"
-    with contextlib.suppress(AssertionError, OSError, ValueError):
-        digest = S.recorded_digest(run_dir)
-        assert digest not in text, f"{what}: the refusal carries the record's bytes (its digest)"
-
-
-def _assert_model_refusal_names_no_run_and_carries_no_byte(text: str, run_dir: Path,
-                                                            what: str) -> None:
-    """The refusal as a model receives it (a tool result): a fixed reason carrying no byte of
-    the alert or the record, and no run folder name either (the run id would differ between
-    arms; the host folder is host layout)."""
-    assert text, f"{what}: nothing refused"
-    assert Path(run_dir).name not in text, (
-        f"{what}: the refusal the model reads names the run folder: {text[:400]!r}")
     assert DECOY not in text, f"{what}: the refusal carries the replaced alert's bytes"
     with contextlib.suppress(AssertionError, OSError, ValueError):
         digest = S.recorded_digest(run_dir)
@@ -238,13 +210,13 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
         publish=in_process_publish())
 
 
-def _scripted_daemon(**kw: Any) -> Any:
+def _scripted_daemon() -> Any:
     """`e2e/_box665.RecordingDocker`: a healthy scripted daemon (create succeeds, the startup
     sentinel reads back) recording every argv, so `start_box`'s REAL argv build runs without a
     live box."""
     from defender.tests.e2e._box665 import RecordingDocker
 
-    return RecordingDocker(**kw)
+    return RecordingDocker()
 
 
 def _readonly_binds_inside(mounts: list[dict]) -> list[dict]:
@@ -271,8 +243,8 @@ def _live_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, hard: bool) -
     half are both bindable. `hard=True` fails where the environment cannot start a box."""
     def unavailable(why: str) -> None:
         if hard:
-            pytest.fail(f"{why} — this cell must run, never skip: CI's `test` job has a daemon "
-                        "and registers runsc (78, RG1)")
+            pytest.fail(f"{why} — this cell must run, never skip (CI's `test` job has a daemon "
+                        "and registers runsc)")
         pytest.skip(why)
 
     if not daemon_reachable():
@@ -282,7 +254,7 @@ def _live_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, hard: bool) -
         anchor = dood_anchor()
         if anchor is None:
             unavailable("docker-outside-of-Docker with no shared mount covering the repo tree, "
-                        "so no bind source resolves (C46)")
+                        "so no bind source resolves")
         else:
             root = anchor / f"t1222-{uuid.uuid4().hex[:12]}"
     root.mkdir(parents=True)
@@ -558,8 +530,7 @@ def test_a1_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
 def test_a1_runsc_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
     with _live_tree(tmp_path, monkeypatch, hard=True):
         assert "runsc" in docker_runtimes(), (
-            "the 'runsc' runtime is not registered with this daemon — this cell FAILS rather "
-            "than skips (78, RG1); CI's `test` job registers runsc")
+            "the 'runsc' runtime is not registered with this daemon (CI's `test` job registers it)")
         start_box = functools.partial(S.sym("box", "start_box"),
                                       spec=_runtime_spec("runsc"))
         seen, alert = _box_write_run(tmp_path, start_box=start_box)
@@ -574,8 +545,7 @@ def test_p151_production_runtime_meets_every_write_shape(tmp_path, monkeypatch):
         monkeypatch.delenv("DEFENDER_BOX_RUNTIME", raising=False)
         production = S.sym("box", "BoxSpec").from_env({}).runtime
         assert production in docker_runtimes(), (
-            f"the production runtime {production!r} is not registered with this daemon — this "
-            "cell FAILS rather than skips (PA-08 never ran; RG1)")
+            f"the production runtime {production!r} is not registered with this daemon")
         seen, alert = _box_write_run(tmp_path, start_box=S.sym("box", "start_box"))
         _assert_box_held(seen, alert)
 
@@ -668,7 +638,7 @@ def test_p192_alert_larger_than_one_read_returns(tmp_path):
     assert d.raised is None, f"run start refused a large alert: {d.raised!r} {d.refusal!r}"
     assert d.rc == 0, f"run start refused a large alert: rc={d.rc} {d.refusal!r}"
     text = d.input_bytes.decode("utf-8")
-    assert len(text) > 65_536, "the alert is not past one read (PA-27) — nothing to observe"
+    assert len(text) > 65_536, "premise: the alert is not longer than one read"
     assert _framed(d.opening_message, text.strip()), "MAIN no longer gets the whole alert inline"
     assert rel in d.sidecar(S.L3)["goal"], "the lead was not pointed at the alert"
     returns = _returns(d.router.seen(S.L3))

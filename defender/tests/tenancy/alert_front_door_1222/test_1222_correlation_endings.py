@@ -43,9 +43,9 @@ def _one_doc(system: str, verb: str, params: dict) -> Any:
     return {"system": system, "verb": verb, "result": []}
 
 
-def _backend(*, fault: Any = T.CLEAN, exc: Callable[[], BaseException] = S.transport_fault,
-             answer: Callable[[str, str, dict], Any] = _one_doc) -> S.Backend:
-    return S.Backend(answer=answer, fault=fault, exc=exc)
+def _backend(*, fault: Any = T.CLEAN,
+             exc: Callable[[], BaseException] = S.transport_fault) -> S.Backend:
+    return S.Backend(answer=_one_doc, fault=fault, exc=exc)
 
 
 def _q(i: int | str) -> S.Turn:
@@ -109,14 +109,13 @@ def _frames(d: S.Drive) -> collections.Counter[str]:
     return collections.Counter(_norm(d, body) for body in S.outer_frames(d.opening_message))
 
 
-def _summary_frame(control: S.Drive, text: str = S.DEFAULT_CORRELATION_SUMMARY) -> str:
+def _summary_frame(control: S.Drive) -> str:
     """The control's correlation summary, framed in its opening message — the positive control
     every 'nothing framed beside the sentence' check is measured against."""
-    found = [b for b in _frames(control) if text in b]
+    found = [b for b in _frames(control) if S.DEFAULT_CORRELATION_SUMMARY in b]
     assert len(found) == 1, (
-        "the summary control's opening message does not carry l-00c's summary in exactly one "
-        f"frame (A4: the lead runs to its end before the opening message is built); "
-        f"frames carrying it: {len(found)}")
+        f"the summary control's opening message carries l-00c's summary in {len(found)} "
+        "frames, not one")
     return found[0]
 
 
@@ -146,9 +145,8 @@ def _named(d: S.Drive, control: S.Drive, what: str) -> str:
     text)."""
     sentence = _ending(d, control)
     assert sentence, (
-        f"{what}: MAIN's opening message names no ending — its harness prose is the summary "
-        "run's, line for line (A2: one fixed sentence outside the lead's frame; RC1: silent "
-        "or late at base)")
+        f"{what}: MAIN's opening message names no ending (its harness prose is the summary "
+        "run's, line for line)")
     assert "<RUN_DIR>" not in sentence, f"{what}: the sentence names the run folder: {sentence!r}"
     # The run folder's model spelling is no more welcome than its host one.
     assert MODEL_RUN not in sentence, f"{what}: the sentence names the run folder: {sentence!r}"
@@ -164,8 +162,8 @@ def _alone(control: S.Drive, *named: tuple[str, S.Drive]) -> None:
     for what, d in named:
         beside = _frames_beside(d, control)
         assert beside == [], (
-            f"{what}: the opening message carries framed lead output beside the sentence "
-            f"(exactly one correlation section, never both): {beside}")
+            f"{what}: the opening message carries framed lead output beside the sentence: "
+            f"{beside}")
 
 
 def _assert_never_handed(d: S.Drive, *needles: str) -> None:
@@ -182,18 +180,18 @@ def _assert_continued(d: S.Drive, what: str, *, requests: int | None = None) -> 
     assert d.rc == 0, f"{what}: rc={d.rc!r}"
     if requests is not None:
         assert d.main.requests == requests, (
-            f"{what}: MAIN made {d.main.requests} requests, its script asks {requests} — the run "
-            "did not continue to MAIN's own end")
+            f"{what}: MAIN made {d.main.requests} requests, its script asks {requests}")
     assert not (d.summary or {}).get("truncated_by"), (
         f"{what}: the run was cut: {d.summary!r}")
 
 
-def _assert_closed(d: S.Drive, what: str, disposition: str = "inconclusive") -> None:
+def _assert_closed(d: S.Drive, what: str) -> None:
+    """report.md closes with MAIN's `inconclusive`."""
     report = d.report
     assert report is not None, f"{what}: the run never wrote report.md ({d.summary!r})"
     meta, _body = S.sym("_frontmatter", "parse_frontmatter")(report)
-    assert meta.get("disposition") == disposition, (
-        f"{what}: report.md closes {meta.get('disposition')!r}, MAIN closed {disposition!r}")
+    assert meta.get("disposition") == "inconclusive", (
+        f"{what}: report.md closes {meta.get('disposition')!r}, MAIN closed 'inconclusive'")
 
 
 def _stopped_loudly(d: S.Drive) -> bool:
@@ -255,16 +253,16 @@ def _lead_session_refused_once(tmp_path: Path) -> Callable[..., Any]:
     return S.store_factory(Path(tmp_path), lead_session="once")
 
 
-def _pre_trip(system: str = "elastic") -> Callable[[Path], None]:
-    """`before=`: the run's breaker already marks `system` down — written by the REAL
+def _pre_trip() -> Callable[[Path], None]:
+    """`before=`: the run's breaker already marks elastic down — written by the REAL
     `circuit_breaker.record_outcome` (two connectivity failures, exit 2)."""
     def plant(run_dir: Path) -> None:
         state = S.sym("investigation.run_state", "RunState")(run_dir, run_dir.name)
         plant.run_state = state
         record = S.sym("systems.circuit_breaker", "record_outcome")
         for _ in range(S.sym("systems.circuit_breaker", "PER_SYSTEM_FAIL_LIMIT")):
-            record(state, system, 2)
-        assert S.sym("systems.circuit_breaker", "is_tripped")(state, system)
+            record(state, "elastic", 2)
+        assert S.sym("systems.circuit_breaker", "is_tripped")(state, "elastic")
     return plant
 
 
@@ -497,7 +495,7 @@ def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any
         # Elastic has no config.env, so it is down from run start; cmdb stays usable.
         return {"scene": _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down"), omit_systems=("elastic",)),
                 "leads": {S.L3: [_q(1), _q(2), S.text("narration")]}}
-    raise AssertionError(f"not an A2 ending: {ending!r}")
+    raise AssertionError(f"no scenario for the ending {ending!r}")
 
 
 #: The named endings, plus `l-00c` on a system down at run start: a named non-run that never
@@ -663,7 +661,7 @@ def test_p191_lead_writes_a_summary_without_reading_the_alert(tmp_path: Path) ->
                            ("read only another file", elsewhere,
                             "FD1222-READ-ELSEWHERE-SUMMARY")):
         assert mark in d.opening_message, (
-            f"{label}: the lead's summary is not in MAIN's opening message (A4)")
+            f"{label}: the lead's summary is not in MAIN's opening message")
         added = _summary_frames(d, control)
         assert len(added) == 1, (
             f"{label}: {len(added)} lead frames in MAIN's opening — not one correlation section")

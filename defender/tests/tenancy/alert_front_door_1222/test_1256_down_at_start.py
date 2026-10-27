@@ -69,6 +69,24 @@ def _down_lead() -> dict[str, Any]:
             "leads": {S.L3: [_q(1), _q(2), _q(3), S.text("FD1256-DOWN-NARRATION")]}}
 
 
+def _breaker_references(scene: _Scene) -> tuple[S.Drive, S.Drive]:
+    """Reference runs of l-00c's tripped-breaker and every-call-failed endings on `scene`."""
+    tripped = scene.run("tb-reference", before=_pre_trip(),
+                        leads={S.L3: [_q(1), S.text("FD1256-TB-NARRATION")]})
+    ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
+                    leads={S.L3: [_q(1), S.text("FD1256-ECF-NARRATION")]})
+    return tripped, ecf
+
+
+def _unconfigured(tmp_path: Path) -> _Scene:
+    """A tenant whose elastic misses ELASTICSEARCH_URL (one of
+    `elastic_adapter.REQUIRED_CONFIG_KEYS`); cmdb stays complete, so gather keeps a usable
+    system and the run is not refused."""
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
+    _drop(scene, "elastic", "ELASTICSEARCH_URL")
+    return scene
+
+
 def _section(d: S.Drive) -> str:
     """The body of MAIN's ONE correlation section (frames kept): where l-00c's ending is named."""
     _head, body = S.correlation_section(d.opening_message)
@@ -80,8 +98,7 @@ def _assert_never_started(d: S.Drive, what: str) -> None:
     charged nothing."""
     assert not d.router.dispatched(S.L3), f"{what}: l-00c was dispatched on a system down at start"
     assert not d.has_sidecar(S.L3), (
-        f"{what}: l-00c claimed its leads-table row though its system was down at start (O-6: "
-        "it ends before the claim, as the withheld ending does)")
+        f"{what}: l-00c claimed its leads-table row though its system was down at start")
     assert d.budget.get("subagent_spawns") == 0, (
         f"{what}: l-00c spent a gather count though its system was down at start: {d.budget!r}")
     assert d.backend.rec.calls == [], (
@@ -119,11 +136,10 @@ def test_o6_down_at_start_has_its_own_ending_constant() -> None:
     others = {name: value for name, value in vars(spec).items()
               if name.startswith("ENDING_") and name != ENDING_NAME}
     assert {"ENDING_TRIPPED_BREAKER", "ENDING_EVERY_CALL_FAILED", "ENDING_WITHHELD"} <= set(
-        others), f"premise: the A2 endings are not where they were: {sorted(others)}"
+        others), f"premise: the named endings are not where they were: {sorted(others)}"
     value = getattr(spec, ENDING_NAME, None)
     assert isinstance(value, str), (
-        f"lead_zero._spec has no {ENDING_NAME} (#1256 O-6: l-00c on a system down at start ends "
-        f"with its own ending): {value!r}")
+        f"lead_zero._spec has no {ENDING_NAME}: {value!r}")
     assert value, f"{ENDING_NAME} is empty"
     assert value not in others.values(), (
         f"{ENDING_NAME} = {value!r} is another ending's value: "
@@ -136,16 +152,9 @@ def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_caus
     scene = _Scene(tmp_path)
     control = scene.control()
     withheld = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-withheld"), table=S.TABLE_WITHHELD).run("withheld")
-    tripped = scene.run("tb-reference", before=_pre_trip(),
-                        leads={S.L3: [_q(1), S.text("FD1256-TB-NARRATION")]})
-    ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
-                    leads={S.L3: [_q(1), S.text("FD1256-ECF-NARRATION")]})
-    # Elastic misses ELASTICSEARCH_URL (one of `elastic_adapter.REQUIRED_CONFIG_KEYS`); cmdb stays
-    # complete, so gather keeps a usable system and the run is not refused.
-    unconfigured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
-    _drop(unconfigured, "elastic", "ELASTICSEARCH_URL")
-    down = unconfigured.run("down-at-start", main=S.closing_main_turns("inconclusive"),
-                            **_down_lead())
+    tripped, ecf = _breaker_references(scene)
+    down = _unconfigured(tmp_path).run("down-at-start", main=S.closing_main_turns("inconclusive"),
+                                       **_down_lead())
 
     # The channels the 'never started' checks read can show a started lead (positive controls).
     assert control.has_sidecar(S.L3), "premise: the summary control's l-00c claimed no row"
@@ -290,13 +299,8 @@ def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path
     scene = _Scene(tmp_path)
     control = scene.control()
     withheld = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-withheld"), table=S.TABLE_WITHHELD).run("withheld")
-    tripped = scene.run("tb-reference", before=_pre_trip(),
-                        leads={S.L3: [_q(1), S.text("FD1256-TB-NARRATION")]})
-    ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
-                    leads={S.L3: [_q(1), S.text("FD1256-ECF-NARRATION")]})
-    unconfigured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
-    _drop(unconfigured, "elastic", "ELASTICSEARCH_URL")
-    not_configured = unconfigured.run("not-configured", **_down_lead())
+    tripped, ecf = _breaker_references(scene)
+    not_configured = _unconfigured(tmp_path).run("not-configured", **_down_lead())
     # The broken adapter's calls would be answered (the injected registry serves them): a run that
     # dispatches the lead anyway is seen calling.
     tree = _tree_with_broken_elastic(tmp_path / "planted")
@@ -337,17 +341,17 @@ def test_o5b_l00c_call_time_config_fault_marks_its_system_not_configured_uncharg
         "premise: l-00c was not dispatched — elastic did not pass the start check")
     calls = d.backend.rec.calls
     assert len(calls) == 1, (
-        f"after elastic's first call raised ConfigFault, {len(calls)} calls reached the verb "
-        "(O-5b: the system is down from that call on; its later calls run no adapter)")
+        f"after elastic's first call raised ConfigFault, {len(calls)} calls reached the verb, "
+        "not 1")
     body = _section(d)
     low = body.lower()
     assert _names_system(body, "elastic"), f"the ending does not name the system: {body!r}"
     assert "not configured" in low, (
-        f"the ending does not name the cause 'not configured' (DP4): {body!r}")
+        f"the ending does not name the cause 'not configured': {body!r}")
     said = [w for w in TRIPPED_WORDS if w in low]
     assert not said, f"the ending names the breaker's cause ({said}) for a config fault: {body!r}"
     assert "config file not found" not in low, (
-        f"the correlation section carries the fault's text (#1222 A2, D5): {body!r}")
+        f"the correlation section carries the fault's text: {body!r}")
     assert d.run_state is not None, "the run left no state to read the breaker from"
     assert d.run_state.breaker_failures("elastic") == 0, (
         f"the escaped ConfigFault was charged to elastic's breaker: {d.breaker!r}")
@@ -382,23 +386,20 @@ def test_d5_l00c_keeps_a_usable_summary_and_main_is_told_its_system_went_down(
     body = _section(d)
     framed = [b for b in S.outer_frames(body) if D5_SUMMARY in b]
     assert framed, (
-        "the usable summary l-00c wrote is not framed in MAIN's correlation section (D5: it is "
-        f"kept, not discarded for a `down_mid_lead` ending): {body!r}")
+        f"the usable summary l-00c wrote is not framed in MAIN's correlation section: {body!r}")
     note = S.harness_text(body)
     assert _names_system(note, "elastic"), (
-        f"no host note beside the summary names elastic (D5: MAIN is told the system went down "
-        f"during the lead): {note!r}")
+        f"no host note beside the summary names elastic: {note!r}")
     assert "not configured" in note.lower(), (
-        f"the host note beside the summary does not name the cause 'not configured' (D5): "
-        f"{note!r}")
+        f"the host note beside the summary does not name the cause 'not configured': {note!r}")
     assert ESCAPE_TOKEN not in body, (
-        f"the correlation section carries the escaped fault's text (D5, #1222 A2): {body!r}")
+        f"the correlation section carries the escaped fault's text: {body!r}")
     said = [w for w in TRIPPED_WORDS if w in note.lower()]
     assert not said, f"the note names the breaker's cause ({said}) for a config fault: {note!r}"
     calls = d.backend.rec.calls
     assert len(calls) == 2, (
-        f"{len(calls)} of l-00c's calls reached the verb; after its second escaped, elastic is "
-        "down (O-5b) and its third must run no adapter")
+        f"{len(calls)} of l-00c's calls reached the verb, not 2 (the third came after the "
+        "second escaped)")
     assert d.run_state is not None, "the run left no state to read the breaker from"
     assert d.run_state.breaker_failures("elastic") == 0, (
         f"the escaped ConfigFault was charged to elastic's breaker: {d.breaker!r}")
@@ -424,18 +425,16 @@ def test_d5_l00c_whose_last_turn_is_empty_ends_down_mid_lead_and_its_text_beside
     low = body.lower()
     assert _names_system(body, "elastic"), (
         f"l-00c ended on an empty turn after elastic went down, and its section does not name "
-        f"elastic (D5a: it ends `down_mid_lead`, which names the cause): {body!r}")
+        f"elastic: {body!r}")
     assert "not configured" in low, (
-        f"the section does not name the cause 'not configured' (D5a, DP4): {body!r}")
+        f"the section does not name the cause 'not configured': {body!r}")
     assert D5_SUMMARY not in body, (
         "MAIN's correlation section carries the text l-00c wrote beside the call that escaped "
-        "though its last turn was empty (D5a: only the lead's final text counts as its summary; "
-        f"text beside the escaping call is not kept): {body!r}")
+        f"though its last turn was empty: {body!r}")
     assert S.outer_frames(body) == [], (
-        f"the section frames lead output though the lead has no summary (D5a): "
-        f"{S.outer_frames(body)}")
+        f"the section frames lead output though the lead has no summary: {S.outer_frames(body)}")
     assert ESCAPE_TOKEN not in body, (
-        f"the correlation section carries the escaped fault's text (D5, #1222 A2): {body!r}")
+        f"the correlation section carries the escaped fault's text: {body!r}")
     said = [w for w in TRIPPED_WORDS if w in low]
     assert not said, f"the section names the breaker's cause ({said}): {body!r}"
     assert d.run_state is not None, "the run left no state to read the breaker from"
@@ -449,13 +448,8 @@ def test_d5_l00c_with_no_summary_after_its_system_went_down_ends_down_mid_lead(
         tmp_path: Path) -> None:
     scene = _Scene(tmp_path)
     empty = scene.run("empty-reference", leads={S.L3: [S.EMPTY_OUTPUT]})
-    ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
-                    leads={S.L3: [_q(1), S.text("FD1256-ECF-NARRATION")]})
-    tripped = scene.run("tb-reference", before=_pre_trip(),
-                        leads={S.L3: [_q(1), S.text("FD1256-TB-NARRATION")]})
-    unconfigured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
-    _drop(unconfigured, "elastic", "ELASTICSEARCH_URL")
-    at_start = unconfigured.run("down-at-start", **_down_lead())
+    tripped, ecf = _breaker_references(scene)
+    at_start = _unconfigured(tmp_path).run("down-at-start", **_down_lead())
     d = scene.run("d5-no-summary", backend=_fail_alerts(_escape),
                   leads={S.L3: [_q(1), S.EMPTY_OUTPUT]})
 
@@ -463,11 +457,11 @@ def test_d5_l00c_with_no_summary_after_its_system_went_down_ends_down_mid_lead(
     low = body.lower()
     assert _names_system(body, "elastic"), (
         f"l-00c ended with no summary after elastic went down, and its section does not name "
-        f"elastic (D5: `down_mid_lead` names the cause): {body!r}")
+        f"elastic: {body!r}")
     assert "not configured" in low, (
-        f"the section does not name the cause 'not configured' (D5, DP4): {body!r}")
+        f"the section does not name the cause 'not configured': {body!r}")
     assert ESCAPE_TOKEN not in body, (
-        f"the correlation section carries the escaped fault's text (D5, #1222 A2): {body!r}")
+        f"the correlation section carries the escaped fault's text: {body!r}")
     said = [w for w in TRIPPED_WORDS if w in low]
     assert not said, f"the section names the breaker's cause ({said}): {body!r}"
     assert S.outer_frames(body) == [], (
@@ -652,13 +646,13 @@ _CRASHING_CMDB = _PLANTED_CMDB.replace(
     "def check_settings(*_a, **_k):\n    return None",
     f"def check_settings(*_a, **_k):\n    raise RuntimeError({CRASH_MARK!r})")
 
-#: A planted elastic whose declared check finds it not configured, with the real verbs'
-#: signatures (the correlation lead's agreement check reads the declared `alerts`).
-_NOT_CONFIGURED_ELASTIC = f'''\
-"""#1256 planted: an elastic adapter whose settings check finds it not configured."""
+def _planted_elastic(doc: str, check_settings: str) -> str:
+    """A planted elastic adapter (docstring `#1256 planted: <doc>.`) whose declared check is
+    the source `check_settings`, with the real verbs' signatures (the correlation lead's
+    agreement check reads the declared `alerts`); each verb logs its call to `PLANTED_CALLS`."""
+    return f'''\
+"""#1256 planted: {doc}."""
 from pathlib import Path
-
-from defender.kit.faults import ConfigFault
 
 
 def _record_planted_call(verb):
@@ -666,9 +660,7 @@ def _record_planted_call(verb):
         print(f"elastic.{{verb}}", file=log)
 
 
-def check_settings(*_a, **_k):
-    raise ConfigFault("{ELASTIC_PLANTED_KEY} is not set - this tenant does not configure it")
-
+{check_settings}
 
 def _search(ctx, *, native_query: str, start=None, end=None, limit: int = 20, index=None,
             sort: str = "desc") -> dict:
@@ -688,6 +680,15 @@ def health_check(ctx) -> dict:
 
 VERBS = {{"health-check": health_check, "query": _search, "alerts": _search, "esql": esql}}
 '''
+
+
+#: A planted elastic whose declared check finds it not configured.
+_NOT_CONFIGURED_ELASTIC = _planted_elastic(
+    "an elastic adapter whose settings check finds it not configured", f'''\
+def check_settings(*_a, **_k):
+    from defender.kit.faults import ConfigFault
+    raise ConfigFault("{ELASTIC_PLANTED_KEY} is not set - this tenant does not configure it")
+''')
 
 
 #: MAIN dispatches one lead on cmdb; its gather agent asks cmdb who web-1 is, then summarises.
@@ -734,9 +735,9 @@ def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one(tmp_path:
     mixed = _planted_tree(mixed_root, {"cmdb": _CRASHING_CMDB, "elastic": _NOT_CONFIGURED_ELASTIC})
     main, gather, raised = _drive_over(mixed, tenant, tmp_path / "run-mixed")
     assert raised is not None, (
-        "the run started though cmdb's adapter is broken and elastic not configured — every "
-        f"granted system down (#1256 O-8): MAIN asked {len(main.seen)} times, gather "
-        f"{len(gather.seen)}, adapter calls {_planted_calls(mixed_root)}")
+        "the run started though cmdb's adapter is broken and elastic not configured: MAIN "
+        f"asked {len(main.seen)} times, gather {len(gather.seen)}, adapter calls "
+        f"{_planted_calls(mixed_root)}")
     text = str(raised).replace(str(tenant.root), "<DATA_ROOT>")
     _assert_names_each(text, (("cmdb", CRASH_MARK), ("elastic", ELASTIC_PLANTED_KEY)),
                        "broken + not configured")
@@ -809,8 +810,7 @@ def test_o8_d4_setup_adopts_an_all_down_tenant_whose_runs_are_refused(
         rc = policy_cli.main(["show", "gather", "--run-dir", str(policy_run),
                               "--tenant", tenant_id])
     except SystemExit as refused:
-        pytest.fail(f"defender-policy refused a tenant whose systems are down (D4: only a run "
-                    f"refuses): {refused.code!r}")
+        pytest.fail(f"defender-policy refused a tenant whose systems are down: {refused.code!r}")
     shown = capsys.readouterr().out
     assert rc == 0, f"defender-policy show gather exited {rc!r} over an all-down tenant:\n{shown}"
     assert shown.startswith("agent: gather"), f"defender-policy showed no gather policy:\n{shown}"
