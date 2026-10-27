@@ -1,5 +1,4 @@
-"""The open-trees plumbing for #1134's curator step (v3, ported from v2) and the world its new
-test files share. It defines no tests."""
+"""The open-trees plumbing for #1134's curator tests and the world those files share."""
 from __future__ import annotations
 
 import dataclasses
@@ -207,12 +206,9 @@ def _host_spelling(entry: str) -> re.Pattern[str]:
 
 
 def warnings_naming(caplog: Any, entry: str) -> list[str]:
-    """The WARNING records whose message names `entry` (the contract: "logged at WARNING naming
-    the entry", by its corpus name — `Held` has no public root spelling).
-
-    A WARNING that spells `entry` under an absolute path (the host path the core built from the
-    held root, e.g. through `str()` of the refusal) fails here outright: the contract's "Log
-    spelling" names the entry by its corpus name, not by an absolute path (E10)."""
+    """The WARNING messages naming `entry`, by its corpus name. One that spells `entry` under an
+    absolute path (the host path the core built from the held root, e.g. through `str()` of the
+    refusal) fails here outright: the log names an entry by its corpus name only."""
     named = [r.getMessage() for r in caplog.records
              if r.levelno == logging.WARNING and entry in r.getMessage()]
     spelled = [m for m in named if _host_spelling(entry).search(m)]
@@ -296,8 +292,8 @@ class FailsOn(RealOs):
     """The real `os` as a handle's `os_` seam, except that a call to `verb` (on the leaf `leaf`
     when given, else on any) raises the plain `OSError(code)` a failing disk gives: `ENOSPC` on
     the `rename` that lands a replace-write, `EIO` or `EACCES` on an `unlink`. It is no refusal
-    of the tree's shape (not `NotPlainEntry`), so O5.3 never passes it over. `raised` counts the
-    failures, so a test can show the failing call was reached."""
+    of the tree's shape (not `NotPlainEntry`), so it is never passed over as one. `raised` counts
+    the failures, so a test can show the failing call was reached."""
 
     def __init__(self, verb: str, code: int, *, leaf: str | None = None) -> None:
         self.verb, self.code, self.leaf, self.raised = verb, code, leaf, 0
@@ -471,25 +467,17 @@ def world(tmp_path: Path) -> World:
 
 
 # ---------------------------------------------------------------------------------------
-# #1108 P4 (O7, amendments 2-3): a lane over a git-free draft
+# A lane over a git-free batch draft (#1108)
 # ---------------------------------------------------------------------------------------
 #
-# After P4 a lane's corpus is the draft of a P3 batch (`<T>/drafts/<id>/agent`, no `.git`), its
-# claim is the `ChangeSet` the batch derives from it, and the one commit-maker commits on the
-# batch branch of the tenant clone. These helpers build that world for real (`published_tenant`
-# then P3's `start_batch`) and read back what landed from git. Nothing here decides policy.
-#
-# ASSUMED SEAM (S-H, one spelling for every lane builder; the implementer provides it):
-#   lessons_run.build_author_config(paths, *, state, trees, batch, ...)
-#   questioner_run.build_questioner_config(paths, *, state, trees, batch, ...)
-#   lead_author.build_lead_author_deps(paths, *, state, trees, batch, ...)
-#   pitfalls_curator.run_pitfalls(*, paths, state, trees, batch, ...)
-#   lead_author.run(run, *, label, paths, batch, ...)   (the no-deps path opens its trees over the draft)
-# `batch` is P3's `version_control.Batch`: the lane's corpus dirs are
-# `KnowledgePaths(agent_root=<the draft's agent/>)`'s (U9: `<T>/drafts/<id>/stage/agent`), its claim is `batch.change_set()`
-# judged by the lane's gates, its commit is `batch.commit(<admitted ChangeSet>, message)`, and its
-# per-claim reset is `batch.reset()`. `paths` keeps the learning state (queues, locks) and the
-# product checkout (`repo_root`: adapters stay in the product repo, #1172), never a corpus.
+# A lane's corpus is the draft of a batch (`<T>/drafts/<id>/stage/agent`, no `.git`), its claim
+# is the `ChangeSet` the batch derives from it (`batch.change_set()`, judged by the lane's gates),
+# and the one commit-maker commits on the batch branch of the tenant clone. These helpers build
+# that world for real (`published_tenant`, then `start_batch`) and read back what landed from git.
+# Every lane builder takes the `version_control.Batch` as `batch=`: `build_author_config`,
+# `build_questioner_config`, `build_lead_author_deps`, `run_pitfalls`, and `lead_author.run` (whose
+# no-deps path opens its trees over the draft). `paths` keeps the learning state (queues, locks)
+# and the product checkout (adapters), never a corpus.
 
 #: A lane draft's own agent content (`agent=` of `published_tenant`): both curator corpora and the
 #: skills tree, empty but tracked, so every lane's mount point exists in the export.
@@ -501,7 +489,7 @@ DRAFT_AGENT_FILES: dict[str, str] = {
 }
 AUTHOR_LANES = ("lessons", "lessons-questioner")
 LEAD_LANES = ("skills",)
-#: The repo-relative spellings after P4 (OD6): commit, ChangeSet and handoff paths are `agent/...`.
+#: Repo-relative spellings: commit, ChangeSet and handoff paths are `agent/...`.
 DRAFT_LESSONS_REL = "agent/lessons/"
 DRAFT_SIBLING_REL = "agent/lessons-questioner/"
 DRAFT_SKILLS_REL = "agent/skills/"
@@ -524,13 +512,13 @@ class DraftLane:
     @property
     def agent(self) -> Path:
         """The draft's `agent/`, as the batch itself names it (its box's workdir and
-        `DEFENDER_AGENT_DIR` source): `<T>/drafts/<id>/stage/agent` under U9's layout. Asked of
-        P3, never re-derived from `draft_root`, so the helpers follow the layout's one owner."""
+        `DEFENDER_AGENT_DIR` source): `<T>/drafts/<id>/stage/agent`. Asked of the batch, never
+        re-derived from `draft_root`, so the helpers follow the layout's one owner."""
         return Path(self.batch.box_request().workdir)
 
     @property
     def root(self) -> Path:
-        """The repo-shaped root holding the draft's `agent/` (U9: the box-mounted `stage/`):
+        """The repo-shaped root holding the draft's `agent/` (the box-mounted `stage/`):
         what repo-relative `agent/...` names are relative to, and where a lane's spawn runs."""
         return self.agent.parent
 
@@ -583,7 +571,7 @@ class DraftLane:
     def drift(self) -> list[str]:
         """Every `agent/...` path whose bytes or presence differ between the draft and the batch
         tip, links and non-files included as present (never followed): `[]` is "the draft is
-        back at what the batch holds" (a reset claim, U10)."""
+        back at what the batch holds" (a reset claim)."""
         listed = self.git("ls-tree", "-r", "--name-only", self.tip(), "--", "agent").stdout
         tip = {rel: self.git("cat-file", "-p", f"{self.tip()}:{rel}").stdout.encode(
                    "utf-8", "surrogateescape")
@@ -613,7 +601,7 @@ def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
                batch_id: str = "b1", state_dir: Path | None = None,
                product: Path | None = None) -> DraftLane:
     """The fixture tenant published for real over its own data root (its agent content
-    `draft_agent(files)`, or `agent`), then P3's real `start_batch(batch_id, lanes=lanes)`: the
+    `draft_agent(files)`, or `agent`), then the real `start_batch(batch_id, lanes=lanes)`: the
     draft is built from that export, no branch yet. `files` are agent-relative
     (`"lessons/x.md"`). `product` is the product checkout `paths.repo_root` names (adapters; a
     scratch folder with no corpus by default). Each call gets its own data root, so a test may
@@ -628,8 +616,8 @@ def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
         clone = t.clone
     state = state_dir if state_dir is not None else scene / "state"
     state.mkdir(parents=True, exist_ok=True)
-    # The product checkout holds no corpus after P4 (O1): the lane's `paths` name a scratch
-    # checkout with none, so a lane still reading `paths.lessons_dir` finds nothing there.
+    # The product checkout holds no corpus: the lane's `paths` name a scratch checkout with none,
+    # so a lane still reading `paths.lessons_dir` finds nothing there.
     if product is None:
         product = scene / "product"
         product.mkdir(exist_ok=True)
@@ -646,7 +634,7 @@ def draft_trees(lane: DraftLane) -> DrainTrees:
 def draft_author_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
                      manifest_seed: str | None = None, box: Any = None, state: Any = None,
                      **replaced: Any) -> Any:
-    """The REAL lessons config over a draft lane (ASSUMED SEAM `batch=`), `replaced` swapped in."""
+    """The real lessons config over a draft lane (`batch=lane.batch`), `replaced` swapped in."""
     from defender.learning.author.lessons import run as lessons_run
 
     cfg = lessons_run.build_author_config(
@@ -659,7 +647,7 @@ def draft_author_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
 def draft_questioner_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
                          manifest_seed: str | None = None, box: Any = None, state: Any = None,
                          **replaced: Any) -> Any:
-    """The REAL questioner config over a draft lane (ASSUMED SEAM `batch=`)."""
+    """The real questioner config over a draft lane, as `draft_author_cfg` builds the lessons one."""
     from defender.learning.author.questioner import run as questioner_run
 
     cfg = questioner_run.build_questioner_config(
@@ -671,11 +659,11 @@ def draft_questioner_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
 
 @dataclasses.dataclass
 class DraftWorld:
-    """`World` after P4: a draft lane (`draft_lane`) carrying both curator corpora as the
-    batch's declared lanes, a folder outside the tenant's data root where every link points,
-    and the lane's held mounts over the draft, open for as long as the world is referenced.
-    `cfg()` is the REAL lessons config over the draft (assumed `batch=` seam); every head
-    observation reads the batch branch (what the commit-maker made)."""
+    """`World` over a draft lane (`draft_lane`) carrying both curator corpora as the batch's
+    declared lanes, a folder outside the tenant's data root where every link points, and the
+    lane's held mounts over the draft, open for as long as the world is referenced. `cfg()` is
+    the real lessons config over the draft; every head observation reads the batch branch (what
+    the commit-maker made)."""
 
     tmp: Path
     lane: DraftLane

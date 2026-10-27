@@ -76,8 +76,8 @@ DRAFT_NAME = "gather/queries/wazuh/_draft/probe.md"
 MINTED_NAME = "gather/queries/wazuh/_draft/0a1b2c3d4e5f.md"
 SKILL_DRAFT_NAME = "elastic/_draft/probe.md"
 SKILL_MD_NAME = "elastic/SKILL.md"
-#: #1108 P4 (O7, OD6): the reducer surface is the tenant's pitfalls add-on (`_declared870.
-#: REDUCER_REL`, the test's own oracle, not the production constant), as a name under the mount.
+#: The reducer surface: the tenant's pitfalls add-on (the test's own `REDUCER_REL`, not the
+#: production constant), as a name under the mount.
 REDUCER_NAME = ADDON_REL.removeprefix("agent/skills/")
 TWIN_NAME = DRAFT_NAME
 
@@ -93,12 +93,10 @@ def marked_template(tid: str, status: str = "established", *, covers=()) -> str:
 @pytest.fixture
 def scene(tmp_path: Path):
     """`seed_skills_repo` (a wazuh adapter with real verbs, a catalog with an established
-    template and a draft, an `elastic` SKILL.md with a pending skill draft; committed), a folder
-    outside it, and the lead drain's trees over it, open for the test.
-
-    #1108 P4 (O7, OD6, OD12 class ii): the skills tree is a tenant-shaped root
-    (`draft_scene_over`: the mount `<root>/agent/skills`, names `agent/skills/...`, committed as
-    the batch base the rules compare against); the adapters stay in the product checkout."""
+    template and a draft, an `elastic` SKILL.md with a pending skill draft) moved to a
+    tenant-shaped root (`draft_scene_over`: the mount `<root>/agent/skills`, committed as the
+    batch base the rules compare against), a folder outside it, and the lead drain's trees over
+    it, open for the test. The adapters stay in the product checkout."""
     with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
@@ -705,11 +703,9 @@ def _worktree(tmp_path: Path, name: str = "repo") -> Path:
 
 
 def _run_dir(*rows: tuple[str, str, str], run_id: str = "run-1") -> Path:
-    """A run dir whose queries table holds `rows` (`(query_id, system, verb)`), in order,
-    written through the production writer, one lead each. A natural run where run setup leaves
-    one (`_state1135.curation_run_dir`: `<data root>/<T>/runs/<run_id>`, #1105 PR 2), so the
-    lane's entry points take it as the `Run` the drain opens (`run_of`) and a row naming it
-    rehydrates; `run_id` tells apart the runs of one test."""
+    """A run dir where run setup leaves one (`curation_run_dir(run_id)`) whose queries table
+    holds `rows` (`(query_id, system, verb)`), in order, written through the production writer,
+    one lead each."""
     run_dir = curation_run_dir(run_id)
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     for i, (qid, system, verb) in enumerate(rows):
@@ -770,9 +766,8 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
 def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
     tmp_path: Path, site: str | None, caplog,
 ):
-    # #1108 P4 (O7, OD6, OD16): the run serves one claim of a real batch over its git-free draft
-    # (`product_lane`); handoff and commit paths are repo-relative `agent/skills/...` (the test's
-    # own spelling), and what landed is read from the batch branch.
+    # One claim of a real batch over its git-free draft (`product_lane`): handoff and commit
+    # paths are `agent/skills/...`, and what landed is read from the batch branch.
     lane = product_lane(tmp_path, _worktree(tmp_path))
     run_dir = _run_dir()
     spawn = LeadAuthorSpawn()
@@ -837,9 +832,9 @@ def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, capl
 
 
 class PlantingBox:
-    """The P4 drain's `start_box`/`stop_box` seams (#1108 P4 flow 4): records the batch box's
-    request and applies `plant` to the draft root it mounts (`staged`) — the state a box
-    process running beside the lead author leaves before the claim's host work runs."""
+    """The drain's `start_box`/`stop_box` seams: records the batch box's request and applies
+    `plant` to the draft root it mounts (`staged`), as a box running beside the lead author
+    would before the claim's host work."""
 
     def __init__(self, plant: Callable[[Path], None]) -> None:
         from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy
@@ -866,10 +861,10 @@ def _failed(paths: LoopPaths) -> list[dict]:
 
 
 def _lead_tick(tmp_path: Path, data_root: Path, plant: Callable[[Path], None]):
-    """One real P4 lead-author drain tick over the fixture tenant's draft (#1108 P4 flow 4), a
-    curation request queued for a run whose one executed query coins `elastic.newthing`, the
-    box planting `plant` into the draft. Returns `(rc, box, paths, run_dir, tenant)`; the tenant's
-    forge lives only inside the call, so its observations are taken here."""
+    """One real lead-author drain tick over the fixture tenant's draft, for a queued run whose
+    one executed query coins `elastic.newthing`, the box planting `plant` into the draft.
+    Returns `(rc, box, paths, run_dir, delivered)`: the forge lives only inside the call, so
+    what it delivered is read here."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import (
         LEAD_PREFIX, drain_paths, drains, remote_branches, run_stage)
     from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
@@ -891,10 +886,9 @@ def _lead_tick(tmp_path: Path, data_root: Path, plant: Callable[[Path], None]):
 def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skills(
     tmp_path: Path, data_root: Path, monkeypatch, caplog,
 ):
-    """#1134 over the P4 drain's draft: with a box having swapped the draft's catalog folder for
-    a link out, the lane's default seams (label carried to the held `skills/` mount) refuse every
-    draft write behind the link, write nothing outside, and deliver nothing. (The claim's fate
-    after a box-planted link is P3's ChangeSet refusal, not pinned here.)"""
+    """A box swapped the draft's catalog folder for a link out: the lane's default seams (label
+    carried to the held `skills/` mount) refuse every draft write behind the link, write nothing
+    outside, and deliver nothing. The claim's fate (the ChangeSet's refusal) is not pinned here."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -922,9 +916,9 @@ def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skill
 
 def test_a_seam_that_cannot_hold_skills_dead_letters_the_claim(
         tmp_path: Path, data_root: Path, caplog):
-    """#1134 over the P4 drain's draft: a box that removed the draft's `skills/` lane leaves the
-    lead author nothing to hold: the claim is dead-lettered `lead-author-error` naming
-    `FileNotFoundError`, never re-queued as a transient, and the run gets no lead-author state."""
+    """A box that removed the draft's `skills/` lane leaves the lead author nothing to hold: the
+    claim is dead-lettered `lead-author-error` naming `FileNotFoundError`, never re-queued as a
+    transient, and the run gets no lead-author state."""
     def plant(draft: Path) -> None:
         shutil.rmtree(draft / "agent" / "skills")
 
@@ -1000,8 +994,8 @@ def _lessons(paths: LoopPaths) -> None:
 def _refusing_trees(tmp_path: Path) -> dict[str, Callable[[], tuple[LoopPaths, DrainTrees]]]:
     """Each way the lane's trees can fail to hold `skills/` exactly, as `(paths, open trees)`:
     the author member's trees, and trees whose one mount is moved off `skills/`, lies above it
-    (`defender/`) or below it. Since #1179's amendment a member answers its own trees, so the
-    wrong mount sets are opened directly (`DrainTrees.open`)."""
+    (`defender/`) or below it. A member label answers its own trees, so the wrong mount sets are
+    opened directly (`DrainTrees.open`)."""
     repo = _worktree(tmp_path)
     plain = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     _lessons(plain)

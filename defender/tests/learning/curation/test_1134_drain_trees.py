@@ -60,7 +60,7 @@ CATALOG = "gather/queries"
 SKILL_SITES = tuple(PurePosixPath(p) for p in (
     "gather", "gather/queries", "gather/queries/elastic", "gather/queries/elastic/_draft"))
 #: The folders below the listed one in each tree's known shape, each listed on its own: a corpus
-#: is flat, the catalog is at most `<sys>/_draft/<file>.md` (addendum 2, B2).
+#: is flat, the catalog is at most `<sys>/_draft/<file>.md`.
 BELOW = {LESSONS: (), QUESTIONER: (), SKILLS: ("elastic", "elastic/_draft")}
 #: What the drain's listings hold (relative to the listed folder: the corpus mount, or the
 #: catalog under skills) once the record is a plain file, written out in path-parts order.
@@ -218,7 +218,8 @@ PLANT_ROWS = _rows(NAME_PLANTS, FOLDER_PLANTS)
 
 def plant(d: Drain, label: str, site: PurePosixPath | None, kind: str) -> Planted:
     """`kind` at the record's own name (`site` None), or at its holding folder `site`, which
-    replaces the real folder and what it held."""
+    replaces the real folder and what it held. Tests map the record after planting: `tree_for`
+    is lexical and never looks at the plant."""
     if site is None:
         return plant_entry(d.path(label), kind, root=d.mount(label), host=d.outside)
     shutil.rmtree(d.mount(label) / site)
@@ -293,7 +294,7 @@ def _malformed(d: Drain) -> dict[str, tuple[Any, ...]]:
         "nested-skills-after-catalog": (ski / CATALOG, ski),
         "nested-parent-after-child": (les, que, d.defender),
         "nested-child-after-parent": (d.defender, les),
-        # #1134 step 2, H4: nesting judged between EVERY pair, not only neighbours in the list.
+        # Nesting is judged between every pair, not only neighbours in the list.
         "nested-not-adjacent-child-later": (les, ski, les / "sub", que),
         "nested-not-adjacent-parent-later": (les / "sub", ski, les),
         "relative-with-a-missing-absolute-before-it": (d.tmp / "no-such-mount", "lessons"),
@@ -326,7 +327,7 @@ def test_open_judges_the_whole_list_before_opening_anything(drain, case):
         assert trees.mounts == siblings
 
 
-#: Mount lists in the order given: the drain's, and one no sort would keep (#1134 step 2, H5).
+#: Mount lists in the order given: the drain's, and one no sort would keep.
 ORDERS = {"drain": (LESSONS, QUESTIONER, SKILLS), "skills-first": (SKILLS, LESSONS, QUESTIONER)}
 
 
@@ -358,7 +359,7 @@ def test_open_holds_each_mount_once_in_order_by_its_spelling_and_never_again_by_
 
 class Boom(BaseException):
     """A fault that is no `Exception`, as `KeyboardInterrupt` and `asyncio.CancelledError` are
-    not: a cleanup keyed on `Exception` or `OSError` misses it (#1134 step 2, H3)."""
+    not: a cleanup keyed on `Exception` or `OSError` misses it."""
 
 
 #: Faults an `os_` raises opening a root by path, each made afresh per row: its own `OSError`,
@@ -669,7 +670,7 @@ def test_the_with_block_gives_the_trees_and_its_exit_closes_every_root_once(drai
 
 
 #: The work step's own faults, each made afresh per row: an `Exception`, and two
-#: `BaseException`s that are not (#1134 step 2, H3).
+#: `BaseException`s that are not.
 WORK_FAULTS: dict[str, Callable[[], BaseException]] = {
     "runtime_error": lambda: RuntimeError("the work step's own fault"),
     "boom": lambda: Boom("the batch is torn down mid-step"),
@@ -873,7 +874,7 @@ def test_a_write_or_delete_through_a_drain_handle_refuses_a_plant_and_lands_once
         drain, trees, label, site, kind, verb):
     d = drain
     planted = plant(d, label, site, kind)
-    held, name = handle(trees, d, label)  # mapped with the plant in place: lexical, it never looks (H2)
+    held, name = handle(trees, d, label)
     state, before = entry_state(planted.at), census(d.tmp)
     where = f"{verb} through {label} with a {kind} at {site or 'the name'}"
 
@@ -905,7 +906,7 @@ def test_a_read_through_a_drain_handles_view_refuses_a_plant_and_reads_a_plain_f
     verb = "read"
     d = drain
     planted = plant(d, label, site, kind)
-    held, name = handle(trees, d, label)  # mapped with the plant in place: lexical, it never looks (H2)
+    held, name = handle(trees, d, label)
     state, before = entry_state(planted.at), census(d.tmp)
     where = f"{verb} through {label} with a {kind} at {site or 'the name'}"
 
@@ -952,7 +953,7 @@ def test_the_record_folders_listing_through_a_drain_handles_view_lists_the_plant
         drain, trees, label, site, kind):
     d = drain
     planted = plant(d, label, site, kind)
-    held, name = handle(trees, d, label)  # mapped with the plant in place: lexical, it never looks (H2)
+    held, name = handle(trees, d, label)
     state, before = entry_state(planted.at), census(d.tmp)
 
     got = judged_by_stat(lambda: do_verb(held, name, "entries"), planted)
@@ -982,7 +983,7 @@ def test_mkdir_of_the_draft_folder_through_the_skills_handle_refuses_a_plant_on_
     d = drain
     ski = d.mount(SKILLS)
     planted = plant(d, SKILLS, site, kind)
-    assert_maps(trees, ski / DRAFT_FOLDER, ski, DRAFT_FOLDER)  # mapped with the plant in place: lexical, it never looks (H2)
+    assert_maps(trees, ski / DRAFT_FOLDER, ski, DRAFT_FOLDER)
     held, name = trees.tree_for(ski / DRAFT_FOLDER)
     state, before = entry_state(planted.at), census(d.tmp)
 
@@ -1048,7 +1049,7 @@ def test_the_drains_listings_through_a_held_mount_list_a_plant_as_itself_and_nev
     d = drain
     planted = plant(d, label, site, kind)
     assert_maps(trees, listed_path(d, label), d.mount(label),
-                CATALOG if label == SKILLS else ".")  # mapped with the plant in place: lexical, it never looks (H2)
+                CATALOG if label == SKILLS else ".")
     held, name = trees.tree_for(listed_path(d, label))
     state, before = entry_state(planted.at), census(d.tmp)
 
@@ -1068,7 +1069,7 @@ def test_the_drains_listings_through_a_held_mount_list_a_plant_as_itself_and_nev
                                     for f, rows in LISTINGS[label].items()}, got
 
 
-#: C2's plants at a holding folder: a link to an EMPTY outside folder (a write that followed it
+#: Plants at a holding folder: a link to an EMPTY outside folder (a write that followed it
 #: would CREATE the draft there), a dangling link (it would create the target folder), a file.
 O3_PLANTS = ("folder_link_empty_outside", "folder_link_dangling", "folder_file")
 
@@ -1081,7 +1082,7 @@ def test_o3_a_draft_written_through_the_skills_handle_never_lands_outside_skills
     d = drain
     ski = d.mount(SKILLS)
     planted = plant(d, SKILLS, site, kind)
-    held, name = handle(trees, d, SKILLS)  # mapped with the plant in place: lexical, it never looks (H2)
+    held, name = handle(trees, d, SKILLS)
     assert held is trees.mount(ski)
     target = None if kind == "folder_file" else Path(os.readlink(planted.at))
     state, before = entry_state(planted.at), census(d.tmp)
@@ -1156,7 +1157,9 @@ def _under(path: str, top: str) -> bool:
 
 
 def following(seen: dict[str, list[Any]], d: Drain) -> list[str]:
-    """What the watch saw that could have followed a link (see the section comment)."""
+    """What the watch saw that could have followed a link: a spawn; an absolute open under the
+    scene or `/proc`; a relative open spelled with a `/`, without `O_NOFOLLOW` (bar `.`), or
+    naming a plant's target; an open by descriptor of a folder outside."""
     tops = (str(d.tmp), os.path.realpath(d.tmp))
     outside = (str(d.outside), os.path.realpath(d.outside))
     bad = []

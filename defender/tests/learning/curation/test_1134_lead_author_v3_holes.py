@@ -40,8 +40,8 @@ from defender.tests.learning.curation.test_1134_lead_author_handle import (
 )
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
-#: Step 4's uncommon errnos (`test_1134_shared_readers.UNCOMMON_ERRNOS`): faults no row names
-#: by hand, so a reader special-casing the common ones is caught.
+#: Errnos no other row uses (as in `test_1134_shared_readers`), so a reader special-casing the
+#: common ones is caught.
 UNCOMMON_ERRNOS = (errno.ENOMEM, errno.EMFILE, errno.ESTALE, errno.ENOTCONN)
 #: Every errno a refused listing is driven with here.
 REFUSED_ERRNOS = (errno.EACCES, errno.EIO, *UNCOMMON_ERRNOS)
@@ -52,9 +52,8 @@ def _bad_fd(caplog) -> list[str]:
 
 
 def _draft_lane(tmp_path: Path) -> C.DraftLane:
-    """`_worktree`'s seeded tree after P4: its `skills/` as the tenant's `agent/skills` (one
-    export commit) under a P3 batch with the lead lane `skills`; the product checkout keeps the
-    adapters and no corpus (O1, #1172)."""
+    """`_worktree`'s seeded `skills/` as the tenant's `agent/skills` (one export commit) under a
+    batch with the lead lane `skills`; the product checkout keeps the adapters and no corpus."""
     repo = _worktree(tmp_path)
     agent = tmp_path / "agent-src"
     shutil.copytree(repo / "defender" / "skills", agent / "skills")
@@ -66,9 +65,8 @@ def _draft_lane(tmp_path: Path) -> C.DraftLane:
 
 def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
         tmp_path: Path, monkeypatch, caplog):
-    """#1134 + #1108 P4 O7: with no deps the tick opens its own trees over the batch's draft,
-    mints each draft there and reaches its agent, leaving no descriptor open below the draft.
-    ASSUMED SEAM (S-H): `lead_author.run(run, *, label, paths, batch)`."""
+    """With no deps the tick opens its own trees over the batch's draft, mints each draft there
+    and reaches its agent, leaving no descriptor open below the draft."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     caplog.set_level(logging.DEBUG)
     lane = _draft_lane(tmp_path)
@@ -109,10 +107,8 @@ def test_a_refused_listing_alone_does_not_refuse_the_draft(
 
 @pytest.fixture
 def scene(tmp_path: Path):
-    """The handle file's scene after P4 (O7, OD6): `seed_skills_repo`'s skills tree at a
-    tenant-shaped root (`draft_scene_over`: the mount `<root>/agent/skills`, names
-    `agent/skills/...`, the adapters in the product checkout), committed, a folder outside it,
-    the lane's trees over it, open for the test."""
+    """The handle file's scene: `seed_skills_repo`'s skills tree at a tenant-shaped root
+    (`draft_scene_over`), committed, a folder outside it, the lane's trees over it, open."""
     with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 
@@ -160,7 +156,7 @@ def test_a_refused_draft_folder_neither_clears_the_twin_nor_departs_a_draft(
 
 @pytest.mark.parametrize("route", ["reopen", "scandir"])
 def test_kind_at_on_the_mount_point_answers_from_its_own_listing(scene, route: str):
-    rel = "agent/skills"  # the mount point, repo-relative under the tenant-shaped root (OD6)
+    rel = "agent/skills"  # the mount point, repo-relative under the tenant-shaped root
     assert kind_at(scene.repo, scene.tree_for, rel) == "dir"
     refuser = RefusesFolder(scene.skills_dir, route, errno.EIO)
     with DrainTrees.open((scene.skills_dir,), os_=refuser) as trees:

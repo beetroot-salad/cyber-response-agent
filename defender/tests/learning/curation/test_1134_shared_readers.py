@@ -87,7 +87,7 @@ FILES: dict[str, str] = {
     "lessons/_TEMPLATE.md": lesson_text("underscore-name"),  # lint-stale-ref: ok — test data: an underscore-named lesson, not the retired product template
     "lessons/notes.txt": lesson_text("not-md"),
     "lessons/sub/nested.md": lesson_text("nested"),
-    # Near misses: `.md` inside a name that does not END `.md` (H5).
+    # Near misses: `.md` inside a name that does not END `.md`.
     "lessons/notes.md.bak": lesson_text("near-miss-bak"),
     "lessons/x.mdx": lesson_text("near-miss-mdx"),
     "lessons/x.md~": lesson_text("near-miss-tilde"),
@@ -102,7 +102,7 @@ FILES: dict[str, str] = {
     f"{CATALOG}/cmdb.v2/v2-host.md": template_text("cmdb.v2", "v2-host"),
     f"{CATALOG}/wazuh/auth-events.md": template_text("wazuh", "auth-events"),
     f"{CATALOG}/wazuh/_draft/novel.md": template_text("wazuh", "novel", "draft"),
-    # Today's glob takes a dot or `_` name in the catalog, at every level it selects, and a
+    # The selection takes a dot or `_` name in the catalog, at every level it selects, and a
     # top-level `_draft` folder as a system of its own (`*/*.md`).
     f"{CATALOG}/wazuh/_private.md": template_text("wazuh", "underscore-name"),
     f"{CATALOG}/wazuh/.hidden.md": template_text("wazuh", "dot-name"),
@@ -236,7 +236,7 @@ def _same(record: Any) -> Any:
 
 @dataclasses.dataclass(frozen=True)
 class Reader:
-    """One iterator. `record(path, text)` builds today's record for the plain file at `path`;
+    """One iterator. `record(path, text)` builds its record for the plain file at `path`;
     `key` projects a yielded record (and an expected one) to what is compared; `reads` is False
     for the reader that only lists."""
 
@@ -251,8 +251,8 @@ class Reader:
         return [self.key(r) for r in self.call(arg, **kw)]
 
     def expected(self, where: Path, rels: Iterable[str]) -> list[Any]:
-        """Today's answer for plain records at `rels` (`t`-relative): sorted by path parts,
-        each spelled `where / <its name below the walked folder>`."""
+        """The answer for plain records at `rels` (`t`-relative): sorted by path parts, each
+        spelled `where / <its name below the walked folder>`."""
         top = TREES[self.tree].top
         order = sorted(rels, key=lambda rel: PurePosixPath(rel).parts)
         return [self.key(self.record(where / below(rel, top), TEXT[rel])) for rel in order]
@@ -327,7 +327,7 @@ def rqt_called_as(scene: Scene, probe: str, form: str, os_: Any = os,
                   where: Path | None = None) -> Iterator[tuple[tuple[Any, ...], dict[str, Any]]]:
     """`read_query_template`'s `(args, kwargs)` for `probe` in `form`: the bare Path; a Bound
     on the catalog with `"<sys>/x.md"`; a held `skills` view with the prefixed name (`str`, or
-    `PurePosixPath`); the held `skills` view under `gather/queries` with `"<sys>/x.md"` (H7).
+    `PurePosixPath`); the held `skills` view under `gather/queries` with `"<sys>/x.md"`.
     `where` defaults to the folder the name is relative to."""
     if form == "path":
         yield (scene.t / probe,), {}
@@ -363,7 +363,7 @@ def said(caplog: pytest.LogCaptureFixture) -> list[str]:
 def rqt_quietly(caplog: pytest.LogCaptureFixture, args: tuple[Any, ...],
                 kw: dict[str, Any]) -> tuple[QueryTemplate | None, str]:
     """`read_query_template(*args, **kw)` under the deadline. It must log nothing, whatever it
-    answers: its caller (the commit gate) words the refusal from the reason it returns (H4)."""
+    answers: its caller (the commit gate) words the refusal from the reason it returns."""
     caplog.clear()
     got = in_time(lambda: read_query_template(*args, **kw))
     assert said(caplog) == [], f"read_query_template logged: {said(caplog)}"
@@ -371,7 +371,7 @@ def rqt_quietly(caplog: pytest.LogCaptureFixture, args: tuple[Any, ...],
 
 
 def gone(path: Path) -> str:
-    """Today's words for a record absent at read time."""
+    """The words for a record absent at read time: the `FileNotFoundError`'s own."""
     return str(FileNotFoundError(errno.ENOENT, "No such file or directory", str(path)))
 
 
@@ -565,8 +565,8 @@ def test_a_path_with_where_is_a_value_error(scene, reader):
 
 def assert_reads_the_whole_tree(scene: Scene, reader: Reader, form: str,
                                 caplog: pytest.LogCaptureFixture) -> None:
-    """With a plain record at every probe too, `reader` in `form` yields today's answer for
-    the whole tree, spelled under `t`, and warns nothing."""
+    """With a plain record at every probe too, `reader` in `form` yields the answer for the
+    whole tree, spelled under `t`, and warns nothing."""
     shape = TREES[reader.tree]
     scene.put(shape.probes)
     caplog.clear()
@@ -635,7 +635,7 @@ def test_a_non_plain_entry_at_a_record_name_is_refused_and_skipped(
 def test_read_query_template_refuses_a_non_plain_entry_at_the_name(
         scene, probe, plant, form, caplog):
     """`(None, "malformed template: <the read's reason>")`, and nothing read from the plant.
-    Control: a plain template at the same address reads as today."""
+    Control: a plain template at the same address reads."""
     planted = plant_record(scene, probe, plant)
     rec = None if form == "path" else SpellingRecorder()
 
@@ -655,7 +655,7 @@ def test_read_query_template_refuses_a_non_plain_entry_at_the_name(
 def test_a_refused_lesson_reaches_warn_label_and_on_skip_spelled_under_where(
         scene, form, caplog):
     """`on_skip` gets the refused lesson's path and `warn_label` labels it, spelled
-    `where / name` (today's `corpus_dir / "x.md"`) in every form."""
+    `where / name` (as `corpus_dir / "x.md"`) in every form."""
     shape = TREES["lessons"]
     probe = shape.probes[0]
     plant_record(scene, probe, "symlink")
@@ -681,8 +681,8 @@ def test_a_refused_lesson_reaches_warn_label_and_on_skip_spelled_under_where(
 @pytest.mark.parametrize("reader", READING, ids=reader_id)
 def test_a_record_gone_between_the_walk_and_the_read_warns_in_todays_exact_words(
         scene, reader, form, caplog):
-    """A record the walk listed that is gone when it is read (an `os_` seam removes it at its
-    open) is today's absent text, `where / name` spelled, and the rest yields."""
+    """A record the walk listed that is gone when read (an `os_` seam removes it at its open)
+    warns `gone`'s text, spelled `where / name`, and the rest yields."""
     shape = TREES[reader.tree]
     probe = shape.probes[0]
     scene.put([probe])
@@ -894,8 +894,8 @@ def test_a_refused_listing_warns_once_and_yields_what_it_should(
     if folder in NEVER_ENTERED:
         assert seam.asked == 0, f"{folder} lies below the listing's depth, yet was entered"
     else:
-        # Exactly once (v3 adversary hole V3-H1): the listing's verdict is the one the reader
-        # keeps; a reader that listed the folder again could hear a different answer.
+        # Exactly once: the listing's verdict is the one the reader keeps; a reader that listed
+        # the folder again could hear a different answer.
         assert seam.asked == 1, (
             f"the folder was asked for {seam.asked} times; its one listing decides")
     caplog.clear()
@@ -1275,7 +1275,7 @@ def test_a_non_directory_passed_as_the_root_warns_once_and_yields_nothing(
     assert warned == [f"warn: skipping {top} ({NOT_A_DIR})"]
 
 
-# -- H2: the Path form reads through its held handle, never by a path it formats ------------
+# -- the Path form reads through its held handle, never by a path it formats ----------------
 
 #: `(reader, the folder swapped for a link after the first record)`: the walked folder itself,
 #: and a `<sys>` folder below it.
@@ -1373,7 +1373,7 @@ def test_the_path_form_opens_nothing_below_its_root_by_a_spelling(path_form_open
     assert row["warnings"] == []
 
 
-# -- H3: a Bound whose folder is gone reads nothing, and never falls back to `where` -------
+# -- a Bound whose folder is gone reads nothing, and never falls back to `where` -----------
 
 def plant_marked_tree(scene: Scene, at: Path, names: Iterable[PurePosixPath], tree: str,
                       what: str) -> list[Path]:
@@ -1409,12 +1409,12 @@ def test_a_bound_whose_folder_is_gone_reads_nothing_and_never_falls_back_to_wher
     assert warned == []
 
 
-# -- H6: the Path form spells what it was given, a relative path too -----------------------
+# -- the Path form spells what it was given, a relative path too ---------------------------
 
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_the_path_form_spells_a_relative_path_as_given(scene, reader, monkeypatch, caplog):
-    """H6: a relative Path (the working directory is the tmp dir) spells every record relative,
-    as today's `corpus_dir / name` does. Never made absolute."""
+    """A relative Path (the working directory is the tmp dir) spells every record relative, as
+    `corpus_dir / name` does; it is never made absolute."""
     monkeypatch.chdir(scene.tmp)
     shape = TREES[reader.tree]
     scene.put(shape.probes)
@@ -1444,7 +1444,7 @@ def test_a_folder_refused_once_is_warned_from_that_one_listing(scene, reader, fo
     assert seam.asked == 1, f"wazuh was listed {seam.asked} times; its one listing decides"
 
 
-#: Errnos outside the ones every other row uses (V3-H2): whatever `entries()` says is the reason.
+#: Errnos outside the ones every other row uses: whatever `entries()` says is the reason.
 UNCOMMON_ERRNOS = (errno.ENOMEM, errno.EMFILE, errno.ESTALE, errno.ENOTCONN)
 
 
@@ -1468,7 +1468,7 @@ def test_a_refused_folders_reason_is_the_listings_verbatim_whatever_the_errno(
     assert said(caplog) == [f"warn: skipping {where}/{site} ({os.strerror(err)})"]
 
 
-#: Two folder faults in one catalog (V3-H3), each `(site, fault)`: a fault is a seam refusal
+#: Two folder faults in one catalog, each `(site, fault)`: a fault is a seam refusal
 #: (`"EIO"`), found gone (`"gone"`), or a plant left by the parent listing (`"fifo"`, `"link"`).
 TWO_FAULTS = {
     "refused-first": ((".dotsys", "EIO"), ("wazuh", "fifo")),

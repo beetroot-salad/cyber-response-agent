@@ -42,16 +42,14 @@ from defender.tests.support.runtime.engine._engine_helpers import replay_once as
 from defender.records import WIRE_LOG_DIR  # noqa: E402
 
 
-#: #1108 P4 (O7, option (a) of the S-H report): the lane writes a batch draft's `agent/skills`;
-#: the adapters and the authored product prompts stay in the product checkout. The deps bind the
-#: product tree as `defender_dir` and the draft's `agent/` as `RunScope(tenant_agent=...)`
-#: (ASSUMED SEAM: the lead author's write lanes compile under that scope); relative paths resolve
-#: from the draft's `agent/` (P3 `Batch.box_request`'s workdir).
+# The lane writes a batch draft's `agent/skills`; the adapters and product prompts stay in the
+# product checkout. The deps bind the product tree as `defender_dir` and the draft's `agent/` as
+# `RunScope(tenant_agent=...)`; relative paths resolve from the draft's `agent/` (the box's workdir).
 
 
 def _lead_deps(run_dir: Path, wt: Path) -> LeadAuthorDeps:
-    """The lead-author deps via the SINGLE bind seam (#551): `wt/defender` (product: adapters)
-    as the policy anchor and the deps' `defender_dir`, `wt/draft/agent` as the tenant agent."""
+    """The deps via `bind`: `wt/defender` (product: adapters) as the policy anchor and
+    `defender_dir`, `wt/draft/agent` as the tenant agent."""
     deps = bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt / "defender",
                 scope=RunScope(tenant_agent=_agent(wt)))
     assert isinstance(deps, LeadAuthorDeps)
@@ -69,8 +67,7 @@ def _agent(wt: Path) -> Path:
 
 
 def _tool_then_text(tool_calls, final_text):
-    """A two-turn FunctionModel: turn 1 issues the tool calls; once a ToolReturnPart is seen
-    (turn 2+), emit the final text. Lets a real write_file execute, then the model 'finishes'."""
+    """A two-turn FunctionModel: the tool calls, then `final_text` once a tool has returned."""
     def fn(messages, info):
         seen_return = any(
             isinstance(p, ToolReturnPart)
@@ -89,9 +86,9 @@ def _prompt(tmp_path):
 
 
 def _worktree(tmp_path):
-    """A tmp lane tree: `<root>/defender` (product: the `elastic` and `cmdb` adapters, since #772
-    one lane per declared system) and `<root>/draft/agent/skills/...` (the batch draft the lane
-    writes), with the draft folders real writes land in."""
+    """A tmp lane tree: `<root>/defender` (product: the `elastic` and `cmdb` adapters, one lane
+    per declared system) and `<root>/draft/agent/skills/...` (the batch draft the lane writes),
+    with the draft folders real writes land in."""
     root = tmp_path / "wt"
     skills = _agent(root) / "skills"
     (skills / "gather" / "queries" / "elastic" / "_draft").mkdir(parents=True)
@@ -108,10 +105,8 @@ def _run_dir(tmp_path):
 
 
 def _spawn(**over):
-    """run_author_stage with hermetic defaults (fake key + fake transport); override per case.
-
-    Keeps the flat per-knob override ergonomics the cases rely on and folds them into the
-    #713 grouped call shape here, so a case still says `model=...` / `batch_id=...`."""
+    """run_author_stage with hermetic defaults (fake key + fake transport); a case overrides any
+    knob flat (`model=...`), folded here into the grouped `wiring`/`ctx` call."""
     kw = dict(
         system_prompt_file=Path("/tmp/does-not-matter-lae.md"),
         batch_id="run-A", user_prompt="u", repo_root=Path("/tmp/wt"),
@@ -145,7 +140,7 @@ def _spawn(**over):
 
 def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
     """One bind anchors the product tree and the draft: the lane writes and reads its own draft,
-    and a policy bound to another draft refuses both (#551, O7)."""
+    and a policy bound to another draft refuses both."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     deps = _lead_deps(rd, wt)
     assert deps.defender_dir == wt / "defender"
@@ -162,14 +157,14 @@ def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
         skill, "body\n", run_dir=rd, defender_dir=deps.defender_dir, policy=other_pol).allow
     assert not permission.decide_read(
         skill, run_dir=rd, defender_dir=deps.defender_dir, policy=other_pol).allow
-    # … and the product tree's own skills are no lane (O1/O7: tenant writes touch agent/ only)
+    # … and the product tree's own skills are no lane: tenant writes touch agent/ only
     product = wt / "defender" / "skills" / "elastic" / "_draft" / "x.md"
     assert not permission.decide_write(
         product, "body\n", run_dir=rd, defender_dir=deps.defender_dir, policy=deps.policy).allow
 
 
 def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
-    with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
+    with pytest.raises(ValidationError):  # a missing required field: pydantic's error, not TypeError (#1067)
         LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x")
     deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
     assert deps.policy.write_allow  # non-empty
@@ -178,8 +173,8 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
         "defender-elastic query x | defender-sql 'SELECT 1'", policy=deps.policy).allow
 
 
-# the bound lead-author policy — shape + the rm-of-drafts matcher (F3) + asymmetry
-# (#1108 P4: rm runs from the draft's `agent/`, the box's workdir; `skills/...` is relative to it)
+# the bound policy's rm-of-drafts matcher: rm runs from the draft's `agent/` (the box's workdir),
+# so `skills/...` is relative to it
 
 
 def _rm(cmd: str, wt: Path, pol: AgentPolicy) -> bool:
@@ -195,8 +190,8 @@ def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path
 
 
 def test_rm_outside_skills_denied(tmp_path):
-    """rm of a path OUTSIDE the draft's skills (lessons, the product tree, an absolute system
-    file) → denied, with the in-skills draft as the positive control (#551, O7)."""
+    """rm of a path outside the draft's skills (lessons, the product tree, a system file) is
+    denied; the in-skills draft is the positive control."""
     wt = _worktree(tmp_path)
     pol = _lead_policy(wt)
     assert _rm("rm skills/elastic/_draft/z.md", wt, pol)
@@ -206,8 +201,7 @@ def test_rm_outside_skills_denied(tmp_path):
 
 
 def test_rm_flags_and_multipath_denied(tmp_path):
-    """F3: single-path rm only. ``rm -rf <skills>`` (a flag) and ``rm a b`` (multi-path) are
-    DENIED — one draft removed at a time."""
+    """Single-path rm only: a flag (``rm -rf``) or several paths (``rm a b``) is denied."""
     wt = _worktree(tmp_path)
     pol = _lead_policy(wt)
     assert _rm("rm skills/elastic/_draft/x.md", wt, pol)
@@ -257,7 +251,7 @@ def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
     assert _rm("rm skills/gather/queries/elastic/_draft/z.md", wt, pol)
 
 
-# run_stage — require_output (the new flag) + the writers toolset
+# run_stage — require_output + the writers toolset
 
 def test_run_stage_require_output_matrix(tmp_path):
     deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
@@ -293,7 +287,7 @@ def test_run_stage_require_output_matrix(tmp_path):
         assert _go(False, "real story", "pc") == "real story"   # positive control
 
 
-# F2 — a repo-relative file op resolves against the WORKTREE, not the process cwd
+# a repo-relative file op resolves against the lane tree, not the process cwd
 
 def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
@@ -400,7 +394,7 @@ def test_writer_contentless_final_after_write_is_success(tmp_path):
     assert (_agent(wt) / "skills" / "gather" / "queries" / "elastic" / "e.md").read_text() == "X"
 
 
-# run_author_stage — rc mapping (F1) + key ordering + trace key
+# run_author_stage — rc mapping + key ordering + trace key
 
 def test_run_author_stage_success_returns_zero():
     """A run_author that completes (returns text — or "" for a writer) → rc 0."""
@@ -408,8 +402,8 @@ def test_run_author_stage_success_returns_zero():
 
 
 def test_run_author_stage_run_unprocessable_maps_to_124():
-    """A per-run fault (timeout / usage-limit / model error / empty verdict → RunUnprocessable
-    from run_author) → rc 124 (single-run quarantine). The positive contrast to config faults."""
+    """A per-run fault (`RunUnprocessable`: timeout, usage limit, model error, empty verdict) is
+    rc 124, quarantining that run only, unlike a config fault."""
     def _boom(*a, **kw):
         raise RunUnprocessable("model timed out")
     assert _spawn(run_author=_boom) == 124
@@ -425,8 +419,7 @@ def test_run_author_stage_config_fault_propagates_not_124():
         raise FatalConfigError("misconfigured effort")
     with pytest.raises(FatalConfigError):
         _spawn(run_author=_boom_build)
-    # rejected: catch FatalConfigError → return 124 "to keep the drain alive" — a single misconfig
-    #           would then burn the whole queue into quarantine one marker per tick, invisibly
+    # Not mapped to 124: one misconfig would then quarantine the whole queue, a marker per tick.
 
 
 def test_run_author_stage_stage_abort_propagates():
@@ -475,7 +468,7 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
     assert b.read_text().strip()
 
 
-# config cross-product + defaults (FACT-EFFORT / F5) + build-fault → FatalConfigError
+# config and build faults → FatalConfigError
 
 
 def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):

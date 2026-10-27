@@ -689,8 +689,8 @@ def test_an_absent_top_and_an_empty_top_are_told_apart(scratch, how):
     assert census(scratch.tmp) == before
 
 
-#: Every character below `/` in code-point order, control characters too (v2 hole D: a sort
-#: key that stands `\x1f` in for the separator).
+#: Every character below `/` in code-point order, control characters too: a sort key that
+#: stands `\x1f` in for the separator gets these wrong.
 BELOW_SLASH = "".join(map(chr, range(1, ord("/"))))
 
 
@@ -1025,7 +1025,7 @@ def test_d2_the_folder_is_judged_by_its_link_count_once_its_scan_is_done(scratch
 
 
 #: Trees `list_tree` must answer at once whatever its depth: once a level holds no folder,
-#: nothing below it remains to list (#1140 review finding 5).
+#: nothing below it remains to list.
 HUGE_DEPTHS = [sys.maxsize, 10**12]
 #: A chain deeper than any depth another row asks for (each level re-walks from the root, so
 #: listing it costs about CHAIN_DEPTH**2 / 2 steps: well under a second).
@@ -1180,12 +1180,11 @@ ERRNO_WHOLE = {"aaa": DIR, "aaa/a1.md": FILE, "sub": DIR, "sub/below": DIR,
 
 def _drivable(route: str, err: int) -> bool:
     """Whether an injected `err` on `route` models something the kernel and CPython can
-    actually produce. ENOENT is the step's alone (the folder's name is gone when it is stepped
-    into): reopening `"."` off a removed folder's handle succeeds; `os.scandir` of a descriptor
-    makes no `getdents` call; the C library reads `getdents`' ENOENT on a removed folder as the
-    end of the listing; and `DirEntry`'s type questions answer from `d_type`, or catch
-    `FileNotFoundError` and answer False (#1140 review finding 11). What a removal at those
-    moments really does is driven for real by the `test_d2_*` rows (`ListingFaults`)."""
+    produce. ENOENT is the step's alone (the folder's name is gone when it is stepped into):
+    reopening `"."` off a removed folder's handle succeeds; `os.scandir` of a descriptor makes no
+    `getdents` call; the C library reads `getdents`' ENOENT on a removed folder as the end of
+    the listing; `DirEntry`'s type questions answer from `d_type`, or catch `FileNotFoundError`
+    and answer False. The `test_d2_*` rows drive a real removal at those moments."""
     return err != errno.ENOENT or route == "step"
 
 

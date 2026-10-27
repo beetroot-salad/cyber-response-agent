@@ -1,5 +1,5 @@
-"""Seams, plants and child-process runners for #1134 v3 step 1's suite
-(`test_1134_tree_listing.py`). It defines no tests."""
+"""Seams, plants and child-process runners for `test_1134_tree_listing.py`, shared by the other
+#1134 listing suites."""
 from __future__ import annotations
 
 import contextlib
@@ -34,7 +34,7 @@ FD_MARGIN = 16
 #: Each route by which listing one folder can be refused: `_step`'s `O_PATH` open of the
 #: folder's own component, the reopen of `.` for reading off that handle, `scandir` of the
 #: reopened descriptor, the listing failing partway through, judging a listed entry's type, and
-#: the `fstat` of the reopened descriptor that judges whether the folder is dead (addendum 3).
+#: the `fstat` of the reopened descriptor that judges whether the folder is dead.
 LISTING_ROUTES = ("step", "reopen", "scandir", "midway", "entry", "fstat")
 
 #: What a planted entry holds, or what a link or hard link reaches.
@@ -304,8 +304,8 @@ class ListingFaults(RealOs):
     fails its `"."` reopen with that errno (EACCES: refused). A folder in `remove` is REALLY
     removed (`shutil.rmtree`, everything in it) at `moment` (`REMOVAL_MOMENTS`) of its own
     listing, and the real call then runs against the removed folder, so what the kernel and
-    CPython answer for a deleted folder is what `entries()` sees (addendum 3, D2: absent, so
-    `list_tree` reports it `gone`). The folder is named off the descriptor BEFORE it is removed
+    CPython answer for a deleted folder is what `entries()` sees (absent, so `list_tree` reports
+    it `gone`). The folder is named off the descriptor BEFORE it is removed
     (once removed, `/proc` spells it with a `" (deleted)"` suffix). `removed` lists the real
     paths removed, in order."""
 
@@ -423,8 +423,8 @@ SWAP_PLANTS = ("file", "fifo", "symlink", "nothing")
 
 
 class SwapsOnStep(RealOs):
-    """#1134 v2 finding #2, for real. The first time the folder `<parent>/<name>` is stepped
-    into (`os_.open(name, ..., dir_fd=<a descriptor naming parent>)`), BEFORE that open is
+    """A real swap: the first time the folder `<parent>/<name>` is stepped into
+    (`os_.open(name, ..., dir_fd=<a descriptor naming parent>)`), BEFORE that open is
     delegated: the folder is renamed out of the tree to `away` (with everything in it), and
     `plant` is put at its name: a plain file, a FIFO, a symlink to the moved folder, or nothing.
     Then the real open runs and meets whatever now stands there. `fired` says it happened."""

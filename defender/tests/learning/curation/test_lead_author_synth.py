@@ -23,13 +23,9 @@ def _lead(
 
 
 def _catalog(tmp_path) -> Path:
-    """Build an isolated tmp catalog and return its dir.
-
-    The catalog sits where a lane's does, at ``<skills>/gather/queries``: pass it as
-    ``synthesize_drafts(..., **drafts_under(cat))`` (its skills root, held, and that
-    root's spelling). That threads the read root through to the catalog load (it both
-    reads the template index from and writes drafts under the same dir), so no
-    module-global patch is needed to keep the call off the real on-disk catalog."""
+    """An isolated catalog where a lane's sits, ``<skills>/gather/queries``. Passed as
+    ``**drafts_under(cat)``, the mint reads its template index from and writes drafts under it,
+    never the real catalog."""
     cat = tmp_path / "skills" / "gather" / "queries"
     (cat / "host-query").mkdir(parents=True)
     (cat / "host-query" / "proc-tree.md").write_text(
@@ -39,13 +35,9 @@ def _catalog(tmp_path) -> Path:
 
 
 def _draft_path(cat, system: str, query_id: str):
-    """Where the mint puts the draft for `query_id` — the derived name, recomputed.
-
-    Through `lead_author._draft_basename` rather than against a literal digest, so these tests
-    bind to the RULE (the basename is a function of the coined id) and not to the output of one
-    hash at one length. A test carrying `3b4b25fa1be8` would have to be re-typed to change
-    `_DIGEST_LEN`, which is the kind of edit that gets made by pasting whatever the code now
-    prints — the opposite of a test."""
+    """Where the mint puts the draft for `query_id`. Through `_draft_basename`, not a literal
+    digest: the tests pin the rule (the basename is a function of the coined id), not one hash
+    at one length."""
     return cat / system / "_draft" / f"{lead_author._draft_basename(query_id)}.md"
 
 
@@ -59,8 +51,7 @@ def test_unresolved_verb_is_drafted(tmp_path):
     text = draft.read_text()
     assert f"id: stub-cmdb.{lead_author._draft_basename('stub-cmdb.network-map')}" in text
     assert "status: draft" in text
-    # The coined name is not discarded by the digest — it is kept where the dedup, the commit
-    # gate and the author all read it.
+    # The coined name survives the digest, in `covers:`, where the dedup, gate and author read it.
     assert "covers:" in text
     assert "stub-cmdb.network-map" in text
 
@@ -186,8 +177,8 @@ def test_safe_id_segment_anchors_at_the_end_of_the_string():
 
 
 def _stub_verbs():
-    """A verb roster standing in for a system's adapter, so a minted draft can be run through
-    the SAME rule the loop's commit gate and CI run it through."""
+    """A verb roster standing in for a system's adapter, so a minted draft goes through the
+    same rule the commit gate and CI apply."""
     from defender.systems.verbs import VerbContext
     from defender.kit.verbs import verb
 
@@ -260,12 +251,10 @@ def test_a_coined_id_cannot_mint_a_basename_the_commit_gate_discards_the_batch_f
         assert not _is_schema_md(rel)
         assert not _is_draft_readme(rel)
         assert path.name != "execution.md"
-    # Each one still records which coined id it came from, so the author can see that gather
-    # called this measurement `SCHEMA` and name it something a catalog can carry.
+    # Each still records the coined id it came from, so the author can rename it.
     for seg in ("SCHEMA", "README", "execution"):
         template = _minted(cat, "stub-cmdb", f"stub-cmdb.{seg}")
-        # Both identities the file answers: its own derived id (dispatchable, because
-        # `template_search` publishes drafts) and the coined id the row carried.
+        # Its own derived id (dispatchable: `template_search` publishes drafts) and the coined id.
         assert template.covers == (template.id, f"stub-cmdb.{seg}")
 
 
@@ -282,8 +271,8 @@ def test_a_goal_carrying_a_line_separator_cannot_forge_a_section(tmp_path):
     template = _minted(cat, "stub-cmdb", "stub-cmdb.network-map")
     assert "evil" not in template.recording
     assert "name: web-1" in template.recording
-    # The goal still CARRIES the model's characters — they are just no longer at a line start,
-    # which is the only position `section_bodies` and the fence walker give meaning to.
+    # The goal keeps the characters, just never at a line start, the only position
+    # `section_bodies` and the fence walker give meaning to.
     assert "## Executed query" in template.goal
     assert not any(
         ln.lstrip().startswith(("## ", "```", "~~~")) for ln in template.goal.splitlines()
@@ -301,8 +290,7 @@ def test_a_placeholder_inside_a_bound_value_is_not_declared_as_an_interface(tmp_
     assert template.params == ("name",)
     assert template.body_substitutions == ()
     assert "web-${env}-1" in template.recording
-    # Vacuous rather than satisfied: there is no `## Query`, so the placeholder rule has no
-    # text to classify and cannot refuse the draft for the shape of the data it recorded.
+    # Vacuous: with no `## Query`, the placeholder rule has nothing to refuse the draft for.
     assert template.query == ""
     assert _scaffold_rules.check_template(template, _stub_verbs()) == []
 
@@ -369,8 +357,7 @@ def test_a_minted_draft_leaves_no_partial_file_behind(tmp_path):
     assert created
     draft_dir = cat / "stub-cmdb" / "_draft"
     assert [p.name for p in draft_dir.iterdir()] == [created[0].name]
-    # The shape a failed write would leave, spelled as `_io.stage_name` spells it: present on
-    # disk, invisible to the corpus walk.
+    # What a failed write leaves (`_io.stage_name`): on disk, invisible to the corpus walk.
     from defender._io import stage_name
 
     stage_name(draft_dir / "leftover.md").write_text("truncated\n---\nnot: frontmatter\n")

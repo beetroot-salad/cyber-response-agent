@@ -1,5 +1,4 @@
-"""The drain's verbs and the child-process open watch for `test_1134_drain_trees.py`. It defines
-no tests."""
+"""The drain's verbs and the child-process open watch for `test_1134_drain_trees.py`."""
 from __future__ import annotations
 
 import contextlib

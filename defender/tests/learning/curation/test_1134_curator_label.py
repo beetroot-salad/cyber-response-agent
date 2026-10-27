@@ -78,9 +78,8 @@ def _refusing_trees(w) -> dict[str, Any]:
     """Each way the trees a curator is handed can fail to hold its corpus exactly, as `(paths,
     open trees)`: opened for the lead member, or trees whose mounts omit the corpora (only
     `skills/`), move them elsewhere, hold only a folder above them (`defender/`), or only a
-    folder below each corpus. Since #1179's amendment a member answers its own trees, so the
-    wrong mount sets are opened directly (`DrainTrees.open`) rather than through a paths double
-    that lies about a member's list."""
+    folder below each corpus. A member label answers its own trees, so the wrong mount sets are
+    opened directly (`DrainTrees.open`)."""
     moved = (w.repo / "moved" / "lessons", w.repo / "moved" / "lessons-questioner")
     for tree in moved:
         tree.mkdir(parents=True, exist_ok=True)
@@ -188,8 +187,8 @@ def test_cfg_tree_for_maps_both_corpora_to_their_own_mounts_and_nothing_else(tmp
 
 
 def _held_queue(paths: LoopPaths) -> None:
-    """One per-case finding from before #1234: the pre-author gate holds it
-    (`retired_direction`), so a tick serves it without spawning any agent."""
+    """One finding of a retired direction: the pre-author gate holds it (`retired_direction`), so
+    a tick serves it without spawning any agent."""
     seed(paths, FINDINGS, [finding_row("f1", run_id="old-run", direction="adversarial")])
 
 
@@ -237,8 +236,8 @@ def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_
 
 @contextlib.contextmanager
 def _tenant_drain(tmp_path: Path, data_root: Path, files: dict | None = None):
-    """The fixture tenant published for real with its forge bound (#1108 P4), and the drain's
-    learning paths over a scratch product checkout: `(tenant, paths)`."""
+    """The fixture tenant published for real with its forge bound, and the drain's learning
+    paths over a scratch product checkout: `(tenant, paths)`."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
     from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
@@ -253,9 +252,9 @@ def _drafts(t: Any) -> Path:
 
 def test_author_drains_real_default_seam_carries_the_label_to_the_open(
         tmp_path, data_root, monkeypatch):
-    """#1134 over the P4 drain (#1108 P4 flow 4): the drain's PRODUCTION `trigger_author` opens
-    the author label's trees over the batch's draft — the gate holds the row, nothing is stuck,
-    nothing stays held under the drafts, and nothing is delivered."""
+    """The drain's production `trigger_author` opens the author label's trees over the batch's
+    draft: the gate holds the row, nothing is stuck, nothing stays held under the drafts, and
+    nothing is delivered."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import (
         BoxSpy, author_drain, remote_branches)
 
@@ -277,11 +276,10 @@ def test_author_drains_real_default_seam_carries_the_label_to_the_open(
 
 def test_a_lane_the_tenant_repo_never_committed_is_still_a_held_mount(
         tmp_path, data_root, monkeypatch):
-    """#1134 over the P4 drain: the draft makes each lane's folder (amendment 3 C2), so a tenant
-    repo holding no `agent/lessons-questioner/` still gives both curators their held corpus:
-    neither channel records a hold fault, the gate holds the findings row, and the questioner
-    curator serves its row. (Replaces the worktree-era "a missing mount point is a hold fault":
-    a host-made draft has no missing lane.)"""
+    """The draft makes each lane's folder, so a tenant repo holding no
+    `agent/lessons-questioner/` still gives both curators their held corpus: neither channel
+    records a hold fault, the gate holds the findings row, and the questioner curator serves its
+    row."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
 
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
@@ -308,7 +306,7 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     repo = make_repo(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    # make_repo now carries both live corpora (#1108 P4 U5); this case needs one absent
+    # make_repo carries both corpora; this case needs one absent
     subprocess.run(["git", "-C", str(repo), "rm", "-rq", str(paths.lessons_questioner_dir)], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "no questioner corpus"], check=True)
     _held_queue(paths)
@@ -323,12 +321,11 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
 
 def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
                fault: BaseException | None = None, extra_mount: Path | None = None) -> LoopPaths:
-    """A `LoopPaths` (the seam's `paths`) that records, each time `learning_dir` is asked for
-    (the builders read it for their prompt path after the open; `runs_dir`, which they read
-    until #1166, is gone; `author_lock_file`, which they used to read, is the
-    state handle's now), what this process holds under the repo; with `fault`, raises it after
-    recording; with `extra_mount`, the paths carry a third mount for the author label to hold
-    (`extra_mount_dir`, which the caller adds to the label's tree list). A class per call."""
+    """A `LoopPaths` (the seam's `paths`) that records what this process holds under the repo
+    each time `learning_dir` is asked for (the builders read it for their prompt path, after the
+    open); with `fault`, raises it after recording; with `extra_mount`, the paths carry a third
+    mount for the author label to hold (`extra_mount_dir`, which the caller adds to the label's
+    tree list). A class per call."""
 
     class Spy(LoopPaths):
         @property
@@ -437,8 +434,8 @@ def _harness() -> Path:
 
 
 #: Run in a fresh interpreter, as the harness runs: materialize the scenario into the scratch
-#: dir (which, after #1108 P4, sets up everything the run needs: no `init_git` of a product-shaped
-#: scratch repo), then `run_author` over it; print what it reported.
+#: dir (which sets up everything the run needs), then `run_author` over it; print what it
+#: reported.
 _HARNESS_RUN = """
 import json, sys
 from pathlib import Path
@@ -453,9 +450,7 @@ print(json.dumps({"rc": run.returncode, "stdout": run.stdout, "stderr": run.stde
 
 def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_path):
     """The harness runs an empty-queue scenario cleanly in its own scratch dir and never reads
-    the retired `DEFENDER_LEARNING_STATE_DIR`. (Its old pin on a product-shaped
-    `defender/learning/_author.lock` under the scratch repo is gone with #1108 P4's harness
-    against a draft: tenant_1108_p4/test_writers.py::test_o7_the_evals_harness_...)"""
+    the retired `DEFENDER_LEARNING_STATE_DIR`."""
     evals = _harness().parent
     scenario = tmp_path / "scenario"
     scenario.mkdir()
@@ -480,8 +475,7 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
 
 def test_the_trigger_holds_nothing_for_an_injected_seam(tmp_path, data_root, monkeypatch):
     """An injected `trigger_author` keeps its call shape (no `label`) and the lane opens nothing
-    around it: the default seam is the only place the author label is consumed (over the P4
-    drain's draft, #1108 P4 flow 4)."""
+    around it: the default seam is the only place the author label is consumed."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
 
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
