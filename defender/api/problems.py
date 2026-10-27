@@ -27,8 +27,8 @@ class ProblemResponse(JSONResponse):
 
 
 def problem(status: int, detail: str | None, *, errors: list[FieldError] | None = None,
-            headers: Mapping[str, str] | None = None) -> ProblemResponse:
-    body = Problem(title=HTTPStatus(status).phrase, status=status, detail=detail, errors=errors)
+            headers: Mapping[str, str] | None = None, type_: str = "about:blank") -> ProblemResponse:
+    body = Problem(type=type_, title=HTTPStatus(status).phrase, status=status, detail=detail, errors=errors)
     return ProblemResponse(body.model_dump(mode="json", exclude_none=True), status_code=status,
                            headers=headers, media_type=PROBLEM_MEDIA_TYPE)
 

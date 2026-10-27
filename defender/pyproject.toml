@@ -90,6 +90,15 @@ api = [
     "fastapi>=0.115",
     # The ASGI server behind `api/serve.py`, the local dev entry point.
     "uvicorn>=0.30",
+    # Verifies the sign-in provider's ID tokens (`identity/keycloak.py`); `[crypto]` brings the RSA
+    # support RS256 needs.
+    "pyjwt[crypto]",
+    # The HTTP client `identity/keycloak.py` uses for the token endpoint and admin API; the `dev`
+    # extra's `httpx` is not installed in a production `api` sync.
+    "httpx",
+    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq,
+    # `[pool]` the connection pool the request and sender threads share.
+    "psycopg[binary,pool]>=3.2",
 ]
 dev = [
     "pytest>=8.0",
@@ -125,6 +134,7 @@ pythonpath = [".."]
 tmp_path_retention_policy = "failed"
 markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
+    "postgres: needs a PostgreSQL server at DEFENDER_TEST_POSTGRES_DSN (skips without one, fails without one in CI); CI's test job runs a PostgreSQL service for it",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
     "box: drives a REAL container to pin the #540 execution boundary (needs a native docker daemon + the gVisor runtime; self-skips under docker-outside-of-Docker)",
     # NOT a way to skip a check — a `gate`-marked test re-runs a repo-wide lint gate over
