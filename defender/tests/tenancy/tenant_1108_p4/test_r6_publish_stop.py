@@ -78,6 +78,18 @@ def _alive(pid: int) -> bool:
     return stat[stat.rindex(")") + 2] != "Z"
 
 
+def _outlives(pid: int, grace: float = 5.0) -> bool:
+    """Still alive after `grace` seconds. A killed process closes its pipes (which is what ends
+    the launch's wait) before the kernel marks it dead, so an immediate look can catch it mid-exit.
+    The grace stays far below the grandchild's own 25 s sleep: an unkilled one still fails."""
+    deadline = time.monotonic() + grace
+    while _alive(pid):
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def test_r6_a_killed_child_takes_its_grandchildren_and_the_launch_does_not_wait_on_them(tmp_path):
     pidfile = tmp_path / "grandchild.pid"
     started = time.monotonic()
@@ -88,7 +100,7 @@ def test_r6_a_killed_child_takes_its_grandchildren_and_the_launch_does_not_wait_
         grandchild = int(pidfile.read_text())
         assert B.outcome_class(line) == "stale:transient", line
         assert elapsed < 15, f"the launch waited {elapsed:.1f}s on a grandchild holding its pipes"
-        assert not _alive(grandchild), "the child's grandchild outlived the kill"
+        assert not _outlives(grandchild), "the child's grandchild outlived the kill"
     finally:
         if pidfile.exists():
             with contextlib.suppress(ProcessLookupError):
