@@ -44,7 +44,7 @@ def _pay_inconclusive_price(deps) -> None:
     path.write_bytes(existing + addition)
 
 
-def _close(deps, disposition, *, stages=None, bounds=None):
+def _close(deps, disposition, *, stages=None):
     from defender.investigation import challenge_gate
     from defender.investigation.close_tool import close_investigation
     from defender.tests.support.runtime.permissions import _review_bundle
@@ -56,7 +56,7 @@ def _close(deps, disposition, *, stages=None, bounds=None):
         stages=stages if stages is not None else _review_bundle.bundle(
             composer=_review_bundle.composer_reply("holds")
         ),
-        bounds=bounds if bounds is not None else challenge_gate.default_bounds(),
+        bounds=challenge_gate.default_bounds(),
     )
 
 

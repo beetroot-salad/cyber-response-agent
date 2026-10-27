@@ -32,7 +32,6 @@ def _case(
     hypotheses=None,
     leads=None,
     disposition=None,
-    termination="natural",
 ) -> Companion:
     body = {
         "prologue": {"vertices": [], "edges": []},
@@ -40,7 +39,7 @@ def _case(
         "findings": leads or [],
         "conclude": {
             "disposition": disposition,
-            "termination": {"category": termination},
+            "termination": {"category": "natural"},
         },
     }
     return Companion(

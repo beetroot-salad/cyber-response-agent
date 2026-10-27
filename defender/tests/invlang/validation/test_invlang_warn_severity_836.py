@@ -39,10 +39,10 @@ _ERROR_FAMILY_DOCS = [
 ]
 
 
-def _diagnose(text: str, current: str | None = None) -> list:
+def _diagnose(text: str) -> list:
     from defender.skills.invlang.validate import diagnose
 
-    return diagnose(text, current)
+    return diagnose(text, None)
 
 
 def _rendered_warning(tmp_path: Path, doc: str) -> str:

@@ -35,13 +35,6 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (  # noq
 )
 
 
-EDGE_BLOCK = """
-```invlang
-:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|attempted_auth|v-002|v-001|2026-05-05T03:47:12Z|siem-event:siem|outcome=failed
-```
-"""
-
 BLANK_IDENT_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -57,17 +50,10 @@ v-006|process|??|nc[pid=4242]|image=/usr/bin/nc
 """
 CLOSE_CLASS_ROW = "l-001|v-006|class|nc"
 
-#: A refinement naming the EDGE. The gate blocks on it; the frontier cannot key on it.
-EDGE_TARGET_DOC = PROLOGUE + EDGE_BLOCK + attr_block("l-001|e-001|attrs.auth_method|??")
-
 #: Open at block 2, closed at block 3.
 REFINED_DOC = PROLOGUE + OPEN_CLASS_BLOCK + attr_block(CLOSE_CLASS_ROW)
 
-_FIXTURE_DOCS = {
-    "edge target": EDGE_TARGET_DOC,
-    "blank ident": PROLOGUE + BLANK_IDENT_BLOCK,
-    "refined": REFINED_DOC,
-}
+BLANK_IDENT_DOC = PROLOGUE + BLANK_IDENT_BLOCK
 
 
 def _cells(doc: str, *, include_ident: bool = True):
@@ -85,7 +71,7 @@ def _frontier(doc: str):
 
 def test_a_blank_cell_is_neither_open_nor_held():
     """Cells are three-state, and the third state is not a rounding error."""
-    doc = _FIXTURE_DOCS["blank ident"]
+    doc = BLANK_IDENT_DOC
     by_slot = {c.slot: c for c in _cells(doc) if c.vertex_id == "v-008"}
 
     assert by_slot["ident"].state == CELL_EMPTY
@@ -101,7 +87,7 @@ def test_a_blank_cell_is_neither_open_nor_held():
 
 def test_include_ident_is_the_gates_divergence_made_a_parameter():
     """The ident asymmetry is one flag on one walk, and still asymmetric."""
-    doc = _FIXTURE_DOCS["blank ident"]
+    doc = BLANK_IDENT_DOC
     assert not [c for c in _cells(doc, include_ident=False) if c.slot == "ident"]
     assert [c for c in _cells(doc, include_ident=True) if c.slot == "ident"]
 

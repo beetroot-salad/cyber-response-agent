@@ -97,8 +97,7 @@ def test_1221_a_benign_close_resting_on_past_cases_alone_is_refused(grounding):
     )
     assert _errors(_example_b()) == [], "the control failed: example-b as shipped draws errors"
     assert _errors(_grounded(grounding, extra_row=ORG_AUTHORITY_ROW)) == [], (
-        "a cited row beside an uncited org-authority row on the same contract was refused — "
-        "#27 forbids resting on past cases ALONE"
+        "a cited row beside an uncited org-authority row on the same contract was refused"
     )
 
     assert _refusals_of_ac1(cited), (

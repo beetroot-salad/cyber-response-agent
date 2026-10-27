@@ -64,13 +64,6 @@ v-003|compute|ip-only/??/??|10.42.7.183|knowledge=partial
 ```
 """
 
-CANDIDATE_SET_BLOCK = """
-```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-007|compute|ip-only/{internal, dmz}/known-corp|10.42.7.9|knowledge=partial
-```
-"""
-
 AUTHZ_DECL_BLOCK = """
 ```invlang
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
@@ -154,19 +147,17 @@ def authz_row(verdict: str) -> str:
     )
 
 
-#: Every fixture document, by the name the failure message should name.
+#: The fixture documents, by name.
 _FIXTURE_DOCS = {
     "open class": PROLOGUE + OPEN_CLASS_BLOCK,
     "closed class": PROLOGUE + OPEN_CLASS_BLOCK + attr_block(CLOSE_CLASS_ROW),
     "open loginuid": PROLOGUE + OPEN_LOGINUID_BLOCK,
     "open ident": PROLOGUE + OPEN_IDENT_BLOCK,
     "open triple": PROLOGUE + OPEN_TRIPLE_BLOCK,
-    "candidate set": PROLOGUE + CANDIDATE_SET_BLOCK,
     "authz declared": PROLOGUE + AUTHZ_DECL_BLOCK,
     "authz authorized": PROLOGUE + AUTHZ_DECL_BLOCK + authz_row("authorized"),
     "authz unauthorized": PROLOGUE + AUTHZ_DECL_BLOCK + authz_row("unauthorized"),
     "proposed contract": PROLOGUE + PROPOSED_CONTRACT_BLOCK,
-    "half written": PROLOGUE + HALF_WRITTEN_BLOCK,
 }
 
 
@@ -305,7 +296,7 @@ def test_an_unresolved_ident_is_in_the_frontier_but_not_in_the_benign_gate(tmp_p
         "the frontier work leaked into the benign disposition gate"
     )
     assert validate_investigation(doc + CONCLUDE_BENIGN, None) is None, (
-        "an unresolved ident newly blocks a benign close — #836 N3 says it must not"
+        "an unresolved ident blocks a benign close"
     )
     # ...and the control that the gate still WORKS: an open class on the same document blocks.
     blocked = PROLOGUE + OPEN_CLASS_BLOCK + CONCLUDE_BENIGN
@@ -422,10 +413,10 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
         "the append that opened `class=??` did not carry the lesson it unlocked"
     )
     assert "/agent/lessons/process-class-open.md" in second, (
-        "the pushed lesson is not named by the run copy's model-view path (O-TEXT)"
+        "the pushed lesson is not named by the run copy's model-view path"
     )
     assert "checkout-decoy-class-open" not in second, (
-        "the recall read the checkout's lessons corpus, not the run copy's (O2)"
+        "the recall read the checkout's lessons corpus, not the run copy's"
     )
 
     third = _tool_append_block(deps, PROSE_BLOCK)
@@ -507,8 +498,7 @@ def test_an_open_case_slot_matches_a_concrete_selector_and_a_settled_one_does_no
 
     hits = _names(match_lessons(_frontier(_FIXTURE_DOCS["open triple"]), corpus))
     assert hits == ["hits-through-the-open-slot"], (
-        "`ip-only/internal` can only reach `ip-only/??/??` through the open slot 1, and "
-        "`bastion` must still be refused by the concrete slot 0"
+        "`ip-only/internal` must match only through open slot 1, `bastion` not at concrete slot 0"
     )
 
     # ...and against a wholly open cell, a fully concrete selector matches too — the same
@@ -733,8 +723,7 @@ v-008|process|??|nc[pid=4242]|loginuid=??
         "`nginx` matched a `??` — it pinned nothing and must not outscore the attribute"
     )
     assert hits["zzz-names-the-open-attribute"] == 3, (
-        "naming an `attrs.<name>` slot is a claim about what the document HOLDS, where "
-        "`class` and `ident` are cells every vertex carries — `ATTR_SLOT_WEIGHT` (#935)"
+        "an `attrs.<name>` slot match is not weighted by `ATTR_SLOT_WEIGHT`"
     )
     assert hits["aaa-wholly-open-class"] < hits["zzz-names-the-open-attribute"], (
         "a class literal the document never mentions outranked the exact open slot"

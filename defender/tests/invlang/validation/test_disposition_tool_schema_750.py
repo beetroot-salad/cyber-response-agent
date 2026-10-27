@@ -103,9 +103,8 @@ def test_the_registered_tool_advertises_the_owners_vocabulary(tmp_path):
 
     assert DISPOSITION_VALUES, "the vocabulary owner is empty; the comparison below is vacuous"
     assert prop.get("enum") == list(DISPOSITION_VALUES), (
-        "the model is not told the disposition vocabulary structurally — the schema's enum is "
-        f"{prop.get('enum')!r}, the owner's members are {list(DISPOSITION_VALUES)!r}. The "
-        f"whole advertised argument schema is {prop!r}"
+        f"the advertised enum is {prop.get('enum')!r}, the owner's members are "
+        f"{list(DISPOSITION_VALUES)!r}; schema: {prop!r}"
     )
 
 
@@ -173,8 +172,7 @@ def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_p
     message = str(excinfo.value)
 
     assert repr(LACED) == "'beni\\u200bgn'", (
-        "python's repr no longer escapes U+200B, so the assertions below are about the wrong "
-        "thing — the retry text needs another way to make the character visible"
+        "python's repr no longer escapes U+200B, so the assertions below test the wrong thing"
     )
     assert "'beni\\u200bgn'" in message, (
         f"the refusal does not show the invisible character: {message!r}"

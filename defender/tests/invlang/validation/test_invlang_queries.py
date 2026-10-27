@@ -257,10 +257,8 @@ def test_lead_branch_effects_min_support_drops_low_n_rows():
 def _shape_case(
     case_id: str,
     *,
-    signature_id: str = "5710",
     vertices: list[dict] | None = None,
     hypotheses: list[dict] | None = None,
-    disposition: str = "benign",
     resolutions: list[dict] | None = None,
 ) -> Companion:
     leads = (
@@ -271,26 +269,25 @@ def _shape_case(
         "prologue": {"vertices": vertices or [], "edges": []},
         "hypothesize": {"hypotheses": hypotheses or []},
         "findings": leads,
-        "conclude": {"disposition": disposition},
+        "conclude": {"disposition": "benign"},
     }
     return Companion(
         case_id=case_id,
         source_path=Path(f"/tmp/fake/{case_id}/investigation.md"),
         body=body,
-        signature_id=signature_id,
+        signature_id="5710",
     )
 
 
 def _hyp(h_id: str, name: str, *, attached_to: str = "v-001",
          parent_type: str = "compute",
-         parent_class: str = "bastion/internal/known-corp",
          rel: str = "attempted_auth", weight: str | None = None) -> dict:
     return {
         "id": h_id, "name": name,
         "anchor": attached_to,
         "proposed_edge": {
             "relation": rel,
-            "parent_vertex": {"type": parent_type, "classification": parent_class},
+            "parent_vertex": {"type": parent_type, "classification": "bastion/internal/known-corp"},
         },
         "weight": weight,
         "status": "active",

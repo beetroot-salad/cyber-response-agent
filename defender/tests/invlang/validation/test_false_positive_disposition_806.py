@@ -166,8 +166,9 @@ def test_the_reader_is_the_gate_table_and_not_one_keyword():
     assert laced.rationale
 
 
-def _close(tmp_path, companion: str, disposition: str):
-    """Drive the real close far enough to reach (or clear) the entry price."""
+def _close(tmp_path, companion: str | None, disposition: str):
+    """Drive the real close far enough to reach (or clear) the entry price. A `None` companion
+    leaves `investigation.md` unwritten."""
     import asyncio
 
     from defender.agents import MAIN_DEF
@@ -179,7 +180,8 @@ def _close(tmp_path, companion: str, disposition: str):
 
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
-    (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
+    if companion is not None:
+        (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
     deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
@@ -288,59 +290,25 @@ def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, sh
     (#879)."""
     from pydantic_ai.exceptions import ModelRetry
 
-    import asyncio
-
-    from defender.agents import MAIN_DEF
-    from defender.investigation import challenge_gate
-    from defender.investigation.agent_definition import bind
-    from defender.investigation.close_tool import _close_investigation_async
-    from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
-    from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
-
-    run_dir = tmp_path / fixture_uuid("run")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    if companion is not None:
-        (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
-    dfn = tmp_path / "defender"
-    dfn.mkdir(exist_ok=True)
-    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
-
     with pytest.raises(ModelRetry) as e:
-        asyncio.run(_close_investigation_async(
-            deps, "benign", stages=_bundle(composer=_composer(finding="holds")),
-            bounds=challenge_gate.default_bounds(),
-        ))
+        _close(tmp_path, companion, "benign")
     assert "prologue.vertices" in str(e.value), shape
-    assert not (run_dir / "report.md").exists(), shape
+    assert not (tmp_path / fixture_uuid("run") / "report.md").exists(), shape
 
 
 def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_path):
     """A gate that cannot look must not report clean."""
-    import asyncio
-
     from defender._io import ALIAS_READ_REFUSAL
     from defender._vocab import HOST_ONLY_DISPOSITION
-    from defender.agents import MAIN_DEF
-    from defender.investigation import challenge_gate
-    from defender.investigation.agent_definition import bind
     from defender.investigation.close_tool import (
-        CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR, _close_investigation_async,
+        CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR,
     )
-    from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
-    from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
     from defender.tests.support.runtime.engine._spec992 import frontmatter, record
 
     for disposition in ("benign", "false-positive"):
         run_dir = tmp_path / disposition / fixture_uuid("run")
-        (run_dir / "gather_raw").mkdir(parents=True)
-        (run_dir / "investigation.md").mkdir()          # the fault: a directory, not a file
-        dfn = tmp_path / disposition / "defender"
-        dfn.mkdir(exist_ok=True)
-        deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
-        result = asyncio.run(_close_investigation_async(
-            deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
-            bounds=challenge_gate.default_bounds(),
-        ))
+        (run_dir / "investigation.md").mkdir(parents=True)  # the fault: a directory, not a file
+        result = _close(tmp_path / disposition, None, disposition)
         assert (result.outcome, result.failure_kind) == (FORCED_INCONCLUSIVE, STAGE_ERROR), disposition
         fm = frontmatter(run_dir)
         assert fm["disposition"] == HOST_ONLY_DISPOSITION, (disposition, fm)
@@ -355,26 +323,8 @@ def test_an_absent_companion_is_not_a_fault(tmp_path):
     answers, and only the second is a fault."""
     from pydantic_ai.exceptions import ModelRetry
 
-    run_dir = tmp_path / fixture_uuid("run")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    dfn = tmp_path / "defender"
-    dfn.mkdir(exist_ok=True)
-
-    import asyncio
-
-    from defender.agents import MAIN_DEF
-    from defender.investigation import challenge_gate
-    from defender.investigation.agent_definition import bind
-    from defender.investigation.close_tool import _close_investigation_async
-    from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
-    from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
-
-    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
     with pytest.raises(ModelRetry) as e:
-        asyncio.run(_close_investigation_async(
-            deps, "false-positive", stages=_bundle(composer=_composer(finding="holds")),
-            bounds=challenge_gate.default_bounds(),
-        ))
+        _close(tmp_path, None, "false-positive")
     assert "could not be read" not in str(e.value)
     assert "detection_notes" in str(e.value)
 

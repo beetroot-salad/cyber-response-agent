@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from defender.tests.support.invlang.validation._invlang_warn_836 import (
@@ -16,6 +14,7 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (
     flagged_rows,
     main_deps,
     offered_tool_names,
+    registered_tools,
     run_one_response,
     seed_investigation,
 )
@@ -45,31 +44,6 @@ def _pay_inconclusive_price(run) -> None:
         path.read_bytes()
         + b'\n```invlang\n:T conclude\nceiling_test  state=nothing-to-try cap=telemetry.collect note=process telemetry not retrieved\n```\n'
     )
-
-
-def _registered_tools():
-    """MAIN's registered `Tool` objects by name: where the per-tool `sequential` flag lives."""
-    import os
-
-    from pydantic_ai.models import override_allow_model_requests
-    from pydantic_ai.models.function import FunctionModel
-
-    from defender.agents import MAIN_DEF
-    from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.investigation import driver, observe
-    from defender.providers import BuiltModel
-    from defender.investigation.tools import AgentDeps
-    from defender.tests.e2e._replay_harness import ReplayFn
-
-    logger = observe.RequestLogger(Path(os.devnull))
-    with override_allow_model_requests(False):
-        agent = driver.build_agent_core(
-            MAIN_DEF, deps_type=AgentDeps, instructions="probe", logger=logger,
-            agent_id="probe",
-            make_model=lambda name, effort: BuiltModel(FunctionModel(ReplayFn([])), None),
-            limits=DEFAULT_LIMITS,
-        )
-    return dict(agent._function_toolset.tools)
 
 
 # the repair itself
@@ -419,8 +393,11 @@ def test_fix_row_refused_once_the_close_committed(tmp_path):
 # two write calls in one model response
 
 def test_write_verbs_execute_sequentially_within_one_response(tmp_path):
+    from defender.agents import MAIN_DEF
+
     deps, run = main_deps(tmp_path)
-    tools = _registered_tools()
+    # MAIN's registered `Tool` objects: where the per-tool `sequential` flag lives.
+    tools = registered_tools(MAIN_DEF)
 
     assert tools["append_block"].sequential is True
     assert tools["fix_row"].sequential is True

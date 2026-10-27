@@ -175,8 +175,8 @@ def test_a_hostile_system_directory_name_does_not_blind_the_gate():
         capture_output=True, text=True, cwd=REPO_ROOT,
     )
     assert proc.returncode == 0, (
-        "the hostile names declare nothing, so a table total over `alpha` is total — the "
-        f"gate must be clean, not red or crashed\nstdout={proc.stdout}\nstderr={proc.stderr}"
+        f"the gate was not clean over hostile names that declare nothing\n"
+        f"stdout={proc.stdout}\nstderr={proc.stderr}"
     )
     assert "1 system" in proc.stdout, (
         f"the gate covered a system count that is not just `alpha`: {proc.stdout}"

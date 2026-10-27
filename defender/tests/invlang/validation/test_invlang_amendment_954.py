@@ -36,8 +36,6 @@ from defender.tests.support.invlang.validation._invlang_amendment_954 import (
 FIRST_ROW = "l-001|1|alpha|v-001||cmdb|24h"
 #: The row it must discard, with everything that row declares.
 LATER_ROW = "l-001|2|beta|v-002||edr|48h"
-#: A third row for the same id — F-C's count case.
-THIRD_ROW = "l-001|3|gamma|v-002||edr|72h"
 #: A DIFFERENT lead in the same block. The complementary condition for every negative here.
 OTHER_ROW = "l-002|1|delta|v-002||edr|48h"
 
@@ -45,8 +43,6 @@ OTHER_ROW = "l-002|1|delta|v-002||edr|48h"
 REPEAT_DOC = VERTICES + findings_block(FIRST_ROW, LATER_ROW)
 #: The same document with the later row never written — what the repeat must read as.
 FIRST_ONLY_DOC = VERTICES + findings_block(FIRST_ROW)
-#: ...and with the first row never written, so a test can tell the two readings apart.
-LATER_ONLY_DOC = VERTICES + findings_block(LATER_ROW)
 #: Two distinct ids: two buckets, no warning.
 TWO_IDS_DOC = VERTICES + findings_block(FIRST_ROW, OTHER_ROW)
 
@@ -235,7 +231,7 @@ def test_a_blank_cell_in_an_amending_row_does_not_erase_the_earlier_value():
     assert lead["outcome"]["failure_reason"] == "timeout"
     # The two the amending row takes UNCONDITIONALLY.
     assert lead["name"] == "beta"
-    assert lead["target"] == "", "`target` is taken unconditionally — C1 does not cover it"
+    assert lead["target"] == "", "`target` is taken unconditionally"
     assert repeat_diagnostics(doc) == [], "a CROSS-block re-listing is the legal amendment"
 
 
@@ -512,8 +508,6 @@ PADDING_ATTR_HEADER = "[resolved_by|target|key|value|note?]"
 
 PAD_EATS_DELIMITER_ROW = "l-001|v-001|bogus|c:\\path\\"
 
-BYTES_MOVE_ROW = r"l-001|v-001|a\|a\ |hello"
-
 
 def test_a_rebuilt_row_that_loses_a_delimiter_is_withheld():
     """A candidate whose rejoin turns an author's trailing backslash into an escaped `|` is WITHHELD, because it no longer splits to the block's declared width."""
@@ -547,16 +541,6 @@ def test_a_candidate_carrying_a_fence_delimiter_is_withheld():
 
 # readers that parse without validating
 
-FOLD_FIRST = "l-001|1|alpha|v-001||cmdb|24h|timeout"
-FOLD_LATER = "l-001|2|beta|v-002||edr|48h"
-FOLD_OTHER = "l-002|2|delta|v-002||edr|48h"
-FOLD_REPEAT_DOC = (
-    VERTICES + findings_block(FOLD_FIRST, FOLD_LATER, FOLD_OTHER) + close_block(1)
-)
-FOLD_FIRST_ONLY_DOC = VERTICES + findings_block(FOLD_FIRST, FOLD_OTHER) + close_block(1)
-FOLD_LATER_ONLY_DOC = VERTICES + findings_block(FOLD_LATER, FOLD_OTHER) + close_block(1)
-
-
 def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clean(tmp_path):
     """The corpus loader, the one bucket reader that keeps its warnings, reports a stored case
     carrying a within-block repeat as PARTIAL, and its lead is the first row's."""
@@ -575,15 +559,6 @@ def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clea
         REPEAT_PHRASE in w.reason for _path, ws in report.partial for w in ws
     ), "the kept warning is the repeated-id one"
     assert companions[0].leads[0]["name"] == "alpha"
-
-
-FP_FIRST_ROW = "l-001|1|alpha|v-001||cmdb|24h"
-FP_LATER_ROW = "l-001|2|beta|v-999||edr|48h"
-FP_RESULT = attr_block("l-001|v-001|attrs.owner|svc-deploy")
-
-
-def _fp_doc(*rows):
-    return VERTICES + findings_block(*rows) + FP_RESULT + CONCLUDE_FALSE_POSITIVE
 
 
 SEEDING_BLOCK = attr_block("l-001|v-001|attrs.owner|svc-deploy")

@@ -50,7 +50,6 @@ def _conclude(
     impact_verdict: str = "none",
     impact_severity: str | None = None,
     ceiling_test: str | None = None,
-    ceiling_rationale: str | None = None,
 ) -> str:
     """A `:T conclude` scalar block. `None` omits the row; a string writes it verbatim, so
     `impact_severity="null"` is how the explicit-null spelling is tested apart from absence."""
@@ -65,8 +64,6 @@ def _conclude(
         rows.append(f"impact_severity        {impact_severity}")
     if ceiling_test is not None:
         rows.append(f"ceiling_test           {ceiling_test}")
-    if ceiling_rationale is not None:
-        rows.append(f"ceiling_rationale      {ceiling_rationale}")
     rows.append('summary                "Failure series left one threshold ungraded"')
     return "\n".join(rows)
 
@@ -90,13 +87,6 @@ def _deferred_preds(*rows: str) -> str:
 
 
 # rule #13 — `ceiling_test` required when termination is severity-ceiling
-
-_TERMINATION_CATEGORIES = [
-    "trust-root",
-    "adversarial-refuted",
-    "severity-ceiling",
-    "exhaustion-escalation",
-]
 
 _A_CEILING_TEST = '"authorized_keys FIM on app-server-01 (auditd write events) not retrieved"'
 
@@ -287,10 +277,10 @@ h-002|?scheduled-batch-mount|v-002|runs_on|identity|service-account/known-corp||
 ac2|e-001|change-mgmt|"an approved change window covers this attempt"|escalate|escalate"""
 
 
-def _authz_row(contract: str = "ac1", verdict: str = "authorized") -> str:
+def _authz_row(contract: str = "ac1") -> str:
     return (
         ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
-        f'l-001|e-001|{contract}|{verdict}|approved-source-list|"host is listed in CMDB"'
+        f'l-001|e-001|{contract}|authorized|approved-source-list|"host is listed in CMDB"'
     )
 
 
@@ -369,8 +359,6 @@ _IP_DEFAULTS = {
     "escalation_on": "exceeds",
 }
 
-_IMPACT_DIMENSIONS = ["confidentiality", "integrity", "availability", "scope"]
-
 
 def _impact_preds(lead: str, *rows: dict[str, str]) -> str:
     lines = [f":L {lead}.impact_preds [" + "|".join(_IP_COLS) + "]"]
@@ -380,10 +368,10 @@ def _impact_preds(lead: str, *rows: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
-def _ip_doc(*rows: dict[str, str], lead: str = "l-001") -> str:
+def _ip_doc(*rows: dict[str, str]) -> str:
     """An impact-prediction document with NO `:T conclude`, so rule #31's closure gate cannot
     fire alongside #29 and every error count below reads one rule."""
-    return _doc(_PROLOGUE, _LEADS, _impact_preds(lead, *rows))
+    return _doc(_PROLOGUE, _LEADS, _impact_preds("l-001", *rows))
 
 
 def test_a_well_formed_impact_prediction_validates_clean() -> None:

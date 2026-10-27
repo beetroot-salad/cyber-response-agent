@@ -84,17 +84,8 @@ def test_an_unmatched_attribute_prediction_blocks_a_double_plus_like_a_p_star_wo
 
 _SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|screen_result]\n"
 
-_SCREEN_CLEAN = _PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
-"""
-
 _SCREEN_ON_A_NON_SCREEN_LEAD = _PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|auth-history|v-001|||elastic|10m|no_match
-"""
-
-_SCREEN_SEQUENCE_EVERY_LEAD_SCORED = _PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
-l-002|1|cadence-screen|v-001|screen||elastic|24h|no_match
 """
 
 _SCREEN_MATCH_WITH_HYPOTHESES = _PROLOGUE + _ONE_HYPOTHESIS + _SCREEN_HEADER + """\
@@ -131,22 +122,6 @@ _FORK_IDENTICAL = _FORK_DISTINCT.replace(
     'p1|proposed_edge|"failures repeat on a fixed interval"',
     'p1|proposed_edge|"Failures arrive in bursts,   no fixed interval between them"',
 )
-
-#: The same claims on hypotheses hung on DIFFERENT vertices. Not siblings, so not a fork.
-_SAME_CLAIMS_ON_TWO_ANCHORS = _PROLOGUE.replace(
-    "v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|",
-    "v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|\n"
-    "v-002|compute|monitoring-agent/internal/known-corp|172.18.0.16|",
-) + _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-h-002|?credential-guessing|v-002|runs_on|process|??/??/??||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
-
-:H h-002.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
-"""
 
 
 def test_siblings_declaring_the_same_claims_are_refused() -> None:
@@ -199,12 +174,6 @@ h-002.p1|"the interval histogram lead did not return"
 _SURVIVING_ONE_OF_TWO = _TWO_LIVE_HYPOTHESES + """\
 :T conclude.surviving [hyp_id|final_weight]
 h-001|null
-"""
-
-_SURVIVING_BOTH = _TWO_LIVE_HYPOTHESES + """\
-:T conclude.surviving [hyp_id|final_weight]
-h-001|null
-h-002|null
 """
 
 
@@ -300,15 +269,6 @@ p2|proposed_edge|"failures repeat on a fixed interval"
 
 :H h-001.refuts [id|refutes|claim]
 r1|p2|"the series is cadenced"
-"""
-
-#: A refutation on a hypothesis that declared no predictions yet. Lean, legal, and nothing for
-#: the scope rule to resolve against — rule #23 exempts the same shape.
-_REFUT_ON_A_PREDICTIONLESS_HYPOTHESIS = _PROLOGUE + _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.refuts [id|refutes|claim]
-r1|p1|"the series is cadenced"
 """
 
 
@@ -480,29 +440,6 @@ def test_an_off_vocabulary_after_token_settles_no_prediction(after: str) -> None
     assert any("h-001.p1" in e and "declared and then abandoned" in e for e in errors), errors
 
 
-#: A `:R impact` row and the `ip1` it grades, with EVERY cell quoted — legal, and the shape
-#: that drew three simultaneous refusals before the read side learned to unquote.
-_IMPACT_QUOTED = (
-    ":L l-001.impact_preds "
-    "[id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]\n"
-    'ip1|"confidentiality"|"session bytes within the 30d baseline"'
-    "|within|exceeds|indeterminate|exceeds\n\n"
-    ":R impact [resolved_by|pred_ref|dim|observed|verdict|grounding|authority|as_of"
-    "|reasoning]\n"
-    'l-001|"ip1"|"confidentiality"|"180GB"|"exceeds"|"telemetry-baseline"|"partial"'
-    '|"2026-05-05T04:00:00Z"|"3 sigma over a 2 sigma threshold"\n\n'
-)
-
-
-_LONE_CONTRACT = _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
-
-"""
-
-
 def _authz_row(fulfills: str) -> str:
     return (
         ":R authz [resolved_by|fulfills|verdict|grounding|anchor_id|anchor_kind|authority"
@@ -579,7 +516,6 @@ def test_a_second_conclude_block_of_unrecognized_keys_does_not_refuse_the_close(
     ) == []
 
 
-_LESSON_CONCLUDE = ":T conclude\nanalyst_note           soc-tier2\n\n"
 _REAL_CONCLUDE = (
     ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
     ":T conclude.surviving [hyp_id|final_weight]\nh-001|null\n\n"
@@ -588,13 +524,6 @@ _DEFER_P1 = (
     ":T conclude.deferred_preds [prediction_ref|rationale]\n"
     'h-001.p1|"telemetry never arrived"\n\n'
 )
-
-
-def _screen_row(mode: str, result: str) -> str:
-    return (
-        ":L findings [id|loop|name|target|mode|screen_result|tests|system|window]\n"
-        f"l-001|1|probe|v-001|{mode}|{result}|h-001|elastic|10m\n\n"
-    )
 
 
 def test_a_claim_that_normalizes_to_nothing_is_an_empty_claim() -> None:

@@ -46,6 +46,7 @@ __all__ = [
     "offered_tool_defs",
     "offered_tool_names",
     "recording_stages",
+    "registered_tools",
     "run_one_response",
     "seed_investigation",
     "warn_window",
@@ -191,6 +192,23 @@ def build_main_agent(model_fn: Any, *, review_stages: Any = None) -> Any:
             review_stages=stages, bounds=challenge_gate.default_bounds(), catalog=None,
             gather_grant=driver.GATHER_DEF.verb_grant,
         )
+
+
+def registered_tools(defn: Any) -> dict[str, Any]:
+    """`defn`'s REGISTERED `Tool` objects by name, read off a real agent core built with a fake
+    model rather than off a hand-kept list."""
+    from defender.hooks.budget_enforcer import DEFAULT_LIMITS
+    from defender.investigation.tools import AgentDeps
+
+    logger = observe.RequestLogger(Path(os.devnull))
+    with override_allow_model_requests(False):
+        agent = driver.build_agent_core(
+            defn, deps_type=defn.deps_cls or AgentDeps, instructions="probe", logger=logger,
+            agent_id="probe",
+            make_model=lambda name, effort: BuiltModel(FunctionModel(ReplayFn([])), None),
+            limits=DEFAULT_LIMITS,
+        )
+    return dict(agent._function_toolset.tools)
 
 
 def offered_tool_defs(deps: Any, *, turns: list[Turn] | None = None) -> list[Any]:

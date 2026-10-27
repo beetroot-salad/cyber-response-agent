@@ -92,8 +92,7 @@ def test_recording_more_about_a_class_slot_never_loses_a_selector():
         f"refining a compute class cell lost the selector: {pins}"
     )
     assert pins["ip-only/??"] == pins["ip-only/??/??"], (
-        "a two-slot spelling of a three-slot type scored differently from the padded one — "
-        "the cell is still being taken at its own length"
+        "a two-slot spelling of a three-slot type scored differently from the padded one"
     )
     # ...and a pattern that matched NOWHERE by equality pins nothing: the wholly-open cases
     # stay at 0 rather than riding the padding.
@@ -139,7 +138,7 @@ def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
     hits = _match(TWO_VERTEX_DOC)
     top = _names(hits)
     assert LOGINUID_LESSON in top, (
-        f"#919's motivating lesson is still cut from its own reproduction; got {top}"
+        f"the motivating lesson is cut from its own reproduction; got {top}"
     )
 
     by_name = {h.name: h.score for h in _match(TWO_VERTEX_DOC, top_k=99)}
@@ -192,8 +191,7 @@ def test_the_edge_lane_wins_a_slot_on_score_rather_than_on_its_name(tmp_path):
 
     hits = LF.match_lessons(frontier_from_text(CONTRACT_AND_THREE_CELLS_DOC), corpus)
     assert "zzz-anchor-only" in _names(hits), (
-        "the lesson speaking to the run's one open authorization question lost every slot to "
-        f"three bare node matches that sort earlier; got {_names(hits)}"
+        f"the authorization lesson lost every slot to bare node matches; got {_names(hits)}"
     )
     assert _names(hits)[0] == "zzz-anchor-only", (
         "the edge lesson survived on the alphabet rather than on its score"
@@ -313,8 +311,7 @@ def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers
         "other open class unmentioned"
     )
     assert block(tuple(reversed(rows))) == placed, (
-        "reversing the order the vertices are DECLARED in changed where the lessons landed — "
-        "placement is reading the walk order rather than the frontier's content"
+        "reversing the vertex declaration order changed where the lessons landed"
     )
 
 
@@ -354,8 +351,7 @@ def test_a_candidate_set_in_a_selector_is_a_disjunction_and_not_a_wildcard(tmp_p
     assert inside == sorted(inside), f"the in-set refinement path is not monotonic: {inside}"
 
     assert LF._class_pins(sel, "bastion/internet/novel", "compute") is None, (
-        "a lesson scoped to internal-or-dmz matched a bastion vertex — the candidate set is "
-        "being read as a wildcard rather than as the disjunction the author wrote"
+        "a lesson scoped to internal-or-dmz matched a bastion vertex"
     )
     # ...and it still earns nothing where it matches: it names no single value, so there is
     # no equality for it to anchor on, exactly as the open marker has none.

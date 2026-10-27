@@ -10,33 +10,13 @@ from defender.tests.support.integrations._defender_sql import assert_query_error
 from defender.tests.support.invlang.validation._invlang_warn_836 import (
     WARN_DOC,
     main_deps,
+    registered_tools,
     seed_investigation,
 )
 
 
 def _registered_names(defn) -> set[str]:
-    """The REGISTERED tool names, read off a real Agent as
-    `test_budget_seams_631._registered_names` does, rather than off a hand-kept list."""
-    import os
-
-    from pydantic_ai.models import override_allow_model_requests
-    from pydantic_ai.models.function import FunctionModel
-
-    from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.investigation import driver, observe
-    from defender.providers import BuiltModel
-    from defender.investigation.tools import AgentDeps
-    from defender.tests.e2e._replay_harness import ReplayFn
-
-    logger = observe.RequestLogger(Path(os.devnull))
-    with override_allow_model_requests(False):
-        agent = driver.build_agent_core(
-            defn, deps_type=defn.deps_cls or AgentDeps, instructions="probe", logger=logger,
-            agent_id="probe",
-            make_model=lambda name, effort: BuiltModel(FunctionModel(ReplayFn([])), None),
-            limits=DEFAULT_LIMITS,
-        )
-    return set(agent._function_toolset.tools)
+    return set(registered_tools(defn))
 
 
 # which agents are offered the repair verb
@@ -99,7 +79,7 @@ def test_budget_tripped_run_still_completes_repair_cycle(tmp_path):
     from defender._agent_role import AgentRole
 
     assert tier("fix_row", AgentRole.MAIN) == "tail"
-    assert "fix_row" not in BUDGET_EXEMPT_TOOLS, "R1 deliberately did NOT exempt it"
+    assert "fix_row" not in BUDGET_EXEMPT_TOOLS, "`fix_row` must not be budget-exempt"
 
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 3}
     over_cap = {"tool_calls": 99, "started_monotonic": None}
