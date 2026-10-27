@@ -1,4 +1,4 @@
-"""D7 `tenant.py scaffold <id> <dir>`: a new tenant repo from the template."""
+"""`tenant.py scaffold <id> <dir>`: a new tenant repo from the template."""
 from __future__ import annotations
 
 import os
@@ -11,7 +11,8 @@ import pytest
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
-#: Every ambient git variable is dropped from the scaffold process's environment, so the test,
+#: Ambient git variables (and `EMAIL`, git's identity fallback), dropped from the scaffold
+#: process's environment so the host's git setup decides nothing.
 _AMBIENT_GIT = tuple(k for k in os.environ if k.startswith("GIT_")) + ("EMAIL",)
 
 
@@ -52,7 +53,7 @@ def _refused(proc: subprocess.CompletedProcess, *names: str) -> str:
 
 
 def _product_repo(tmp: Path) -> Path:
-    """A SCRATCH git repository with one commit, standing for the product repo the operator
+    """A scratch git repository with one commit, standing for the product repo the operator
     runs `scaffold` from. Never the real worktree."""
     repo = tmp / "product"
     (repo / "defender").mkdir(parents=True)
@@ -96,7 +97,6 @@ def _empty_dir(path: Path) -> Path:
 
 def test_1120_scaffold_copies_the_template_writes_the_tenant_id_and_commits(
         tmp_path: Path, data_root: Path) -> None:
-    """`tenant.py scaffold acme <empty dir>` exits 0."""
     target = _empty_dir(tmp_path / "acme-tenant")
     proc = _scaffold(H.TID, target, home=_home(tmp_path))
     H.assert_clean(proc)
@@ -170,7 +170,6 @@ def test_1120_scaffold_refuses_a_bad_id_or_a_non_empty_target_and_writes_nothing
 
 def test_1120_scaffold_leaves_the_product_repo_unchanged_under_an_exported_git_dir(
         tmp_path: Path) -> None:
-    # rejected: automatic retry and a clone timeout (N3).
     product = _product_repo(tmp_path)
     before = _repo_state(product)
     target = _empty_dir(tmp_path / "acme-tenant")
@@ -204,7 +203,7 @@ def test_1120_a_failed_scaffold_leaves_its_target_as_found_and_a_retry_succeeds(
     assert H.git(target, "rev-list", "--count", "HEAD").stdout.strip() == "1"
 
 
-#: Words any "no commit identity" refusal carries — scaffold's own preflight message or git's
+#: Words any "no commit identity" refusal carries, whether scaffold's preflight or git says it.
 _IDENTITY_WORDS = ("identity", "user.email", "user.name", "who you are")
 
 

@@ -34,7 +34,7 @@ def _migrate(tenant_id: str, target: Path, *, home: Path, script: Path | None = 
 
 
 def _old_shape_root(root: Path) -> Path:
-    """`<root>/playground/{tenant.json, runs/r1/report.md, sessions/s1}`, no knowledge/."""
+    """`<root>/<lab id>/{tenant.json, runs/r1/report.md, sessions/s1}`, no knowledge/."""
     H.plant_row(root, _TID)
     run = root / _TID / "runs" / "r1"
     run.mkdir(parents=True)
@@ -54,7 +54,7 @@ def _committed(repo: Path, rev: str = "HEAD", under: str = "") -> dict[str, byte
 
 def _checkout_with_a_retired_lab(dest: Path, shape: str = "merged",
                                  extra: dict[str, str] | None = None) -> tuple[Path, dict]:
-    """A tmp checkout whose history commits a lab at `knowledge/tenants/playground` (the
+    """A tmp checkout whose history commits a lab at `knowledge/tenants/<lab id>` (the
     fixture's files, plus `extra`) and then deletes it, reaching HEAD by `shape`: "merged" (a
     branch deleting it, merged with a merge commit into a main that moved on), "squashed", or
     "linear". Returns the checkout and the lab's committed files."""

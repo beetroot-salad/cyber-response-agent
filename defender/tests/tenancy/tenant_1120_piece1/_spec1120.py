@@ -1,4 +1,4 @@
-"""Shared machinery for #1120 piece 1's spec — "the tenant frame". NO test functions."""
+"""Shared helpers for the #1120 tenant-frame tests (no test functions)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
@@ -21,13 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
 KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
 
-#: A4's fixture tenant and D9's template, both committed in the product repo.
+#: The fixture tenant (the retired lab's frozen copy) and the template, both committed in the
+#: product repo.
 FIXTURE = KNOWLEDGE_ROOT / "tenant-fixture"
 TEMPLATE = KNOWLEDGE_ROOT / "tenant-template"
-
-#: The lab (`knowledge/tenants/playground`) is retired in piece 1 (human, PR #1157: #1158
-#: folded in); the fixture is its frozen copy, and the checkout copy a test sets the data
-#: root's settings against.
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
@@ -36,53 +33,51 @@ LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 TID = fixture_uuid("tenant:acme")
 OTHER = fixture_uuid("tenant:beta")
 
-#: `<root>/<T>/tenant.json` — the row (unchanged from #1078).
+#: `<root>/<T>/tenant.json` — the row.
 ROW_NAME = "tenant.json"
 
-#: The row FILE's path property on `Tenant` — a COINED name (N6, see the module docstring).
+#: The row file's path property on `Tenant`.
 ROW_PATH_PROPERTY = "row_path"
 
-#: `Tenant`'s nine path properties (D1's table), in the design's order.
+#: `Tenant`'s nine path properties.
 TENANT_PATH_PROPERTIES = (
     "tenant_root", "runs", "sessions", "episodes", "learning", "worktrees", "knowledge", "settings",
     "agent",
 )
 
-#: D1's step 4: files required under `settings/`. Spelled as literals: after piece 1 the
-#: constant's home is the implementer's choice, and the test must be able to disagree with it.
+#: Files required under `settings/`, spelled as literals so a test can disagree with the
+#: production constant.
 REQUIRED_SETTINGS = (
     "verb-grants.yaml",
     "lead-zero.yaml",
     "systems/case-history/mapping.yaml",
 )
 
-#: D4's per-tenant probe file, relative to `knowledge/`.
+#: The per-tenant id file, relative to `knowledge/`.
 TENANT_ID_FILE = Path("agent") / ".tenant-id"
 
-#: The fixture's lead-zero template (A4).
+#: The fixture's lead-zero template.
 FIXTURE_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
-#: Run start's own readiness function (V14, human): what `run.py` reaches to decide a tenant can
-#: run — its grants load, gather holds a query verb (`require_gather_query`), and the lead-zero
-#: agreement. doc-1120 "Key flows / Run" step 3 names it; setup must reach THIS function, never
-#: a hand-copied rule list. A COINED address: renamed HERE if the implementer moves it.
+#: Run start's readiness function (grants load, gather holds a query verb, lead-zero agrees);
+#: setup must reach this function, never a hand-copied rule list.
 RUN_READINESS = "defender.systems.run_tenant.resolve_run_tenant"
 
-#: `tenant.py`'s setup subcommand's function (today's `setup(tenant_id)`) — the census's start.
+#: `tenant.py`'s setup subcommand function.
 SETUP_FUNCTION = "defender.cli.tenant.setup"
 
-#: V16 (human): what `check` says when its committed-`.tenant-id` git read cannot answer (git
-#: absent, git refusing the clone as dubious ownership, any git error) — beside git's reason.
+#: What `check` says, beside git's reason, when its committed-`.tenant-id` git read cannot
+#: answer (git absent, dubious ownership, any git error).
 CANNOT_VERIFY_TENANT_ID = "cannot verify .tenant-id is committed"
 
 #: An adapter whose source the cold roster read cannot parse, so no census over the checkout
-#: holding it can be taken (M6) — for `check` and the census lint alike.
+#: holding it can be taken — for `check` and the census lint alike.
 BROKEN_SYSTEM = "broken"
 BROKEN_ADAPTER = "VERBS = {\n    'verb': (\n"
 
 
 # ======================================================================================
-# The owner, lazily. ONE place, so a rename is one edit.
+# The owner, imported lazily.
 # ======================================================================================
 
 def mod(dotted: str) -> Any:
@@ -90,20 +85,19 @@ def mod(dotted: str) -> Any:
     return importlib.import_module(f"defender.{dotted}")
 
 
-#: Every owner helper below takes the owner MODULE (`from defender.tenancy import _tenant` in the test
-#: file — it exists at base; only its new attributes do not), so the test visibly drives the
-#: target and a missing attribute is that one test's `AttributeError`.
+#: Owner helpers take the owner module (`_tenant`) from the test file, so the test visibly
+#: drives the target.
 
 def accept(owner: Any, root: Path | str, tenant_id: str = TID, *,
            defender_dir: Path = DEFENDER, box_mounted: tuple[Path, ...] = ()) -> Any:
-    """The REAL `accept_tenant(data_root, raw_id, *, defender_dir, box_mounted)` (D1)."""
+    """The real `accept_tenant(data_root, raw_id, *, defender_dir, box_mounted)`."""
     return owner.accept_tenant(
         fixture_data_root(Path(location_path(root))), tenant_id, defender_dir=Path(defender_dir), box_mounted=tuple(box_mounted))
 
 
 def refusal(owner: Any, fn: Any, *args: Any, **kw: Any) -> BaseException:
-    """Call `fn` and hand back its refusal — asserting it IS the one tenant refusal class
-    (`owner.TenantRefused`, #0), never an `OSError`/`KeyError`/`ValueError` escaping."""
+    """Call `fn` and return its refusal, asserting it is `owner.TenantRefused`, never an
+    escaping `OSError`/`KeyError`/`ValueError`."""
     with pytest.raises(owner.TenantRefused) as refused:
         fn(*args, **kw)
     return refused.value
@@ -115,9 +109,8 @@ def accept_refusal(owner: Any, root: Path | str, tenant_id: str = TID, **kw: Any
 
 
 # ======================================================================================
-# The data root, hand-spelled. EXPECTED paths are composed here, never read back from the
-# owner: a test that asked `Tenant` where the runs are and then asserted they are there would
-# be green for any layout at all.
+# The data root, hand-spelled: expected paths are composed here, never read back from the
+# owner (asking `Tenant` where the runs are, then finding them there, passes for any layout).
 # ======================================================================================
 
 def tenant_folder(root: Path, tenant_id: str = TID) -> Path:
@@ -136,9 +129,8 @@ def agent_dir(root: Path, tenant_id: str = TID) -> Path:
     return knowledge_dir(root, tenant_id) / "agent"
 
 
-#: #1108 P4 (U9, design data model): each run reads its OWN copy of the export it was handed,
-#: `<T>/run-knowledge/<run id>/{owner, settings/, stage/{agent/, <token>}}` — never the tenant's
-#: clone (`<T>/knowledge/`) and never the checkout.
+#: Each run reads its own copy of its export, `<T>/run-knowledge/<run id>/{owner, settings/,
+#: stage/{agent/, <token>}}`, never the tenant's clone (`<T>/knowledge/`) or the checkout.
 RUN_COPIES = "run-knowledge"
 
 
@@ -162,9 +154,9 @@ def row_path(root: Path, tenant_id: str = TID) -> Path:
 def plant_row(root: Path, tenant_id: str = TID, *, body: str | bytes | None = None,
               row_tenant_id: str | None = None, drop: str | None = None,
               extra: dict[str, Any] | None = None) -> Path:
-    """Write `<root>/<tenant_id>/tenant.json` BY HAND — a valid row, or a real corruption.
+    """Write `<root>/<tenant_id>/tenant.json` by hand — a valid row, or a real corruption.
     `body` writes raw bytes verbatim; `row_tenant_id` lets the row name another tenant; `drop`
-    removes a field; `extra` adds keys a newer writer might add (N18)."""
+    removes a field; `extra` adds keys a newer writer might add."""
     path = row_path(root, tenant_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     if body is not None:
@@ -183,11 +175,10 @@ def plant_row(root: Path, tenant_id: str = TID, *, body: str | bytes | None = No
 
 def place_knowledge(root: Path, tenant_id: str = TID, *, source: Path = FIXTURE,
                     tenant_id_file: str | bytes | None = "id") -> Path:
-    """What the OPERATOR does before `setup` (DC2): a plain folder copied to
-    `<root>/<tenant_id>/knowledge`. The copy is independent of `source` (new inodes, links
-    kept as links). `tenant_id_file`: `"id"` writes `agent/.tenant-id` = `<tenant_id>\\n` (what
-    `scaffold` writes and a tenant repo commits — M8); `None` leaves it absent; any other value
-    is written verbatim (the byte-rule cells). Returns the `knowledge/` path."""
+    """What the operator does before `setup`: copy `source` to `<root>/<tenant_id>/knowledge`
+    (new inodes, links kept as links). `tenant_id_file`: `"id"` writes `agent/.tenant-id` =
+    `<tenant_id>\\n` (as `scaffold` does); `None` leaves it absent; anything else is written
+    verbatim. Returns the `knowledge/` path."""
     dest = knowledge_dir(root, tenant_id)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, dest, symlinks=True)
@@ -207,7 +198,7 @@ def write_tenant_id_file(knowledge: Path, tenant_id: str, content: str | bytes |
 
 
 def adopted(root: Path, tenant_id: str = TID, **kw: Any) -> Path:
-    """A FINISHED tenant built by hand — a placed `knowledge/` plus a valid row — so a test
+    """A finished tenant built by hand — a placed `knowledge/` plus a valid row — so a test
     about acceptance does not depend on `setup`. Returns the tenant folder."""
     place_knowledge(root, tenant_id, **kw)
     plant_row(root, tenant_id)
@@ -258,10 +249,9 @@ def census_diff(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
 
 
 # ======================================================================================
-# git, for the tests' own throwaway repos (tests may build them raw — lint_raw_git_subprocess
-# excludes test modules). The environment is scrubbed of every ambient GIT_* variable (J-PO1:
-# an exported GIT_DIR decides the repository whatever `cwd=` says) and carries its own
-# identity, so a developer's config never decides an outcome.
+# git for the tests' own throwaway repos (lint_raw_git_subprocess excludes test modules). The
+# env drops every ambient GIT_* variable (an exported GIT_DIR overrides `cwd=`) and carries its
+# own identity, so a developer's config never decides an outcome.
 # ======================================================================================
 
 GIT_IDENTITY = {
@@ -299,8 +289,8 @@ def repo_of(folder: Path, repo: Path) -> Path:
 
 
 def local_clone(repo: Path, dest: Path) -> Path:
-    """A PLAIN `git clone <local path>` — no `--no-hardlinks`, so `.git/objects` files are hard
-    links to the source's (claims C3, C4, P-DC2-1 leg D: 7 and 24 files with `st_nlink > 1`)."""
+    """A plain `git clone <local path>` (no `--no-hardlinks`), so `.git/objects` files are hard
+    links to the source's."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     git(dest.parent, "clone", "-q", str(repo), str(dest))
     return dest
@@ -317,7 +307,7 @@ def git_status(repo: Path) -> str:
 
 def cloned_tenant(tmp: Path, root: Path, tenant_id: str = TID, *,
                   tenant_id_file: str | bytes | None = "id") -> Path:
-    """DC2's canonical placement: the tenant's repo (the fixture, committing
+    """The canonical placement: the tenant's repo (the fixture, committing
     `agent/.tenant-id` unless `tenant_id_file is None`) cloned by a plain local `git clone`
     into `<root>/<tenant_id>/knowledge`. Returns the `knowledge/` path."""
     src = tmp / f"{tenant_id}-repo-src"
@@ -327,10 +317,9 @@ def cloned_tenant(tmp: Path, root: Path, tenant_id: str = TID, *,
     return local_clone(repo, knowledge_dir(root, tenant_id))
 
 
-#: The three ways a clone's `agent/.tenant-id` can hold the right id WITHOUT its repo committing
-#: it (V2, human: "for a git clone, acceptance refuses an agent/.tenant-id that is not
-#: committed"): never added, added but never committed, and committed as ANOTHER tenant's id
-#: (the wrong tenant's repo cloned) then overwritten by hand — 47 P6's cross-tenant case.
+#: Three ways a clone's `agent/.tenant-id` can hold the right id without its repo committing
+#: it: never added, staged but not committed, and committed as another tenant's id (the wrong
+#: repo cloned) then overwritten by hand.
 UNCOMMITTED_TENANT_ID_WAYS = ("untracked", "staged", "overwritten")
 
 
@@ -338,8 +327,8 @@ def clone_with_uncommitted_tenant_id(tmp: Path, root: Path, how: str,
                                      tenant_id: str = TID) -> Path:
     """A plain local clone at `<root>/<tenant_id>/knowledge` whose `agent/.tenant-id` holds
     exactly `<tenant_id>\\n` while its repo's HEAD does not commit that content, `how` being
-    one of `UNCOMMITTED_TENANT_ID_WAYS`. Real git states, built with real git: the file's bytes
-    are right and only the commit is missing. Returns the `knowledge/` path."""
+    one of `UNCOMMITTED_TENANT_ID_WAYS`. Real git states: the file's bytes are right and only
+    the commit is missing. Returns the `knowledge/` path."""
     assert how in UNCOMMITTED_TENANT_ID_WAYS, how
     committed = f"{OTHER}\n" if how == "overwritten" else None
     knowledge = cloned_tenant(tmp, root, tenant_id, tenant_id_file=committed)
@@ -350,15 +339,14 @@ def clone_with_uncommitted_tenant_id(tmp: Path, root: Path, how: str,
 
 
 # ======================================================================================
-# tenant.py, as a process. Every driver takes the tenant.py MODULE (`from defender.scripts
-# import tenant as tenant_py` in the test file) and runs its own file, so the test visibly
-# drives the target (`spec-graph calls`) while the command still runs as the operator runs it.
+# tenant.py as a process. Drivers take the imported `tenant.py` module and run its file, so
+# the test visibly drives the target while the command runs as the operator runs it.
 # ======================================================================================
 
 def tenant_env(root: Path | str | None, *, unset: tuple[str, ...] = (),
                **extra: str) -> dict[str, str]:
     """The environment an operator command runs in: this test's own, with the data root set
-    (or removed, for `None`), the WORKTREE's package first on the path (the shared venv's
+    (or removed, for `None`), the worktree's package first on the path (the shared venv's
     editable install points at the main checkout), and `unset` removed."""
     env = dict(os.environ)
     env.pop(DATA_ROOT_ENV, None)
@@ -398,9 +386,8 @@ def output(proc: subprocess.CompletedProcess) -> str:
 
 
 def assert_ran(proc: subprocess.CompletedProcess) -> None:
-    """The PROGRAM ran and answered on its own terms: a missing script exits 2 with the
-    interpreter's "can't open file", and a crash prints a traceback — neither may be read as
-    the command's verdict (a refusal is `[tenant.py] …`, never a traceback)."""
+    """The program ran and answered: neither a missing script ("can't open file", exit 2)
+    nor a traceback may be read as the command's verdict."""
     text = output(proc)
     assert "can't open file" not in text, f"the script does not exist:\n{text}"
     assert "Traceback (most recent call last)" not in text, (
@@ -437,11 +424,9 @@ def check(module: Any, root: Path | None, *args: str, **kw: Any) -> subprocess.C
 
 
 def adopt_fixture(module: Any, root: Path, tenant_id: str = TID) -> Path:
-    """THE ONE HELPER a test uses to get a tenant in a tmp data root (D9, H2; it also serves
-    the pass-A re-plumb): copy `knowledge/tenant-fixture` into `<root>/<id>/knowledge`, write
-    `agent/.tenant-id` = `<id>\n` into the COPY (the fixture commits none — M8), and run the
-    operator's `tenant.py setup <id>` (`module`), which must exit 0. Returns the tenant
-    folder."""
+    """A tenant in a tmp data root the operator's way: place the fixture (writing
+    `agent/.tenant-id`, which the fixture does not commit) and run `tenant.py setup <id>`,
+    which must exit 0. Returns the tenant folder."""
     place_knowledge(root, tenant_id)
     assert_clean(setup(module, root, tenant_id))
     return tenant_folder(root, tenant_id)
@@ -452,14 +437,13 @@ def adopt_fixture(module: Any, root: Path, tenant_id: str = TID) -> Path:
 # ======================================================================================
 
 class RunRecorder:
-    """ONE fake per seam `run.main` takes, each RECORDING what it was handed — it classifies
-    nothing and refuses nothing. `materialize` makes the run dir where it is told so the tail
-    has a tree to list; `lifecycle` keeps every keyword (`tenant=` is the `RunTenant`)."""
+    """One recording fake per `run.main` seam; it classifies and refuses nothing.
+    `materialize` makes the run dir where told so the tail has a tree to list; `lifecycle`
+    keeps every keyword (`tenant=` is the `RunTenant`)."""
 
     def __init__(self, run_dir_at: Path) -> None:
-        # #1187 (declared change 1): a run id is a canonical UUID — the folder is
-        # fixture_uuid(<label>) beside the readable last segment (a UUID passes as it is).
-        # Read the folder back off `run_dir_at`, never off the label.
+        # A run id is a canonical UUID: a readable last segment becomes fixture_uuid(<label>)
+        # (a UUID passes as is). Read the folder back off `run_dir_at`, never off the label.
         from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 
         run_dir_at = Path(run_dir_at)
@@ -521,7 +505,7 @@ def drive_run(run_module: Any, argv: list[str], rec: RunRecorder,
     """The REAL `run.main(argv)` (`run_module` is the imported `defender/run.py`) with every
     seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`."""
     try:
-        # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+        # Plus the in-process launch-time publish.
         from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
         return run_module.main(list(argv), **with_publish(dict(rec.seams()))), None
@@ -537,7 +521,7 @@ def exit_text(exc: BaseException | None) -> str:
 
 
 def assert_verbatim(entry_text: str, owner_text: str, *, entry: str) -> None:
-    """The entry passed the owner's refusal through VERBATIM (#0)."""
+    """The entry passed the owner's refusal through verbatim."""
     assert owner_text, "the owner's refusal carries no message"
     assert owner_text in entry_text, (
         f"{entry} did not pass accept_tenant's refusal through verbatim.\n"
@@ -545,14 +529,11 @@ def assert_verbatim(entry_text: str, owner_text: str, *, entry: str) -> None:
 
 
 # ======================================================================================
-# A tmp CHECKOUT — the running code, copied — for the tests about which tree `check` takes its
-# census from (A3, s070), and for every "inside the RUNNING checkout's defender/" cell (O11a is
-# keyed to the running checkout, so a data root placed inside the COPY's tree is the cell, and
-# the real worktree is never written into). It is a real copy of this worktree's `defender/`
-# (tests, docs, caches, replay fixtures and the golden eval cases left out) plus `knowledge/`,
-# git-initialised as a checkout is (#1108 P4: the census itself reads the adapters cold and
-# starts no git; the system markers are the tenant's, not the checkout's). Run its scripts with `run_script`, pointing
-# at the copy's own file (`checkout / script_of(module).relative_to(REPO_ROOT)`).
+# A tmp checkout — a git-initialised copy of `defender/` (tests, docs, caches and fixtures left
+# out) plus `knowledge/` — for tests about which tree `check` takes its census from and for
+# "inside the running checkout's defender/" cases, so the real worktree is never written into.
+# Run its scripts with `run_script` on the copy's own file
+# (`checkout / script_of(module).relative_to(REPO_ROOT)`).
 # ======================================================================================
 
 _CHECKOUT_IGNORE = shutil.ignore_patterns(
@@ -566,9 +547,8 @@ def tmp_checkout(dest: Path) -> Path:
     shutil.copytree(DEFENDER, dest / "defender", ignore=_CHECKOUT_IGNORE, symlinks=True)
     shutil.copytree(KNOWLEDGE_ROOT, dest / "knowledge", symlinks=True)
     git(dest, "init", "-q", "-b", "main")
-    # No background maintenance: a newer git's auto-maintenance after the commit repacks the
-    # loose objects in a detached process, racing every before/after census of this tree
-    # (phase E, PR #1157: CI's git packed them under a refused scaffold's census).
+    # No background maintenance: auto-maintenance after the commit repacks loose objects in a
+    # detached process, racing every before/after census of this tree.
     git(dest, "config", "maintenance.auto", "false")
     git(dest, "config", "gc.auto", "0")
     git(dest, "add", "-A")

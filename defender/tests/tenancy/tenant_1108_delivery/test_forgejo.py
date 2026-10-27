@@ -153,8 +153,8 @@ def test_owner_and_repository_compare_without_case():
                                     "http://forge.invalid:3000/a/tenants/blue.git",
                                     "http://forge.invalid:bad/tenants/blue.git", "http:///tenants/blue.git"])
 def test_an_origin_that_is_not_one_forge_repository_is_refused(origin):
-    """O-G fails closed: no network scheme, no host, a bad port, or a path that is not
-    exactly owner and repository is a `ForgeError` naming the origin, before any request."""
+    """Fails closed: no network scheme, no host, a bad port, or a path that is not exactly
+    owner and repository is a `ForgeError` naming the origin, before any request."""
     http = ForgeHTTP()
     with pytest.raises(_forge_module().ForgeError):
         _forge_module().ForgeAddress.parse(origin)
@@ -216,8 +216,8 @@ def test_a_long_listing_is_read_to_its_end(total):
 
 @pytest.mark.parametrize("value", ["many", "1.5", "0x10"])
 def test_a_total_count_that_is_not_a_number_is_a_forge_error(value):
-    """Refusal contract (deck #677; orchestrator ruling): an `X-Total-Count` that is not a
-    whole number is a `ForgeError`, never a `ValueError` escaping the forge."""
+    """An `X-Total-Count` that is not a whole number is a `ForgeError`, never a `ValueError`
+    escaping the forge."""
     http = ForgeHTTP()
     http.total_count = value
     http.pages = {1: [row(1, "lessons/a")]}
@@ -267,8 +267,8 @@ def test_every_page_is_asked_of_the_parsed_address(origin, address):
 
 
 def test_prefix_listing_counts_only_prs_whose_head_is_the_base_repository():
-    """O-G (review finding #9): forks, under another owner or beside ours under the same
-    owner, are not ours even when their head branch matches the prefix."""
+    """Forks, under another owner or beside ours under the same owner, are not ours even when
+    their head branch matches the prefix."""
     http = ForgeHTTP()
     http.pages = {1: [pr_row(1, "lessons/a", repo=FORK), pr_row(2, "lessons/b")],
                   2: [pr_row(3, "lessons/c", repo=SIBLING_FORK), pr_row(4, "lessons/d")]}
@@ -291,11 +291,8 @@ def test_repository_identity_is_the_repository_id():
     assert forge(http).list_open_prs("lessons/") == [normalized(2, "lessons/a")]
 
 
-# `test_the_writer_lease_is_not_held_by_a_fork_pr` (the lease on `AuthorBranch`) is deleted with
-# `AuthorBranch` (#1108 P4, OD12 class (i)). The writer lease is now pinned at the drains' real
-# entry: `tenant_1108_p4/test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_
-# lease_and_nothing_else_does` (ours, a fork, a sibling fork, a namesake, no head repository, the
-# other lane), on both drains; the listing's identity rules stay pinned above.
+# The writer lease over these listings is pinned at the drains' entry:
+# `tenant_1108_p4/test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does`.
 
 
 def test_a_pr_row_without_its_head_repository_is_skipped():

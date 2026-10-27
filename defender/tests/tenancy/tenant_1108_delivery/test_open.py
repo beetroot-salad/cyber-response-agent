@@ -37,8 +37,8 @@ from ._scenarios import (
 
 @pytest.mark.parametrize("reply", sorted(_UNUSABLE_REPOSITORY))
 def test_a_repository_read_without_an_integer_id_is_refused(repo, reply):
-    """C1 / refusal contract (deck #677; orchestrator ruling): the repository id `open()` reads
-    is what every PR row's head is compared with."""
+    """The repository id `open()` reads is what every PR row's head is compared with, so a
+    reply without an integer id is refused."""
     http = ForgeHTTP()
     http.repository = _UNUSABLE_REPOSITORY[reply]
     with pytest.raises((target().DeliveryRefused, _forge().ForgeError)):

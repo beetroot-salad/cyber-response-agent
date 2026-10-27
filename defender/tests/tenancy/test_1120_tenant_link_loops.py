@@ -48,7 +48,7 @@ def test_check_folder_over_a_looped_folder_refuses_without_a_traceback(tmp_path:
 
 def test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree(tmp_path: Path) -> None:
     """`<T>/runs -> knowledge`: the settings half now lies inside the runs base a box mounts,
-    so step 7 refuses it, naming the settings. Control: a real `runs/` is accepted."""
+    so acceptance refuses it, naming the settings. Control: a real `runs/` is accepted."""
     root = tmp_path / "data"
     H.adopted(root)
     runs = H.tenant_folder(root) / "runs"

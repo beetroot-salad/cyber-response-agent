@@ -88,7 +88,6 @@ def test_o7_lint_flags_each_form(tmp_path):
 def test_o7_lint_allows_passthrough(tmp_path):
     """The lint reports none of these: dict(ctx.env); env=ctx.env passed to a child; any lookup
     inside a function named main; any module outside the four trees."""
-    # rejected: N4: adapters still hand the run's cleaned env to their children untouched
     _skeleton(tmp_path)
     inside = ("import os\n"
               "import subprocess\n"
@@ -169,8 +168,8 @@ class Tool:
 
 
 def test_s7_nf7_lint_flags_indirect_and_module_scope_reads(tmp_path):
-    # rejected: dynamic getattr(os, "environ"), /proc/self/environ and lookups inside shared helpers outside the trees (D6: direct lookups only)
-    # rejected: flagging a child fork with no env= argument (#18: not a lookup; the four existing forks pass env=dict(ctx.env), G28)
+    # Direct lookups only: getattr(os, "environ"), /proc/self/environ, helpers outside the
+    # trees and forks without env= are out of the lint's scope.
     _skeleton(tmp_path)
     rel = "defender/learning/branch/estate/nf7_1107.py"
     S.plant_module(tmp_path, rel, _NF7)
@@ -224,7 +223,7 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
     exported = "http://exported-s017:9"
     S.plant(tmp_path / "tenants", marker=marker)
     record = S.resolve(tmp_path / "tenants")
-    # CX8: the shim on the verb env's PATH receives the argv the transport forks.
+    # The shim on the verb env's PATH receives the argv the transport forks.
     shim = S.DockerShim(tmp_path / "shim", [S.answer('{"host": "web-1"}', "200")])
     monkeypatch.setenv("CMDB_URL_BASE", exported)
     run_dir = tmp_path / "run"
@@ -242,9 +241,7 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
         f"the exported CMDB_URL_BASE reached the call's argv: {calls[-1]['argv']}")
 
 
-#: G34's homonyms of "override": (file, a phrase on the listed line). They stay.
-#: #1108 P4 (O1): the other five homonym docs were the system skills, the catalog and the tacit
-#: registry's, which moved to each tenant; the product tree keeps only `connect`'s.
+#: Homonyms of "override" the product docs keep: (file, a phrase on the listed line).
 HOMONYMS: tuple[tuple[str, str], ...] = (
     ("defender/skills/connect/SKILL.md", "overrideable with cause"),
 )

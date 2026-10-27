@@ -1,4 +1,5 @@
-"""#1077's tenant-record/stamp/family demands, RESTORED under #1078's tenant-on-the-request API."""
+"""The run stamp's tenant and world fields and the family check over them (#1077), under
+#1078's tenant-on-the-request API."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -23,8 +24,7 @@ T_ID = H.VALID_ID
 @pytest.fixture
 def tenant_root(tmp_path, monkeypatch) -> Path:
     """A data root under this test's tmp dir, holding T_ID set up the way an operator does
-    (#1120: the fixture tenant's knowledge placed, then the row created through the real
-    owner) — the same fixture shape `test_1078_materialize.py` uses."""
+    (the fixture tenant's knowledge placed, then the row created through the real owner)."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     set_up_tenant(root, T_ID)
@@ -33,20 +33,19 @@ def tenant_root(tmp_path, monkeypatch) -> Path:
 
 def _materialize(alert: Path, **kw):
     """`materialize_run` for T_ID, handed the `Tenant` the real `accept_tenant` returns over
-    this test's data root (#1120: the builder takes an accepted tenant, not an id). #1279 (A3):
-    setup takes no run id."""
+    this test's data root."""
     tenant = T1106.accept(current_data_root(), T_ID)
     return H.run_common().materialize_run(alert, tenant=tenant, **kw).run_dir
 
 
 def _arm(alert: Path, world, ep: Path):
-    """`materialize_run` for a sibling arm of episode `ep` (#1105 PR 2): made through the
-    episode's view (`run=`, the arm's run from its roster id), whose container and arm roster the launcher's RUNS step
-    makes before the first sibling (#1187 R2) — here `_triplet_947.episode_view` stands in."""
+    """`materialize_run` for a sibling arm of episode `ep`, made through the episode's view
+    (`run=`, the arm's run from its roster id), whose container and arm roster the launcher's
+    RUNS step makes before the first sibling — here `_triplet_947.episode_view` stands in."""
     tenant = T1106.accept(current_data_root(), T_ID)
     with Episode.open(ep) as episode:
         view = T.episode_view(episode, tenant=tenant)
-        # #1279 (A3, rev 6): the caller makes the arm's run from the roster id; setup takes it.
+        # The caller makes the arm's run from the roster id; setup takes it.
         return _materialize(alert, world=world, run=view.create(view.arm_id(world.world_id)))
 
 
@@ -55,11 +54,11 @@ def _stamp(run_dir: Path) -> dict:
 
 
 def _sibling_world(tmp_path: Path, root: Path, label: str):
-    """A pass-(A) episode whose manifest names a source at T_ID's tenant location, and the
-    `ResumeWorld` a sibling resolves from it — same shape as `test_1078_materialize.py`'s own
-    `_sibling_world` (kept file-local rather than shared, matching that file's own convention)."""
+    """An episode whose manifest names a source at T_ID's tenant location, and the
+    `ResumeWorld` a sibling resolves from it. Same shape as `test_1078_materialize.py`'s own
+    `_sibling_world`, kept file-local as that file keeps its own."""
     _base, src = H.tenant_source(root, T_ID, row=False)
-    # #1187 (Layout A): the episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it.
+    # The episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it.
     manifest = H.family_for(src)
     ep = manifest.parent
     world = H.run_py().resume_world(
@@ -68,7 +67,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str):
     return src, ep, world
 
 
-# D3 — the stamp's two new fields (RunProvenance itself — untouched by #1078)
+# The stamp's tenant and world fields
 
 def test_the_stamp_spells_tenant_id_and_world_id_on_the_wire():
     prov = S.provenance_mod()
@@ -91,7 +90,7 @@ def test_the_stamp_spells_tenant_id_and_world_id_on_the_wire():
     assert prov.RunProvenance.from_obj({**on_the_wire, "a_key_from_the_future": 1}) is not None
 
 
-# O4 / D2 — the record, created once, read by the stamp
+# Run setup stamps the tenant
 
 def test_materialize_stamps_the_tenant_and_world_from_the_record(tenant_root, tmp_path):
     alert = H.plant_alert(tmp_path / "in")
@@ -106,16 +105,12 @@ def test_materialize_stamps_the_tenant_and_world_from_the_record(tenant_root, tm
         "the stamp is written by the host before the box exists — the sentinel is planted later")
 
 
-# Decision 4's sole exception — a corrupt tenant record refuses the run
-
-
-# Decision 13 — the record's scope, its create race, and the collision guard
+# The retired tenant record's name is never a run id
 
 
 def test_a_minted_run_id_is_never_the_tenant_records_name(tenant_root, tmp_path):
-    """#1279 (A3, conflict updated): a caller can no longer offer `_tenant.json` as a run id for
-    the id rule to refuse, so what is left is the positive side: the minted id is a run id, the
-    record's name is not, and setup leaves no entry at the record's name."""
+    """The minted id is a run id, the record's name is not, and setup leaves no entry at the
+    record's name."""
     from defender.records._run_id import is_valid_run_id
 
     alert = H.plant_alert(tmp_path / "in")
@@ -129,12 +124,11 @@ def test_a_minted_run_id_is_never_the_tenant_records_name(tenant_root, tmp_path)
     assert not (base / H.RECORD_NAME).exists(), "setup left an entry at the record's name"
 
 
-# Decision 3 — setup retry and reuse (retired by #1279: a run id is minted, never reused)
+# An interrupted arm setup is refused, not resumed
 
 def test_an_arm_setup_that_was_interrupted_is_refused_not_resumed(tenant_root, tmp_path):
-    """#1279 (O5, O8; conflict updated from `test_a_second_materialize_for_one_run_id_finishes_
-    what_the_first_left_undone`): arms are never resumed in place. A setup-only dir at the
-    roster's arm id (what an interrupted first call leaves) is refused, and left as it was."""
+    """Arms are never resumed in place (#1279): a setup-only dir at the roster's arm id (what an
+    interrupted first call leaves) is refused, and left as it was."""
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
     arm_id = T.roster_arm_id(ep, world.world_id)
     arm_dir = ep / "runs" / arm_id
@@ -145,7 +139,7 @@ def test_an_arm_setup_that_was_interrupted_is_refused_not_resumed(tenant_root, t
     with pytest.raises(SystemExit) as refused:
         _arm(RunPaths(src).alert, world, ep)
 
-    # The refusal is the setup-only dir's (O8), naming the arm: not some unrelated exit.
+    # The refusal is the setup-only dir's, naming the arm: not some unrelated exit.
     assert isinstance(refused.value.code, str), refused.value.code
     assert arm_id in refused.value.code, (
         f"the refusal does not name the arm {arm_id}: {refused.value.code!r}")
@@ -154,7 +148,7 @@ def test_an_arm_setup_that_was_interrupted_is_refused_not_resumed(tenant_root, t
     assert not (arm_dir / "provenance.json").exists(), "the refused setup re-stamped the dir"
 
 
-# D3 / decision 15 — the world token, and a resume without a family record
+# The world token, and a resume without a family record
 
 
 def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_world(
@@ -198,17 +192,15 @@ def test_a_resume_without_a_family_record_stamps_the_tenants_base_world(tenant_r
         f"an unforked run stamps a world id: {_stamp(source).get('world_id')!r}")
 
 
-# Decision 15 — the family's view of the two new fields (verify_family, real primitive)
+# The family's view of the tenant and world fields (verify_family, real primitive)
 
 FAMILY_TENANT = fixture_uuid("tenant:acme")
 
 
 def _family_dirs(tmp_path, tenant_id=FAMILY_TENANT, episode_id=None):
-    """`(the siblings' runs base, the episode, the sibling run dirs)`. #1105 PR 2: an arm is
-    opened by id through its episode's view, so the siblings live where the launcher's do — the
-    episode's container `<ep>/runs`. #1187 (Layout A, R2): the episode is
-    `<data root>/<T>/episodes/<uuid>`, its RUNS step taken (`episode_view`: `runs/` and the
-    arm roster), each arm at the id the roster holds for its label — never `<episode>-<label>`.
+    """`(the siblings' runs base, the episode, the sibling run dirs)`: the episode at
+    `<data root>/<T>/episodes/<uuid>` with its RUNS step taken (`runs/` and the arm roster),
+    each arm at the id the roster holds for its label, where the launcher's arms live.
     `dirs` is in `T.WORLDS` order; `_label(ep, d)` names an arm's label."""
     location_path(T.runs_base)(tmp_path, tenant_id=tenant_id)
     episode_id = episode_id or T.EPISODE_ID
@@ -221,9 +213,8 @@ def _family_dirs(tmp_path, tenant_id=FAMILY_TENANT, episode_id=None):
 
 
 def _verify_family(ep: Path, dirs, **kw):
-    """`cli.verify_family` over the episode's arms (#1105 PR 2: `{label: Run | RunRefused}`,
-    each opened by id through the episode's view — as the launcher's VERIFY step hands them).
-    #1187 (R1b): no `base_world_id` is handed — it lived only in the retired `_tenant.json`."""
+    """`cli.verify_family` over the episode's arms (`{label: Run | RunRefused}`, each opened by
+    id through the episode's view, as the launcher's VERIFY step hands them)."""
     with Episode.open(ep) as episode:
         arms = T.family_arms(episode, [_label(ep, d) for d in dirs])
         return S.branch_cli().verify_family(episode, arms, **kw)
@@ -299,8 +290,8 @@ def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_
 
 
 def _label(ep: Path, arm: Path) -> str:
-    """The world label the episode's roster binds to `arm`'s id (#1187: an arm's folder name
-    holds no label)."""
+    """The world label the episode's roster binds to `arm`'s id (an arm's folder name holds no
+    label)."""
     world_id = _world_id(ep, arm)
     from defender import _yaml
 

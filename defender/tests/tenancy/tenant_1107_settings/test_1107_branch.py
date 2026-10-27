@@ -30,7 +30,7 @@ _CONFIG_VARS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX", "ELASTICSEARCH_U
 
 
 class _Preflight:
-    """The role-model preflight seam, RECORDING and answering `rc` (1: the tripwire)."""
+    """The role-model preflight seam, recording and answering `rc` (1: the tripwire)."""
 
     def __init__(self, rc: int = 1) -> None:
         self.rc = rc
@@ -48,7 +48,7 @@ def _layout(tmp_path: Path, data_root: Path, monkeypatch, *,
         monkeypatch.delenv(name, raising=False)
     episodes = data_root / TID / "episodes"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
-    _base, src = H.tenant_source(data_root, TID, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
+    _base, src = H.tenant_source(data_root, TID, published=True)  # a branch launch needs a published tenant (it pins the commit)
     folder = S.plant(data_root, TID, marker=marker)
     return src, data_root, folder, episodes
 
@@ -64,11 +64,11 @@ def _seams(**over: Any) -> dict[str, Any]:
 
 
 def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseException | None]:
-    """The REAL launcher over `src`, whose tenant is set up under `root` — this test's data root
-    (#1120: the launcher reads it from `DEFENDER_DATA_ROOT`; no flag names it). Returns (rc, None)
-    or (None, the SystemExit it refused with)."""
+    """The real launcher over `src`, whose tenant is set up under `root` (this test's data root:
+    the launcher reads `DEFENDER_DATA_ROOT`). Returns (rc, None) or (None, the SystemExit it
+    refused with)."""
     S._require_data_root(root)
-    # #1105 PR 2 (declared change 1): the tenant and the source run by id.
+    # The tenant and the source run, by id.
     argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
             *T.retired_continuation_argv()]
     try:
@@ -78,7 +78,7 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
 
 
 def _resolve(root: Path) -> Any:
-    """The REAL acceptance frame over a planted root (C1)."""
+    """The real acceptance frame over a planted root."""
     return run_tenant.resolve_tenant(
         fixture_data_root(Path(root)), TID, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
@@ -139,11 +139,9 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     # ... and is edited bad before the sibling starts.
     S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
 
-    # #1108 P4 (flow 3, O11): a run reads its own copy of an EXPORT, never the clone's working
-    # tree, so "the sibling resolves its own record at its own start" means: the edit is
-    # PUBLISHED by the sibling's own (unpinned) launch — `S.drive_run`'s in-process publish
-    # commits and exports the folder as it now is — and the sibling's record is resolved from
-    # that export. An edit nobody publishes is never seen (`test_branch_replay`).
+    # A run reads its own copy of an export, never the clone's working tree: the sibling's own
+    # (unpinned) launch publishes the edited folder (`S.drive_run`'s in-process publish) and
+    # resolves its record from that export.
     rec = S.RunRecorder(tmp_path / "sibling-run")
     rc, refused = S.drive_run(
         H.sibling_argv(manifest, "b", "--tenant", TID), rec,
@@ -156,7 +154,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     assert world.label == "b", f"the sibling ran another world: {world!r}"
     assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], \
         f"the sibling's own record does not see the edit: {record.systems['elastic']!r}"
-    # Its Elastic calls fault (O5).
+    # Its Elastic calls fault.
     run_dir = tmp_path / "sibling-run"
     with pytest.raises(S.config_fault()):
         elastic_adapter.query(S.verb_context(record, run_dir, shim.env()), native_query="*")

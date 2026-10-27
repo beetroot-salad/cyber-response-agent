@@ -48,7 +48,7 @@ _STUB_ADAPTERS = {
 
 
 def _tenant(tmp_path: Path, marker: str, *, name: str = "t", **kw) -> tuple[Path, Path]:
-    """A planted #1107 tenant under `tmp_path/<name>`: (tenants root, tenant folder)."""
+    """A tenant planted under `tmp_path/<name>`: (data root, knowledge folder)."""
     root = tmp_path / name
     return root, S.plant(root, marker=marker, **kw)
 
@@ -79,8 +79,7 @@ def _max_time(argv: list[str]) -> str | None:
 
 
 def _run_state(run_dir: Path):
-    """A run's state over `run_dir` (#1235 round 2): the breaker lives on the run's one
-    `RunState`, no longer in a table keyed by the folder."""
+    """A run's state over `run_dir`: the breaker lives on the run's one `RunState`."""
     from defender.investigation.run_state import RunState
 
     return RunState(run_dir, "t1107")
@@ -143,7 +142,6 @@ def test_d_load_config_shape_survives(tmp_path):
 
 
 def test_d2_transport_domain(tmp_path):
-    # rejected: N1: no plain-HTTP transport in this issue
     root, _ = _tenant(tmp_path, "tdok", name="ok")
     shim = S.DockerShim(tmp_path / "ok" / "shim", [_OK])
     cmdb_adapter.health_check(_ctx(S.resolve(root), tmp_path / "ok", shim))
@@ -188,13 +186,13 @@ def test_d2_docker_context_per_system(tmp_path):
     shim.respond(_PS)
     host_state_adapter.proc_tree(ctx, host="web-1")  # docker_exec_raw's call site
     shim.respond(_INSPECT)
-    inspected = host_state_adapter.container_inspect(ctx, container_id="c0ffee1107")  # R5, CX13
+    inspected = host_state_adapter.container_inspect(ctx, container_id="c0ffee1107")
     assert inspected.get("name") == "web-1", f"control: the inspect answer was parsed: {inspected}"
     got = [S.context_of(a) for a in _argvs(shim)]
     want = [S.context_name(m, s) for s in ("cmdb", "identity", "host-state", "host-state")]
     assert got == want, f"each system's child must carry --context <its own>: {got} != {want}"
     assert "inspect" in _argvs(shim)[-1], f"control: the last child is docker inspect: {_argvs(shim)[-1]}"
-    # The not-found answer (AP4): the call still addresses host-state's own context, and whatever
+    # The not-found answer: the call still addresses host-state's own context, and whatever
     # fault it raises names no fallback context.
     shim.respond(_INSPECT_MISSING)
     missing = _raised(host_state_adapter.container_inspect, ctx, container_id="c0ffee1107")
@@ -218,8 +216,6 @@ def test_d2_docker_context_per_system(tmp_path):
 
 
 def test_d2_elastic_containers_no_default(tmp_path):
-    # This slice drives the adapter half only; the write door's half is fork E1's (the door's
-    # new signature is not named by the design, so it is not guessed here).
     m = "ecn"
     root, _ = _tenant(tmp_path, m)
     shim_q = S.DockerShim(tmp_path / "shim", [_SEARCH])
@@ -254,8 +250,6 @@ def test_d2_elastic_containers_no_default(tmp_path):
 
 
 def test_o2_adapter_config_snapshot(tmp_path):
-    # rejected: N7: no run snapshot file is written
-    # rejected: N6: siblings of one episode each build their own record at their own start
     m = "ocs"
     root, folder = _tenant(tmp_path, m)
     record = S.resolve(root)
@@ -328,7 +322,7 @@ def test_s60_timeout_sec_empty_and_request_reads_current_value(tmp_path):
 
 
 def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
-    # G23: `--context ''` answers rc=0 on the default daemon, or on DOCKER_CONTEXT's name when
+    # `--context ''` answers rc=0 on the default daemon, or on DOCKER_CONTEXT's name when
     # that is set — so the only safe empty context is one that never reaches docker.
     root, _ = _tenant(tmp_path, "mdp", name="p")
     shim = S.DockerShim(tmp_path / "p" / "shim", [_OK])
@@ -370,7 +364,8 @@ def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
 
 
 def test_s7_mf3_destination_never_from_process_env(tmp_path, monkeypatch):
-    # rejected: stripping docker's own steering variables from the child environment: waived (w_mf3_docker_steering_vars) to the per-tenant hands box follow-up
+    # Docker's steering variables still reach the child's environment (stripping them is
+    # deferred), so each argv must name its destination explicitly.
     exported = {"DOCKER_CONTEXT": "env-docker-ctx", "SOC_PLAYGROUND_DOCKER_CONTEXT": "env-spg-ctx",
                 "SOC_PLAYGROUND_ES_CONTAINER": "env-es-c", "SOC_PLAYGROUND_KIBANA_CONTAINER": "env-kb-c"}
     for key, value in exported.items():
@@ -422,8 +417,8 @@ def test_s7_nf6_dash_leading_context_is_a_name(tmp_path):
     for i, value in enumerate(("-tlsverify", "--host=tcp://elsewhere")):
         root, folder = _tenant(tmp_path, f"nf{i}", name=f"t{i}")
         S.set_key(folder, "cmdb", "CMDB_DOCKER_CONTEXT", value)
-        # G23/RG3: docker answers an unknown name — a dash-leading one included, taken literally
-        # in both argv shapes — rc=1 'context not found'.
+        # Docker answers an unknown name — a dash-leading one included, taken literally in
+        # both argv shapes — rc=1 'context not found'.
         shim = S.DockerShim(tmp_path / f"t{i}" / "shim", [S.context_not_found(value)])
         ctx = _ctx(S.resolve(root), tmp_path / f"t{i}", shim)
         fault = _raised(cmdb_adapter.health_check, ctx)
@@ -483,8 +478,7 @@ def _own_rows(run_dir: Path) -> list[dict]:
 
 
 def _breaker_doc(run_state) -> dict:
-    """The run's breaker state, read off the run's `RunState` (#1235: nothing writes
-    `circuit_breaker.json` any more); it stays readable here after the driven run."""
+    """The run's breaker state, read off its `RunState` after the driven run."""
     return run_state.breaker_snapshot()
 
 
@@ -586,13 +580,13 @@ def test_s7_mf8_config_fault_breaker_accounting_unchanged(tmp_path):
     assert gather.calls >= limit + 2, \
         f"the lead must be answered after every call (main {main.calls} turns, gather {gather.calls})"
 
-    # Down for connectivity: configured, but docker answers G23's unknown-context rc=1.
+    # Down for connectivity: configured, but docker answers the unknown-context rc=1.
     root_t, _ = _tenant(tmp_path, "mft", name="transport")
     shim_t = S.DockerShim(tmp_path / "transport" / "shim", [_OK])
     ctx_t = _ctx(S.resolve(root_t), tmp_path / "transport", shim_t)
     transport_faults = []
     for system in systems:
-        shim_t.respond(S.context_not_found(S.context_name("mft", system)))  # G23
+        shim_t.respond(S.context_not_found(S.context_name("mft", system)))
         transport_faults.append(_raised(_STUB_ADAPTERS[system].health_check, ctx_t))
     assert all(isinstance(f, TransportFault) for f in transport_faults), \
         f"precondition: every connectivity-down system raised TransportFault: {transport_faults}"
@@ -726,7 +720,7 @@ def test_o5_missing_system_config_run_completes(tmp_path, monkeypatch):
 
 def test_tenant_copied_from_the_template_keeps_its_placeholders(tmp_path):
     root = tmp_path / "tenants"
-    # #1120: the copy is the tenant's knowledge folder under a data root — `agent/.tenant-id`
+    # The copy is the tenant's knowledge folder under a data root — `agent/.tenant-id`
     # naming it, and its row beside it (written by hand, as `_tenants1106.place_tenant` does).
     folder = root / S.PLAYGROUND_ID / "knowledge"
     shutil.copytree(S.TEMPLATE_DIR, folder)

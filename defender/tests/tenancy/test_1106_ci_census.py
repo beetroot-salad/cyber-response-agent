@@ -31,7 +31,7 @@ ROWS_TWO: dict[tuple[str, str], dict] = {
     pair: {"roles": ["gather"]} for pair in ROWS_ONE
 }
 
-#: The template: total, and grants nothing (D1).
+#: The template: total, and grants nothing.
 ROWS_TEMPLATE: dict[tuple[str, str], dict] = {
     pair: {"roles": [], "reason": _WHY} for pair in ROWS_ONE
 }
@@ -46,7 +46,7 @@ def _repo(tmp_path: Path, *, fixture: dict = ROWS_ONE, template: dict = ROWS_TEM
           fixture_lead_zero: str = T.CENSUS_LEAD_ZERO_ID,
           template_lead_zero: str = T.CENSUS_LEAD_ZERO_ID) -> Path:
     """A committed repo declaring alpha and beta, whose two walked knowledge folders
-    (`knowledge/tenant-fixture/`, `knowledge/tenant-template/`, #1120 C26) hold `fixture` and
+    (`knowledge/tenant-fixture/`, `knowledge/tenant-template/`) hold `fixture` and
     `template`, each with a `lead-zero.yaml` naming the given id."""
     repo = planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
     T.plant_census_settings(repo, fixture, template_rows=template)
@@ -112,7 +112,7 @@ def test_a_withheld_leads_config_naming_no_catalog_template_still_turns_the_gate
 
 
 def test_a_lead_zero_naming_no_catalog_template_turns_the_gate_red_naming_the_tenant(tmp_path):
-    """M7: the run-start agreement check, run in CI per folder. The fixture grants the lead
+    """The run-start agreement check, run in CI per folder. The fixture grants the lead
     alpha.lookup and names a template the catalog does not hold."""
     rc, out = _gate(_repo(tmp_path, fixture_lead_zero="alpha.no-such-template"))
     assert rc != 0, out

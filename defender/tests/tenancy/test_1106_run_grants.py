@@ -54,7 +54,7 @@ def test_a_missing_table_refuses_rather_than_projecting_nothing(tmp_path):
     assert str(settings / "verb-grants.yaml") in str(caught.value)
 
 
-# ---- O3: two tenants, one process ---------------------------------------------------------------
+# ---- two tenants, one process ------------------------------------------------------------------
 
 def test_one_process_holds_two_tenants_grants_and_each_admits_exactly_its_own_pairs(tmp_path):
     root = tmp_path / "tenants"
@@ -91,15 +91,6 @@ def test_a_table_edited_between_two_runs_is_read_again(tmp_path):
     assert ("cmdb", "get-host") in _pairs(T.run_grants(a / "settings").gather)
     (a / "settings" / "verb-grants.yaml").write_text(T.TABLE_B, encoding="utf-8")
     assert _pairs(T.run_grants(a / "settings").gather) == set(T.GATHER_PAIRS_B)
-
-
-# ---- M4: no table is read at import ----------------------------------------------------------------
-
-
-# ---- the refusal names the run's own table ----------------------------------------------------
-
-
-# ---- the verb context carries the run's tenant record -------------------------------------------
 
 
 # ---- the operator's audit CLI is an entry point too -------------------------------------------------

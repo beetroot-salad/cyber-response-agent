@@ -34,7 +34,7 @@ def _arg(argv: list[str], flag: str) -> str:
 
 class SpawnRecorder:
     """`spawn=`: records each child's argv and env, the `--tenant` it is started with, and the
-    arm roster its episode held at the moment the child was started (#1187: the episode is
+    arm roster its episode held at the moment the child was started (the episode is
     `<data root>/<T>/episodes/<ep>` of the child's own `--tenant` and `--episode`; the data
     root is the one the child's env hands it)."""
 
@@ -60,8 +60,7 @@ class SpawnRecorder:
 
 def _child_data_root(launch: dict[str, Any]) -> Path:
     """The data root the child `run.py` would re-accept its tenant under: the
-    `DEFENDER_DATA_ROOT` in the env it was spawned with (#1120 — the separate tenants root, and
-    the flag that carried it, are gone)."""
+    `DEFENDER_DATA_ROOT` in the env it was spawned with."""
     assert launch["argv"][1].endswith("run.py"), launch["argv"]
     assert launch["env"].get(DATA_ROOT_ENV), launch["env"]
     return Path(launch["env"][DATA_ROOT_ENV])
@@ -73,10 +72,7 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
     """Every child is started with the episode tenant's `--tenant` and handed the data root,
     over an episode that reached RUNS: the episode at `<acme>/episodes/<uuid>` whose roster the
     view's `start_runs` wrote before `start_family` — so every child, at the moment it starts,
-    finds the roster naming its label (O4b). No `_tenant.json` is written anywhere.
-    #1187 declared change 6
-    #1187 declared change 10
-    """
+    finds the roster naming its label. No `_tenant.json` is written anywhere."""
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 
     cli = T.mod("learning.branch.cli")
@@ -136,8 +132,8 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
     spawn = SpawnRecorder()
     outcome: Any
     try:
-        # #1105 PR 2 (declared change 1): the request names the tenant whose location
-        # `<root>/<T>/runs/<run id>` the source sits at, and the source by its id.
+        # The request names the tenant whose `<root>/<T>/runs/<run id>` the source sits at,
+        # and the source by its id.
         outcome = T.mod("cli.learning.branch").main(
             ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID),
              *P.retired_continuation_argv()],
@@ -153,14 +149,11 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
 
 def _launch(tmp_path: Path, *, stamp_tenant: str | None, location_tenant: Any = _AS_STAMPED,
             source: Path | None = None, questioner: Any = None) -> tuple[Any, SpawnRecorder]:
-    """One episode through the real launcher, as `test_947_triplet_launcher` drives it, with
-    the SOURCE run's stamp naming `stamp_tenant` and the source sitting at `location_tenant`'s
-    runs folder `<root>/<T>/runs/<uuid>` (the same tenant unless a scenario says otherwise;
-    `None` keeps the fixture's tenant) — the request names that location's tenant (#1187: the
-    run's tenant is where it sits; no record). The launcher finds tenants under this test's
-    data root (#1120). `source` is a source run dir the scenario already built (its tenant
-    shaped by hand). Every scenario driving this one is refused before pre-flight reads
-    anything."""
+    """One episode through the real launcher, the source run's stamp naming `stamp_tenant` and
+    the source sitting at `location_tenant`'s `<root>/<T>/runs/<uuid>` (the same tenant unless
+    a scenario says otherwise; `None` keeps the fixture's), the tenant the request names.
+    `source` is a source run the scenario already built. Every scenario driving this one is
+    refused before pre-flight reads anything."""
     location = stamp_tenant if location_tenant is _AS_STAMPED else location_tenant
     src = source if source is not None else location_path(P.runs_base)(tmp_path, tenant_id=location)[1]
     P.source_stamp(src, tenant_id=stamp_tenant)
@@ -168,8 +161,8 @@ def _launch(tmp_path: Path, *, stamp_tenant: str | None, location_tenant: Any = 
 
 
 def _episodes_made() -> list[str]:
-    """Every entry under any tenant's `<data root>/<T>/episodes/` (#1187: where every launch
-    claims its episode) — the census a refusal leaves empty and an accepted launch does not."""
+    """Every entry under any tenant's `<data root>/<T>/episodes/` (where every launch claims its
+    episode) — the census a refusal leaves empty and an accepted launch does not."""
     return sorted(str(p) for p in current_data_root().glob("*/episodes/*"))
 
 
@@ -179,8 +172,8 @@ _BASE = {"rows": [{"user": "alice", "event_id": "e-100", "host": "web-1"}]}
 
 
 def _estate_launch(tmp_path: Path) -> tuple[Any, SpawnRecorder, Any]:
-    """One ACCEPTED episode over `_spec1224`'s estate tenant (`acme`, systems the checkout's
-    playground does not have), stamped `acme`. Returns `(outcome, spawn, estate)`."""
+    """One accepted episode over `_spec1224`'s estate tenant (`acme`, with systems the
+    checkout's fixture lacks), stamped `acme`. Returns `(outcome, spawn, estate)`."""
     est = O.estate(tmp_path)
     _base, src = O.source_run(tmp_path, est, calls=[
         O.Call("idp", "query", O.query_params("user:alice"), _BASE),
@@ -197,11 +190,10 @@ def _episode_tenant(root: Path) -> Path:
 
 
 def _knowledgeless_source(tmp_path: Path, tenant_id: str) -> Path:
-    """A source run under `tenant_id`, whose row and runs folder exist in the data root but
-    whose knowledge folder does not — the tenant no operator set up knowledge for (before #1120:
-    a row in the data root with no folder in the separate tenants root). Built FIRST, while the
-    root is fresh (O10: `create_tenant` mints only into a fresh root); the episode's complete
-    tenant is planted beside it afterwards, by hand."""
+    """A source run under `tenant_id` whose row and runs folder exist but whose knowledge
+    folder does not (a tenant no operator set up). Built first, while the root is fresh
+    (`create_tenant` mints only into a fresh root); the episode's complete tenant is planted
+    beside it afterwards, by hand."""
     import shutil
 
     _base, src = location_path(P.runs_base)(tmp_path, tenant_id=tenant_id)
@@ -212,7 +204,7 @@ def _knowledgeless_source(tmp_path: Path, tenant_id: str) -> Path:
 def test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant(tmp_path):
     """The positive control the refusals below are measured against: the stamp agrees with the
     request, the siblings start on `acme` with the data root, each over a roster naming its
-    label, and the launch's one episode sits under `<acme>/episodes/` (#1187)."""
+    label, and the launch's one episode sits under `<acme>/episodes/`."""
     root = current_data_root()
     outcome, spawn, _est = _estate_launch(tmp_path)
     assert spawn.launches, f"no sibling was started: {outcome!r}"
@@ -230,17 +222,11 @@ def test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant(tmp_path):
 @pytest.mark.parametrize("stamp_tenant", [None, fixture_uuid("tenant:default")])
 def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sibling(
         tmp_path, capsys, stamp_tenant):
-    """The negative on the same launch: only the source stamp's tenant differs from the
-    positive above, and no sibling starts and no episode is made under any tenant's
-    `<T>/episodes/` (the positive above leaves one there). A stamp naming NO tenant is refused
-    as the stamp's fault: the refusal names the stamp (or the provenance it is), as the N14
-    test's does — review-3 F34: "tenant" alone is in every launcher refusal ("of tenant 'X'"),
-    so it was satisfied by any refusal of the source, the retired record's among them.
-    (`default` is a row in the data root with no knowledge folder, as it was before #1120; its
-    refusal is that tenant's.)
-    #1187 declared change 1: the fixture source's id is a uuid, so the refusal is the stamp's,
-    never the id rule's (whose text also says "tenant").
-    """
+    """The negative of the positive above: only the source stamp's tenant differs, no sibling
+    starts and no episode is made. A stamp naming no tenant is refused as the stamp's fault (the
+    refusal names the stamp or provenance; "tenant" alone is in every launcher refusal);
+    `default` is a row with no knowledge folder, refused as that tenant. The source id is a
+    uuid, so the refusal is never the id rule's (whose text also says "tenant")."""
     src = None if stamp_tenant is None else _knowledgeless_source(tmp_path, stamp_tenant)
     _episode_tenant(current_data_root())
     outcome, spawn = _launch(tmp_path, stamp_tenant=stamp_tenant, source=src)
@@ -257,7 +243,7 @@ def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sib
     assert _episodes_made() == [], _episodes_made()
 
 
-# ---- O2/O6 on the branching lane: the launcher reads the INJECTED episode tenant ------------------
+# ---- the branching lane: the launcher reads the injected episode tenant --------------------------
 
 def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(tmp_path):
     checkout = T.fixture_run_tenant().grants.gather
@@ -319,7 +305,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     assert questioner.calls == 0, "the questioner was paid for before the refusal"
 
 
-# ---- O3 on the resume path: a sibling serves through its OWN run's grant ------------------------
+# ---- the resume path: a sibling serves through its own run's grant ------------------------------
 
 _ELASTIC_FOR_GATHER = """\
   elastic:
@@ -359,7 +345,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
         assert {(s, v) for s, v, _ in registry.grant.entries} == set(pairs), tenant_id
         assert registry.decide(*own_pair).outcome == "GRANTED", (tenant_id, own_pair)
         assert registry.decide(*other_pair).outcome != "GRANTED", (tenant_id, other_pair)
-        # The MODEL-FACING pointer names the table, never a tenant (#1255 O3) and never the
+        # The model-facing pointer names the table, never a tenant (#1255) and never the
         # host path to it.
         pointer = str(registry.grant_home)
         assert "verb-grants.yaml" in pointer, (tenant_id, pointer)

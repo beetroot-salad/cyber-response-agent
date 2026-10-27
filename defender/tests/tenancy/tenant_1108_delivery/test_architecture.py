@@ -1,4 +1,4 @@
-"""Where tenant delivery is wired (#1108 P4).
+"""Where tenant delivery is wired (#1108).
 
 The source-reading rules (no disk credential location, the check-file name's single home and absence from agent-facing text) are held by `tooling/lint/lint_delivery_architecture.py`."""
 from __future__ import annotations
@@ -32,15 +32,15 @@ def non_docstring_nodes(tree):
 
 
 
-#: P3's delivery package. P4 wires it into host-side delivery processes (drains, `tenant.py`,
-#: the launch-time publish child); the run process never imports it (P-3).
+#: The delivery package: host-side delivery processes (drains, `tenant.py`, the launch-time
+#: publish child) import it; the run process never does.
 _DELIVERY = "defender.learning.author.version_control"
 _TENANT_DELIVERY = f"{_DELIVERY}.delivery.TenantDelivery"
 
 
 def _p4_census():
-    # The #1108 P4 census engine (symbol resolution and the static import closure); lazy, so
-    # this module collects whatever state that contract is in.
+    # The #1108 census engine (symbol resolution and the static import closure), imported at
+    # call time.
     return importlib.import_module("defender.tests.tenancy.tenant_1108_p4.test_census")
 
 
@@ -49,10 +49,9 @@ def _delivery_modules(closure):
 
 
 def test_the_run_process_never_imports_tenant_delivery():
-    """P-3 (#1108 P4, replacing P3's dormancy ban): the run process — `run.py` and
-    `run_common.py` and everything they import, at module level, inside a function, or by
-    an `import_module` string — never reaches the delivery package. The launch-time publish
-    is a separate child process; the run only receives its outcome."""
+    """The run process — `run.py`, `run_common.py` and everything they import, at module
+    level, inside a function, or by an `import_module` string — never reaches the delivery
+    package; the launch-time publish is a separate child process."""
     target()
     census = _p4_census()
     closure = census.static_import_closure(census.RUN_ENTRIES)
@@ -69,11 +68,10 @@ def test_the_run_process_never_imports_tenant_delivery():
 
 
 def test_the_run_closure_walk_sees_lazy_aliased_and_string_imports(tmp_path):
-    """P-3 positive control: on a planted tree, the same walk reaches the delivery package
+    """Positive control: on a planted tree, the same walk reaches the delivery package
     through a function-local aliased from-import two modules away and through an
     `import_module` string — the evasions a module-level-only walk would miss — while a
-    module only NAMED to spawn a child (`-m`, the separate publish process P-3 wants) is not
-    an import."""
+    module only named to spawn a child (`-m`, as the publish child is) is not an import."""
     census = _p4_census()
     root = tmp_path / "defender"
     for rel, text in {
@@ -135,10 +133,9 @@ def test_the_caller_census_resolves_aliases_and_the_door():
 
 
 def test_tenant_delivery_has_production_callers_outside_the_run_process():
-    """#1108 P4 wires P3's delivery (replacing the dormancy ban): `TenantDelivery` is
-    referenced by at least one production module outside its package — a host-side delivery
-    process (drains, revert, `tenant.py`, the publish child) — and none of them is in the run
-    process's import closure."""
+    """`TenantDelivery` is referenced by at least one production module outside its package
+    — a host-side delivery process (drains, revert, `tenant.py`, the publish child) — and none
+    of them is in the run process's import closure."""
     target()
     census = _p4_census()
     module_of = census._astlib.module_and_package
