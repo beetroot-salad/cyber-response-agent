@@ -37,7 +37,7 @@ from .fakes import (
 from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
 from .ports import ApiDeps
 
-#: The users each tenant gets; a token is `<tenant>-<role>`.
+#: The users each tenant gets, each signed in as `<tenant>-<role>` (see `demo_sessions`).
 DEMO_ROLES = ("analyst", "engineer")
 #: Made-up knowledge commits the demo investigations name (the latest and an earlier one).
 _DEMO_COMMITS = ("d3a0c0de" * 5, "e4a1c0de" * 5)
@@ -47,14 +47,16 @@ UTC_NOW: Callable[[], _dt.datetime] = partial(_dt.datetime.now, _dt.UTC)
 
 
 #: Where the demo's frontend is said to live; a state-changing request must carry it as `Origin`.
+#: The API sends no CORS headers: as in deployment, where the proxy serves both on one origin,
+#: the frontend's dev server forwards API calls, so the browser only ever sees this origin.
 DEMO_FRONTEND_ORIGIN = "http://localhost:3000"
 _SESSION_LIFETIME = _dt.timedelta(days=365)
 _logger = logging.getLogger(__name__)
 
 
 def demo_sessions(tenants: Sequence[str]) -> dict[str, str]:
-    """session cookie value -> `<tenant>-<role>`'s name, one per tenant and role. Predictable
-    and public: the demo has no sign-in."""
+    """`<tenant>-<role>` -> that user's session cookie value, one per tenant and role.
+    Predictable and public: the demo has no sign-in."""
     return {f"{tenant}-{role}": f"demo-session-{tenant}-{role}" for tenant in tenants for role in DEMO_ROLES}
 
 

@@ -12,6 +12,8 @@ from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from defender import identity as _identity
 from defender.identity import Authenticated, IdentityService
@@ -77,11 +79,22 @@ def _deps(request: Request) -> ApiDeps:
     return deps
 
 
-def _check_origin(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> None:
-    """A request that changes state must come from the configured frontend (O6). Checked first,
-    before the session and before the body is read, so a forged request learns nothing."""
-    if request.method not in _SAFE_METHODS and request.headers.get("origin") != deps.frontend_origin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "this request does not come from the frontend")
+class _FrontendOriginOnly:
+    """A request that changes state must come from the configured frontend (O6). A layer in front
+    of routing, so it answers before the session is looked at or the body is read: a forged
+    request learns nothing, not even whether its body would have parsed."""
+
+    def __init__(self, app: ASGIApp, *, origin: str) -> None:
+        self._app = app
+        self._origin = origin
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] not in _SAFE_METHODS \
+                and Headers(scope=scope).get("origin") != self._origin:
+            refused = problem(status.HTTP_403_FORBIDDEN, "this request does not come from the frontend")
+            await refused(scope, receive, send)
+            return
+        await self._app(scope, receive, send)
 
 
 def _authenticated(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
@@ -562,10 +575,10 @@ def create_app(deps: ApiDeps) -> FastAPI:
         title="Defender platform API",
         version=API_VERSION,
         summary="Stub: the routes and shapes are the contract; the records behind them are not yet real.",
-        dependencies=[Depends(_check_origin)],
         lifespan=_lifespan,
     )
     app.state.deps = deps
+    app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = APIRouter(prefix="/tenants/{tenant_id}", responses=responses(404))
     for router in (alerts, investigations, learning_jobs, lessons, systems, people):
         in_tenant.include_router(router)

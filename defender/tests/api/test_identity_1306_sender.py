@@ -92,31 +92,26 @@ def test_a_re_invite_arriving_during_a_send_stays_pending(kind: str) -> None:
 
 
 @pytest.mark.parametrize("kind", ["set_password", "notice"])
-def test_the_sender_does_not_hold_its_claim_while_it_calls_the_port(kind: str) -> None:
-    """While a send is at Keycloak or the mail server, the re-requested person or row can be claimed again (flow 1)."""
+def test_a_second_sender_skips_what_the_first_is_sending_and_a_re_invite_is_not_held_up(kind: str) -> None:
+    """While a send is at Keycloak or the mail server, another sender does not take it, and a re-invite still lands (flow 1, r9)."""
     world, ann, _ = two_tenants()
     person = NEW if kind == "set_password" else BOB
     world.invite(ann, T1, person)
-    claimed: list[Any] = []
+    inside: list[Any] = []
 
     def inside_the_send() -> None:
-        world.invite(ann, T1, person)  # re-requested: pending again
-        claim = (world.repo.claim_pending_set_password if kind == "set_password"
-                 else world.repo.claim_pending_notification)
-        with claim() as row:
-            claimed.append(row)
+        inside.append(world.invite(ann, T1, person).status_code)
+        now = world.clock()
+        claim = world.repo.claim_set_password if kind == "set_password" else world.repo.claim_notification
+        inside.append(claim(now=now, hold_until=now + HOUR))
 
     if kind == "set_password":
         world.signin.during_send = inside_the_send
     else:
         world.mail.during_notice = inside_the_send
     world.send_pending()
-    assert len(claimed) == 1
-    assert claimed[0] is not None, "the sender still held its claim during the port call"
-    if kind == "set_password":
-        assert claimed[0].email == NEW
-    else:
-        assert claimed[0].tenant_id == T1
+    assert inside[0] == 202, "the re-invite was held up by the send"
+    assert inside[1] is None, "a second sender could take the send that was in flight"
 
 
 @pytest.mark.parametrize("kind", ["set_password", "notice"])
@@ -406,8 +401,8 @@ def test_a_periodic_pass_that_raises_does_not_stop_the_loop() -> None:
     with world.lifespan_client() as browser:
         assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
         world.sign_in(ANN, browser=browser)
-        world.repo.failing.add("claim_pending_set_password")
-        assert wait_until(lambda: world.repo.refusals.get("claim_pending_set_password", 0) >= 2)  # raised, again
+        world.repo.failing.add("claim_set_password")
+        assert wait_until(lambda: world.repo.refusals.get("claim_set_password", 0) >= 2)  # raised, again
         world.repo.failing.clear()
         assert world.invite(browser, T1, NEW).status_code == 202
         assert wait_until(lambda: world.signin.sends_to(NEW) == 1)

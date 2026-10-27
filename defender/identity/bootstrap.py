@@ -9,12 +9,13 @@ from defender._model import model
 from defender.records._tenant_id import TenantId
 
 from .ports import IdentityRepository
+from .rows import Email
 
 
 @model(frozen=True)
 class Bootstrap:
-    administrators: tuple[str, ...]
-    tenants: Mapping[str, tuple[str, ...]]
+    administrators: tuple[Email, ...]
+    tenants: Mapping[str, tuple[Email, ...]]
 
 
 def register_tenant(repo: IdentityRepository, tenant_id: TenantId) -> None:

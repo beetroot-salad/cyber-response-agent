@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
-import re
 import uuid
 from collections.abc import Collection, Iterator
 from contextlib import contextmanager
@@ -25,9 +24,8 @@ from defender.records._tenant_id import TenantId
 
 from .errors import DataRuleViolation
 from .memory import TOUCH_AFTER, check_membership_fields, session_hash
-from .rows import Membership, MembershipStatus, Session, User, UserStatus
+from .rows import Membership, MembershipStatus, Session, User, UserStatus, normalize_email
 
-_SCHEMA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #: Held while migrations apply, so two processes starting together do not race.
 _MIGRATION_LOCK = 1306_0001
 
@@ -85,6 +83,14 @@ CREATE TABLE sessions (
 );
 CREATE INDEX sessions_by_user ON sessions (user_id);
 """),
+    ("0002_send_retries", """
+ALTER TABLE users
+    ADD COLUMN set_password_attempts integer NOT NULL DEFAULT 0,
+    ADD COLUMN set_password_next_try_at timestamptz;
+ALTER TABLE memberships
+    ADD COLUMN notify_attempts integer NOT NULL DEFAULT 0,
+    ADD COLUMN notify_next_try_at timestamptz;
+"""),
 )
 
 _NO_TIME: Any = None
@@ -105,19 +111,22 @@ _USER_AS_U = ", ".join(f"u.{f.name} AS u_{f.name}" for f in dataclasses.fields(U
 
 class PostgresIdentityRepository:
     def __init__(self, dsn: str, *, schema: str, max_connections: int = 10) -> None:
-        if not _SCHEMA_NAME.match(schema):
-            raise ValueError(f"not a schema name: {schema!r}")
         self._dsn = dsn
         self._schema = schema
         self._migrate()
         self._pool: ConnectionPool[psycopg.Connection[dict[str, Any]]] = ConnectionPool(
             dsn, min_size=1, max_size=max_connections, open=True,
-            kwargs={"row_factory": dict_row, "options": f"-c timezone=UTC -c search_path={schema}"})
+            kwargs={"row_factory": dict_row, "options": "-c timezone=UTC"}, configure=self._use_schema)
 
     def close(self) -> None:
         self._pool.close()
 
     # --- plumbing ----------------------------------------------------------------------------
+    def _use_schema(self, conn: psycopg.Connection[dict[str, Any]]) -> None:
+        """On every new pooled connection: the schema, quoted as the migrations quote it."""
+        conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(self._schema)))
+        conn.commit()
+
     @contextmanager
     def _conn(self) -> Iterator[psycopg.Connection[dict[str, Any]]]:
         with self._pool.connection() as conn, _data_rules(), conn.transaction():
@@ -179,7 +188,7 @@ class PostgresIdentityRepository:
             row = conn.execute(
                 "INSERT INTO users (id, email, display_name, status, signin_account_id, is_platform_admin,"
                 " created_at, updated_at, activated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
-                (str(uuid.uuid4()), email.strip().lower(), display_name, status, signin_account_id,
+                (str(uuid.uuid4()), normalize_email(email), display_name, status, signin_account_id,
                  is_platform_admin, created_at, created_at, created_at if status == "active" else None),
             ).fetchone()
         user = self._user(row)
@@ -187,7 +196,7 @@ class PostgresIdentityRepository:
         return user
 
     def ensure_user(self, email: str, *, now: _dt.datetime) -> User:
-        email = email.strip().lower()
+        email = normalize_email(email)
         with self._conn() as conn:
             row = conn.execute(
                 "INSERT INTO users (id, email, status, created_at, updated_at)"
@@ -206,7 +215,7 @@ class PostgresIdentityRepository:
     def user_by_email(self, email: str) -> User | None:
         with self._conn() as conn:
             return self._user(conn.execute(
-                "SELECT * FROM users WHERE email = %s", (email.strip().lower(),)).fetchone())
+                "SELECT * FROM users WHERE email = %s", (normalize_email(email),)).fetchone())
 
     def user_by_signin_account(self, account_id: str) -> User | None:
         with self._conn() as conn:
@@ -355,23 +364,39 @@ class PostgresIdentityRepository:
             raise DataRuleViolation(f"no membership {membership_id!r}")
         return int(row["notify_requested_seq"])
 
-    @contextmanager
-    def claim_pending_set_password(self, skip: Collection[str] = ()) -> Iterator[User | None]:
+    def claim_set_password(
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+    ) -> User | None:
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM users WHERE status = 'invited'"
-                " AND set_password_requested_seq > set_password_sent_seq AND id <> ALL(%s)"
-                " ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED", (list(skip),)).fetchone()
-            yield self._user(row)
+            return self._user(conn.execute(
+                "UPDATE users SET set_password_next_try_at = %s WHERE id = ("
+                " SELECT id FROM users WHERE status = 'invited'"
+                " AND set_password_requested_seq > set_password_sent_seq"
+                " AND (set_password_next_try_at IS NULL OR set_password_next_try_at <= %s) AND id <> ALL(%s)"
+                " ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *",
+                (hold_until, now, list(skip))).fetchone())
 
-    @contextmanager
-    def claim_pending_notification(self, skip: Collection[str] = ()) -> Iterator[Membership | None]:
+    def claim_notification(
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+    ) -> Membership | None:
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM memberships WHERE status = 'invited'"
-                " AND notify_requested_seq > notify_sent_seq AND id <> ALL(%s)"
-                " ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED", (list(skip),)).fetchone()
-            yield self._membership(row)
+            return self._membership(conn.execute(
+                "UPDATE memberships SET notify_next_try_at = %s WHERE id = ("
+                " SELECT id FROM memberships WHERE status = 'invited'"
+                " AND notify_requested_seq > notify_sent_seq"
+                " AND (notify_next_try_at IS NULL OR notify_next_try_at <= %s) AND id <> ALL(%s)"
+                " ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *",
+                (hold_until, now, list(skip))).fetchone())
+
+    def defer_set_password(self, user_id: str, *, until: _dt.datetime) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE users SET set_password_attempts = set_password_attempts + 1,"
+                         " set_password_next_try_at = %s WHERE id = %s", (until, user_id))
+
+    def defer_notification(self, membership_id: str, *, until: _dt.datetime) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE memberships SET notify_attempts = notify_attempts + 1,"
+                         " notify_next_try_at = %s WHERE id = %s", (until, membership_id))
 
     def settle_set_password(
         self, user_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,
@@ -380,7 +405,8 @@ class PostgresIdentityRepository:
         with self._conn() as conn:
             applied = conn.execute(
                 "UPDATE users SET set_password_sent_seq = %s,"
-                " set_password_sent_at = COALESCE(%s, set_password_sent_at)"
+                " set_password_sent_at = COALESCE(%s, set_password_sent_at),"
+                " set_password_attempts = 0, set_password_next_try_at = NULL"
                 " WHERE id = %s AND set_password_sent_seq < %s AND %s <= set_password_requested_seq"
                 " RETURNING 1", (read_seq, sent_at, user_id, read_seq, read_seq)).fetchone() is not None
             if applied and sent_at is not None and expires_at is not None:
@@ -395,6 +421,7 @@ class PostgresIdentityRepository:
         with self._conn() as conn:
             return conn.execute(
                 "UPDATE memberships SET notify_sent_seq = %s, notified_at = COALESCE(%s, notified_at),"
+                " notify_attempts = 0, notify_next_try_at = NULL,"
                 " expires_at = CASE WHEN %s::timestamptz IS NOT NULL AND %s::timestamptz IS NOT NULL"
                 " AND status = 'invited' THEN %s ELSE expires_at END"
                 " WHERE id = %s AND notify_sent_seq < %s AND %s <= notify_requested_seq RETURNING 1",

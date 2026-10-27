@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import datetime as _dt
 from collections.abc import Collection
-from contextlib import AbstractContextManager
 from typing import Protocol
 
 from defender._model import model
@@ -86,27 +85,33 @@ class IdentityRepository(Protocol):
         ...
     def active_membership(self, user_id: str, tenant_id: str) -> Membership | None: ...
 
-    # --- sends: a send is pending while requested_seq > sent_seq
+    # --- sends: a send is pending while requested_seq > sent_seq, and due while its next try
+    # is unset or not after `now`
     def request_set_password(self, user_id: str, *, now: _dt.datetime) -> int: ...
     def request_notification(self, membership_id: str, *, now: _dt.datetime) -> int: ...
-    def claim_pending_set_password(
-        self, skip: Collection[str] = (),
-    ) -> AbstractContextManager[User | None]:
-        """Yields an `invited` user with a pending set-password send that no other claim holds
-        and that is not in `skip`, or `None`. The claim is held for the block."""
+    def claim_set_password(
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+    ) -> User | None:
+        """An `invited` user with a due set-password send that is not in `skip`, or `None`.
+        Moves its next try to `hold_until` before returning, so any other claimant skips it
+        until then; nothing stays locked after the call."""
         ...
-    def claim_pending_notification(
-        self, skip: Collection[str] = (),
-    ) -> AbstractContextManager[Membership | None]:
-        """As `claim_pending_set_password`, for an `invited` row with a pending notification."""
+    def claim_notification(
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+    ) -> Membership | None:
+        """As `claim_set_password`, for an `invited` row with a due notification."""
         ...
+    def defer_set_password(self, user_id: str, *, until: _dt.datetime) -> None:
+        """After a failed send: one more attempt, and the next try at `until`."""
+        ...
+    def defer_notification(self, membership_id: str, *, until: _dt.datetime) -> None: ...
     def settle_set_password(
         self, user_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,
         expires_at: _dt.datetime | None = None,
     ) -> bool:
         """Move `sent_seq` to `read_seq`, only while `sent_seq < read_seq <= requested_seq`.
         `sent_at=None` means the send was dropped. `expires_at` goes on the user's `invited`
-        rows."""
+        rows. When it applies it clears the attempts and the next try."""
         ...
     def settle_notification(
         self, membership_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,

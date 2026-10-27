@@ -23,6 +23,8 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 DSN_ENV = "DEFENDER_TEST_POSTGRES_DSN"
 NOW = dt.datetime(2026, 10, 26, 12, 0, tzinfo=dt.UTC)
 WEEK = dt.timedelta(days=7)
+HOUR = dt.timedelta(hours=1)
+HOLD = dt.timedelta(minutes=5)
 T1 = TenantId(fixture_uuid("tenant:t1"))
 T2 = TenantId(fixture_uuid("tenant:t2"))
 T_UNREGISTERED = TenantId(fixture_uuid("tenant:unregistered"))
@@ -32,6 +34,14 @@ def _postgres_repo(dsn: str, schema: str):
     from defender.identity.postgres import PostgresIdentityRepository
 
     return PostgresIdentityRepository(dsn, schema=schema)
+
+
+def _claim_user(repo, now=NOW):
+    return repo.claim_set_password(now=now, hold_until=now + HOLD)
+
+
+def _claim_row(repo, now=NOW):
+    return repo.claim_notification(now=now, hold_until=now + HOLD)
 
 
 def _dsn() -> str:
@@ -412,42 +422,42 @@ def test_nothing_is_pending_until_requested(seeded):
     u = _user(seeded)
     _invited(seeded, u)
     assert (u.set_password_requested_seq, u.set_password_sent_seq) == (0, 0)
-    with seeded.claim_pending_set_password() as claimed:
-        assert claimed is None
-    with seeded.claim_pending_notification() as claimed:
-        assert claimed is None
+    claimed = _claim_user(seeded)
+    assert claimed is None
+    claimed = _claim_row(seeded)
+    assert claimed is None
 
 
 def test_a_requested_set_password_is_claimed_until_settled_as_sent(seeded):
     """DC-3: request bumps requested_seq; settling with the read value clears pending and stamps sent_at."""
     u = _user(seeded)
     assert seeded.request_set_password(u.id, now=NOW) == 1
-    with seeded.claim_pending_set_password() as claimed:
-        assert claimed.id == u.id
-        assert (claimed.set_password_requested_seq, claimed.set_password_sent_seq) == (1, 0)
-        assert claimed.set_password_requested_at == NOW
+    claimed = _claim_user(seeded)
+    assert claimed.id == u.id
+    assert (claimed.set_password_requested_seq, claimed.set_password_sent_seq) == (1, 0)
+    assert claimed.set_password_requested_at == NOW
     sent = NOW + dt.timedelta(minutes=1)
     assert seeded.settle_set_password(u.id, 1, sent_at=sent) is True
     got = seeded.user(u.id)
     assert (got.set_password_sent_seq, got.set_password_sent_at) == (1, sent)
-    with seeded.claim_pending_set_password() as claimed:
-        assert claimed is None
+    claimed = _claim_user(seeded)
+    assert claimed is None
 
 
 def test_a_re_send_during_a_send_stays_pending(seeded):
     """DC-3/DC-8: CAS of sent_seq to the value read; a request that arrived mid-send is still pending."""
     u = _user(seeded)
     seeded.request_set_password(u.id, now=NOW)
-    with seeded.claim_pending_set_password() as claimed:
-        read = claimed.set_password_requested_seq
+    claimed = _claim_user(seeded)
+    read = claimed.set_password_requested_seq
     assert seeded.request_set_password(u.id, now=NOW + dt.timedelta(seconds=5)) == 2  # arrives mid-send
     assert seeded.settle_set_password(u.id, read, sent_at=NOW + dt.timedelta(seconds=9)) is True
-    with seeded.claim_pending_set_password() as claimed:
-        assert claimed.id == u.id
-        assert (claimed.set_password_sent_seq, claimed.set_password_requested_seq) == (1, 2)
+    claimed = _claim_user(seeded)
+    assert claimed.id == u.id
+    assert (claimed.set_password_sent_seq, claimed.set_password_requested_seq) == (1, 2)
     assert seeded.settle_set_password(u.id, 2, sent_at=NOW + dt.timedelta(seconds=20)) is True
-    with seeded.claim_pending_set_password() as claimed:
-        assert claimed is None
+    claimed = _claim_user(seeded)
+    assert claimed is None
 
 
 def test_a_stale_settle_does_not_apply(seeded):
@@ -492,8 +502,8 @@ def test_a_dropped_send_advances_the_counter_without_a_send_time(seeded):
     got = seeded.user(u.id)
     assert (got.set_password_sent_seq, got.set_password_sent_at) == (1, None)
     assert seeded.membership(row.id).expires_at is None  # nothing went out, so nothing runs out
-    with seeded.claim_pending_set_password() as claimed:
-        assert claimed is None
+    claimed = _claim_user(seeded)
+    assert claimed is None
 
 
 def test_a_real_send_sets_the_expiry_of_the_users_invited_rows_only(seeded):
@@ -521,8 +531,8 @@ def test_an_activated_user_has_no_pending_set_password(seeded):
     u = _user(seeded)
     seeded.request_set_password(u.id, now=NOW)
     seeded.activate_user(u.id, display_name="Ann", now=NOW)
-    with seeded.claim_pending_set_password() as claimed:
-        assert claimed is None
+    claimed = _claim_user(seeded)
+    assert claimed is None
 
 
 def test_a_requested_notification_is_claimed_until_settled_as_sent(seeded):
@@ -530,15 +540,15 @@ def test_a_requested_notification_is_claimed_until_settled_as_sent(seeded):
     u = _user(seeded)
     row = _invited(seeded, u)
     assert seeded.request_notification(row.id, now=NOW) == 1
-    with seeded.claim_pending_notification() as claimed:
-        assert claimed.id == row.id
-        assert (claimed.notify_requested_seq, claimed.notify_sent_seq) == (1, 0)
+    claimed = _claim_row(seeded)
+    assert claimed.id == row.id
+    assert (claimed.notify_requested_seq, claimed.notify_sent_seq) == (1, 0)
     sent = NOW + dt.timedelta(minutes=1)
     assert seeded.settle_notification(row.id, 1, sent_at=sent, expires_at=sent + WEEK) is True
     got = seeded.membership(row.id)
     assert (got.notify_sent_seq, got.notified_at, got.expires_at) == (1, sent, sent + WEEK)
-    with seeded.claim_pending_notification() as claimed:
-        assert claimed is None
+    claimed = _claim_row(seeded)
+    assert claimed is None
 
 
 def test_a_re_notify_during_a_send_stays_pending_and_a_stale_settle_does_not_apply(seeded):
@@ -548,9 +558,9 @@ def test_a_re_notify_during_a_send_stays_pending_and_a_stale_settle_does_not_app
     seeded.request_notification(row.id, now=NOW)
     assert seeded.request_notification(row.id, now=NOW) == 2
     assert seeded.settle_notification(row.id, 1, sent_at=NOW) is True
-    with seeded.claim_pending_notification() as claimed:
-        assert claimed.id == row.id
-        assert claimed.notify_requested_seq == 2
+    claimed = _claim_row(seeded)
+    assert claimed.id == row.id
+    assert claimed.notify_requested_seq == 2
     assert seeded.settle_notification(row.id, 2, sent_at=NOW) is True
     assert seeded.settle_notification(row.id, 1, sent_at=NOW) is False
     assert seeded.membership(row.id).notify_sent_seq == 2
@@ -575,8 +585,8 @@ def test_a_notification_settle_sets_the_expiry_of_that_row_only(seeded):
     assert seeded.settle_notification(r1.id, 1, sent_at=NOW, expires_at=NOW + WEEK) is True
     assert seeded.membership(r1.id).expires_at == NOW + WEEK
     assert seeded.membership(r2.id).expires_at is None
-    with seeded.claim_pending_notification() as claimed:  # control: the other is still pending
-        assert claimed.id == r2.id
+    claimed = _claim_row(seeded)  # control: the other is still pending
+    assert claimed.id == r2.id
 
 
 def test_a_notification_is_pending_only_while_the_row_is_invited(seeded):
@@ -586,26 +596,60 @@ def test_a_notification_is_pending_only_while_the_row_is_invited(seeded):
     seeded.request_notification(gone.id, now=NOW)
     seeded.request_notification(kept.id, now=NOW)
     seeded.revoke_invitation(gone.id)
-    with seeded.claim_pending_notification() as claimed:
-        assert claimed.id == kept.id
+    claimed = _claim_row(seeded)
+    assert claimed.id == kept.id
     assert seeded.settle_notification(kept.id, 1, sent_at=NOW) is True
-    with seeded.claim_pending_notification() as claimed:
-        assert claimed is None
+    claimed = _claim_row(seeded)
+    assert claimed is None
 
 
-def test_a_claimed_user_is_skipped_by_a_second_claimant(seeded):
-    """Flow 1 (SKIP LOCKED): while one sender holds a user, another gets the next one or nothing."""
+def test_a_claimed_user_is_skipped_by_a_second_claimant_until_the_hold_runs_out(seeded):
+    """Flow 1 (r9): a claim holds the user until `hold_until`; another claimant gets the next one or nothing."""
     a, b = _user(seeded, "a@x.org"), _user(seeded, "b@x.org")
     seeded.request_set_password(a.id, now=NOW)
-    with seeded.claim_pending_set_password() as first:
-        assert first.id == a.id
-        with seeded.claim_pending_set_password() as second:
-            assert second is None
-        seeded.request_set_password(b.id, now=NOW)
-        with seeded.claim_pending_set_password() as third:
-            assert third.id == b.id
-    with seeded.claim_pending_set_password() as again:  # control: the hold ended with the block
-        assert again.id in {a.id, b.id}
+    assert _claim_user(seeded).id == a.id
+    assert _claim_user(seeded) is None
+    seeded.request_set_password(b.id, now=NOW)
+    assert _claim_user(seeded).id == b.id
+    assert seeded.user(a.id).set_password_next_try_at == NOW + HOLD
+    assert _claim_user(seeded, NOW + HOLD - dt.timedelta(seconds=1)) is None
+    assert _claim_user(seeded, NOW + HOLD).id in {a.id, b.id}  # control: a crashed sender's hold runs out
+
+
+@pytest.mark.parametrize("kind", ["set_password", "notification"])
+def test_a_deferred_send_is_due_again_at_its_next_try_and_a_settle_clears_the_attempts(seeded, kind):
+    """Flow 1 (r9): a failed send counts an attempt and waits for its next try; a settle starts over."""
+    u = _user(seeded)
+    row = _invited(seeded, u)
+    later = NOW + dt.timedelta(minutes=30)
+    if kind == "set_password":
+        seeded.request_set_password(u.id, now=NOW)
+        claim, defer, settle, target = _claim_user, seeded.defer_set_password, seeded.settle_set_password, u.id
+        state = lambda: (seeded.user(u.id).set_password_attempts, seeded.user(u.id).set_password_next_try_at)  # noqa: E731
+    else:
+        seeded.request_notification(row.id, now=NOW)
+        claim, defer, settle, target = _claim_row, seeded.defer_notification, seeded.settle_notification, row.id
+        state = lambda: (seeded.membership(row.id).notify_attempts, seeded.membership(row.id).notify_next_try_at)  # noqa: E731
+    assert claim(seeded).id == target
+    defer(target, until=later)
+    assert state() == (1, later)
+    assert claim(seeded, later - dt.timedelta(seconds=1)) is None
+    again = claim(seeded, later)
+    assert again.id == target
+    assert (again.set_password_attempts if kind == "set_password" else again.notify_attempts) == 1
+    defer(target, until=later + HOUR)
+    assert state() == (2, later + HOUR)
+    assert settle(target, 1, sent_at=later + HOUR) is True
+    assert state() == (0, None)
+
+
+def test_a_claim_skips_what_the_caller_names(seeded):
+    """Flow 1: `skip` leaves those users out of this claim."""
+    a, b = _user(seeded, "a@x.org"), _user(seeded, "b@x.org")
+    seeded.request_set_password(a.id, now=NOW)
+    seeded.request_set_password(b.id, now=NOW)
+    assert seeded.claim_set_password(now=NOW, hold_until=NOW + HOLD, skip={a.id}).id == b.id
+    assert seeded.claim_set_password(now=NOW, hold_until=NOW + HOLD, skip={b.id}).id == a.id
 
 
 # --- sessions --------------------------------------------------------------------------------
@@ -713,28 +757,36 @@ def test_concurrent_ensure_user_of_one_new_email_converge_on_one_user(two_connec
 
 
 @pytest.mark.postgres
-def test_two_senders_cannot_claim_the_same_user(two_connections):
-    """Flow 1: FOR UPDATE SKIP LOCKED — while one sender holds the pending user, the other gets nothing."""
+def test_two_senders_claiming_at_once_get_the_user_once(two_connections):
+    """Flow 1 (r9): FOR UPDATE SKIP LOCKED then the hold — two claims racing for one pending user, one wins."""
     first, second = two_connections
-    u = first.add_user("p@x.org", created_at=NOW)
-    first.request_set_password(u.id, now=NOW)
-    held, release, outcome = threading.Event(), threading.Event(), {}
+    for i in range(10):  # repeat to give the race a chance to happen
+        u = first.add_user(f"p{i}@x.org", created_at=NOW)
+        first.request_set_password(u.id, now=NOW)
+        barrier, got = threading.Barrier(2), []
 
-    def holder():
-        with first.claim_pending_set_password() as claimed:
-            outcome["holder"] = claimed.id if claimed else None
-            held.set()
-            release.wait(timeout=20)
+        def claim(r, barrier=barrier, got=got):
+            barrier.wait(timeout=10)
+            got.append(_claim_user(r))
 
-    t = threading.Thread(target=holder)
-    t.start()
+        threads = [threading.Thread(target=claim, args=(r,)) for r in two_connections]
+        [t.start() for t in threads]
+        [t.join(timeout=20) for t in threads]
+        assert sorted((c.id if c else "") for c in got) == ["", u.id]
+        assert first.settle_set_password(u.id, 1, sent_at=NOW) is True
+
+
+@pytest.mark.postgres
+def test_a_mixed_case_schema_is_used_as_given():
+    """Fixed details: the schema name is quoted the same way everywhere, so `Identity_X` is not folded."""
+    dsn = _dsn()
+    schema = f"Identity_{uuid.uuid4().hex}"
+    r = _postgres_repo(dsn, schema)
     try:
-        assert held.wait(timeout=20)
-        with second.claim_pending_set_password() as claimed:
-            outcome["other"] = claimed.id if claimed else None
+        r.register_tenant(T1)
+        u = r.ensure_user("Mixed@X.org", now=NOW)
+        assert r.user_by_email("mixed@x.org").id == u.id
+        assert r.tenants() == [str(T1)]
     finally:
-        release.set()
-        t.join(timeout=20)
-    assert outcome == {"holder": u.id, "other": None}
-    with second.claim_pending_set_password() as claimed:  # control: free again after release
-        assert claimed.id == u.id
+        r.close()
+        _drop_schema(dsn, schema)

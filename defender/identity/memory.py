@@ -9,14 +9,13 @@ import datetime as _dt
 import hashlib
 import threading
 import uuid
-from collections.abc import Collection, Iterator
-from contextlib import contextmanager
+from collections.abc import Collection
 from typing import Any
 
 from defender.records._tenant_id import TenantId
 
 from .errors import DataRuleViolation
-from .rows import Membership, MembershipStatus, Session, User, UserStatus
+from .rows import Membership, MembershipStatus, Session, User, UserStatus, normalize_email
 
 #: How stale `last_seen_at` must be before a request writes it again.
 TOUCH_AFTER = _dt.timedelta(minutes=5)
@@ -28,8 +27,8 @@ def session_hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _email(raw: str) -> str:
-    return raw.strip().lower()
+def _due(next_try_at: _dt.datetime | None, now: _dt.datetime) -> bool:
+    return next_try_at is None or next_try_at <= now
 
 
 def check_membership_fields(
@@ -44,8 +43,7 @@ def check_membership_fields(
 
 
 class InMemoryIdentityRepository:
-    """Every operation takes one lock, so a sender thread and request threads can share it.
-    A claim is a held id, not a held lock: the lock is never kept across a claim's block."""
+    """Every operation takes one lock, so a sender thread and request threads can share it."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -55,8 +53,6 @@ class InMemoryIdentityRepository:
         self._by_account: dict[str, str] = {}
         self._memberships: dict[str, Membership] = {}
         self._sessions: dict[str, Session] = {}
-        self._held_users: set[str] = set()
-        self._held_memberships: set[str] = set()
 
     # --- tenants -----------------------------------------------------------------------------
     def register_tenant(self, tenant_id: TenantId) -> None:
@@ -85,7 +81,7 @@ class InMemoryIdentityRepository:
         self, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
-        email = _email(email)
+        email = normalize_email(email)
         if email in self._by_email:
             raise DataRuleViolation(f"the email {email!r} already belongs to a user")
         if signin_account_id is not None and signin_account_id in self._by_account:
@@ -95,6 +91,7 @@ class InMemoryIdentityRepository:
             signin_account_id=signin_account_id, is_platform_admin=is_platform_admin,
             set_password_requested_seq=0, set_password_sent_seq=0,
             set_password_requested_at=None, set_password_sent_at=None,
+            set_password_attempts=0, set_password_next_try_at=None,
             created_at=created_at, updated_at=created_at,
             activated_at=created_at if status == "active" else None,
         )
@@ -116,7 +113,7 @@ class InMemoryIdentityRepository:
 
     def ensure_user(self, email: str, *, now: _dt.datetime) -> User:
         with self._lock:
-            existing = self._by_email.get(_email(email))
+            existing = self._by_email.get(normalize_email(email))
             return self._users[existing] if existing else self._new_user(email, created_at=now)
 
     def user(self, user_id: str) -> User | None:
@@ -125,7 +122,7 @@ class InMemoryIdentityRepository:
 
     def user_by_email(self, email: str) -> User | None:
         with self._lock:
-            found = self._by_email.get(_email(email))
+            found = self._by_email.get(normalize_email(email))
             return self._users[found] if found else None
 
     def user_by_signin_account(self, account_id: str) -> User | None:
@@ -182,7 +179,8 @@ class InMemoryIdentityRepository:
     def _insert_membership(self, **fields: object) -> Membership:
         row = Membership(
             id=str(uuid.uuid4()), notify_requested_seq=0, notify_sent_seq=0,
-            notify_requested_at=None, notified_at=None, **fields)  # type: ignore[arg-type]
+            notify_requested_at=None, notified_at=None, notify_attempts=0, notify_next_try_at=None,
+            **fields)  # type: ignore[arg-type]
         self._memberships[row.id] = row
         return row
 
@@ -282,35 +280,39 @@ class InMemoryIdentityRepository:
             self._update_membership(membership_id, notify_requested_seq=seq, notify_requested_at=now)
             return seq
 
-    @contextmanager
-    def claim_pending_set_password(self, skip: Collection[str] = ()) -> Iterator[User | None]:
+    def claim_set_password(
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+    ) -> User | None:
         with self._lock:
             found = next((u for u in self._users.values()
                           if u.status == "invited" and u.set_password_requested_seq > u.set_password_sent_seq
-                          and u.id not in self._held_users and u.id not in skip), None)
-            if found is not None:
-                self._held_users.add(found.id)
-        try:
-            yield found
-        finally:
-            if found is not None:
-                with self._lock:
-                    self._held_users.discard(found.id)
+                          and _due(u.set_password_next_try_at, now) and u.id not in skip), None)
+            if found is None:
+                return None
+            self._update_user(found.id, set_password_next_try_at=hold_until)
+            return self._users[found.id]
 
-    @contextmanager
-    def claim_pending_notification(self, skip: Collection[str] = ()) -> Iterator[Membership | None]:
+    def claim_notification(
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+    ) -> Membership | None:
         with self._lock:
             found = next((m for m in self._memberships.values()
                           if m.status == "invited" and m.notify_requested_seq > m.notify_sent_seq
-                          and m.id not in self._held_memberships and m.id not in skip), None)
-            if found is not None:
-                self._held_memberships.add(found.id)
-        try:
-            yield found
-        finally:
-            if found is not None:
-                with self._lock:
-                    self._held_memberships.discard(found.id)
+                          and _due(m.notify_next_try_at, now) and m.id not in skip), None)
+            if found is None:
+                return None
+            self._update_membership(found.id, notify_next_try_at=hold_until)
+            return self._memberships[found.id]
+
+    def defer_set_password(self, user_id: str, *, until: _dt.datetime) -> None:
+        with self._lock:
+            attempts = self._users[user_id].set_password_attempts + 1
+            self._update_user(user_id, set_password_attempts=attempts, set_password_next_try_at=until)
+
+    def defer_notification(self, membership_id: str, *, until: _dt.datetime) -> None:
+        with self._lock:
+            attempts = self._memberships[membership_id].notify_attempts + 1
+            self._update_membership(membership_id, notify_attempts=attempts, notify_next_try_at=until)
 
     def settle_set_password(
         self, user_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,
@@ -320,7 +322,8 @@ class InMemoryIdentityRepository:
             user = self._users.get(user_id)
             if user is None or not user.set_password_sent_seq < read_seq <= user.set_password_requested_seq:
                 return False
-            changes: dict[str, object] = {"set_password_sent_seq": read_seq}
+            changes: dict[str, object] = {
+                "set_password_sent_seq": read_seq, "set_password_attempts": 0, "set_password_next_try_at": None}
             if sent_at is not None:
                 changes["set_password_sent_at"] = sent_at
             self._update_user(user_id, **changes)
@@ -338,7 +341,8 @@ class InMemoryIdentityRepository:
             row = self._memberships.get(membership_id)
             if row is None or not row.notify_sent_seq < read_seq <= row.notify_requested_seq:
                 return False
-            changes: dict[str, object] = {"notify_sent_seq": read_seq}
+            changes: dict[str, object] = {
+                "notify_sent_seq": read_seq, "notify_attempts": 0, "notify_next_try_at": None}
             if sent_at is not None:
                 changes["notified_at"] = sent_at
                 if row.status == "invited" and expires_at is not None:

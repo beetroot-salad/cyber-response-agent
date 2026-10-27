@@ -190,6 +190,17 @@ def test_a_state_changing_request_without_the_frontend_origin_is_refused_and_cha
     assert allowed.status_code == success
 
 
+def test_a_forged_request_is_refused_before_its_body_is_read() -> None:
+    """O6: a body that would not parse still gets the 403, not a 422 that says how it was read."""
+    world, ann_session, _ = two_tenants()
+    path = f"/tenants/{T1}/invitations"
+    forged = world.client_with_cookie(ann_session.cookies[SESSION_COOKIE], origin="https://evil.example")
+    for body in ("{", '{"email": 7}'):
+        assert forged.post(path, content=body, headers={"content-type": "application/json"}).status_code == 403
+    allowed = world.client_with_cookie(ann_session.cookies[SESSION_COOKIE])
+    assert allowed.post(path, content="{", headers={"content-type": "application/json"}).status_code == 422  # control
+
+
 def test_the_origin_is_checked_before_the_session_and_only_for_state_changing_methods() -> None:
     """Check order Origin, session, tenant; GET needs no Origin (O6)."""
     world, _, _ = two_tenants()

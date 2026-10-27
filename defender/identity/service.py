@@ -8,7 +8,6 @@ import datetime as _dt
 import hashlib
 import logging
 import secrets
-import threading
 from collections.abc import Callable
 from typing import Literal
 
@@ -39,6 +38,9 @@ SESSION_IDLE_LIMIT = _dt.timedelta(hours=12)
 #: A failed send is retried after 30 s, doubling, but never later than this.
 _RETRY_FIRST = _dt.timedelta(seconds=30)
 _RETRY_LAST = _dt.timedelta(hours=1)
+#: How long a claimed send is skipped by every other sender: well past a send's port calls, so
+#: two API processes do not send it twice, and short enough that a crashed one's send comes back.
+_SEND_HOLD = _dt.timedelta(minutes=5)
 _PRELOGIN_PARTS = 3
 
 
@@ -116,17 +118,17 @@ class IdentityService:
         self.send_interval = send_interval
         self._session_idle_limit = session_idle_limit
         self._listed = frozenset(
-            {e.strip().lower() for e in bootstrap.administrators}
-            | {e.strip().lower() for emails in bootstrap.tenants.values() for e in emails})
-        self._failures: dict[str, tuple[int, _dt.datetime]] = {}
-        self._failures_lock = threading.Lock()
+            {*bootstrap.administrators, *(e for emails in bootstrap.tenants.values() for e in emails)})
 
     # --- start: the bootstrap file ---------------------------------------------------------
     def start(self) -> None:
-        """Make the people and tenants in the bootstrap file reachable; never re-invite.
-        Raises `BootstrapRefused` before writing anything if the file cannot be applied."""
+        """Make the people and tenants in the bootstrap file reachable. First members are invited
+        only into a tenant that never had a membership; any listed person still `invited` gets a
+        fresh set-password email once the last is over 7 days old, even if a member revoked their
+        invitation (O8). Raises `BootstrapRefused` before writing anything if the file cannot be
+        applied."""
         now = self._clock()
-        admins = tuple(dict.fromkeys(e.strip().lower() for e in self._bootstrap.administrators))
+        admins = tuple(dict.fromkeys(self._bootstrap.administrators))
         firsts = self._first_members()
         self._refuse_unsafe_file(admins, firsts)
         for tenant in firsts:
@@ -171,7 +173,7 @@ class IdentityService:
                 tenant = str(TenantId(raw))
             except TenantRefused as e:
                 raise BootstrapRefused(f"not a tenant id: {raw!r}") from e
-            firsts[tenant] = tuple(dict.fromkeys(e.strip().lower() for e in emails))
+            firsts[tenant] = tuple(dict.fromkeys(emails))
         return firsts
 
     def _refuse_unsafe_file(self, admins: tuple[str, ...], firsts: dict[str, tuple[str, ...]]) -> None:
@@ -207,35 +209,19 @@ class IdentityService:
         self._send_set_passwords()
         self._send_notifications()
 
-    def _backed_off(self) -> set[str]:
-        now = self._clock()
-        with self._failures_lock:
-            return {key for key, (_, retry_at) in self._failures.items() if retry_at > now}
-
-    def _record_outcome(self, key: str, failed: bool) -> None:
-        with self._failures_lock:
-            if not failed:
-                self._failures.pop(key, None)
-                return
-            attempts = self._failures.get(key, (0, self._clock()))[0] + 1
-            delay = min(_RETRY_FIRST * 2 ** (attempts - 1), _RETRY_LAST)
-            self._failures[key] = (attempts, self._clock() + delay)
-
     def _send_set_passwords(self) -> None:
-        tried = self._backed_off()
+        tried: set[str] = set()
         while True:
-            with self._repo.claim_pending_set_password(skip=tried) as user:
-                if user is None:
-                    return
-                tried.add(user.id)
-            # Outside the claim: a port call is slow, and a re-invite must not wait for it.
+            now = self._clock()
+            user = self._repo.claim_set_password(now=now, hold_until=now + _SEND_HOLD, skip=tried)
+            if user is None:
+                return
+            tried.add(user.id)
             try:
                 self._send_set_password(user)
             except Exception:
                 _logger.exception("set-password send for user %s failed; it stays pending", user.id)
-                self._record_outcome(user.id, failed=True)
-            else:
-                self._record_outcome(user.id, failed=False)
+                self._repo.defer_set_password(user.id, until=self._retry_at(user.set_password_attempts))
 
     def _still_wanted(self, user: User) -> bool:
         return user.status == "invited" and (
@@ -259,19 +245,21 @@ class IdentityService:
             user.id, user.set_password_requested_seq, sent_at=sent, expires_at=sent + INVITATION_LIFETIME)
 
     def _send_notifications(self) -> None:
-        tried = self._backed_off()
+        tried: set[str] = set()
         while True:
-            with self._repo.claim_pending_notification(skip=tried) as row:
-                if row is None:
-                    return
-                tried.add(row.id)
+            now = self._clock()
+            row = self._repo.claim_notification(now=now, hold_until=now + _SEND_HOLD, skip=tried)
+            if row is None:
+                return
+            tried.add(row.id)
             try:
                 self._send_notification(row)
             except Exception:
                 _logger.exception("notification for invitation %s failed; it stays pending", row.id)
-                self._record_outcome(row.id, failed=True)
-            else:
-                self._record_outcome(row.id, failed=False)
+                self._repo.defer_notification(row.id, until=self._retry_at(row.notify_attempts))
+
+    def _retry_at(self, failed_before: int) -> _dt.datetime:
+        return self._clock() + min(_RETRY_FIRST * 2 ** failed_before, _RETRY_LAST)
 
     def _send_notification(self, row: Membership) -> None:
         fresh = self._repo.membership(row.id)
