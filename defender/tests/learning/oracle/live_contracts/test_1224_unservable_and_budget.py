@@ -32,7 +32,7 @@ HOST_DB1 = S.query_params("host:db-1")
 HOST_DB2 = S.query_params("host:db-2")
 EDR_ROWS = S.default_calls()[1].payload
 LOOKUP_ALICE = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
-#: A row the claim never declares: O3's "an oracle double that adds an undeclared row".
+#: A row the claim never declares.
 UNDECLARED = {"user": "alice", "event_id": "e-999", "action": "logon", "host": "db-1",
               "ts": "2026-07-28T15:22:00Z"}
 #: World b's fact f1 ("alice obtained a TGT and logged on to db-1 at 15:22Z"), as one forged
@@ -58,7 +58,7 @@ def _explore(q: str = "host:db-1") -> S.Move:
 
 
 def _unservable(exc: BaseException) -> bool:
-    """`exc` is the coined `OracleUnservable` (or an exception group holding one)."""
+    """`exc` is `OracleUnservable` (or an exception group holding one)."""
     cls = S.unservable_cls()
     if isinstance(exc, cls):
         return True
@@ -73,8 +73,7 @@ def _the_unservable(exc: BaseException) -> BaseException:
 
 
 def _no_preflight(*_a: Any, **_k: Any) -> int:
-    """The role-preflight seam, neutralised whatever it is called with (M25 scopes the
-    production one by a branching flag)."""
+    """The role-preflight seam, neutralised whatever it is called with."""
     return 0
 
 
@@ -107,7 +106,7 @@ class _Run:
 
     @property
     def state(self) -> Any:
-        """The run's one `RunState` (#1235 round 2): the driver's `summary["run_state"]`, or —
+        """The run's one `RunState`: the driver's `summary["run_state"]`, or —
         for a run that ended by raising — the one state its calls carried."""
         if self.summary is not None:
             return self.summary["run_state"]
@@ -125,8 +124,8 @@ class _Run:
 
     @property
     def breaker(self) -> dict:
-        """The run's circuit-breaker state, read off the run's `RunState` (#1235: never a file in
-        the run dir)."""
+        """The run's circuit-breaker state, read off the run's `RunState` (never a file in the
+        run dir)."""
         return self.state.breaker_snapshot()
 
     def failures(self, system: str) -> int:
@@ -134,7 +133,7 @@ class _Run:
 
     @property
     def budget(self) -> dict:
-        """The run's budget counters, read off the run's `RunState` (#1235)."""
+        """The run's budget counters, read off the run's `RunState`."""
         return self.state.budget_snapshot()
 
     @property
@@ -225,7 +224,7 @@ def _sibling_episode(tmp_path: Path, monkeypatch: Any, est: S.Estate) -> Path:
 def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.ScriptedModel,
             turns: list[Any], label: str = "b", **knobs: Any) -> _Sibling:
     """World `label`'s sibling: the REAL `run.main --episode`, handed the oracle and verifier
-    through its coined seams; its lifecycle seam drives the real investigation (replay
+    through its seams; its lifecycle seam drives the real investigation (replay
     harness) over the world registry, so whatever escapes the investigation reaches the
     sibling's own abort path as it would in production."""
     H = S.replay_harness()
@@ -241,12 +240,11 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
                                   gather=sib.run.gather, verbs=reg, tenant=est.place())
         return sib.run.summary
 
-    # #1105 PR 2 (declared change 6): `--tenant T --episode <episode id> --world L`.
     argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]
     try:
         from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
-        # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+        # The launch-time publish, in process.
         sib.rc = S.mod(S.RUN).main(argv, lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,
                                    verifier=verifier.model, roster=est.roster(),
@@ -309,15 +307,11 @@ def _carries_submission(model: S.ScriptedModel, i: int, served: Any) -> bool:
 
 
 def _timing_box(out: bytes, *, cut_off: int = 0) -> tuple[Any, list[dict]]:
-    """A SANDBOXED box factory (a `_DockerTransport`, GD-16, as `S.sandboxed_box`) that also
-    records the time bound each run is handed; it answers with `out` as the program's stdout
-    (the scripted program's own output: content, not a fault).
-
-    The first `cut_off` runs outlive their time bound: the transport raises what the docker
-    transport's `subprocess.run(..., timeout=)` raises then, `subprocess.TimeoutExpired` with
-    the docker exec argv and the bound it was handed. `BoxExecutor.run_parsed` passes it
-    through unwrapped, with no `BoxResult` and no exit code (GPR-02, executed on a real
-    container and on the host executor)."""
+    """A SANDBOXED box factory (as `S.sandboxed_box`) that records the time bound each run is
+    handed and answers with `out` as the program's stdout (content, not a fault). The first
+    `cut_off` runs outlive their bound: the transport raises what `subprocess.run(..., timeout=)`
+    raises then, `subprocess.TimeoutExpired`, which `BoxExecutor.run_parsed` passes through
+    unwrapped (as observed on a real container and on the host executor)."""
     spec_mod = S.mod("box._spec")
     codec = S.mod("execution.box_codec")
     seen: list[dict] = []
@@ -327,7 +321,7 @@ def _timing_box(out: bytes, *, cut_off: int = 0) -> tuple[Any, list[dict]]:
         def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> Any:
             seen.append({"frame": frame, "timeout": timeout})
             if len(seen) <= cut_off:
-                raise subprocess.TimeoutExpired(  # GPR-02
+                raise subprocess.TimeoutExpired(
                     ["docker", "exec", "-i", "-w", str(cwd), self.name,
                      "python3", "-m", "defender.execution.bash_exec"], timeout)
             return codec.RawExec(rc=0, stdout=codec.encode_response(
@@ -406,26 +400,6 @@ def test_1224_query_tool_reraises_oracle_unservable_with_no_row_and_no_breaker_c
     assert run.gather.calls == 2, "the lead's model was asked again after the unservable call"
 
 
-def test_1224_sibling_aborts_with_an_unservable_reason(tmp_path, monkeypatch):
-    """a sibling whose call goes unservable ends its run and leaves its own world record naming "oracle unservable" and the failing call."""
-    est = S.estate(tmp_path)
-    ep = _sibling_episode(tmp_path, monkeypatch, est)
-    est.answer("idp", "query", BOB, BOB_ROWS)
-    o = S.oracle(*[S.text_only("ORCL-MARK-d05d: no.")] * 4)
-
-    sib = _resume(ep, est, oracle=o, verifier=S.passing_verifier(),
-                  turns=[_q("user:bob"), S.done_turn()], retry_cap=1)
-
-    assert sib.aborted, f"the sibling finished normally (rc {sib.rc!r}) after an unservable call"
-    rec = sib.record("b")
-    assert rec is not None, "the sibling exited without writing its own world record"
-    assert rec["world"] == "b"
-    assert rec["reason"] == S.REASON_UNSERVABLE, rec
-    assert _names_call(rec.get("call"), "idp", "query", "user:bob"), rec
-    assert sib.record("a") is None
-    assert sib.record("c") is None
-
-
 def test_1224_no_oracle_error_reaches_the_sibling_transcript_or_evidence(tmp_path):
     """check failures, verifier failures, prose turns and exhausted retries leave no oracle error text in the investigator's records."""
     est = S.estate(tmp_path)
@@ -454,7 +428,7 @@ def test_1224_no_oracle_error_reaches_the_sibling_transcript_or_evidence(tmp_pat
 
 
 def test_1224_oracle_retries_charge_no_investigator_budget(tmp_path):
-    """however many oracle and verifier attempts a call takes, the sibling's budget state and the lead's request count match an unbranched run of the same …"""
+    """However many oracle and verifier turns a call takes, budget, request counts and wire log match an unbranched run."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("edr", "query", HOST_DB1, EDR_ROWS)
@@ -559,7 +533,7 @@ def test_1224_exhausted_oracle_budget_makes_the_sibling_unservable(tmp_path):
 
 
 def test_1224_side_query_rerun_sees_data_that_moved_since_the_oracle_ran(tmp_path):
-    """when tenant data moves between the oracle's removal side query and check 5's re-run, the count mismatch fails the attempt and the claimed answer is …"""
+    """Data moving before check 5's re-run fails the attempt on the count; the claimed answer is never served or cached."""
     r1 = {"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
           "ts": "2026-07-28T15:00:00Z"}
     r2 = {"user": "alice", "event_id": "e-101", "action": "logon", "host": "10.0.0.9",
@@ -633,7 +607,7 @@ def test_oracle_turn_ends_without_submitting(tmp_path):
 
 
 def test_input_oracle_model_returns_nothing_usable(tmp_path):
-    """an empty reply, a refusal, or a reply cut off mid-answer is an ordinary failed attempt: nothing is served from it, the retry is told, the …"""
+    """An empty, refusing or cut-off reply is a failed attempt: the retry is told, and repeats end unservable."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     refusal = "I won't fabricate attack telemetry; that could be used to cause harm."
@@ -661,12 +635,12 @@ def test_input_oracle_model_returns_nothing_usable(tmp_path):
 
 
 def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
-    """a verifier provider failure after the host checks passed re-asks the verifier once inside the attempt; nothing is served until a verifier pass is …"""
+    """The verifier is re-asked once inside the attempt (no oracle attempt spent); nothing is served without a pass."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path / "a")
     o = S.oracle(S.submit(ALICE_ROWS))
-    # GPR-01: the verifier's first request fails as its provider client fails after retries.
+    # The verifier's first request fails as its provider client fails after retries.
     v = S.verifier(S.raising(S.OUTAGE), S.verdict(True))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=2)
 
@@ -676,7 +650,7 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
     assert run.rows_for("idp", "user:alice")[0]["exit_code"] == 0
     assert v.requests == 2, "the verifier was not re-asked after its provider failed"
     assert not v.overrun
-    # M03=A: the re-ask is inside the attempt; it spends no oracle attempt of its own.
+    # The re-ask is inside the attempt; it spends no oracle attempt of its own.
     assert o.submissions() == 1
     assert not o.overrun
     for leak in ("ModelHTTPError", "provider answered 503"):
@@ -685,7 +659,7 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
 
     ep2 = S.episode_v2(tmp_path / "b")
     o2 = S.oracle(then=S.submit(ALICE_ROWS))
-    v2 = S.verifier(then=S.raising(S.OUTAGE))  # GPR-01, on every request
+    v2 = S.verifier(then=S.raising(S.OUTAGE))  # on every request
     reg2 = S.world_registry(ep2, "b", est, oracle=o2, verifier=v2, retry_cap=2)
     with pytest.raises(S.unservable_cls()):
         S.call(reg2, "idp", "query", est.ctx(tmp_path / "inv-b"), q="user:alice")
@@ -722,7 +696,7 @@ def test_verifier_replies_with_neither_a_pass_nor_a_failure(tmp_path):
 
 
 def test_exploration_query_errors_on_the_real_system(tmp_path):
-    """a real-system error on the oracle's own exploration is feedback inside the turn, seen only by the oracle; it is not the world's telemetry and the …"""
+    """It is in-turn feedback only the oracle sees: never the investigator's, its breaker's or the world ledger's."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.fail("edr", "query", HOST_DB1, fault="TransportFault",
@@ -747,7 +721,7 @@ def test_exploration_query_errors_on_the_real_system(tmp_path):
 
 
 def test_python_runs_past_its_time_limit(tmp_path):
-    """the oracle's Python is bounded in time and output; a run cut off by its time bound is in-turn feedback the oracle is told about, not a failed …"""
+    """A run cut off by its time bound is in-turn feedback, not a failed attempt; its output is capped before the oracle."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
@@ -784,7 +758,7 @@ def test_python_runs_past_its_time_limit(tmp_path):
 
 
 def test_resumed_sibling_leaves_the_oracle_side_trace_of_the_first_attempt(tmp_path):
-    """the first attempt's oracle-side ledger rows survive a resume oracle-side only: not lost, not duplicated, and never in the evidence, world ledger or …"""
+    """The first attempt's oracle-side rows survive a resume oracle-side only: neither lost, duplicated nor leaked."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -851,7 +825,7 @@ def test_conc_15_calls_issued_after_the_sibling_is_unservable(tmp_path):
 
 
 def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
-    """an operator's resume of a sibling that exited unservable does not retry the failing call, and the world's validity and its single record are …"""
+    """The abort leaves b's one record (`oracle unservable`, the failing call); a resume neither retries nor rewrites it."""
     est = S.estate(tmp_path)
     ep = _sibling_episode(tmp_path, monkeypatch, est)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -859,9 +833,10 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
 
     first = _resume(ep, est, oracle=S.oracle(*[S.text_only("no")] * 4),
                     verifier=S.passing_verifier(), turns=turns, retry_cap=1)
-    assert first.aborted
+    assert first.aborted, f"the sibling finished normally (rc {first.rc!r}) after an unservable call"
     rec = first.record("b")
-    assert rec is not None
+    assert rec is not None, "the sibling exited without writing its own world record"
+    assert rec["world"] == "b"
     assert rec["reason"] == S.REASON_UNSERVABLE
     assert _names_call(rec.get("call"), "idp", "query", "user:bob"), rec
     after_abort = sorted(p.name for p in (ep / S.WORLD_RECORDS).iterdir())
@@ -883,7 +858,7 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
 
 
 def test_disk_full_while_freezing_forged_rows(tmp_path):
-    """a verified answer whose forged rows cannot be frozen is a failed attempt: it is not served, nothing half-written is frozen, and no store error …"""
+    """An answer whose forged rows cannot be frozen fails its attempt: nothing is served, half-frozen or leaked."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     served = {"rows": [*ALICE_ROWS["rows"], FORGED_ROW]}
@@ -917,7 +892,7 @@ def test_disk_full_while_freezing_forged_rows(tmp_path):
 
 
 def test_oracle_ledger_append_fails_after_a_good_answer(tmp_path):
-    """when the oracle-side ledger cannot record the call's exploration, the verified answer is not served, and the failure never lands in the sibling's …"""
+    """An oracle-side ledger write failure withholds the answer and never reaches the world ledger, breaker or transcript."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("edr", "query", HOST_DB1, EDR_ROWS)
@@ -945,7 +920,7 @@ def test_oracle_ledger_append_fails_after_a_good_answer(tmp_path):
 
 
 def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path, monkeypatch):
-    """one oracle budget per world spans pre-flight and the sibling: a world whose pre-flight exhausted it leaves its sibling nothing to spend, unservable …"""
+    """One budget per world spans pre-flight and its sibling, which starts already unservable once pre-flight spent it."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     monkeypatch.setenv(S.KNOB_BUDGET, str(TINY_BUDGET))

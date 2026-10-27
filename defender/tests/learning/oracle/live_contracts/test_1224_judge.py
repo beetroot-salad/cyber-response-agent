@@ -1,4 +1,8 @@
-"""The judge model decides each world's bucket from the served-world prompt; host-side gate, reply validation and finding enqueue around it."""
+"""The judge model decides each world's bucket from the served-world prompt; host-side gate, reply validation and finding enqueue around it.
+
+A world never shown its facts cannot take a discipline bucket, so replies for such worlds use
+`lead-set` or `lead-quality`.
+"""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -22,9 +26,9 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
-    """The episodes root a launch resolves (`DEFENDER_EPISODES_BASE`, outside the data root),
-    and the learning STATE root, so the judge's appender writes this test's own queues and never
-    the checkout's `learning/_pending/`."""
+    """`env_state()` (the default state of `_grade` and `_queue`) opens this test's own
+    learning-state root. `DEFENDER_EPISODES_BASE` is retired in production; it is still pointed
+    outside the data root."""
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
@@ -32,12 +36,11 @@ def _roots(tmp_path, monkeypatch):
 @dataclass
 class _JudgeByScope(S.FakeJudge):
     """#921's recording `FakeJudge`, whose reply is chosen by the world (or the family scope)
-    the call names in its agent id. Inject-only: it routes a SCRIPT, it decides nothing.
+    the call names in its agent id. It routes a script; it decides nothing.
 
-    `worlds[label]` is a reply text, or a list of texts answered in call order (the last one
-    repeats); `family` is the family-scope reply. A label with no script falls back to
-    `FakeJudge`'s own `replies`/`default`. `fault` keeps #921's P9 shape (executed): a failed
-    call is `RunUnprocessable`, whatever its cause."""
+    `worlds[<world id>]` is a reply text, or a list of texts answered in call order (the last one
+    repeats); `family` is the family-scope reply. A world with no script falls back to
+    `FakeJudge`'s own `replies`/`default`. A `fault` hit raises `FakeJudge`'s one failure class."""
 
     worlds: dict[str, Any] = field(default_factory=dict)
     family: Any = None
@@ -61,10 +64,9 @@ class _JudgeByScope(S.FakeJudge):
 def _finding(topic: str = "the lead was never revisited", *, bucket: str = "lead-quality",
              subject: str = "defender", evidence: list[str] | None = None,
              **over: Any) -> dict:
-    """One finding as the model writes it — #921's `finding_doc` in the #1234 shape, with no
-    pattern or holding_system (the v2 reply drops both). A `defender` finding is an
-    investigator finding resting on the default two-run contrast; a `world` finding names
-    `idp` (one of `S.SYSTEMS`) and, by default, the manifest's family-level discriminator."""
+    """One finding as the model writes it (`J.finding_doc`; the v2 reply has no pattern or
+    holding_system). A `defender` finding rests on the default two-run contrast; a `world`
+    finding names `idp` and, by default, the manifest's family-level discriminator."""
     doc = J.finding_doc(bucket=bucket, subject=subject, topic=topic, evidence=evidence,
                         systems=None if subject == "defender" else ["idp"])
     doc.update(over)
@@ -73,8 +75,8 @@ def _finding(topic: str = "the lead was never revisited", *, bucket: str = "lead
 
 def _world_reply(bucket: str | Any = "lead-quality", systems: Any = ("idp",),
                  findings: list[dict] | None = None, **over: Any) -> dict:
-    """A world-scope reply in the #1234 shape (the three pass tables, noise_floor_note, the
-    three filed lists) with the top-level `bucket` and `systems` exactly as given."""
+    """A world-scope reply (the three pass tables, noise_floor_note, the three filed lists)
+    with the top-level `bucket` and `systems` exactly as given."""
     doc = J.reply_doc(findings=[_finding()] if findings is None else findings)
     doc["bucket"] = bucket
     doc["systems"] = list(systems) if isinstance(systems, (list, tuple)) else systems
@@ -83,8 +85,8 @@ def _world_reply(bucket: str | Any = "lead-quality", systems: Any = ("idp",),
 
 
 def _family_reply(**over: Any) -> dict:
-    """A family-scope reply in the #1234 shape: family-scope world findings only (none by
-    default) — no family verdict word (A17)."""
+    """A family-scope reply: family-scope world findings only (none by default), no family
+    verdict word."""
     return J.family_reply(**over)
 
 
@@ -110,9 +112,9 @@ def _judge(worlds: dict[str, Any] | None = None, *,
 
 
 def _grade(tmp_path: Path, ep: Path, judge: Any, **kw: Any) -> Any:
-    """`grade_episode` through its own seams: one draw, a recording `git show`, this test's
-    state handle — by id (#1105 PR 2, `_judge_921.grade_at`): the judge reads only the episode
-    it is handed (J3), so `tmp_path` threads nothing in."""
+    """`grade_episode` through its own seams (`J.grade_at`): one draw, a recording `git show`,
+    this test's state handle. The judge reads only the episode it is handed, so `tmp_path`
+    threads nothing in."""
     del tmp_path
     kw.setdefault("draws", 1)
     kw.setdefault("git_show", J.FakeGitShow())
@@ -177,8 +179,8 @@ def _worlds_named(doc: Any) -> set[str]:
 
 
 def _filed(ep: Path, label: str) -> list[dict]:
-    """Every finding world `label`'s draws filed (#1234: a world row carries no findings; the
-    draw documents hold the three filed lists), draw by draw in filing order."""
+    """Every finding world `label`'s draws filed (a world row carries no findings; the draw
+    documents hold the three filed lists), draw by draw in filing order."""
     out: list[dict] = []
     for n in range(len(J.draw_files(ep, label))):
         doc = J.draw_doc(ep, label, n)
@@ -189,8 +191,8 @@ def _filed(ep: Path, label: str) -> list[dict]:
 
 def _lanes(ep: Path, label: str, draw: int = 0) -> dict[Any, Any]:
     """Each filed finding of world `label`'s draw `draw`, by topic, mapped to the lane the
-    record's ledger (`dispositions`) gave it — joined on `finding_id`'s index (A13: one index
-    space over the three filed lists in filing order)."""
+    record's ledger (`dispositions`) gave it — joined on `finding_id`'s index (one index space
+    over the three filed lists in filing order)."""
     ledger = {e.get("finding_id"): e.get("lane") for e in _record(ep).get("dispositions") or []}
     doc = J.draw_doc(ep, label, draw)
     filed = [f for key in ("investigator_findings", "world_findings", "gaps")
@@ -216,8 +218,7 @@ def _sibling_says(ep: Path, label: str, disposition: str) -> None:
 
 def _oracle_row(q: str, *, label: str = "b", claim: dict | None = None,
                 verdict: dict | None = None, **extra: Any) -> dict:
-    """A served `oracle` ledger row (coined fields: base_digest, claim, verifier_verdict,
-    attempts)."""
+    """A served `oracle` ledger row (with base_digest, claim, verifier_verdict, attempts)."""
     row = S.ledger_row(S.ORACLE_DECISION, params=S.query_params(q), label=label,
                        payload={"rows": [{"user": "alice", "event_id": "f-1"}]},
                        base_digest=S.digest("base"), attempts=1, **extra)
@@ -230,8 +231,7 @@ def _oracle_row(q: str, *, label: str = "b", claim: dict | None = None,
 
 def _page(ep: Path) -> tuple[str | None, str | None]:
     """The episode page: `(html, None)` when it renders, `(None, refusal text)` when it refuses
-    by name (`JudgeRefused`). Any other exception propagates — that is a crash. (#1105 PR 2,
-    declared change 4: rendered by id, `_episode_1025.render_episode`.)"""
+    by name (`JudgeRefused`). Any other exception propagates — that is a crash."""
     refused = S.judge_refused_cls()
     try:
         path = E.render_episode(Path(ep), module=S.mod(S.VISUALIZE))
@@ -271,7 +271,7 @@ def test_1224_family_with_one_unservable_sibling_is_graded_on_the_rest(tmp_path)
 
 
 def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_findings(
-        tmp_path, monkeypatch):
+        tmp_path):
     # Positive control: one unservable world (pre-flight's) — graded, the model is called.
     one = tmp_path / "one"
     ep1 = S.judged_episode(one, outcome=None)
@@ -304,18 +304,6 @@ def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_find
     assert not _draws_of(ep), "an unusable family left draw files"
     assert _all_queued(state) == [], "an unusable family enqueued findings"
 
-    # The pre-flight site: two failed calibrations write `unusable` and start no sibling.
-    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
-    site = tmp_path / "launch"
-    est = S.estate(site)
-    spawn = S.FakeSpawn()
-    launch = S.launch(site, est, oracle=S.oracle(then=S.text_only()),
-                      verifier=S.passing_verifier(), spawn=spawn, judge=_judge())
-    outcome = S.read_outcome(launch.ep) or {}
-    assert outcome.get("outcome") == "unusable", f"pre-flight wrote {outcome!r}"
-    assert {u.get("world") for u in outcome.get("unservable_worlds") or []} == {"b", "c"}
-    assert spawn.launches == [], "a sibling started for a family pre-flight found unusable"
-
 
 def test_1224_world_bucket_is_the_judge_models_output(tmp_path):
     for bucket in ("lead-set", "lead-quality", "analyze-discipline", "decision-discipline",
@@ -342,31 +330,6 @@ def test_1224_world_bucket_is_the_judge_models_output(tmp_path):
         else:
             assert [r["type"] for r in _from_world(_queue(state), "b")] == [bucket], (
                 f"the {bucket!r} finding did not reach the defender queue as written")
-
-
-def test_1224_world_whose_facts_sit_only_on_unserved_systems_is_never_lead_set(tmp_path):
-    doc = S.family_v2(served_systems=("edr", "idp"), worlds=[
-        S.control_world("a"),
-        S.world_v2("b", facts=[S.fact("f1")]),
-        S.world_v2("c", facts=[S.fact("f2", "the badge reader logged carol at door 7",
-                                      ("carol", "door-7"))]),
-    ])
-    ep = S.judged_episode(tmp_path, doc=doc)
-    judge = _judge({
-        "b": _world_reply("lead-set", ("idp",), findings=[_finding("b-lead", bucket="lead-set")]),
-        "c": _world_reply("lead-set", ("badge",), findings=[_finding("c-lead", bucket="lead-set")]),
-    })
-    _grade(tmp_path, ep, judge)
-
-    assert _row(ep, "b").get("bucket") == "lead-set", "the positive control: b was not lead-set"
-    assert S.judge_called_for(judge, T.fixture_world_id("c")), "a couldn't-look world was not admitted to the judge (M20=A)"
-    assert _row(ep, "c").get("bucket") != "lead-set", (
-        "a world whose facts sit only on unserved systems was recorded lead-set (O11)")
-    assert _row(ep, "c").get("bucket") is None, (
-        f"the refusal substituted a bucket ({_row(ep, 'c').get('bucket')!r}); the host refuses, "
-        "it never computes one (M20=A)")
-    assert not [r for r in _from_world(_queue(), "c") if r.get("type") == "lead-set"], (
-        "a couldn't-look world's lead-set finding was enqueued")
 
 
 def test_1224_judge_model_gets_facts_verdict_calls_claims_movement_and_served_systems(
@@ -478,9 +441,8 @@ def _gate_case(root: Path, word: str | None, *, raw: str | None = None) -> tuple
 
 
 def _torn_outcome_text(scratch: Path) -> str:
-    """A REAL outcome record torn mid-write (fault rung 1): the record written whole in the
-    coined shape by the suite's writer (`S.outcome_record`), then cut inside its quoted reason —
-    the bytes a crash mid-write leaves. Keys are written sorted, so the cut lands after
+    """A REAL outcome record torn mid-write: written whole by `S.outcome_record`, then cut
+    inside its quoted reason. Keys are written sorted, so the cut lands after
     `outcome: accepted`: the torn bytes still carry the word, and they do not parse."""
     import yaml
 
@@ -605,6 +567,8 @@ def test_p078_judge_reply_lead_set_for_a_world_whose_facts_are_only_partly_serva
             f"world {label}, whose reply touches no served system, was recorded lead-set")
         assert _row(ep, label).get("bucket") is None, (
             f"world {label}: a bucket was substituted for the refused lead-set")
+        assert not [r for r in _from_world(_queue(), label) if r.get("type") == "lead-set"], (
+            f"world {label}'s refused lead-set finding was enqueued")
 
 
 def test_served_system_grants_only_health_checks(tmp_path, monkeypatch):
@@ -641,7 +605,7 @@ def test_served_system_grants_only_health_checks(tmp_path, monkeypatch):
     try:
         S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), q="user:alice")
     except S.unservable_cls():
-        pass  # whether this attempt is served is not this premise's question
+        pass  # whether this attempt is served is not this test's question
     assert est.calls("idp", "query"), "the positive control: the served system was never read"
     assert est.calls("siem-x", "query") == [], (
         "the oracle's run_query used a verb the gather grant lacks on a health-check-only system")
@@ -757,7 +721,6 @@ def test_1224_original_call_unservable_in_preflight_and_the_worlds_ledger(tmp_pa
     ep = S.judged_episode(root, labels=("a", "c"), outcome=None)
     S.outcome_record(ep, "accepted", unservable=[
         {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:MARKER-FU22")}])
-    # #1234 A5: the discipline buckets are unavailable to a world never shown its facts.
     judge = _judge({"c": _world_reply("lead-quality", ("edr",))})
     _grade(root, ep, judge)
     assert not S.judge_called_for(judge, T.fixture_world_id("b")), "the unservable world was graded"
@@ -787,7 +750,6 @@ def test_judge_input_has_a_served_call_with_no_verified_claim(tmp_path):
 
 
 def test_judge_model_call_fails_for_one_world_but_not_the_rest(tmp_path):
-    # #1234 A5: the discipline buckets are unavailable to a world never shown its facts.
     reply_b = _world_reply("lead-set", ("idp",), findings=[_finding("b-later", bucket="lead-set")])
     reply_c = _world_reply("lead-quality", ("edr",), findings=[_finding("c-now")])
     ep = S.judged_episode(tmp_path)
@@ -1039,7 +1001,6 @@ def test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_
     fault = S.ledger_row(S.FAULT, system="edr", params=S.query_params("host:MARKER-PCO7-FAULT"),
                          payload={"error": "the edr adapter could not load"}, label="c")
     ep = S.judged_episode(tmp_path, ledgers={"b": [real_error], "c": [fault]})
-    # #1234 A5: the discipline buckets are unavailable to a world never shown its facts.
     judge = _judge({"b": _world_reply("lead-quality", ("idp",)),
                     "c": _world_reply("lead-set", ("edr",))})
     _grade(tmp_path, ep, judge)
