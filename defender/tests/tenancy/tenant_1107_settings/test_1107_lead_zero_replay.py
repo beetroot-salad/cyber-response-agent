@@ -83,27 +83,6 @@ def _jsonl_text(run_dir: Path) -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in sorted(run_dir.rglob("*.jsonl")))
 
 
-class _QueryAnswers(ReplayFn):
-    """`ReplayFn` that also keeps, per model request, the `query` tool's answers that arrived
-    with it — the tool-return and retry-prompt parts of the request's last message, i.e. the
-    host's answer to the previous turn's call, read off that request rather than diffed from the
-    whole transcript (an answer worded like an earlier one still counts)."""
-
-    __name__ = "_QueryAnswers"
-
-    def __init__(self, turns: list[Turn]) -> None:
-        super().__init__(turns)
-        self.answers: list[str] = []
-
-    def __call__(self, messages: Any, info: Any) -> Any:
-        parts = getattr(messages[-1], "parts", ()) if messages else ()
-        self.answers.append("\n".join(
-            str(p.content) for p in parts
-            if getattr(p, "part_kind", None) in ("tool-return", "retry-prompt")
-            and getattr(p, "tool_name", None) == "query"))
-        return super().__call__(messages, info)
-
-
 # ---- both AgentDeps copies carry the record ------------------------------------------------------
 
 def test_d_agentdeps_record(tmp_path):

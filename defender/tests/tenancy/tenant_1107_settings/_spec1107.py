@@ -36,10 +36,6 @@ mod = T1106.mod
 
 #: The field `VerbContext` and `AgentDeps` carry the record under.
 RECORD_FIELD = "tenant"
-#: The keyword a transport call names the secrets its one child needs under.
-SECRETS_KW = "secrets"
-#: The reference-key suffix.
-SECRET_REF_SUFFIX = "_SECRET_REF"
 #: The one implemented access method.
 DOCKER_EXEC = T1106.DOCKER_EXEC
 #: The per-tenant secret store's file name, under `settings/`.
@@ -55,10 +51,6 @@ NOT_CONFIGURED = "this tenant's settings do not configure this system"
 RETIRED_FIELD = "settings_dir"
 #: A keyword the replay helper chain must not take (grants come through the tenant).
 GRANTS_KW = "grants"
-#: The env lint's inline suppression token, in either spelling (coined; the repo's other lints
-#: spell theirs `# lint-monkeypatch: ok — <reason>`). o7_lint_clean_empty_allowlist asserts no
-#: swept file carries it.
-ENV_LINT_SUPPRESSION = re.compile(r"lint[-_]tenant[-_]env[-_]reads\s*:", re.I)
 #: The config-shaped variables a developer's shell might carry, cleared before a branch launch so
 #: a value either side of an assertion is the one the test put there.
 BRANCH_CONFIG_VARS: tuple[str, ...] = (
@@ -106,10 +98,6 @@ def settings_pointer() -> str:
 
 #: Each system folder's key prefix, as the adapters spell it.
 PREFIX = T1106.PREFIX
-
-#: The six docker-exec-curl stub systems (`_stub_transport.load_config`'s three-key template).
-STUB_SYSTEMS: tuple[str, ...] = (
-    "cmdb", "identity", "ticket", "case-history", "change-mgmt", "threat-intel")
 
 context_name = T1106.context_name
 es_container = T1106.es_container
@@ -231,9 +219,9 @@ def resolve(root: Path, tenant_id: str = PLAYGROUND_ID, *, dispatches_lead_zero:
         dispatches_lead_zero=dispatches_lead_zero, **kw)
 
 
-def tenant_folder_of(root: Path, tenant_id: str = PLAYGROUND_ID) -> Any:
-    """The accepted `Tenant` for a planted tenant (the replay harness's `tenant=` input)."""
-    return T1106.accept(Path(root), tenant_id)
+def tenant_folder_of(root: Path) -> Any:
+    """The accepted `Tenant` for the planted tenant (the replay harness's `tenant=` input)."""
+    return T1106.accept(Path(root), PLAYGROUND_ID)
 
 
 def _require_data_root(root: Path) -> None:
@@ -261,30 +249,6 @@ def verb_context(record: Any, run_dir: Path, env: Mapping[str, str], **kw: Any) 
 def record_on(ctx: Any) -> Any:
     """The record a context carries."""
     return getattr(ctx, RECORD_FIELD)
-
-
-def launch_branch(src: Path, data_root: Path, **seams: Any) -> tuple[Any, BaseException | None]:
-    """The real branch launcher (`learning.branch.cli.main`) over the source run `src`, whose
-    tenant is planted under `data_root` (this test's), every seam faked (`_triplet_947`'s fakes,
-    no role preflight) unless handed in. Returns `(rc, None)` or `(None, the SystemExit it
-    refused with)`."""
-    _require_data_root(data_root)
-    from defender.tests.support.learning.branch import _triplet_947 as t947
-
-    fakes: dict[str, Any] = {
-        "spawn": t947.FakeSpawn(), "questioner": t947.FakeAgent(),
-        "live_tree": t947.source_capture(), "preflight": t947.no_preflight}
-    fakes.update(seams)
-    argv = [str(src), str(t947.BRANCH_MESSAGE_ID), *t947.retired_continuation_argv()]
-    try:
-        return mod("cli.learning.branch").main(argv, **fakes), None
-    except SystemExit as refused:
-        return None, refused
-
-
-def with_mapping(fn: Any, *args: Any, mapping: Any, **kw: Any) -> Any:
-    """Call one `case_ticket` mapping consumer with the record's mapping as `mapping=`."""
-    return fn(*args, mapping=mapping, **kw)
 
 
 def open_reporter(mapping: Any) -> str:
@@ -358,17 +322,10 @@ def context_not_found(name: str) -> dict[str, Any]:
 # never passes -v/--trace). curl's own failures still print the `-w` status line (`"\n000"`); a
 # daemon refusal prints nothing to stdout.
 
-def curl_refused(host: str, port: int = 8080) -> dict[str, Any]:
-    """curl could not connect (rc=7)."""
-    return answer("", "000", rc=7, stderr=(
-        f"curl: (7) Failed to connect to {host} port {port} after 0 ms: "
-        "Could not connect to server\n"))
-
-
-def curl_timed_out(ms: int = 3001) -> dict[str, Any]:
+def curl_timed_out() -> dict[str, Any]:
     """curl's `--max-time` expired against a target that accepted and never answered (rc=28)."""
     return answer("", "000", rc=28, stderr=(
-        f"curl: (28) Operation timed out after {ms} milliseconds with 0 bytes received"))
+        "curl: (28) Operation timed out after 3001 milliseconds with 0 bytes received"))
 
 
 def no_such_container(name: str) -> dict[str, Any]:
@@ -376,10 +333,10 @@ def no_such_container(name: str) -> dict[str, Any]:
     return answer("", None, rc=1, stderr=f"Error response from daemon: No such container: {name}")
 
 
-def container_not_running(container_id: str = "3f2a9c1e7b44") -> dict[str, Any]:
+def container_not_running() -> dict[str, Any]:
     """`docker exec` into a stopped container (rc=1, the daemon's own text)."""
     return answer("", None, rc=1,
-                  stderr=f"Error response from daemon: container {container_id} is not running")
+                  stderr="Error response from daemon: container 3f2a9c1e7b44 is not running")
 
 
 class DockerShim:
@@ -468,15 +425,14 @@ def run_py() -> Any:
     return mod("run")
 
 
-def run_argv(alert: Path, data_root: Path, *, tenant_id: str = PLAYGROUND_ID,
-             update_ticket: bool = False, extra: Iterable[str] = ()) -> list[str]:
-    """`run.py`'s argv for `tenant_id`, planted under `data_root` (this test's). `run.py` takes
-    no run id: a run's id is the name of the folder its `RunRecorder` builds."""
+def run_argv(alert: Path, data_root: Path, *, update_ticket: bool = False) -> list[str]:
+    """`run.py`'s argv for the playground tenant, planted under `data_root` (this test's).
+    `run.py` takes no run id: a run's id is the name of the folder its `RunRecorder` builds."""
     _require_data_root(data_root)
-    argv = [str(alert), "--tenant", tenant_id]
+    argv = [str(alert), "--tenant", PLAYGROUND_ID]
     if update_ticket:
         argv.append("--update-ticket")
-    return [*argv, *extra]
+    return argv
 
 
 def plant_alert(where: Path, *, alert_id: str = "a-1107") -> Path:
@@ -495,8 +451,8 @@ class RunRecorder:
     `materialize` builds the run dir where told, with a real (empty) session store behind its
     pointer so the real page renderer (`run_common.visualize`, the default `visualize` seam) can
     render it; `lifecycle` returns `summary` (the run-end record the ticket lane reads:
-    `truncated_by`, `closed_before_cut`). `visualize` is left to production unless a test asks
-    for the recording one (`seams(record_visualize=True)`)."""
+    `truncated_by`, `closed_before_cut`). `seams()` leaves `visualize` to production; a test
+    that wants the recording one hands `visualize=rec.visualize` itself."""
 
     def __init__(self, run_dir_at: Path, *, summary: Mapping[str, Any] | None = None,
                  before_lifecycle: Any = None) -> None:
@@ -546,12 +502,9 @@ class RunRecorder:
         self.order.append("enqueue")
         return False
 
-    def seams(self, *, record_visualize: bool = False) -> dict[str, Any]:
-        s: dict[str, Any] = {"preflight": self.preflight, "materialize": self.materialize,
-                             "lifecycle": self.lifecycle, "enqueue": self.enqueue}
-        if record_visualize:
-            s["visualize"] = self.visualize
-        return s
+    def seams(self) -> dict[str, Any]:
+        return {"preflight": self.preflight, "materialize": self.materialize,
+                "lifecycle": self.lifecycle, "enqueue": self.enqueue}
 
 
 def seed_session_store(run_dir: Path) -> None:
@@ -585,19 +538,11 @@ def ticket_writer() -> Any:
     return mod("investigation.ticket_writer")
 
 
-def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
-                defender_dir: Path = DEFENDER, **kw: Any) -> Any:
+def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str], **kw: Any) -> Any:
     """`record_case_ticket` as run.py calls it: the record, the defender dir and the run env
     handed in (`tenant=`, `defender_dir=`, `env=`)."""
     return ticket_writer().record_case_ticket(
-        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
-
-
-def open_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
-              defender_dir: Path = DEFENDER, **kw: Any) -> Any:
-    """`open_case_ticket`, same keywords as `record_step`."""
-    return ticket_writer().open_case_ticket(
-        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
+        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=DEFENDER, env=dict(env), **kw)
 
 
 def receipt_path(run_dir: Path) -> Path:

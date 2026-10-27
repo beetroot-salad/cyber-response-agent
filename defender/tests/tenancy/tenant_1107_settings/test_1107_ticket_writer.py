@@ -11,7 +11,6 @@ from typing import Any
 from defender import box as box_mod
 from defender.records import RunPaths
 from defender.records import run_end
-from defender.systems import run_tenant
 from defender.investigation import ticket_writer
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
@@ -58,9 +57,9 @@ def _run(tmp_path: Path, root: Path, alert: Path, *, run_id: str = "r1107",
     return rc, refused, rec.run_dir_at, rec
 
 
-def _summary(truncated_by: str | None = None, closed_before_cut: bool = False) -> dict[str, Any]:
+def _summary(truncated_by: str | None = None) -> dict[str, Any]:
     return {"output": "spec1107", "requests": 0, "truncated_by": truncated_by,
-            "closed_before_cut": closed_before_cut}
+            "closed_before_cut": False}
 
 
 def _host_paths(folder: Path, root: Path) -> set[str]:
@@ -69,9 +68,9 @@ def _host_paths(folder: Path, root: Path) -> set[str]:
     return {str(settings), str(settings.resolve()), str(root), str(root.resolve())}
 
 
-def _warnings(caplog, logger: str = TW_LOGGER) -> list[str]:
+def _warnings(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records
-            if r.levelno >= logging.WARNING and r.name == logger]
+            if r.levelno >= logging.WARNING and r.name == TW_LOGGER]
 
 
 def _ticket_line_near(page: str, reason: str, *others: str, window: int = 1500) -> bool:
@@ -89,29 +88,6 @@ def _ticket_line_near(page: str, reason: str, *others: str, window: int = 1500) 
 
 def _post_calls(shim: S.DockerShim) -> list[list[str]]:
     return [c["argv"] for c in shim.calls() if "POST" in c["argv"]]
-
-
-def _records_carried(value: Any, *, _depth: int = 0, _seen: set[int] | None = None) -> list[Any]:
-    """Every `RunTenant` reachable from `value` (mappings, sequences, attributes)."""
-    seen = _seen if _seen is not None else set()
-    if _depth > 6 or id(value) in seen:
-        return []
-    seen.add(id(value))
-    if isinstance(value, run_tenant.RunTenant):
-        return [value]
-    if isinstance(value, (str, bytes, int, float, bool, Path)) or value is None:
-        return []
-    out: list[Any] = []
-    if isinstance(value, dict):
-        items: list[Any] = [*value.keys(), *value.values()]
-    elif isinstance(value, (list, tuple, set, frozenset)):
-        items = list(value)
-    else:
-        attrs = getattr(value, "__dict__", None)
-        items = list(attrs.values()) if isinstance(attrs, dict) and not isinstance(value, type) else []
-    for item in items:
-        out += _records_carried(item, _depth=_depth + 1, _seen=seen)
-    return out
 
 
 def test_d_writer_context_from_run(tmp_path, monkeypatch):

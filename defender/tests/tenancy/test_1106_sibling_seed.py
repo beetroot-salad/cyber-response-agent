@@ -98,7 +98,7 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
         assert launch["roster_at_spawn"].get(P.world_id(ep, label)) == str(roster[P.world_id(ep, label)]), launch
         assert _child_data_root(launch).resolve() == root.resolve()
     assert sorted(p.name for p in root.rglob("_tenant.json")) == [], (
-        "a `_tenant.json` was written (#1187 R1 retires it)")
+        "a retired `_tenant.json` was written")
 
 
 @pytest.mark.parametrize("tenant_id", [None, "Not A Tenant"])
@@ -111,7 +111,7 @@ def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_p
             pytest.raises(Exception) as caught:  # noqa: PT011 — the class is the launcher's; the effect is pinned
         cli.start_family(episode, [P.fixture_world_id("b")], spawn=spawn, tenant_id=tenant_id)
     assert not isinstance(caught.value, TypeError), (
-        f"start_family does not take the episode's tenant yet: {caught.value!r}")
+        f"start_family does not take the episode's tenant: {caught.value!r}")
     assert "tenant" in str(caught.value).lower(), caught.value
     assert spawn.launches == []
     assert not (ep / "runs").exists(), "the refused family made the arm container"
@@ -276,7 +276,7 @@ def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any
     assert asked.calls == 0, "the questioner was paid for before the stamp was compared"
     assert _episodes_made() == [], _episodes_made()
     assert sorted(p.name for p in root.rglob("_tenant.json")) == [], (
-        "a `_tenant.json` was written (#1187 R1 retires it)")
+        "a retired `_tenant.json` was written")
 
 
 def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_questioner(

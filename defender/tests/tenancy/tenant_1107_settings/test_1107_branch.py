@@ -21,12 +21,6 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 #: A tenant id nothing else on this box spells, so "the message names the tenant" is a finding
 #: about the message and never about a default.
 TID = fixture_uuid("tenant:acme-t1107")
-#: The config-shaped variables a developer's shell might carry. Cleared before every launch so a
-#: value either side of an assertion is the one the test put there.
-_CONFIG_VARS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX", "ELASTICSEARCH_URL",
-                "ELASTIC_SSL_VERIFY", "SOC_PLAYGROUND_ES_CONTAINER",
-                "SOC_PLAYGROUND_KIBANA_CONTAINER", "SOC_PLAYGROUND_DOCKER_CONTEXT",
-                "CMDB_URL_BASE", "DEFENDER_RUN_DIR", "DEFENDER_RUNS_BASE")
 
 
 class _Preflight:
@@ -41,13 +35,11 @@ class _Preflight:
         return self.rc
 
 
-def _layout(tmp_path: Path, data_root: Path, monkeypatch, *,
-            marker: str) -> tuple[Path, Path, Path, Path]:
+def _layout(data_root: Path, monkeypatch, *, marker: str) -> tuple[Path, Path, Path, Path]:
     """A branchable tenant source, complete settings, and its canonical episodes folder."""
-    for name in _CONFIG_VARS:
+    for name in S.BRANCH_CONFIG_VARS:
         monkeypatch.delenv(name, raising=False)
     episodes = data_root / TID / "episodes"
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
     _base, src = H.tenant_source(data_root, TID, published=True)  # a branch launch needs a published tenant (it pins the commit)
     folder = S.plant(data_root, TID, marker=marker)
     return src, data_root, folder, episodes
@@ -95,7 +87,7 @@ def _sans_paths(text: str, *paths: Path) -> str:
 
 def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, monkeypatch):
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
-    src, outside, _folder, episodes = _layout(tmp_path, data_root, monkeypatch, marker="mf13")
+    src, outside, _folder, episodes = _layout(data_root, monkeypatch, marker="mf13")
 
     # Positive control: the same tenant under a root outside both trees passes every check
     # before spend.
@@ -127,7 +119,7 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
 def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatch):
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
-    for name in _CONFIG_VARS:
+    for name in S.BRANCH_CONFIG_VARS:
         monkeypatch.delenv(name, raising=False)
     _base, src = H.tenant_source(data_root, TID)
     root = data_root

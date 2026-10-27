@@ -135,9 +135,7 @@ def test_blanket_scope_entry_is_refused(tmp_path):
     )):
         scoped = _entry(id=f"tk-scoped-{i}", **{field: value})
         assert _ids(_load(tmp_path / f"scoped{i}", scoped)) == [scoped["id"]], (
-            f"a legitimately scoped {field} of {value!r} was refused as blanket — the rule has "
-            f"been tuned past the entries the registry is FOR, and the one anchor kind a "
-            f"container-root case can reach is unwritable"
+            f"a legitimately scoped {field} of {value!r} was refused as blanket"
         )
 
 
@@ -174,8 +172,7 @@ def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
     assert registry().find_entry(
         entries, actor=ACTOR, host=HOST, pattern=PATTERN, now=dt.date(2026, 5, 5),
     ) is None, (
-        "an entry past its own `review_by` still discharged — a stale sanction authorizes "
-        "forever, which is the one thing a file entry cannot be trusted to notice about itself"
+        "an entry past its own `review_by` still discharged"
     )
 
 
@@ -202,8 +199,7 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
         "covers — the lookup is not reading the registry it was handed"
     )
     assert hit["matched"]["id"] == "tk-fixture-only", (
-        "the verb answered with something other than the entry in the tree its `VerbContext` "
-        "names — a registry resolved off an import-time path answers for the wrong estate"
+        "the verb answered from a tree other than the one its `VerbContext` names"
     )
     assert set(hit["matched"]) == set(registry().ENTRY_FIELDS), (
         "the matched entry reaching the model is not the loaded entry — the payload a human "
@@ -234,8 +230,7 @@ def test_no_authz_grounding_from_a_past_ai_verdict(tmp_path):
         for field in registry().ENTRY_FIELDS
         for term in ("case", "precedent", "similar")
     ), (
-        "the entry shape grew a field that can cite a past case — the convention-vs-bad-habit "
-        "problem relocated to 'what counts as similar', now carrying a human's signature"
+        "the entry shape grew a field that can cite a past case"
     )
 
     entries = _load(tmp_path / "similar", _entry())
@@ -289,7 +284,7 @@ def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
     assert (FIXTURE_AGENT / "skills" / SYSTEM / "SKILL.md").is_file(), (
         "the fixture tenant's tacit-knowledge registry ships no per-system SKILL.md")
     assert not registry().registry_path(DEFENDER).exists(), (
-        "the product tree still carries a tacit-knowledge registry (#1108 P4: tenant knowledge)")
+        "the product tree still carries a tacit-knowledge registry")
 
     entries = registry().load_entries(path)
     assert all(set(e) == set(registry().ENTRY_FIELDS) for e in entries)

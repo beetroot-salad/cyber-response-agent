@@ -392,7 +392,7 @@ def test_1120_setup_adopts_knowledge_and_provisions_tenant_learning(
     assert text == "", f"a successful adopt printed something:\n{text}"
     assert H.census_diff(before, H.tree_census(root)) == [
         f"added: {H.TID}/learning", f"added: {H.TID}/{H.ROW_NAME}",
-    ], "#1186 O5: fresh setup provisions learning beside the tenant's knowledge"
+    ], "a fresh setup must add exactly learning/ and the row"
     assert list((H.tenant_folder(root) / "learning").iterdir()) == []
     _row_is_acme(root)
     if (knowledge / ".git").exists():
@@ -459,7 +459,7 @@ def test_1120_the_one_tenant_guard_admits_only_knowledge_beside_a_missing_row(
     if foreign is None:
         assert refused is None, (
             f"the one-tenant guard refused the operator-placed knowledge in a rowless own "
-            f"folder (MF1 (a) admits exactly that name): {refused}")
+            f"folder: {refused}")
     else:
         assert refused is not None, f"the guard admitted {foreign!r} beside the placed knowledge"
         text = str(refused)
@@ -480,10 +480,8 @@ def test_1120_setup_refuses_a_placed_knowledge_folder_whose_tenant_id_is_absent_
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "bad", root, tenant_id_file=content)
     before = H.tree_census(root)
-    proc = H.setup(tenant_py, root)
-    H.assert_refused(proc, str(knowledge / H.TENANT_ID_FILE), *also_named)
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
-    assert not location_path(H.row_path)(root).exists(), "a refused setup left a row (rules-first, MF1 Q2)"
+    H.assert_first_setup_refused(H.setup(tenant_py, root), root, before,
+                                 str(knowledge / H.TENANT_ID_FILE), *also_named)
     assert H.git_status(knowledge) == "", "setup wrote into the operator's clone"
 
     control = tmp_path / "control"
@@ -505,7 +503,7 @@ def test_1120_setup_over_a_finished_tenant_succeeds_and_writes_nothing(tmp_path:
     _gap_table(H.settings_dir(root))
     gapped = H.tree_census(root)
     text = H.assert_clean(H.setup(tenant_py, root))
-    assert text == "", f"a re-run over a gapped table printed something (DC1):\n{text}"
+    assert text == "", f"a re-run over a gapped table printed something:\n{text}"
     assert H.census_diff(gapped, H.tree_census(root)) == [], "the gapped re-run wrote something"
     H.assert_refused(H.check(tenant_py, root, H.TID), GAP_PAIR)
 
@@ -670,12 +668,7 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
     # The case-history mapping's refusal names the file relative to settings/, never the host
     # path.
     needle = "systems/case-history/mapping.yaml" if named.name == "mapping.yaml" else str(named)
-    text = H.assert_refused(proc, needle)
-    assert "the data root is not empty" not in text, (
-        f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
-        f"the folder rule must refuse {named}:\n{text}")
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused first setup wrote"
-    assert not location_path(H.row_path)(root).exists(), "a refused first setup left a row (MF1 Q2)"
+    H.assert_first_setup_refused(proc, root, before, needle)
 
     control = tmp_path / "control"
     H.place_knowledge(control)
@@ -720,8 +713,7 @@ def test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused(
     text = H.assert_refused(H.run_script(script, "setup", H.TID, root=root),
                             "[tenant.py]", str(checkout / "defender"), str(root))
     assert "not empty" not in text, (
-        f"the refusal is the one-tenant guard's, not O11a's — the guard must admit the placed "
-        f"knowledge (MF1 (a)):\n{text}")
+        f"the one-tenant guard refused instead of the defender-tree check:\n{text}")
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
 
     allowed = checkout / ".defender-data"

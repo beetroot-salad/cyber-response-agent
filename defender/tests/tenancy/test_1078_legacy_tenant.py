@@ -120,7 +120,7 @@ def test_a_minted_run_id_is_never_the_tenant_records_name(tenant_root, tmp_path)
     assert run_dir.is_dir(), run_dir
     assert is_valid_run_id(run_dir.name), run_dir
     assert run_dir.name != H.RECORD_NAME, run_dir
-    assert not is_valid_run_id(H.RECORD_NAME), "claim C18, the first coincidence"
+    assert not is_valid_run_id(H.RECORD_NAME), "the retired record's name passes as a run id"
     assert not (base / H.RECORD_NAME).exists(), "setup left an entry at the record's name"
 
 
@@ -197,19 +197,17 @@ def test_a_resume_without_a_family_record_stamps_the_tenants_base_world(tenant_r
 FAMILY_TENANT = fixture_uuid("tenant:acme")
 
 
-def _family_dirs(tmp_path, tenant_id=FAMILY_TENANT, episode_id=None):
-    """`(the siblings' runs base, the episode, the sibling run dirs)`: the episode at
+def _family_dirs(tmp_path, episode_id):
+    """`(the episode, the sibling run dirs)`: the episode at
     `<data root>/<T>/episodes/<uuid>` with its RUNS step taken (`runs/` and the arm roster),
     each arm at the id the roster holds for its label, where the launcher's arms live.
     `dirs` is in `T.WORLDS` order; `_label(ep, d)` names an arm's label."""
-    location_path(T.runs_base)(tmp_path, tenant_id=tenant_id)
-    episode_id = episode_id or T.EPISODE_ID
+    location_path(T.runs_base)(tmp_path, tenant_id=FAMILY_TENANT)
     ep = T.episode(tmp_path, episode_id=episode_id)
     with Episode.open(ep) as episode:
         T.episode_view(episode)
-    base = ep / "runs"
     dirs = [T.arm_run_dir(ep, w) for w in T.WORLDS]
-    return base, ep, dirs
+    return ep, dirs
 
 
 def _verify_family(ep: Path, dirs, **kw):
@@ -221,7 +219,7 @@ def _verify_family(ep: Path, dirs, **kw):
 
 
 def test_the_family_stamp_agrees_on_the_tenant_and_not_on_the_world(tmp_path):
-    base, ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-agree"))
+    ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-agree"))
     for d in dirs:
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=_world_id(ep, d))
@@ -232,13 +230,11 @@ def test_the_family_stamp_agrees_on_the_tenant_and_not_on_the_world(tmp_path):
     assert agreed["tenant_id"] == FAMILY_TENANT, (
         "the tenant is constant across a family and stays in `agreed`")
     assert "world_id" not in agreed, (
-        "`_write_family_stamp` publishes ONE sibling's WHOLE stamp as `agreed` minus `world_id` "
-        "— the siblings differ on the world by design, so publishing one sibling's world as the "
-        "family's would be a false record")
+        "`agreed` carries a world id, though the siblings differ on the world by design")
 
 
 def test_a_family_spanning_two_tenants_is_a_member_fault(tmp_path):
-    base, ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-cross"))
+    ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-cross"))
     for i, d in enumerate(dirs):
         S.plant_stamp(d, **T.provenance_record(),
                       tenant_id=fixture_uuid("tenant:tenant-one") if i == 0 else fixture_uuid("tenant:tenant-two"),
@@ -252,7 +248,7 @@ def test_a_family_spanning_two_tenants_is_a_member_fault(tmp_path):
 
 
 def test_a_sibling_stamp_with_no_tenant_field_is_its_own_named_fault(tmp_path):
-    base, ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-absent"))
+    ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-absent"))
     for i, d in enumerate(dirs):
         fields = dict(T.provenance_record())
         if i:
@@ -273,7 +269,7 @@ def test_a_sibling_stamp_with_no_tenant_field_is_its_own_named_fault(tmp_path):
 
 def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_the_skipped(
         tmp_path):
-    base, ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-partial"))
+    ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-partial"))
     for d in dirs[:2]:
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=_world_id(ep, d))
@@ -312,13 +308,12 @@ def _arm_stamp_has_the_unforked_shape(run_dir: Path, *, token: str, natural_worl
     text = path.read_text(encoding="utf-8")
     stamp = json.loads(text)
     assert stamp.get("parent_run_id") is None, (
-        f"the arm's run folder names its parent run {stamp.get('parent_run_id')!r} (#1255 P3)")
+        f"the arm's run folder names its parent run {stamp.get('parent_run_id')!r}")
     assert stamp.get("fork_turn") is None, (
-        f"the arm's run folder names its fork turn {stamp.get('fork_turn')!r} (#1255 P3)")
+        f"the arm's run folder names its fork turn {stamp.get('fork_turn')!r}")
     assert stamp.get("world_id") in (None, natural_world), (
         f"the arm's stamp carries the world id {stamp.get('world_id')!r}, neither absent nor the "
-        f"tenant's natural base world {natural_world!r} — the world id moves out of the run "
-        "folder (#1255 P3)")
+        f"tenant's natural base world {natural_world!r}")
     assert token not in text, f"the arm's run-folder stamp carries its world token {token!r}"
 
 

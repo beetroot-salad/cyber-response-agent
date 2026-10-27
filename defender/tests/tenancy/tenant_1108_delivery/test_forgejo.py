@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import importlib
 import json
 
 import httpx
 import pytest
+
+from defender.learning.author.version_control import forgejo
 
 from ._identity import identity as fixture_identity
 
@@ -21,12 +22,8 @@ from ._support import (
 )
 
 
-def _forge_module():
-    return importlib.import_module("defender.learning.author.version_control.forgejo")
-
-
 def forge(http, origin=ORIGIN):
-    return _forge_module().ForgejoForge(origin=origin, identity=fixture_identity(), client=http.client)
+    return forgejo.ForgejoForge(origin=origin, identity=fixture_identity(), client=http.client)
 
 
 def row(number, head):
@@ -87,7 +84,7 @@ _FORGE_CALLS = {
 def test_a_transport_fault_is_a_forge_error(fault, call):
     http = ForgeHTTP()
     http.fault = lambda request: fault("the forge's transport failed", request=request)
-    with pytest.raises(_forge_module().ForgeError):
+    with pytest.raises(forgejo.ForgeError):
         _FORGE_CALLS[call](forge(http))
     assert http.requests
 
@@ -104,8 +101,8 @@ def test_protection_read_failure_or_unknown_push_permission_refuses(response):
         calls.append(request)
         return response
     client = httpx.Client(transport=httpx.MockTransport(reply))
-    with pytest.raises(_forge_module().ForgeError, match="protect|push|403|JSON|main"):
-        _forge_module().ForgejoForge(origin=ORIGIN, identity=fixture_identity(), client=client).verify_main_protection()
+    with pytest.raises(forgejo.ForgeError, match="protect|push|403|JSON|main"):
+        forgejo.ForgejoForge(origin=ORIGIN, identity=fixture_identity(), client=client).verify_main_protection()
     assert any(call.url.path.endswith("/branches/main") for call in calls)
 
 
@@ -117,7 +114,7 @@ def test_protection_verification_reads_branch_but_never_changes_rules():
 
 
 def test_the_origin_is_parsed_once_into_one_forge_address():
-    address = _forge_module().ForgeAddress
+    address = forgejo.ForgeAddress
     ours = address.parse(ORIGIN)
     assert (ours.scheme, ours.host, ours.port, ours.owner, ours.repo) == (
         "http", "forge.invalid", 3000, "tenants", "blue")
@@ -135,7 +132,7 @@ def test_the_origin_is_parsed_once_into_one_forge_address():
 
 
 def test_owner_and_repository_compare_without_case():
-    address = _forge_module().ForgeAddress
+    address = forgejo.ForgeAddress
     cased = "http://forge.invalid:3000/Tenants/Blue.git"
     assert address.parse(cased) == address.parse(ORIGIN)
     assert address.parse("HTTP://FORGE.INVALID:3000/TENANTS/BLUE") == address.parse(ORIGIN)
@@ -156,9 +153,9 @@ def test_an_origin_that_is_not_one_forge_repository_is_refused(origin):
     """Fails closed: no network scheme, no host, a bad port, or a path that is not exactly
     owner and repository is a `ForgeError` naming the origin, before any request."""
     http = ForgeHTTP()
-    with pytest.raises(_forge_module().ForgeError):
-        _forge_module().ForgeAddress.parse(origin)
-    with pytest.raises(_forge_module().ForgeError):
+    with pytest.raises(forgejo.ForgeError):
+        forgejo.ForgeAddress.parse(origin)
+    with pytest.raises(forgejo.ForgeError):
         forge(http, origin=origin)
     assert http.requests == []
 
@@ -221,7 +218,7 @@ def test_a_total_count_that_is_not_a_number_is_a_forge_error(value):
     http = ForgeHTTP()
     http.total_count = value
     http.pages = {1: [row(1, "lessons/a")]}
-    with pytest.raises(_forge_module().ForgeError):
+    with pytest.raises(forgejo.ForgeError):
         forge(http).list_open_prs("lessons/")
 
 
@@ -306,6 +303,6 @@ def test_a_pr_row_without_its_head_repository_is_skipped():
     'http://forge.invalid"/tenants/blue.git', 'http://forge.invalid/tenants/blue.git\\'])
 def test_origin_cannot_inject_transport_configuration(origin):
     http = ForgeHTTP()
-    with pytest.raises(_forge_module().ForgeError):
+    with pytest.raises(forgejo.ForgeError):
         forge(http, origin)
     assert http.requests == []

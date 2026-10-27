@@ -36,7 +36,6 @@ from defender.tests.support.runtime.engine._spec767 import (
     receipt,
     receipt_path,
     record,
-    require,
     shipped_mapping_doc,
     ticket,
     current_mapping,
@@ -51,7 +50,6 @@ STANDALONE_FENCE = re.compile(r"(?m)^---\s*$")
 def _case_record(**kw):
     """A `CaseRecord`: `cause` (the host sentence) and `narrative` (the report body), never a
     single `reason`."""
-    cls = require(case_ticket, "CaseRecord", "D3 splits CaseRecord.reason into cause + narrative")
     fields = {
         "case_id": RUN_ID,
         "signature_id": "5710",
@@ -60,15 +58,11 @@ def _case_record(**kw):
         "narrative": "The account is a decommissioned service identity.",
     }
     fields.update(kw)
-    return cls(**fields)
+    return case_ticket.CaseRecord(**fields)
 
 
 def _render_comment(rec):
-    fn = require(
-        case_ticket, "case_record_to_comment",
-        "D3 replaces case_record_to_close with case_record_to_comment",
-    )
-    return fn(rec, mapping=current_mapping())
+    return case_ticket.case_record_to_comment(rec, mapping=current_mapping())
 
 
 def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
@@ -81,18 +75,17 @@ def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
     assert record(run_dir, ok_store) is None, "the post-step returns a value some caller reads"
     assert [(c.method, c.path) for c in ok_store.writes()] == [
         ("POST", f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}")
-    ], "D2 is ONE comment POST and no transition"
+    ], "the writer must make one comment POST and no transition"
     assert [(c.method, c.path) for c in ok_store.calls] == [
         ("POST", f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"),
-    ], "the writer's one call to the store is its POST — it reads nothing back first (#1221)"
-    assert not ok_store.paths(TRANSITIONS_SUFFIX), "the host still transitions the case (N1/O1)"
+    ], "the writer's one call to the store must be its POST, with no read first"
+    assert not ok_store.paths(TRANSITIONS_SUFFIX), "the host transitioned the case"
 
     good = receipt(run_dir)
     assert good["key"] == run_dir.name
     assert good["ok"] is True
     assert good["status"] == "commented", (
-        "the receipt still says `closed` — after D2 nothing closes, so that word records a "
-        "false event (§7 R6/FK29)"
+        "the receipt does not say `commented` (nothing closes the case)"
     )
     assert good["url"].endswith(f"{TICKETS_PATH}/{run_dir.name}")
 
@@ -218,7 +211,7 @@ def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
 
     assert [c.path for c in store.writes()] == [
         TICKETS_PATH, f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"
-    ], "the writer's site census is two POSTs — an open and a comment (c1/r3, S1)"
+    ], "the writer must make two POSTs: an open and a comment"
 
     for call in store.writes():
         body = call.body if isinstance(call.body, dict) else {}
@@ -258,8 +251,7 @@ def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
     use_mapping(monkeypatch, root, mapping_doc(open_status=CLOSED_STATUS, released=LEGACY_RELEASED))
     loaded = case_ticket.load_case_mapping(current_settings())
     assert loaded["open"]["status"] == CLOSED_STATUS, (
-        "a mapping whose open.status equals its legacy released.status was refused — nothing "
-        "reads `released:` any more (#1221, amended)"
+        "a mapping whose open.status equals its unread legacy released.status was refused"
     )
     calm = case_ticket.alert_to_open_payload(
         facts_of({"rule": {"id": "5710", "description": "sshd"}, "timestamp": "t"}), "c",
@@ -371,8 +363,7 @@ def test_767_comment_payload_keys_are_author_and_body_only(tmp_path, monkeypatch
         "{author, body}"
     )
     assert payload["author"] == AGENT_AUTHOR, (
-        "the writer bound the stale `close.author` instead of the top-level `comment.author` "
-        "— the two sections spell the same key names (r6/FK27) and the binding must be explicit"
+        "the writer bound the stale `close.author` instead of the top-level `comment.author`"
     )
     assert store.comment_body().startswith("benign — ")
 
@@ -419,15 +410,12 @@ def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
         assert "body text" not in body, f"{why}: the report's text crossed as a narrative"
         assert NO_NOTES not in body, f"{why}: the ordinary branch's marker was rendered instead"
         assert len(body.split()) > 3, (
-            f"{why}: the body is a marker token, not a host sentence — D2 says `a host "
-            "sentence saying so`, and `(unreadable)` must not become a literal by accident"
+            f"{why}: the body is a marker token, not a host sentence"
         )
         sentences[why] = body
 
     assert len(set(sentences.values())) == 1, (
-        "the no-disposition family produced more than one host sentence "
-        f"({sentences}) — the branch is keyed on something other than the shared reader's "
-        "single 'no parsable disposition' result"
+        f"the no-disposition family produced more than one host sentence: {sentences}"
     )
 
     # The missing file is the same family, reached without writing a report at all.
@@ -461,7 +449,7 @@ def test_767_narrative_is_the_fence_stripped_report_body(tmp_path, monkeypatch):
     record(run_dir, store)
     wire = store.comment_body()
     assert body in wire, (
-        "the report body did not cross whole — a 472-character cap is still live (r2/FK01)"
+        "the report body did not cross whole (a 472-character cap is still live)"
     )
     assert ELLIPSIS not in wire, "a body well under the bound was cut anyway"
 
@@ -605,8 +593,8 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
     narrative = payload["body"].split("\n\n", 1)[1]
     for placeholder in ("{cause}", "{narrative}"):
         assert placeholder in narrative, (
-            f"the narrative's own literal {placeholder} was re-substituted — the renderer is "
-            "not single-pass, which is the one thing S5 rules out"
+            f"the narrative's own literal {placeholder} was re-substituted (the renderer is "
+            "not single-pass)"
         )
     assert narrative.count(HOST_CAUSE) == 0, "a context value leaked into the narrative segment"
 
@@ -615,7 +603,7 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
     open_payload = case_ticket.alert_to_open_payload(
         facts_of(hostile_alert), "case-1", mapping=current_mapping())
     assert open_payload["labels"] == ["sig:{summary}", "evt:{signature}"], (
-        "a substituted alert value was re-interpreted as a template (FK53)"
+        "a substituted alert value was re-interpreted as a template"
     )
     assert open_payload["summary"] == "{case_id}"
     assert open_payload["status"] == OPEN_STATUS
@@ -644,11 +632,10 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
     store = FakeStore(**store_kw)
 
     assert record(run_dir, store) is None, f"{arm}: the fault escaped into the run"
-    assert len(store.writes()) == 1, f"{arm}: the writer retried — D2 is one POST"
+    assert len(store.writes()) == 1, f"{arm}: the writer retried its one POST"
     assert capsys.readouterr().err.count("WARNING defender.investigation.ticket_writer") <= 1, f"{arm}: warned twice"
     assert receipt_path(run_dir).is_file(), (
-        f"{arm}: no receipt was written — r1/c14 record the receipt on BOTH branches, which "
-        "is what the `error` word and the `ok` boolean are for"
+        f"{arm}: no receipt was written for the failed POST"
     )
 
 
@@ -778,7 +765,7 @@ def test_767_case_record_splits_cause_from_narrative(tmp_path, monkeypatch):
     store = FakeStore()
     record(run_dir, store)
     assert store.comment_body() == f"{HOST_CAUSE}//the model's own notes", (
-        "the render context does not carry both `cause` and `narrative` (FK21/auth_P5)"
+        "the render context does not carry both `cause` and `narrative`"
     )
 
     use_mapping(monkeypatch, root, mapping_doc(comment_body="{no_such_key}"))

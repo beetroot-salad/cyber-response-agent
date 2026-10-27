@@ -141,7 +141,7 @@ def test_tenant_delivery_has_production_callers_outside_the_run_process():
     module_of = census._astlib.module_and_package
     callers = {module_of(path)[0] for path, tree in production_trees()
                if not path.startswith(_OWNER) and _references_tenant_delivery(path, tree, census)}
-    assert callers, "TenantDelivery has no production caller: P4 wires none"
+    assert callers, "TenantDelivery has no production caller"
     in_run = sorted(callers & set(census.static_import_closure(census.RUN_ENTRIES)))
     assert in_run == [], f"TenantDelivery callers inside the run process: {in_run}"
 

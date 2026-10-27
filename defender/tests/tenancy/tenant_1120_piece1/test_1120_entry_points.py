@@ -33,9 +33,6 @@ from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as P
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.records._tenant_id import TenantId
 
-#: The launcher's retired episodes knob: nothing reads it (the tests still set it).
-EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
-
 
 def _owner(root: Path, tenant_id: str = H.TID, **kw: Any) -> str:
     """`accept_tenant`'s own refusal on this tree — the text every entry must pass through."""
@@ -53,7 +50,7 @@ def _assert_never_created(root: Path) -> None:
         f"a refused entry created {root.parent} inside the checkout's defender/ tree")
 
 
-def _owner_in_checkout(checkout: Path, root: Path, tenant_id: str = H.TID) -> str:
+def _owner_in_checkout(checkout: Path, root: Path) -> str:
     """`accept_tenant`'s refusal as the tmp checkout's own code raises it (its defender-tree
     guard is keyed to its own `defender/`), from a child interpreter that imports the copy."""
     code = (
@@ -72,7 +69,7 @@ def _owner_in_checkout(checkout: Path, root: Path, tenant_id: str = H.TID) -> st
         "    raise SystemExit(0)\n"
         "raise SystemExit('ACCEPTED')\n")
     proc = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
-        [sys.executable, "-c", code, str(checkout), str(root), tenant_id],
+        [sys.executable, "-c", code, str(checkout), str(root), H.TID],
         env=H.tenant_env(root), cwd=str(checkout), capture_output=True, text=True,
         timeout=120, check=False)
     assert proc.returncode == 0, (
@@ -86,19 +83,18 @@ def _copy_script(checkout: Path, module: Any) -> Path:
     return checkout / H.script_of(module).resolve().relative_to(H.REPO_ROOT)
 
 
-def _knowledge_link(base: Path, root: Path, tenant_id: str = H.TID, *, row: bool = True) -> None:
+def _knowledge_link(base: Path, root: Path) -> None:
     """`<root>/<id>/knowledge` as a symlink to a complete knowledge folder elsewhere."""
-    real = H.place_knowledge(base / "elsewhere", tenant_id)
-    if row:
-        H.plant_row(root, tenant_id)
-    H.tenant_folder(root, tenant_id).mkdir(parents=True, exist_ok=True)
-    H.knowledge_dir(root, tenant_id).symlink_to(real, target_is_directory=True)
+    real = H.place_knowledge(base / "elsewhere")
+    H.plant_row(root)
+    H.tenant_folder(root).mkdir(parents=True, exist_ok=True)
+    H.knowledge_dir(root).symlink_to(real, target_is_directory=True)
 
 
-def _source_under(root: Path, *, runs_tenant: str = H.TID) -> Path:
-    """A finished, branchable source run at `<root>/<runs_tenant>/runs/<id>`, with no
-    runs-base record: a run's tenant is where it sits."""
-    base = H.tenant_folder(root, runs_tenant) / "runs"
+def _source_under(root: Path) -> Path:
+    """A finished, branchable source run at `<root>/<T>/runs/<id>`, with no runs-base record: a
+    run's tenant is where it sits."""
+    base = H.tenant_folder(root) / "runs"
     base.mkdir(parents=True, exist_ok=True)
     return P.source_run(base)
 
@@ -150,7 +146,6 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
     src = _source_under(data_root)
     # The episode sits at `<root>/<T>/episodes/<uuid>`.
     manifest = P.family_for(src)
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(manifest.parent.parent))
     with Episode.open(manifest.parent) as episode:
         T.episode_view(episode, tenant=expected)  # the container, as its launcher makes it
     sib = H.RunRecorder(tmp_path / "sib")
@@ -353,7 +348,6 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
     (H.settings_dir(data_root) / "verb-grants.yaml").unlink()
     expected = _owner(data_root)
     assert "verb-grants.yaml" in expected, expected
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(manifest.parent.parent))
     rec = H.RunRecorder(tmp_path / "sib")
     rc, exc = H.drive_run(
         run_py, ["--tenant", H.TID, "--episode", manifest.parent.name, "--world", "b"], rec)
@@ -478,7 +472,6 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(branch_root))
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     est = S1224.estate(tmp_path)
     branch_tenant = est.place()
     response = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon",

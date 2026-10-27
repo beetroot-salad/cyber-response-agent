@@ -172,25 +172,12 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
     untagged = [fn for fn in ("local_runs", "call_runs", "chain_learning")
                 if not any("owner-only record location" in d for d in _in(displays, fn))]
     assert untagged == [], (
-        f"these record-location joins escape the lint (M5 tagging): {untagged}\n"
+        f"these record-location joins escape the lint: {untagged}\n"
         + "\n".join(displays))
     clean = ("local_settings", "local_knowledge", "local_agent", "call_settings",
              "chain_settings", "chain_agent", "run_tenant_settings")
     flagged = {fn: _in(displays, fn) for fn in clean if _in(displays, fn)}
     assert flagged == {}, f"knowledge-half joins are reported: {flagged}"
-
-
-_LEAD = "lead-zero-correlation"
-_WHY = "the template grants nothing until an operator decides"
-
-#: A total table over the planted census (alpha.lookup, beta.lookup and their health-checks).
-GRANTED_ROWS: dict[tuple[str, str], dict] = {
-    ("alpha", "health-check"): {"roles": ["gather", _LEAD]},
-    ("alpha", "lookup"): {"roles": ["gather", _LEAD]},
-    ("beta", "health-check"): {"roles": ["gather"]},
-    ("beta", "lookup"): {"roles": ["gather"]},
-}
-TEMPLATE_ROWS = {pair: {"roles": [], "reason": _WHY} for pair in GRANTED_ROWS}
 
 
 def _table(rows: dict[tuple[str, str], dict]) -> str:
@@ -203,24 +190,19 @@ def _table(rows: dict[tuple[str, str], dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _planted_repo(tmp_path: Path, *, fixture_rows: dict = GRANTED_ROWS,
-                  template_rows: dict = TEMPLATE_ROWS,
-                  lab_rows: dict | None = None, broken_lab: bool = False,
-                  systems: dict[str, str] | None = None) -> Path:
-    """A committed synthetic repo (`_dispositions995.planted_tree`) declaring `systems`, with the lead-
-    zero catalog template, a template folder and a fixture folder — plus, on request, a lab under
-    knowledge/tenants/ (`lab_rows`) or a broken one (`broken_lab`)."""
-    repo = D995.planted_tree(tmp_path, systems or {"alpha": "lookup", "beta": "lookup"})
+def _planted_repo(tmp_path: Path, *, fixture_rows: dict = H.CENSUS_ROWS,
+                  broken_lab: bool = False) -> Path:
+    """A committed synthetic repo (`_dispositions995.planted_tree`) declaring alpha and beta, with
+    the lead-zero catalog template, a template folder and a fixture folder — plus, on request, a
+    broken lab under knowledge/tenants/ (`broken_lab`)."""
+    repo = D995.planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
     lead_zero = T1106.lead_zero_text(T1106.CENSUS_LEAD_ZERO_ID)
     # Each folder carries the lead-zero template in its own catalog.
     folders = [
-        T1106.plant_tenant(repo / "knowledge", "tenant-template", table=_table(template_rows),
+        T1106.plant_tenant(repo / "knowledge", "tenant-template", table=_table(H.CENSUS_TEMPLATE_ROWS),
                            configs={}, lead_zero=lead_zero),
         T1106.plant_tenant(repo / "knowledge", "tenant-fixture", table=_table(fixture_rows),
                            configs={}, lead_zero=lead_zero)]
-    if lab_rows is not None:
-        folders.append(T1106.plant_tenant(repo / "knowledge" / "tenants", "playground",
-                                          table=_table(lab_rows), configs={}, lead_zero=lead_zero))
     if broken_lab:
         folders.append(T1106.plant_tenant(repo / "knowledge" / "tenants", "x", configs={},
                                           lead_zero=lead_zero, omit=("verb-grants.yaml",)))
@@ -240,7 +222,7 @@ def test_1120_the_census_lint_walks_the_template_and_the_fixture_and_no_tenants_
     assert rc == 0, f"the census lint refused a repo whose template and fixture are clean:\n{out}"
     assert _clean_names(out) == {"tenant-template", "tenant-fixture"}, out
 
-    gapped = {k: v for k, v in GRANTED_ROWS.items() if k != ("beta", "lookup")}
+    gapped = {k: v for k, v in H.CENSUS_ROWS.items() if k != ("beta", "lookup")}
     rc, out = _census(_planted_repo(tmp_path / "gapped", fixture_rows=gapped))
     assert rc == 1, f"a fixture table omitting beta.lookup is not a finding (rc {rc}):\n{out}"
     assert "tenant-fixture: beta.lookup" in out, out

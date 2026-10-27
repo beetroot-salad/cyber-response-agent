@@ -45,12 +45,11 @@ def _copy_script(checkout: Path) -> Path:
     return checkout / H.script_of(tenant_py).resolve().relative_to(H.REPO_ROOT)
 
 
-def _folder(tmp_path: Path, name: str, *, source: Path = H.FIXTURE,
-            tenant_id_file: str | bytes | None = None) -> Path:
-    """A tenant repo's working folder (`settings/` + `agent/`), copied from `source` — what
+def _folder(tmp_path: Path, name: str, *, tenant_id_file: str | bytes | None = None) -> Path:
+    """A tenant repo's working folder (`settings/` + `agent/`), copied from the fixture — what
     `check --folder` is pointed at in tenant CI. No `.tenant-id` unless asked."""
     folder = tmp_path / name
-    shutil.copytree(source, folder, symlinks=True)
+    shutil.copytree(H.FIXTURE, folder, symlinks=True)
     H.write_tenant_id_file(folder, H.TID, tenant_id_file)
     return folder
 
@@ -99,7 +98,7 @@ def _census_blind_line(proc: subprocess.CompletedProcess, *, folder: Path, cause
     framing = line.index(CENSUS_NOT_TAKEN)
     for said in (cause, *names):
         assert said in line[framing:], (
-            f"the census line does not give {said!r} after its framing (#1159 O1):\n{line}")
+            f"the census line does not give {said!r} after its framing:\n{line}")
     return text, line
 
 
@@ -120,7 +119,7 @@ def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: 
     assert H.census_diff(before, H.tree_census(root)) == [], "check wrote into the data root"
 
     for folder in (H.FIXTURE, H.TEMPLATE):
-        assert not (folder / H.TENANT_ID_FILE).exists(), f"{folder} commits a .tenant-id (M8)"
+        assert not (folder / H.TENANT_ID_FILE).exists(), f"{folder} commits a .tenant-id"
         committed = H.tree_census(folder)
         H.assert_clean(_check_folder(folder))
         assert H.census_diff(committed, H.tree_census(folder)) == [], f"check wrote into {folder}"
@@ -312,12 +311,7 @@ def test_1120_setup_and_check_refuse_a_lead_zero_table_that_disagrees_with_the_r
     knowledge = H.place_knowledge(first)
     _write_lead_zero(knowledge / "settings", template)
     before = H.tree_census(first)
-    text = H.assert_refused(H.setup(tenant_py, first), "lead-zero.yaml", template)
-    assert "the data root is not empty" not in text, (
-        f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
-        f"the lead-zero agreement must refuse it:\n{text}")
-    assert H.census_diff(before, H.tree_census(first)) == [], "the refused setup wrote something"
-    assert not location_path(H.row_path)(first).exists(), "a refused first setup left a row (MF1 Q2)"
+    H.assert_first_setup_refused(H.setup(tenant_py, first), first, before, "lead-zero.yaml", template)
 
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
@@ -451,7 +445,7 @@ def _gather_health_checks_only(settings: Path) -> None:
     pytest.param(_withhold_all, id="all-withheld"),
     pytest.param(_gather_health_checks_only, id="health-checks-only"),
 ])
-def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(
+def test_1120_setup_refuses_a_table_granting_gather_no_query_verb_that_check_accepts(
         tmp_path: Path, plant: Callable[[Path], None]) -> None:
     """A table granting gather no query verb (the template's all-withheld one, or one granting
     only `health-check`) fails `require_gather_query` for every run: setup refuses it, check
@@ -461,12 +455,7 @@ def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(
     plant(knowledge / "settings")
     table = knowledge / "settings" / "verb-grants.yaml"
     before = H.tree_census(first)
-    text = H.assert_refused(H.setup(tenant_py, first), str(table))
-    assert "the data root is not empty" not in text, (
-        f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
-        f"setup must refuse the table no run can start with:\n{text}")
-    assert H.census_diff(before, H.tree_census(first)) == [], "the refused setup wrote something"
-    assert not location_path(H.row_path)(first).exists(), "a refused first setup left a row (MF1 Q2)"
+    H.assert_first_setup_refused(H.setup(tenant_py, first), first, before, str(table))
 
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
@@ -504,7 +493,7 @@ def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
     assert named in status, f"precondition: the clone's .tenant-id is not uncommitted:\n{status!r}"
 
     H.assert_clean(H.setup(tenant_py, root))
-    assert location_path(H.row_path)(root).is_file(), "setup refused a matching .tenant-id (V11: no git rule)"
+    assert location_path(H.row_path)(root).is_file(), "setup refused a matching but uncommitted .tenant-id"
     assert H.accept(_tenant, root).id == H.TID
 
     H.assert_refused(_check_id(root), named)
@@ -657,13 +646,12 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
 
     def assert_census_taken(text: str) -> None:
         assert CENSUS_NOT_TAKEN not in text, (
-            f"#1108 P4: the census is git-free, yet it went blind with git ({cause!r}):\n{text}")
+            f"the git-free census was not taken when git failed ({cause!r}):\n{text}")
         # The census causes end "... on this machine"; `unverified_reason` is their prefix
         # without it, so the unverified-id line does not match these needles.
         for git_cause in (GIT_ABSENT_CAUSE, GIT_UNRUNNABLE_CAUSE):
             assert git_cause not in text, (
-                f"#1108 P4: the census is git-free, yet the output gives a git cause "
-                f"({git_cause!r}):\n{text}")
+                f"the git-free census reports a git cause ({git_cause!r}):\n{text}")
 
     text = H.output(_check_folder(folder, **env))
     assert H.CANNOT_VERIFY_TENANT_ID not in text, (
@@ -674,10 +662,10 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
         text = H.assert_refused(proc, H.CANNOT_VERIFY_TENANT_ID)
         assert_census_taken(text)
         unverified = [ln for ln in text.splitlines() if H.CANNOT_VERIFY_TENANT_ID in ln]
-        assert len(unverified) == 1, f"V16's line is not printed once (#1159 O2):\n{text}"
+        assert len(unverified) == 1, f"the unverified-id line is not printed once:\n{text}"
         assert CENSUS_NOT_TAKEN not in unverified[0], (
-            f"V16's line is not its own line beside the census line (#1159 O2):\n{text}")
+            f"the unverified-id line is not separate from the census line:\n{text}")
         assert unverified_reason in unverified[0], (
-            f"V16's line does not give git's reason ({unverified_reason!r}):\n{text}")
+            f"the unverified-id line does not give git's reason ({unverified_reason!r}):\n{text}")
 
     H.assert_clean(_check_folder(folder))

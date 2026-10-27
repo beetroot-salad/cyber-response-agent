@@ -52,9 +52,9 @@ def test_1120_accept_tenant_refuses_an_off_grammar_id_before_touching_the_root(
         f"a valid id over an absent root must be refused for its row, naming it: {control!r}")
 
 
-def _other_file(tmp_path: Path, name: str = "outside.txt") -> Path:
+def _other_file(tmp_path: Path) -> Path:
     """A regular file outside the tenant — what a planted link would hand the tenant."""
-    target = tmp_path / "elsewhere" / name
+    target = tmp_path / "elsewhere" / "outside.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("not this tenant's bytes\n", encoding="utf-8")
     return target
@@ -77,26 +77,26 @@ def _plant_hardlink(half: Path, tmp_path: Path) -> Path:
     return inside
 
 
-def _accept_within(owner, root: Path, tenant_id: str = H.TID, *, seconds: float = 20.0,
-                   fifo: Path | None = None, **kw) -> tuple[object, BaseException | None]:
+def _accept_within(owner, root: Path, *,
+                   fifo: Path | None = None) -> tuple[object, BaseException | None]:
     """`accept_tenant` in a worker thread with a deadline: a walk that OPENS a FIFO (or follows a
     cycle) blocks, and a blocked call must fail the test rather than hang the worker."""
     box: dict[str, object] = {}
 
     def call() -> None:
         try:
-            box["value"] = H.accept(owner, root, tenant_id, **kw)
+            box["value"] = H.accept(owner, root)
         except BaseException as exc:  # noqa: BLE001 — handed back to the test thread as-is
             box["exc"] = exc
 
     worker = threading.Thread(target=call, daemon=True)
     worker.start()
-    worker.join(seconds)
+    worker.join(20)
     if worker.is_alive():
         if fifo is not None:
             with contextlib.suppress(OSError):
                 os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
-        pytest.fail(f"accept_tenant did not return within {seconds}s — it opened a planted "
+        pytest.fail("accept_tenant did not return within 20s — it opened a planted "
                     "special file or followed a link cycle instead of refusing it by lstat")
     return box.get("value"), box.get("exc")  # type: ignore[return-value]
 
@@ -154,36 +154,6 @@ def test_1120_accept_tenant_reports_the_earliest_failing_check(tmp_path: Path, p
     text = H.accept_refusal(_tenant, root, raw_id, box_mounted=(root,))
     assert earlier in text, f"the refusal does not name the earlier check's fault {earlier!r}: {text!r}"
     assert later not in text, f"the refusal names the LATER check's fault {later!r}: {text!r}"
-
-
-def _row_absent(root: Path) -> None:
-    return None
-
-
-BAD_ROWS = [
-    pytest.param(_row_absent, id="absent"),
-    pytest.param(lambda root: H.plant_row(root, body="{not json"), id="corrupt"),
-    pytest.param(lambda root: H.plant_row(root, body="[]\n"), id="corrupt-non-object"),
-    pytest.param(lambda root: H.plant_row(root, row_tenant_id=H.OTHER), id="other-tenant"),
-    pytest.param(lambda root: location_path(H.row_path)(root).mkdir(parents=True), id="directory"),
-    pytest.param(lambda root: H.plant_row(root, drop="created_at"), id="missing-created-at"),
-]
-
-
-@pytest.mark.parametrize("plant_bad_row", BAD_ROWS)
-def test_1120_accept_tenant_refuses_an_absent_corrupt_or_foreign_row(
-        tmp_path: Path, plant_bad_row) -> None:
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    plant_bad_row(root)
-    text = H.accept_refusal(_tenant, root)
-    assert str(location_path(H.row_path)(root)) in text, f"the refusal does not name the row: {text!r}"
-
-    control = tmp_path / "control"
-    H.place_knowledge(control)
-    H.plant_row(control, extra={"added_by_a_newer_writer": "x"})
-    tenant = H.accept(_tenant, control)
-    assert tenant.row.tenant_id == H.TID
 
 
 def _knowledge_absent(root: Path, tmp_path: Path) -> None:
@@ -326,8 +296,8 @@ def _assert_hardlinked_objects(root: Path) -> None:
     """The positive control is vacuous unless the clone really left a hard link to find."""
     linked = H.hardlinked_git_objects(H.knowledge_dir(root))
     assert linked, (
-        "PRECONDITION FAILED (PO-b): no file under knowledge/.git/objects has st_nlink > 1 — "
-        "this filesystem did not hard-link the local clone, so accepting it proves nothing")
+        "precondition: no file under knowledge/.git/objects has st_nlink > 1 (this "
+        "filesystem did not hard-link the local clone)")
 
 
 def test_1120_accept_tenant_accepts_a_plain_local_clone_whose_git_objects_are_hard_linked(
@@ -459,11 +429,7 @@ def test_1120_accept_tenant_refuses_a_knowledge_entry_outside_the_allow_list(
 
     location_path(H.row_path)(root).unlink()
     before = H.tree_census(root)
-    text = H.assert_refused(H.setup(tenant_py, root), str(entry))
-    assert "the data root is not empty" not in text, (
-        f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
-        f"the folder rule must refuse the entry:\n{text}")
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
+    H.assert_first_setup_refused(H.setup(tenant_py, root), root, before, str(entry))
 
     control = tmp_path / "control"
     knowledge = _clone_with_every_allowed_entry(tmp_path, control)

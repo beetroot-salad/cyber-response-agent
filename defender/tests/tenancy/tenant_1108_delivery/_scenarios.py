@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
-import importlib
-
 import json
 
 import os
@@ -457,9 +455,3 @@ class _AnswerLost(ForgeHTTP):
 
 _UNUSABLE_REPOSITORY = {"no-id": {"full_name": "tenants/blue"}, "list": [], "str-id": {"id": "11"},
                         "null-id": {"id": None}, "float-id": {"id": 11.0}, "bool-id": {"id": True}}
-
-
-def _forge():
-    return importlib.import_module("defender.learning.author.version_control.forgejo")
-
-

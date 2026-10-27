@@ -212,7 +212,7 @@ def test_d2_docker_context_per_system(tmp_path):
     assert [S.context_of(a) for a in _argvs(shim2)] == [S.context_name("dcx", "identity")], \
         "positive control: identity, which names its context, still answers on it"
     every = [tok for a in _argvs(shim) + _argvs(shim2) for tok in a]
-    assert "soc-playground" not in every, "a call fell back to soc-playground (CX17's default)"
+    assert "soc-playground" not in every, "a call fell back to the soc-playground default"
 
 
 def test_d2_elastic_containers_no_default(tmp_path):
@@ -246,7 +246,7 @@ def test_d2_elastic_containers_no_default(tmp_path):
             _raised(elastic_adapter.health_check, ctx_k)
         targets = [S.exec_target(a) for a in _argvs(shim_k)]
         assert not {"elasticsearch", "kibana", "", None} & set(targets), \
-            f"{key} absent: a call fell back to a built-in container (CX17): {targets}"
+            f"{key} absent: a call fell back to a built-in container: {targets}"
 
 
 def test_o2_adapter_config_snapshot(tmp_path):
@@ -572,10 +572,10 @@ def test_s7_mf8_config_fault_breaker_accounting_unchanged(tmp_path):
         lead_system="host-state")
     charged = {s: run_state.breaker_failures(s) for s in systems}
     assert charged == dict.fromkeys(systems, 0), \
-        f"a system down for config was charged (#1256 O-2): {_breaker_doc(run_state)}"
+        f"a system down for config was charged: {_breaker_doc(run_state)}"
     assert run_state.breaker_snapshot()["total_failures"] == 0, \
-        f"the run was charged for systems down for config (#1256 O-2): {_breaker_doc(run_state)}"
-    assert ran == [], f"a system down for config had its adapter run (#1256 O-1): {ran}"
+        f"the run was charged for systems down for config: {_breaker_doc(run_state)}"
+    assert ran == [], f"a system down for config had its adapter run: {ran}"
     assert main.calls >= 2, f"the run must complete (main {main.calls} turns, gather {gather.calls})"
     assert gather.calls >= limit + 2, \
         f"the lead must be answered after every call (main {main.calls} turns, gather {gather.calls})"
@@ -699,17 +699,17 @@ def test_o5_missing_system_config_run_completes(tmp_path, monkeypatch):
     assert gather.calls >= 3, f"the run must complete (main {main.calls} turns, gather {gather.calls})"
     rows = {r["system"]: r for r in _own_rows(run_dir)}
     assert rows.get("threat-intel", {}).get("exit_code") == 0, f"threat-intel must still answer: {rows}"
-    assert ran == [], f"cmdb is not configured, but its adapter ran (#1256 O-1): {ran}"
-    assert "cmdb" not in rows, f"the refused cmdb call wrote a query row (#1256 O-4): {rows['cmdb']}"
+    assert ran == [], f"cmdb is not configured, but its adapter ran: {ran}"
+    assert "cmdb" not in rows, f"the refused cmdb call wrote a query row: {rows['cmdb']}"
     assert run_state.breaker_failures("cmdb") == 0, \
-        f"cmdb's refusal was charged (#1256 O-2): {_breaker_doc(run_state)}"
+        f"cmdb's refusal was charged: {_breaker_doc(run_state)}"
     assert run_state.breaker_snapshot()["total_failures"] == 0, \
-        f"the run was charged for cmdb's refusal (#1256 O-2): {_breaker_doc(run_state)}"
+        f"the run was charged for cmdb's refusal: {_breaker_doc(run_state)}"
     assert gather.seen[1].startswith(gather.seen[0]), \
         "precondition: a gather request's text extends the one before it (harness shape)"
     answered = gather.seen[1][len(gather.seen[0]):]
     assert "not configured" in answered.lower(), \
-        f"the cmdb call's refusal must say cmdb is not configured (#1256 O-4): {answered!r}"
+        f"the cmdb call's refusal must say cmdb is not configured: {answered!r}"
     assert "not found" in answered.lower(), \
         f"the refusal must carry the check's reason (the config file not found): {answered!r}"
     assert "tripped" not in answered.lower(), f"a not-configured refusal reads as a trip: {answered!r}"

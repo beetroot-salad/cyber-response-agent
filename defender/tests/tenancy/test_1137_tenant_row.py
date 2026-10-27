@@ -145,7 +145,7 @@ def _outcome(fn: Callable[..., Any], *args: Any, **kw: Any) -> tuple[Any, Except
 
 def _served(fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
     value, raised = _outcome(fn, *args, **kw)
-    assert raised is None, f"{fn.__name__} refused where today it serves: {raised!r}"
+    assert raised is None, f"{fn.__name__} refused where it should serve: {raised!r}"
     return value
 
 
@@ -153,7 +153,7 @@ def _refused(fn: Callable[..., Any], *args: Any, **kw: Any) -> str:
     """The refusal's message, after checking that the call refused with `TenantRefused` itself:
     no subclass, and no bare `OSError` or `ValueError` escaping."""
     value, raised = _outcome(fn, *args, **kw)
-    assert raised is not None, f"{fn.__name__} served {value!r} where today it refuses"
+    assert raised is not None, f"{fn.__name__} served {value!r} where it should refuse"
     assert type(raised) is owner.TenantRefused, (
         f"{fn.__name__} refused with {type(raised).__name__}, not TenantRefused: {raised}")
     return str(raised)
@@ -225,9 +225,15 @@ _UNDECODABLE = (b'{\n  "created_at": "2026-09-26T00:00:00+00:00\xff",\n'
 #: A good row followed by whitespace past `READ_LIMIT`.
 _OVERSIZED = GOOD_ROW + " " * _io.READ_LIMIT
 
+#: A good row plus a key a newer writer might add: served, the extra key ignored.
+_NEWER_WRITER_ROW = json.dumps(
+    {"tenant_id": TID, "created_at": GOOD_AT, "added_by_a_newer_writer": "x"},
+    indent=2, sort_keys=True) + "\n"
+
 READ_SHAPES: dict[str, ReadShape] = {
     # Served.
     "good-row": ReadShape(_put_row, None),
+    "newer-writer-key": ReadShape(lambda w: _put_row(w, _NEWER_WRITER_ROW), None),
     "linked-T": ReadShape(_plant_linked_dir, None),
     # Refused at the open: the entry at the row's name is not a plain, single-named file.
     "directory-at-row": ReadShape(lambda w: w.row.mkdir(parents=True),
@@ -340,7 +346,7 @@ def test_accept_tenant_reads_the_row_as_it_did(tmp_path, shape):
     READ_SHAPES[shape].plant(w)
     _place_knowledge_if_reachable(w)
     accept = functools.partial(owner.accept_tenant, defender_dir=H.DEFENDER)
-    if shape == "good-row":
+    if shape in ("good-row", "newer-writer-key"):
         tenant = _served(accept, fixture_data_root(w.root), TID)
         assert (tenant.id, tenant.row.tenant_id, tenant.row.created_at) == (TID, TID, GOOD_AT)
         return
@@ -361,8 +367,8 @@ def test_accept_placed_knowledge_reads_a_present_row_as_it_did(tmp_path, shape):
     _place_knowledge_if_reachable(w)
     place = functools.partial(owner.accept_placed_knowledge, defender_dir=H.DEFENDER)
     settings = w.dir / "knowledge" / "settings"
-    if shape in ("good-row", "absent-row"):
-        assert _served(place, fixture_data_root(w.root), TID) == (settings, shape == "good-row")
+    if shape in ("good-row", "newer-writer-key", "absent-row"):
+        assert _served(place, fixture_data_root(w.root), TID) == (settings, shape != "absent-row")
         return
     _refuse_then_repair(place, w, shape, tmp_path)
     assert _served(place, fixture_data_root(w.root), TID) == (settings, True), "the positive control"

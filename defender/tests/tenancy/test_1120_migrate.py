@@ -22,13 +22,11 @@ _TID = fixture_uuid("tenant:playground")
 _LAB = f"knowledge/tenants/{_TID}"
 
 
-def _migrate(tenant_id: str, target: Path, *, home: Path, script: Path | None = None,
-             identity_env: bool = True) -> subprocess.CompletedProcess:
+def _migrate(tenant_id: str, target: Path, *, home: Path,
+             script: Path | None = None) -> subprocess.CompletedProcess:
     """`tenant.py migrate <tenant_id> <target>` as a process, under `home`'s git config and
     with no data root at all (migrate needs none)."""
-    extra = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / "xdg")}
-    if identity_env:
-        extra.update(H.GIT_IDENTITY)
+    extra = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / "xdg"), **H.GIT_IDENTITY}
     return H.run_script(script or H.script_of(tenant_py), "migrate", tenant_id, str(target),
                         root=None, unset=S._AMBIENT_GIT, **extra)
 
@@ -44,26 +42,23 @@ def _old_shape_root(root: Path) -> Path:
     return root
 
 
-def _committed(repo: Path, rev: str = "HEAD", under: str = "") -> dict[str, bytes]:
-    """`{path: bytes}` of what `rev` commits (under `under`, relative to it)."""
-    args = ["ls-tree", "-r", "-z", "--name-only", rev] + (["--", under] if under else [])
+def _committed(repo: Path, under: str = "") -> dict[str, bytes]:
+    """`{path: bytes}` of what HEAD commits (under `under`, relative to it)."""
+    args = ["ls-tree", "-r", "-z", "--name-only", "HEAD"] + (["--", under] if under else [])
     names = [n for n in H.git(repo, *args).stdout.split("\0") if n]
     return {(Path(n).relative_to(under).as_posix() if under else n):
-            H.git(repo, "cat-file", "blob", f"{rev}:{n}").stdout.encode("utf-8") for n in names}
+            H.git(repo, "cat-file", "blob", f"HEAD:{n}").stdout.encode("utf-8") for n in names}
 
 
-def _checkout_with_a_retired_lab(dest: Path, shape: str = "merged",
-                                 extra: dict[str, str] | None = None) -> tuple[Path, dict]:
+def _checkout_with_a_retired_lab(dest: Path, shape: str = "merged") -> tuple[Path, dict]:
     """A tmp checkout whose history commits a lab at `knowledge/tenants/<lab id>` (the
-    fixture's files, plus `extra`) and then deletes it, reaching HEAD by `shape`: "merged" (a
+    fixture's files) and then deletes it, reaching HEAD by `shape`: "merged" (a
     branch deleting it, merged with a merge commit into a main that moved on), "squashed", or
     "linear". Returns the checkout and the lab's committed files."""
     checkout = H.tmp_checkout(dest)
     lab = checkout / _LAB
     if not lab.exists():
         shutil.copytree(H.FIXTURE, lab, symlinks=True)
-    for rel, text in (extra or {}).items():
-        (lab / rel).write_text(text, encoding="utf-8")
     H.git(checkout, "add", "--force", "--", _LAB)
     H.git(checkout, "commit", "-q", "--allow-empty", "-m", "the lab")
     files = _committed(checkout, under=_LAB)

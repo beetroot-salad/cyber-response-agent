@@ -3,10 +3,9 @@ copy, a draft or an export); `DefenderPaths` carries no knowledge (#1108). The s
 census of every other reader is `tenant_1108_p4/test_census.py`."""
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
-_knowledge = importlib.import_module("defender.knowledge._knowledge")
+from defender.knowledge import _knowledge
 
 
 def test_an_agent_root_carries_its_own_knowledge(tmp_path: Path) -> None:

@@ -239,9 +239,3 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
     assert url.startswith(f"http://cmdb-{marker}:8080/"), f"the cmdb call did not use the tenant file's CMDB_URL_BASE: {url!r}"
     assert exported not in " ".join(calls[-1]["argv"]), (
         f"the exported CMDB_URL_BASE reached the call's argv: {calls[-1]['argv']}")
-
-
-#: Homonyms of "override" the product docs keep: (file, a phrase on the listed line).
-HOMONYMS: tuple[tuple[str, str], ...] = (
-    ("defender/skills/connect/SKILL.md", "overrideable with cause"),
-)

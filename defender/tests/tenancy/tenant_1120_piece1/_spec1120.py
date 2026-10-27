@@ -39,12 +39,6 @@ ROW_NAME = "tenant.json"
 #: The row file's path property on `Tenant`.
 ROW_PATH_PROPERTY = "row_path"
 
-#: `Tenant`'s nine path properties.
-TENANT_PATH_PROPERTIES = (
-    "tenant_root", "runs", "sessions", "episodes", "learning", "worktrees", "knowledge", "settings",
-    "agent",
-)
-
 #: Files required under `settings/`, spelled as literals so a test can disagree with the
 #: production constant.
 REQUIRED_SETTINGS = (
@@ -59,13 +53,6 @@ TENANT_ID_FILE = Path("agent") / ".tenant-id"
 #: The fixture's lead-zero template.
 FIXTURE_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 
-#: Run start's readiness function (grants load, gather holds a query verb, lead-zero agrees);
-#: setup must reach this function, never a hand-copied rule list.
-RUN_READINESS = "defender.systems.run_tenant.resolve_run_tenant"
-
-#: `tenant.py`'s setup subcommand function.
-SETUP_FUNCTION = "defender.cli.tenant.setup"
-
 #: What `check` says, beside git's reason, when its committed-`.tenant-id` git read cannot
 #: answer (git absent, dubious ownership, any git error).
 CANNOT_VERIFY_TENANT_ID = "cannot verify .tenant-id is committed"
@@ -74,6 +61,19 @@ CANNOT_VERIFY_TENANT_ID = "cannot verify .tenant-id is committed"
 #: holding it can be taken — for `check` and the census lint alike.
 BROKEN_SYSTEM = "broken"
 BROKEN_ADAPTER = "VERBS = {\n    'verb': (\n"
+
+#: A verb-grants table total over the census `_dispositions995.planted_tree` declares for alpha
+#: and beta (each one's lookup and health-check); alpha's rows also grant the correlation lead.
+CENSUS_ROWS: dict[tuple[str, str], dict] = {
+    ("alpha", "health-check"): {"roles": ["gather", "lead-zero-correlation"]},
+    ("alpha", "lookup"): {"roles": ["gather", "lead-zero-correlation"]},
+    ("beta", "health-check"): {"roles": ["gather"]},
+    ("beta", "lookup"): {"roles": ["gather"]},
+}
+#: The template's table over the same census: total, and grants nothing.
+CENSUS_TEMPLATE_ROWS: dict[tuple[str, str], dict] = {
+    pair: {"roles": [], "reason": "the template grants nothing until an operator decides"}
+    for pair in CENSUS_ROWS}
 
 
 # ======================================================================================
@@ -151,24 +151,11 @@ def row_path(root: Path, tenant_id: str = TID) -> Path:
     return Path(root) / tenant_id / ROW_NAME
 
 
-def plant_row(root: Path, tenant_id: str = TID, *, body: str | bytes | None = None,
-              row_tenant_id: str | None = None, drop: str | None = None,
-              extra: dict[str, Any] | None = None) -> Path:
-    """Write `<root>/<tenant_id>/tenant.json` by hand — a valid row, or a real corruption.
-    `body` writes raw bytes verbatim; `row_tenant_id` lets the row name another tenant; `drop`
-    removes a field; `extra` adds keys a newer writer might add."""
+def plant_row(root: Path, tenant_id: str = TID) -> Path:
+    """Write a valid `<root>/<tenant_id>/tenant.json` by hand."""
     path = row_path(root, tenant_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if body is not None:
-        path.write_bytes(body.encode("utf-8") if isinstance(body, str) else body)
-        return path
-    doc: dict[str, Any] = {
-        "tenant_id": tenant_id if row_tenant_id is None else row_tenant_id,
-        "created_at": "2026-09-28T00:00:00+00:00",
-        **(extra or {}),
-    }
-    if drop is not None:
-        doc.pop(drop)
+    doc = {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"}
     path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
@@ -323,16 +310,15 @@ def cloned_tenant(tmp: Path, root: Path, tenant_id: str = TID, *,
 UNCOMMITTED_TENANT_ID_WAYS = ("untracked", "staged", "overwritten")
 
 
-def clone_with_uncommitted_tenant_id(tmp: Path, root: Path, how: str,
-                                     tenant_id: str = TID) -> Path:
-    """A plain local clone at `<root>/<tenant_id>/knowledge` whose `agent/.tenant-id` holds
-    exactly `<tenant_id>\\n` while its repo's HEAD does not commit that content, `how` being
+def clone_with_uncommitted_tenant_id(tmp: Path, root: Path, how: str) -> Path:
+    """A plain local clone at `<root>/<TID>/knowledge` whose `agent/.tenant-id` holds
+    exactly `<TID>\\n` while its repo's HEAD does not commit that content, `how` being
     one of `UNCOMMITTED_TENANT_ID_WAYS`. Real git states: the file's bytes are right and only
     the commit is missing. Returns the `knowledge/` path."""
     assert how in UNCOMMITTED_TENANT_ID_WAYS, how
     committed = f"{OTHER}\n" if how == "overwritten" else None
-    knowledge = cloned_tenant(tmp, root, tenant_id, tenant_id_file=committed)
-    write_tenant_id_file(knowledge, tenant_id, "id")
+    knowledge = cloned_tenant(tmp, root, TID, tenant_id_file=committed)
+    write_tenant_id_file(knowledge, TID, "id")
     if how == "staged":
         git(knowledge, "add", TENANT_ID_FILE.as_posix())
     return knowledge
@@ -423,13 +409,17 @@ def check(module: Any, root: Path | None, *args: str, **kw: Any) -> subprocess.C
     return tenant_py(module, "check", *args, root=root, **kw)
 
 
-def adopt_fixture(module: Any, root: Path, tenant_id: str = TID) -> Path:
-    """A tenant in a tmp data root the operator's way: place the fixture (writing
-    `agent/.tenant-id`, which the fixture does not commit) and run `tenant.py setup <id>`,
-    which must exit 0. Returns the tenant folder."""
-    place_knowledge(root, tenant_id)
-    assert_clean(setup(module, root, tenant_id))
-    return tenant_folder(root, tenant_id)
+def assert_first_setup_refused(proc: subprocess.CompletedProcess, root: Path,
+                               before: dict[str, Any], *names: str) -> str:
+    """A first setup over placed knowledge refused for the folder's own fault: the refusal names
+    `names` and is not the one-tenant guard's, and the data root is as `before` found it, with
+    no row. Returns the output."""
+    text = assert_refused(proc, *names)
+    assert "the data root is not empty" not in text, (
+        f"the one-tenant guard refused instead of the placed knowledge's own fault:\n{text}")
+    assert census_diff(before, tree_census(root)) == [], "the refused setup wrote something"
+    assert not location_path(row_path)(root).exists(), "a refused first setup left a row"
+    return text
 
 
 # ======================================================================================
@@ -564,11 +554,11 @@ def add_adapter(checkout: Path, system: str, source: str) -> Path:
     return path
 
 
-def edit_table(settings: Path, *, drop: tuple[str, ...] = (), append: str = "") -> Path:
-    """Edit a tenant's `verb-grants.yaml` as TEXT: remove every line containing one of `drop`,
-    then append `append` verbatim. Returns the table's path."""
+def edit_table(settings: Path, *, drop: tuple[str, ...] = ()) -> Path:
+    """Edit a tenant's `verb-grants.yaml` as TEXT: remove every line containing one of `drop`.
+    Returns the table's path."""
     table = Path(settings) / "verb-grants.yaml"
     lines = table.read_text(encoding="utf-8").splitlines(keepends=True)
     kept = [ln for ln in lines if not any(d in ln for d in drop)]
-    table.write_text("".join(kept) + append, encoding="utf-8")
+    table.write_text("".join(kept), encoding="utf-8")
     return table
