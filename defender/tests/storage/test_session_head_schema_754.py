@@ -35,6 +35,7 @@ from defender.tests.support.storage._session_store_705 import (  # noqa: E402
     user_request,
 )
 from defender.records import SessionPaths  # noqa: E402
+from defender.tests.support.storage._store_owner import owned_store, reread
 
 
 # the two tables' declared shape
@@ -228,7 +229,7 @@ def test_open_store_refuses_a_user_version_1_file(tmp_path):
         f"a version-1 file must be refused at open; got {refusal!r}")
     assert "1" in str(refusal), f"the refusal names the version it found: {refusal}"
 
-    fresh = ss.open_store(case_id="case-fresh", sessions=SessionPaths(fixture_runs_base(base)))
+    fresh = owned_store(case_id="case-fresh", sessions=SessionPaths(fixture_runs_base(base)))
     assert fresh.path != stale, "control: a file at the current version opens"
     assert fresh.new_session(agent_id="main")
 
@@ -248,11 +249,11 @@ def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
     assert isinstance(writer_refusal, ss.UnknownSchemaVersion), writer_refusal
     assert sidecars(stale) == [], "neither refusal leaks its connection"
 
-    current = ss.open_store(case_id="case-current", sessions=SessionPaths(fixture_runs_base(base)))
+    current = owned_store(case_id="case-current", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = current.new_session(agent_id="main")
     linear_turns(current, session_id, 1)
     current.close()
-    reader = ss.open_store_for_read(ss.store_path_for("case-current", sessions=SessionPaths(fixture_runs_base(base))))
+    reader = reread(ss.store_path_for("case-current", sessions=SessionPaths(fixture_runs_base(base))))
     assert ss.path_row_ids(reader, session_id), (
         "control: the same reader opens and serves a file at the current version")
 
@@ -265,7 +266,7 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     base = runs_base(tmp_path)
     run_dir = tmp_path / fixture_uuid(f"run-{case_id}")
     run_dir.mkdir()
-    store = ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(base)))
+    store = owned_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(base)))
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     return run_dir, store
 

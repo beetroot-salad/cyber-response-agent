@@ -29,6 +29,7 @@ from defender.tests.support.storage._session_store_705 import (
 )
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.records import SessionPaths
+from defender.tests.support.storage._store_owner import owned_store
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -53,7 +54,7 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
             f"{case_id}: the store must be a sibling of the runs base; got {path}")
         assert path.name.endswith(".db")
 
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = base / fixture_uuid("20260718t101500z-alpha")
     run_dir.mkdir(parents=True)
@@ -82,8 +83,9 @@ def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
     for value in hostile:
         with pytest.raises(ss.InvalidCaseId):
             ss.store_path_for(value, sessions=SessionPaths(fixture_runs_base(base)))
-        with pytest.raises(ss.InvalidCaseId):
-            ss.open_store(case_id=value, sessions=SessionPaths(fixture_runs_base(base)))
+        with pytest.raises(ss.InvalidCaseId), ss.open_store(
+                case_id=value, sessions=SessionPaths(fixture_runs_base(base))):
+            pass
 
     assert ss.CASE_ID_RE.pattern.endswith("\\Z"), (
         f"anchor with \\Z, not $: {ss.CASE_ID_RE.pattern!r} admits a trailing newline "
@@ -124,9 +126,8 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
     from defender.execution.bash_exec import parse
     from defender.box import start_box, stop_box
 
-    ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request(SECRET)], agent_id="main")
     store.close()
@@ -167,9 +168,8 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
 def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
     from defender.learning import lead_repository
 
-    ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request(SECRET)], agent_id="main")
     store.close()
@@ -280,14 +280,14 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
         # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
         run_dir = base / fixture_uuid(slug)
         run_dir.mkdir(parents=True)
-        store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+        store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
         ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [user_request(slug), *complete_pair()], agent_id="main")
         sessions.append(session_id)
         store.close()
 
-    final = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    final = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     assert {row[0] for row in sql(final, "SELECT session_id FROM session")} == set(sessions)
     files = sorted(p.name for p in Path(final.path).parent.glob("*.db"))
     assert files == ["case-alpha.db"], f"two executions produced {files}"

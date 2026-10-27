@@ -378,14 +378,12 @@ def _source_main_session(source_run_dir: Path) -> Iterator[list[tuple[int, Any]]
     source = opened_source(source_run_dir)
     store = branch_mod.source_store_if_any(source.run_dir, source_run=source)
     assert store is not None, "the recorded source left no session store"
-    try:
+    with store:
         session = branch_mod.session_for_run(store, source.run_dir, source_run=source)
         ids = ss.path_row_ids(store, session)
         messages = ss.hydrate(store, session, role="analysis")
         assert len(ids) == len(messages), (len(ids), len(messages))
         yield list(zip(ids, messages, strict=True))
-    finally:
-        store.close()
 
 
 def branch_response(source_run_dir: Path, *, tool: str, arg_suffix: str) -> int:

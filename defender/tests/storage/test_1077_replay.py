@@ -104,8 +104,7 @@ def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: P
             f"a message row with no payload row is observable: {torn} — RG-3 established that "
             "both writes commit inside one transaction")
         # A JOINING reader — a second connection, as a resume or fork opens — sees the same.
-        joiner = SS.store_mod().open_store_for_read(store.path)
-        try:
+        with SS.store_mod().open_store_for_read(store.path) as joiner:
             rows = SS.sql(joiner, """
                 SELECT m.id FROM message m
                 LEFT JOIN message_payload p ON p.message_id = m.id
@@ -115,8 +114,6 @@ def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: P
             committed = SS.sql(
                 joiner, "SELECT COUNT(*) FROM message WHERE session_id = ?", (session_id,))
             assert committed[0][0] >= 1, "positive control: the joiner sees the committed rows"
-        finally:
-            joiner.connection.close()
 
 
 def test_a_second_claim_on_one_lead_still_loses_the_exclusive_create(tmp_path: Path):

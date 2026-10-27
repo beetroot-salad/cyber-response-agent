@@ -956,13 +956,15 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     planted = _tenant()
     src = _branchable_source(tmp_path, planted)
     assert src.run_dir is not None
-    store = S.sym("investigation.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
-    # #1255 (D1, C7): a branch point is a MAIN response that called tools, and the arm resumes
-    # with no continuation prompt — the source's third one (its `echo`), after the capture.
-    point = tool_calling_responses(store)[2]
-    assert calls_of(message_at(store, point))[0].tool_name == "bash", (
-        "the branch point is not the source's `echo` call")
-    spec = spec_at(store, src.run_dir, point)
+    with S.sym("investigation.branch._spec", "open_source_store")(
+            src.run_dir, source_run=_run_handle_1165(src.run_dir)) as store:
+        # #1255 (D1, C7): a branch point is a MAIN response that called tools, and the arm
+        # resumes with no continuation prompt — the source's third one (its `echo`), after the
+        # capture.
+        point = tool_calling_responses(store)[2]
+        assert calls_of(message_at(store, point))[0].tool_name == "bash", (
+            "the branch point is not the source's `echo` call")
+        spec = spec_at(store, src.run_dir, point)
     sibling_dir = location_path(planted.runs) / fixture_uuid(f"{src.run_dir.name}-sibling")
     sibling_dir.mkdir(parents=True)
     for name, source in _held_files(src.run_dir).items():

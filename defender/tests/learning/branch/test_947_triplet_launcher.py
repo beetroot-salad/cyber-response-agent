@@ -495,18 +495,20 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
 
     base, src = location_path(T.runs_base)(tmp_path)
     # #1105 fork S(b): the layout owner hands the store its paths.
-    handle = store_mod.open_store(case_id="case-947", sessions=SessionPaths(fixture_runs_base(base)))
-    sid = handle.new_session(agent_id="main")
-    at = handle.append(sid, [S.user_request("investigate the alert"), *S.complete_pair()],
-                       agent_id="main")[-1]
+    with store_mod.open_store(case_id="case-947",
+                              sessions=SessionPaths(fixture_runs_base(base))) as handle:
+        sid = handle.new_session(agent_id="main")
+        at = handle.append(sid, [S.user_request("investigate the alert"), *S.complete_pair()],
+                           agent_id="main")[-1]
     made: list[str] = []
     lock = threading.Lock()
     barrier = threading.Barrier(3)
 
     def fork():
         barrier.wait()
-        h = store_mod.open_store(case_id="case-947", sessions=SessionPaths(fixture_runs_base(base)))
-        child = h.fork(sid, at_message_id=at)
+        with store_mod.open_store(case_id="case-947",
+                                  sessions=SessionPaths(fixture_runs_base(base))) as h:
+            child = h.fork(sid, at_message_id=at)
         with lock:
             made.append(child)
 

@@ -1324,7 +1324,7 @@ def store_factory(tmp_path: Path, *, fault: SS.StoreFault | None = None,
     base = SS.runs_base(tmp_path)
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("records", "SessionPaths")(fixture_runs_base(base)))
+        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("records", "SessionPaths")(fixture_runs_base(base)))  # lint-store-ownership: ok — a factory: the run that calls it closes the wrapper
         handle = LeadSessionFault(real, fault or default, once=once)
         if sink is not None:
             sink.append(handle)

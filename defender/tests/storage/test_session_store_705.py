@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
+import gc
 import json
+import re
 import sqlite3
+import warnings
 import threading
 
 import pytest
@@ -32,6 +35,7 @@ from defender.tests.support.storage._session_store_705 import (
     user_request,
 )
 from defender.records import SessionPaths
+from defender.tests.support.storage._store_owner import owned_store
 
 
 # the handle, the connection, the schema version
@@ -77,6 +81,28 @@ def test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary(tmp_path
         f"a coerced coordinate must never reach the table; got {stored}")
 
 
+def test_a_store_dropped_while_open_warns_and_one_closed_first_does_not(tmp_path):
+    """A handle collected while its connection is still open names its file in an
+    `UnclosedStoreWarning`: the leak is reported where it happens, not left for SQLite to
+    clean up whenever the collector runs (#1324). A closed handle is collected silently."""
+    ss = store_mod()
+    # Opened bare, not through `make_store`: the test's own stack would hold it open.
+    leaked = ss.open_store(  # lint-store-ownership: ok — the leak under test
+        case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))
+    path = re.escape(str(leaked.path))
+    with pytest.warns(ss.UnclosedStoreWarning, match=path):
+        del leaked
+
+    closed = make_store(tmp_path / "closed")
+    closed.close()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        del closed
+        gc.collect()
+    assert not [w for w in caught if issubclass(w.category, ss.UnclosedStoreWarning)], (
+        f"a closed store still warned: {[str(w.message) for w in caught]}")
+
+
 def test_reader_refuses_an_unknown_user_version(tmp_path):
     """A store whose `PRAGMA user_version` the reader does not know is refused with an"""
     ss = store_mod()
@@ -99,8 +125,9 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
         raw.execute(f"PRAGMA user_version = {bogus}")
         raw.commit()
         raw.close()
-        with pytest.raises(ss.UnknownSchemaVersion):
-            ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))
+        with pytest.raises(ss.UnknownSchemaVersion), ss.open_store(
+                case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path)))):
+            pass
 
 
 # append-only: the negative and its positive control
@@ -375,11 +402,10 @@ def test_a_session_ends_on_an_incomplete_pair_only_when_truncated_by_is_set(tmp_
 
 def test_an_append_is_one_commit_per_render_boundary(tmp_path):
     """One append is one transaction: the `message` row and its `message_payload` row"""
-    ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
-    observer = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    observer = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
 
     samples: list[tuple[int, int]] = []
 
@@ -404,7 +430,7 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
     """Two gather legs appending concurrently against one store, each under its own"""
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    owner = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = owner.new_session(agent_id="main")
 
     counts = {"gather-a": 20, "gather-b": 10}
@@ -413,12 +439,12 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
 
     def leg(agent_id: str, n: int) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
-            barrier.wait(timeout=10)
-            for i in range(n):
-                handle.append(session_id, [text_response(f"{agent_id}-{i}")],
-                              agent_id=agent_id, seq=i)
-            handle.close()
+            with ss.open_store(case_id="case-alpha",
+                               sessions=SessionPaths(fixture_runs_base(base))) as handle:
+                barrier.wait(timeout=10)
+                for i in range(n):
+                    handle.append(session_id, [text_response(f"{agent_id}-{i}")],
+                                  agent_id=agent_id, seq=i)
         except BaseException as exc:  # noqa: BLE001 — the assertion is "no error at all"
             errors.append(exc)
 
@@ -442,7 +468,7 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
     """One writer racing ITSELF — the same `session_id` and the same `agent_id`, appending"""
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    owner = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = owner.new_session(agent_id="main")
 
     per_leg = 15
@@ -452,11 +478,11 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
 
     def leg(tag: str) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
-            barrier.wait(timeout=10)
-            for i in range(per_leg):
-                handle.append(session_id, [text_response(f"{tag}-{i}")], agent_id=agent_id)
-            handle.close()
+            with ss.open_store(case_id="case-alpha",
+                               sessions=SessionPaths(fixture_runs_base(base))) as handle:
+                barrier.wait(timeout=10)
+                for i in range(per_leg):
+                    handle.append(session_id, [text_response(f"{tag}-{i}")], agent_id=agent_id)
         except BaseException as exc:  # noqa: BLE001 — the assertion is "no error at all"
             errors.append(exc)
 

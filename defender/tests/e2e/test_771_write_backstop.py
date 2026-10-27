@@ -224,11 +224,8 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
     # The consequence that is not recoverable by any caller: a run cannot start at all.
-    handle = session_store.open_store(case_id="c-771-anchor", sessions=SessionPaths(fixture_runs_base(linked / "runs")))
-    try:
+    with session_store.open_store(case_id="c-771-anchor", sessions=SessionPaths(fixture_runs_base(linked / "runs"))) as handle:
         assert handle.path.is_file(), "the session store did not land under a symlinked base"
-    finally:
-        handle.connection.close()
 
     # …and the anchor did not buy that by ceasing to look inside the tree.
     outside_dir = tmp_path / "elsewhere" / "loot"

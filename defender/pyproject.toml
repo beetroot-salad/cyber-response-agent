@@ -119,6 +119,14 @@ dev = [
 # test, so `defender.*` namespace imports resolve in tests under both tests/ and
 # learning/ — in isolation or in a full run — without per-file sys.path hacks.
 pythonpath = [".."]
+# A session store collected while still open is a leak (#1324): its opener never closed it, and
+# SQLite then deletes the store's `-wal`/`-shm` files whenever the collector happens to run.
+# The warning is raised inside `__del__`, so pytest reports it as an unraisable exception: both
+# filters are needed, the second narrowed to the store's own `__del__`.
+filterwarnings = [
+    "error::defender.records.session_store.UnclosedStoreWarning",
+    "error:Exception ignored in. <function StoreHandle\\.__del__:pytest.PytestUnraisableExceptionWarning",
+]
 markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",

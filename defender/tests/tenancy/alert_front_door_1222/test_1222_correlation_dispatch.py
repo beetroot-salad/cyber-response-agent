@@ -24,6 +24,7 @@ from defender.tests.support.learning.branch._branch_947 import spec_at
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S7
+from defender.tests.support.storage._store_owner import reread
 
 # Local helpers (work-arounds requested as shared machinery in 82-writer-correlation_dispatch.md)
 
@@ -612,7 +613,7 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
                          S.text(f"{marks['l-002']}: measured.")]})
     _run_with_turns(d)
     assert sink, "the run opened no store through the injected factory"
-    store = sink[-1]
+    store = reread(sink[-1])
     rows = _session_rows(store)
     agents = [a for _s, a in rows]
     expected = ["main", f"gather:{S.L3}", "gather:l-001", "gather:l-002"]
@@ -730,12 +731,13 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
         leads={S.L3: corr, "l-009": [S.query(system, verb, params), S.text("L9 captured.")]})
     _run_with_turns(src)
     assert src.run_dir is not None
-    store = S.sym("investigation.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
     ss = SS.store_mod()
-    path = ss.path_row_ids(store, ss.main_session_id(store))
-    point = S1255.tool_calling_responses(store)[2]  # the `echo` call
-    assert S1255.calls_of(S1255.message_at(store, point))[0].tool_name == "bash", path
-    spec = spec_at(store, src.run_dir, point)
+    with S.sym("investigation.branch._spec", "open_source_store")(
+            src.run_dir, source_run=_run_handle_1165(src.run_dir)) as store:
+        path = ss.path_row_ids(store, ss.main_session_id(store))
+        point = S1255.tool_calling_responses(store)[2]  # the `echo` call
+        assert S1255.calls_of(S1255.message_at(store, point))[0].tool_name == "bash", path
+        spec = spec_at(store, src.run_dir, point)
     sibling_dir = _plant_sibling(src.run_dir, location_path(planted.runs) / fixture_uuid(f"{run_id}-sibling"))
     sib = S.new_drive(tmp_path / "sibling", tenant=planted, main=sibling_turns)
     S.drive_run(sib, sibling_dir, tenant=planted.accept(), resume=spec)

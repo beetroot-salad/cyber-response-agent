@@ -151,11 +151,9 @@ def prebranch_calls(source: Run, branch_message_id: int) -> frozenset[str]:
     store = branch.source_store_if_any(run_dir, source_run=source)
     if store is None:
         return frozenset()
-    try:
+    with store:
         session = branch.session_for_run(store, run_dir, source_run=source)
         leads = set(branch.leads_at(store, session, branch_message_id, run_dir, source_run=source))
-    finally:
-        store.close()
     rows, _unreadable = load_queries_report(run_dir)
     seen: set[str] = set()
     fixed: set[str] = set()

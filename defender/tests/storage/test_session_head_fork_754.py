@@ -32,6 +32,7 @@ from defender.tests.support.storage._session_store_705 import (  # noqa: E402
     user_request,
 )
 from defender.records import SessionPaths  # noqa: E402
+from defender.tests.support.storage._store_owner import owned_store
 
 
 # fork: the branch point becomes a log entry
@@ -256,9 +257,8 @@ def test_head_and_log_move_in_one_transaction(tmp_path):
 
 def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(tmp_path):
     """A refused append is invisible to a later reader, whatever refused it: when the wait for a"""
-    ss = store_mod()
     base = runs_base(tmp_path)
-    real = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    real = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = real.new_session(agent_id="main")
     r1, r2 = linear_turns(real, session_id, 2)
     real.append(session_id, [text_response("recorded move")], agent_id="main",
@@ -288,7 +288,7 @@ def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(t
     assert exhausted is not None, "the database must really have stopped growing"
     real.close()
 
-    reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
+    reopened = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     assert head_of(reopened, session_id) == expected_head
     assert log_rows(reopened, session_id) == expected_log
     assert message_ids(reopened, session_id) == expected_rows

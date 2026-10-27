@@ -8,6 +8,7 @@ import json
 import math
 import sqlite3
 import uuid
+import warnings
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -61,6 +62,11 @@ def _finish_connect(conn: sqlite3.Connection) -> None:
 
 
 # the handle
+
+class UnclosedStoreWarning(ResourceWarning):
+    """A store handle was garbage-collected while still open: whoever opened it never closed
+    it (#1324). The test suite turns this into an error."""
+
 
 @model
 class StoreHandle:
@@ -243,6 +249,14 @@ class StoreHandle:
 
     def close(self) -> None:
         self.connection.close()
+
+    def __del__(self) -> None:
+        try:
+            self.connection.total_changes  # noqa: B018 — raises once the connection is closed
+        except sqlite3.ProgrammingError:
+            return
+        warnings.warn(f"session store {self.path} was dropped while still open",
+                      UnclosedStoreWarning, stacklevel=2, source=self)
 
     def __enter__(self) -> StoreHandle:
         return self

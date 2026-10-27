@@ -34,6 +34,7 @@ from defender.tests.e2e._replay_harness import (
     load_turns_from_trace,
     materialize,
 )
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -70,7 +71,7 @@ def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
     opened: list = []
     drive(run_dir, run_id=run_id, main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
-    return run_dir, opened[0], replay
+    return run_dir, reread(opened[0]), replay
 
 
 def _trace_events(run_dir: Path) -> list[dict]:
@@ -314,7 +315,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
           store_factory=store_factory(tmp_path, sink=opened))
 
     bodies = "".join(row[0] for row in
-                     sql(opened[0], "SELECT payload FROM message_payload"))
+                     sql(reread(opened[0]), "SELECT payload FROM message_payload"))
     assert "window.__pwned" in bodies, (
         "the crafted payload never reached the store — the fixture, not the renderer, "
         "would be what this test measured")

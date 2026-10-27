@@ -186,20 +186,14 @@ def test_a_pointer_planted_inside_the_folder_is_not_the_case_link(tmp_path):
     (run_a / OLD_POINTER_NAME).write_text(json.dumps(b_link), encoding="utf-8")
 
     for open_store in (branch.open_source_store, branch.source_store_if_any):
-        handle = open_store(run_a, source_run=_run_handle_1165(run_a))
-        try:
+        with open_store(run_a, source_run=_run_handle_1165(run_a)) as handle:
             assert Path(handle.path).resolve() == Path(a_link["store_path"]).resolve(), \
                 f"{open_store.__name__} followed a pointer planted inside the run folder"
-        finally:
-            handle.connection.close()
     assert session_store.resolve_store_path(_run_handle_1165(run_a)) == Path(a_link["store_path"])
     assert session_store.resolve_session_id(_run_handle_1165(run_a)) == a_link.get("session_id")
 
-    control = branch.open_source_store(run_b, source_run=_run_handle_1165(run_b))
-    try:
+    with branch.open_source_store(run_b, source_run=_run_handle_1165(run_b)) as control:
         assert Path(control.path).resolve() == Path(b_link["store_path"]).resolve()
-    finally:
-        control.connection.close()
     assert session_store.resolve_store_path(_run_handle_1165(run_b)) == Path(b_link["store_path"])
 
 
@@ -210,13 +204,15 @@ def test_a_hand_copied_run_folder_carries_no_case_link(tmp_path):
     copy = tmp_path / "elsewhere" / fixture_uuid("run")
     shutil.copytree(run_dir, copy)
 
-    assert branch.source_store_if_any(copy, source_run=_run_handle_1165(copy)) is None, \
-        "a hand-copied folder opened a store through a link carried inside it"
+    assert branch.source_store_if_any(  # lint-store-ownership: ok — asserted to open nothing
+        copy, source_run=_run_handle_1165(copy)) is None, (
+        "a hand-copied folder opened a store through a link carried inside it")
 
     (copy / OLD_POINTER_NAME).write_text(json.dumps(_pointer(run_dir)), encoding="utf-8")
     with pytest.raises(branch.BranchError):
-        branch.source_store_if_any(copy, source_run=_run_handle_1165(copy))
+        branch.source_store_if_any(copy, source_run=_run_handle_1165(copy))  # lint-store-ownership: ok — asserted to refuse
 
     handle = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
     assert handle is not None, "the original run's sidecar opened no store"
-    handle.connection.close()
+    with handle:
+        pass

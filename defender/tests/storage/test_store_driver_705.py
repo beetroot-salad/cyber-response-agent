@@ -4,6 +4,7 @@ from __future__ import annotations
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -135,7 +137,7 @@ def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
           verbs=FakeVerbs({"elastic": {}}),
           store_factory=store_factory(tmp_path, sink=opened))
 
-    store = opened[0]
+    store = reread(opened[0])
     agents = {row[0] for row in sql(store, "SELECT DISTINCT agent_id FROM message")}
     assert "main" in agents, agents
     assert any(a != "main" for a in agents), (
@@ -153,7 +155,7 @@ def test_main_history_is_store_rendered(tmp_path):
     drive(run_dir, run_id="store-render", main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
 
-    store = opened[0]
+    store = reread(opened[0])
     session_id = sql(store, "SELECT session_id FROM session")[0][0]
     final = ss.hydrate(store, session_id, role="send")
     seen_text = replay.seen[-1]
@@ -183,7 +185,7 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
           verbs=FakeVerbs({"elastic": {"probe": _one_hit}}),
           store_factory=store_factory(tmp_path, sink=opened))
 
-    store = opened[0]
+    store = reread(opened[0])
     gather_agents = {row[0] for row in
                      sql(store, "SELECT DISTINCT agent_id FROM message WHERE agent_id != 'main'")}
     assert gather_agents, "gather still WRITES rows — this is a render exclusion, not a record one"
@@ -303,10 +305,68 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
 
     assert model.calls >= 2, "a wire-log encoding failure must NOT stop the run"
     assert result["exit_reason"] != "StoreAppendError"
-    store = opened[0]
+    store = reread(opened[0])
     assert sql(store, "SELECT COUNT(*) FROM message")[0][0] > 0, (
         "the store recorded the turn the log could not encode — fail-closed applies to "
         "the store append alone")
+
+
+def _still_open(store) -> bool:
+    """Asked of SQLite itself, not of any flag the handle keeps."""
+    try:
+        store.connection.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return False
+    return True
+
+
+def _exploding_gather(messages, info) -> ModelResponse:
+    raise RuntimeError("an exit type nobody enumerated")
+
+
+@pytest.mark.parametrize("ending", ["finished", "budget-kill", "uncaught"])
+def test_the_run_closes_the_store_it_opened_on_every_exit(tmp_path, monkeypatch, ending):
+    """The driver opened the store through the factory, so the driver closes it — however the
+    run ends, including by an exception it does not catch (#1324). A caller that wants the rows
+    afterwards reopens the file the summary names."""
+    rd = materialize(tmp_path, GOLDEN, run_id=f"close-{ending}")
+    opened: list = []
+    factory = store_factory(tmp_path, sink=opened)
+    if ending == "finished":
+        summary = drive(rd, run_id=f"close-{ending}", main=ReplayFn([Turn(text="Nothing to do.")]),
+                        store_factory=factory)
+        assert summary["truncated_by"] is None, summary
+    elif ending == "budget-kill":
+        monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "1")
+        summary = drive(rd, run_id=f"close-{ending}", main=ReplayFn(_read_alert_turns(rd, 15)),
+                        limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600),
+                        store_factory=factory)
+        assert summary["truncated_by"] == "budget", summary
+    else:
+        with pytest.raises(RuntimeError):
+            drive(rd, run_id=f"close-{ending}", main=ReplayFn([Turn(tool_calls=[("gather", {
+                "lead_id": "l-001", "system": "elastic", "goal": "probe",
+                "what_to_summarize": ["x"]})])]),
+                  gather=_exploding_gather, store_factory=factory)
+    assert len(opened) == 1, f"the run opened {len(opened)} stores"
+    assert not _still_open(opened[0]), f"the run ended ({ending}) with its store still open"
+
+
+def test_a_refused_branch_point_ends_the_run_through_the_store_exit_and_frees_its_log(tmp_path):
+    """A store factory that refuses as `BranchError` — what a resume over an unusable branch
+    point raises — is a store-setup failure: the run ends `truncated_by="store"` naming the
+    class, and its wire log is released, so the same run dir can be driven again."""
+    from defender.investigation import branch, observe
+
+    rd = materialize(tmp_path, GOLDEN, run_id="refused-branch")
+
+    def refusing(case_id: str, run_dir: Path):
+        raise branch.BranchError("the branch point names no message")
+
+    summary = drive(rd, run_id="refused-branch", main=ReplayFn([Turn(text="unreached")]),
+                    store_factory=refusing)
+    assert (summary["truncated_by"], summary["exit_reason"]) == ("store", "BranchError"), summary
+    observe.RequestLogger.from_record(_run_handle_1165(rd).observability.wire_log).close()
 
 
 #: The request-limit run's base ceiling: a few rounds, far under the shipped
@@ -317,7 +377,7 @@ _SHORT_BASE_REQUEST_LIMIT = 4
 @pytest.fixture(scope="module")
 def request_limit_run(tmp_path_factory):
     """ONE run that ends by `UsageLimitExceeded` (a `NeverEndsModel` over `GOLDEN_AB3`), shared
-    by the two tests that read its store read-only: the run-end flush's (1) exit and the
+    by the two tests that read its store read-only (each through its own `reread`): the run-end flush's (1) exit and the
     projection-order test. Driven once instead of twice; neither test writes to it."""
     base = tmp_path_factory.mktemp("request-limit")
     rd = materialize(base, GOLDEN_AB3, run_id='flush-limit')
@@ -382,7 +442,8 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
               store_factory=store_factory(tmp_path / "uncaught", sink=opened))
     exits["uncaught"] = (opened[0], None)
 
-    for label, (store, expected_truncated_by) in exits.items():
+    for label, (closed, expected_truncated_by) in exits.items():
+        store = reread(closed)
         session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
         analysis = ss.hydrate(store, session_id, role="analysis")
         send = ss.hydrate(store, session_id, role="send")
@@ -398,7 +459,8 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
 
 def test_the_moved_projection_is_built_after_the_run_end_flush(request_limit_run):
     ss = store_mod()
-    rd, store = request_limit_run
+    rd, closed = request_limit_run
+    store = reread(closed)
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
     analysis = ss.hydrate(store, session_id, role="analysis")
     events = [json.loads(line) for line in
@@ -428,7 +490,7 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
           main=ReplayFn(_read_alert_turns(rd, 6) + [Turn(text="done")]),
           store_factory=store_factory(tmp_path, sink=opened))
 
-    store = opened[0]
+    store = reread(opened[0])
     rows = sql(store, "SELECT m.id, p.payload FROM message m JOIN message_payload p "
                       "ON p.message_id = m.id WHERE m.synthesized = 1 ORDER BY m.id")
     assert rows, "no synthesized frontier row was minted — the fixture folded nothing"

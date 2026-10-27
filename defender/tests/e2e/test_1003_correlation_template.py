@@ -30,6 +30,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     VerbRecorder,
     drive,
 )
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -145,7 +146,7 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
         ],
     )
     assert source.summary_dict.get("truncated_by") is None, source.summary_dict
-    store = sink[0]
+    store = reread(sink[0])
     from defender.tests.support.runtime.state._1255_snapshot import tool_calling_responses
 
     spec = spec_at(store, source.run_dir, tool_calling_responses(store)[-1])

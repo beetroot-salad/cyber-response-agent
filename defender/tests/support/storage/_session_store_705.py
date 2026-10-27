@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
+import contextlib
 import importlib
 import json
 import sqlite3
@@ -15,6 +16,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.records import SessionPaths  # noqa: E402
+from defender.tests.support.storage._store_owner import owning_stack  # noqa: E402
 from pydantic_ai.messages import (  # noqa: E402
     ModelRequest,
     ModelResponse,
@@ -129,9 +131,10 @@ def runs_base(tmp_path: Path) -> Path:
 
 
 def make_store(tmp_path: Path, *, case_id: str = "case-alpha"):
-    """Open a real per-case store under a real runs base."""
+    """Open a real per-case store under a real runs base, closed when the test ends."""
     ss = store_mod()
-    return ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))
+    return owning_stack().enter_context(contextlib.closing(
+        ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))))
 
 
 def sql(store, query: str, params: tuple = ()) -> list[tuple]:
@@ -328,7 +331,7 @@ def store_factory(tmp_path: Path, *, fault: StoreFault | None = None,
 
     def factory(run_case_id: str, run_dir: Path):
         ss = store_mod()
-        real = ss.open_store(case_id=case_id or run_case_id, sessions=SessionPaths(fixture_runs_base(base)))
+        real = ss.open_store(case_id=case_id or run_case_id, sessions=SessionPaths(fixture_runs_base(base)))  # lint-store-ownership: ok — a factory: the run that calls it closes the handle
         handle = FaultStore(real, fault) if fault is not None else real
         if sink is not None:
             sink.append(handle)

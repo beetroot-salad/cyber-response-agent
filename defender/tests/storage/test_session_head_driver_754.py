@@ -29,6 +29,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 from defender.records import SessionPaths  # noqa: E402
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -50,7 +51,7 @@ def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_pa
           verbs=FakeVerbs({"elastic": {}}),
           store_factory=store_factory(tmp_path, sink=opened))
 
-    store = opened[0]
+    store = reread(opened[0])
     sessions = dict(sql(store, "SELECT session_id, agent_id FROM session"))
     legs = [s for s, agent in sessions.items() if agent != "main"]
     mains = [s for s, agent in sessions.items() if agent == "main"]

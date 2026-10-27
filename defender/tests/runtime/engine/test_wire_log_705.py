@@ -34,6 +34,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
+from defender.tests.support.storage._store_owner import reread
 
 REPO_ROOT = WORKTREE
 SALT = "0011223344556677"
@@ -145,7 +146,7 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
     drive(run_dir, run_id="join", main=replay,
           store_factory=store_factory(tmp_path, sink=opened))
 
-    store = opened[0]
+    store = reread(opened[0])
     rows = sql(store, "SELECT session_id, run_step, wire_sha FROM message "
                       "WHERE kind = 'request' AND wire_sha IS NOT NULL ORDER BY run_step")
     assert rows, "no request row carries a renderer digest"

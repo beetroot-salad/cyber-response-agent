@@ -43,18 +43,17 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
 
     from defender.records import session_store as ss
 
-    store = ss.open_store(
-        case_id=f"visualize-runtime-fixture-{run.parent.name}", sessions=SessionPaths(fixture_runs_base(run.parent)))
-    ss.write_case_pointer(_run_handle_1165(run), case_id=store.case_id, store_path=store.path)
-    sessions: dict[str, str] = {}
-    for rec in messages:
-        agent_id = rec.get("agent_id", "main")
-        if agent_id not in sessions:
-            sessions[agent_id] = store.new_session(agent_id=agent_id)
-        session_id = sessions[agent_id]
-        message = ModelMessagesTypeAdapter.validate_python([rec["message"]])[0]
-        store.append(session_id, [message], agent_id=agent_id)
-    store.close()
+    with ss.open_store(case_id=f"visualize-runtime-fixture-{run.parent.name}",
+                       sessions=SessionPaths(fixture_runs_base(run.parent))) as store:
+        ss.write_case_pointer(_run_handle_1165(run), case_id=store.case_id, store_path=store.path)
+        sessions: dict[str, str] = {}
+        for rec in messages:
+            agent_id = rec.get("agent_id", "main")
+            if agent_id not in sessions:
+                sessions[agent_id] = store.new_session(agent_id=agent_id)
+            session_id = sessions[agent_id]
+            message = ModelMessagesTypeAdapter.validate_python([rec["message"]])[0]
+            store.append(session_id, [message], agent_id=agent_id)
 
 
 def _build_run(tmp: Path) -> Path:

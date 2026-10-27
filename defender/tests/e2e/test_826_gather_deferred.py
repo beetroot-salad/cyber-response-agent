@@ -40,6 +40,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     q,
     raising,
 )
+from defender.tests.support.storage._store_owner import reread
 
 pytestmark = pytest.mark.e2e
 
@@ -74,7 +75,7 @@ class _Res:
     def sessions(self) -> dict[str, str | None]:
         """`agent_id -> truncated_by` for every session this run opened, read straight out of
         the real SQLite file rather than through any reader under test."""
-        store = self.stores[-1]
+        store = reread(self.stores[-1])
         return {
             agent_id: truncated
             for agent_id, truncated in sql(
@@ -213,7 +214,7 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
     drive(run_dir, run_id="d826-store", main=main, gather=gather,
           verbs=elastic_ok(rec), store_factory=store_factory(tmp_path, sink=stores))
 
-    sessions = dict(sql(stores[-1], "SELECT agent_id, truncated_by FROM session"))
+    sessions = dict(sql(reread(stores[-1]), "SELECT agent_id, truncated_by FROM session"))
     assert sessions[f"gather:{LEAD}"] == session_store.TRUNCATED_BY_DEAD_END, \
         "the cut-off lead's session carries no terminator — it reads as one that finished"
     assert sessions["gather:l-002"] is None, \
@@ -290,7 +291,7 @@ def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
 
     stamped = [
         reason for (reason,) in sql(
-            stores[-1], "SELECT truncated_by FROM session WHERE truncated_by IS NOT NULL")
+            reread(stores[-1]), "SELECT truncated_by FROM session WHERE truncated_by IS NOT NULL")
     ]
     assert stamped, "no session was stamped at all — the scenario stopped cutting one off"
     for reason in stamped:
@@ -363,7 +364,7 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
 
     # The session terminator (item 1) covers this new stop too — a fourth terminator with the
     # same gap is exactly what item 1 warned the next one would be.
-    assert dict(sql(res.stores[-1], "SELECT agent_id, truncated_by FROM session"))[
+    assert dict(sql(reread(res.stores[-1]), "SELECT agent_id, truncated_by FROM session"))[
         f"gather:{LEAD}"] == session_store.TRUNCATED_BY_DEAD_END
 
 

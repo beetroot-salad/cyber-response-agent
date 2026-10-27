@@ -328,11 +328,8 @@ def test_o4_fork_store_location(tmp_path, data_root):
     base.mkdir(parents=True)
     src = H.source_run(base)
     br = H.mod("investigation.branch")
-    store = br.open_source_store(src, source_run=_run_handle_1165(src))
-    try:
+    with br.open_source_store(src, source_run=_run_handle_1165(src)) as store:
         as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))
-    finally:
-        store.close()
     # #1255 (D1, P4) COMPAT: the prompt reaches the spec only while the spec declares it.
     retired = ({B947.RETIRED_PROMPT_FIELD: H.CONTINUATION}
                if B947.declares_retired_prompt() else {})

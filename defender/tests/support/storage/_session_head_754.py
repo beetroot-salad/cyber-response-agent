@@ -207,14 +207,11 @@ def session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     caller that still depends on both.
     """
     ss = store_mod()
-    store = ss.open_store_for_read(ss.resolve_store_path(_run_handle_1165(Path(run_dir))))
-    try:
+    with ss.open_store_for_read(ss.resolve_store_path(_run_handle_1165(Path(run_dir)))) as store:
         session_id = ss.resolve_session_id(_run_handle_1165(Path(run_dir))) or ss.main_session_id(store)
         messages = ss.hydrate(store, session_id, role="analysis")
         coords = ss.hydrate(store, session_id, role="actor")
         return list(zip(messages, [c["coord"] for c in coords], strict=True))
-    finally:
-        store.connection.close()
 
 
 def raised_by(fn: Any, *args: Any, **kwargs: Any) -> BaseException | None:

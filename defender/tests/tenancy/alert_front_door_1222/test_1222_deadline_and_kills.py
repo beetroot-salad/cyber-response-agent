@@ -234,7 +234,7 @@ def _main_append_fault_store(tmp: Path, sink: list) -> Callable[..., Any]:
     fault = SS.StoreFault(on="append", after=0, mode="disk-full")
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("records", "SessionPaths")(fixture_runs_base(base)))
+        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("records", "SessionPaths")(fixture_runs_base(base)))  # lint-store-ownership: ok — a factory: the run that calls it closes the wrapper
         handle = _AgentAppendFault(real, fault, agent_id="main")
         sink.append(handle)
         return handle
