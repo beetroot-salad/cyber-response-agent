@@ -155,9 +155,12 @@ def test_a3_under_fullmatches_the_resolved_path(env):
 
 
 def test_a5_symlink_escaping_the_root_denied(env):
+    """An in-shape symlink pointing out of root is denied by bash and the read tool alike: the
+    operand is resolved before its scope check."""
     evil = env.run / "gather_raw" / "l-001" / "9.json"
     os.symlink("/etc/passwd", evil)
     assert not _bash(env, f"cat {evil}", "gather").allow
+    assert not _read(env, evil, "gather").allow
     assert _bash(env, f"cat {env.run}/gather_raw/l-001/0.json", "gather").allow
 
 
@@ -169,7 +172,8 @@ def test_a6_symlink_to_an_in_root_target_allowed(env):
 
 def test_a7_symlink_loop_fails_closed(env):
     """A symlink loop makes `Path.resolve(strict=False)` raise `RuntimeError` (before 3.13); it is
-    in `permission.files.RESOLVE_ERRORS`, so the gate denies and nothing escapes `decide_bash`."""
+    in `permission.files.RESOLVE_ERRORS`, so the gate denies and nothing escapes `decide_bash`
+    (a raise would be a 500 in the driver, not a deny the model can retry)."""
     a = env.run / "gather_raw" / "l-002" / "0.json"
     b = env.run / "gather_raw" / "l-002" / "1.json"
     os.symlink(b, a)

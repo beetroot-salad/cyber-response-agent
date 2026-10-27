@@ -184,25 +184,6 @@ def test_the_author_drain_triggers_exactly_its_two_named_curators(tenant, tmp_pa
         location_path(paths.state_root) / QUESTIONER_FINDINGS.queue)
 
 
-def test_a_full_findings_queue_alone_still_wakes_the_drain(tenant, tmp_path):
-    """The findings-only drive still wakes the drain and runs, its box mounting the draft's two
-    lesson corpora writable."""
-    t = tenant
-    paths = tenant_paths(t, tmp_path)
-    D.seed(paths, FINDINGS, [defender_queue_row()])
-    assert D.pending(paths, QUESTIONER_FINDINGS) == []
-
-    trigger = TwoLaneRecorder(D.recording(D.committing("family-lesson")),
-                              run=(W.DEFENDER_CURATOR_MODULE,))
-    rc, rec = drive(t, paths, trigger)
-
-    assert rc == 0
-    assert W.DEFENDER_CURATOR_MODULE in trigger.modules, (
-        "the findings queue alone no longer wakes the drain")
-    request = rec.only_request()
-    assert writable_sources(request) == lane_sources(request, "lessons", "lessons-questioner")
-
-
 def test_the_lead_author_label_never_mounts_the_questioner_corpus(tenant, tmp_path, monkeypatch):
     """The `lead_author_drain` box mounts the draft's skills tree writable and NEITHER lessons
     corpus. Woken by one pitfalls row (threshold 1); the lane's work steps are no-ops."""

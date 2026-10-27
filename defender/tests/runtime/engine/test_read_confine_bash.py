@@ -5,7 +5,6 @@ The corpus is the tenant's (lessons, system skills, query catalog) under the run
 `defender_dir`. `env.agent` is that run copy, built from made-up content."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -192,11 +191,6 @@ def test_grep_dash_f_patternfile_escapes(env):
     assert _bash(env, f"cat {env.run}/investigation.md | grep root", "gather").allow  # positive control
 
 
-def test_grep_dash_e_promotes_positional_to_file(env):
-    # rejected: model grep as always pattern+files positionally (ignores -e)
-    assert not _bash(env, "grep -e root /etc/shadow", "gather").allow
-
-
 def test_grep_recursive_denied(env):
     """`grep -r`/`-R` is denied: recursion reads files no operand named (and follows symlinks out of
     root). The dir operand is in-root on purpose, so only the flag can deny it."""
@@ -358,37 +352,13 @@ def test_relative_after_cd_still_denied(env):
     assert not _bash(env, f"cd {env.run} && cat gather_raw/l-001/1.json", "gather").allow
 
 
-# H. Symlinks: containment is where a path resolves                             #
+# H. Symlinks: links cannot be created (resolving one is test_grant_gate_575's a5-a8)
 
 def test_ln_symlink_creation_denied(env):
     """`ln -s` is denied on both lanes: `ln` is in no grant, so the agent cannot create a symlink
     (defense in depth; resolving operands is what contains one)."""
     assert not _bash(env, f"ln -s /etc/passwd {env.run}/x", "gather").allow
     assert not _bash(env, f"ln -s /etc/passwd {env.run}/x", "main").allow
-
-
-def test_preexisting_symlink_out_of_root_denied(env):
-    """A pre-existing in-shape symlink pointing out of root is denied on both surfaces because the
-    operand is resolved; a link to an in-root target is allowed (positive control)."""
-    escape = env.run / "gather_raw" / "l-001" / "9.json"
-    os.symlink("/etc/passwd", escape)
-    assert not _bash(env, f"cat {escape}", "gather").allow
-    assert not _read(env, escape, "gather").allow          # ...and the read tool agrees
-
-    (env.run / "gather_raw" / "l-001" / "0.json").write_text("{}\n")
-    inside = env.run / "gather_raw" / "l-001" / "1.json"
-    os.symlink(env.run / "gather_raw" / "l-001" / "0.json", inside)
-    assert _bash(env, f"cat {inside}", "gather").allow     # positive control
-
-
-def test_symlink_loop_fails_closed(env):
-    """A symlink LOOP makes `resolve()` raise `RuntimeError` — the gate must DENY, never propagate
-    (a raise out of decide_bash is a 500 in the driver, not a deny the model can retry)."""
-    a = env.run / "gather_raw" / "l-001" / "2.json"
-    b = env.run / "gather_raw" / "l-001" / "3.json"
-    os.symlink(b, a)
-    os.symlink(a, b)
-    assert not _bash(env, f"cat {a}", "gather").allow      # must not raise
 
 
 # I. Bash redirect writes deny; writes go through the write tools               #

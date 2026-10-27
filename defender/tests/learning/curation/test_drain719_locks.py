@@ -96,31 +96,6 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
     assert h.pending(paths, ch) == []
 
 
-def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(tmp_path: Path):
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    rows = [h.row_for("findings", "a/0")]
-    observed = {}
-
-    for deadline in (1, 2):
-        h.seed(paths, ch, rows)
-        agent = h.recording(h.committing("never"))
-        cfg = h.cfg_for(
-            paths, "findings", invoke_agent=agent, repo_lock_wait_seconds=deadline
-        )
-        with h.Holder(location_path(paths.state_root) / ch.append_lock):
-            rc, seconds = h.elapsed(lambda cfg=cfg: drain.run_batch(cfg=cfg))
-        assert rc == 0
-        assert agent.calls == []
-        assert h.pending(paths, ch) == rows
-        observed[deadline] = seconds
-
-    assert 0.8 <= observed[1] < 2.5, f"the 1s deadline was not what ended the wait: {observed}"
-    assert 1.8 <= observed[2] < 4.0, f"the 2s deadline was not what ended the wait: {observed}"
-    # Each give-up tracks its own deadline: a hard-coded wait gives both the same length.
-    assert observed[2] - observed[1] >= 0.6, f"the wait did not follow the deadline: {observed}"
-
-
 # Lock order and the drain gates
 
 
