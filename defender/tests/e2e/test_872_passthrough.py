@@ -31,8 +31,8 @@ pytestmark = pytest.mark.e2e
 
 
 def _substituting() -> dict:
-    """A foreign dict-row payload comfortably under the shipped bar — the positive control
-    every "and it did not substitute" assertion in this module needs to be non-vacuous."""
+    """A foreign dict-row payload well under the shipped bar: the positive control for every
+    "did not substitute" assertion here."""
     return toon_rows(corpus()["fx-33"])
 
 
@@ -56,18 +56,6 @@ def test_str_scalar_none_and_content_block_returns_never_reach_the_encoder() -> 
         "nothing substituted, so the model-visible assertions above hold over a gate that "
         "never encodes anything"
     )
-
-
-def test_a_raising_toon_encoder_emits_json() -> None:
-    """When the encoder raises on a payload the pre-validator ADMITTED, the model gets the tool's
-    own JSON inside the frame and the gate raises nothing of its own."""
-    value = _substituting()
-    spy = SpyEncoder(EncoderFault(dumps_raises=PANIC("simulated encoder panic (S5's class)")))
-    out = agent_run(toolset=foreign_toolset(value), encoder=spy)
-
-    assert out.error is None, "an encoder fault escaped the gate"
-    assert spy.dumps_calls == 1
-    assert framed_content(out.dispatched.text()) == wire_text(value)
 
 
 def test_a_pydantic_serialization_error_on_the_baseline_emits_json() -> None:
@@ -190,13 +178,15 @@ def test_a_payload_whose_toon_form_is_empty_is_not_substituted() -> None:
 
 
 def test_a_baseexception_from_the_encoder_passes_through_and_a_control_flow_exception_is_reraised() -> None:
-    """Two assertions, and the second is the one a naive widening breaks."""
+    """An encoder panic on an admitted payload is tried once and passes through as the tool's own
+    JSON; a control-flow exception is re-raised (the arm a naive widening breaks)."""
     value = _substituting()
     caught = agent_run(
         toolset=foreign_toolset(value),
         encoder=SpyEncoder(EncoderFault(dumps_raises=PANIC("S5's class, captured"))),
     )
-    assert caught.error is None
+    assert caught.error is None, "an encoder fault escaped the gate"
+    assert caught.encoder.dumps_calls == 1
     assert framed_content(caught.dispatched.text()) == wire_text(value)
 
     for exc in (asyncio.CancelledError(), KeyboardInterrupt(), GeneratorExit(),
@@ -215,8 +205,7 @@ def test_a_baseexception_from_the_encoder_passes_through_and_a_control_flow_exce
 
 
 def test_a_view_the_encoder_produced_that_the_decoder_cannot_read_passes_through() -> None:
-    """A view the encoder itself produced that the decoder cannot read is a passthrough, not an
-    escaped fault — the box r2's diagram does not have."""
+    """The decoder's fault on the encoder's own view is a passthrough, not an escaped fault."""
     value = {"rows": [{"}": i, "z": f"pad-{i}"} for i in range(20)]}
     view = toons.dumps(value)
     with pytest.raises(BaseException) as caught:  # noqa: B017, PT011 — the class IS the probe

@@ -1,4 +1,4 @@
-"""#872 — the return contract at the seam (`d0`, `d0b`, `d16`, `d61`, `d71`, `d72`)."""
+"""#872 — the return contract at the seam: what each branch hands the model."""
 from __future__ import annotations
 
 import pytest
@@ -35,27 +35,9 @@ def _under_bar() -> dict:
     return value
 
 
-def _over_bar() -> dict:
-    value = corpus()[FIXTURE]
-    assert delivered_percent(value) > 95.0, (
-        "the passthrough fixture no longer fails the shipped DELIVERED-bytes bar (`d3`)"
-    )
-    return value
-
-
-def test_passthrough_carries_the_tools_own_json_unchanged_inside_the_frame() -> None:
-    for value in (_over_bar(), "a plain string", 7, None):
-        out = agent_run(toolset=foreign_toolset(value))
-        delivered = out.dispatched.text()
-        assert framed_content(delivered) == wire_text(value), (
-            f"passthrough content diverged from the no-gate wire bytes for {type(value).__name__}"
-        )
-        assert out.encoder.loads_calls == 0, "a passthrough decoded a view it did not deliver"
-
-
 def test_substitute_branch_return_shape() -> None:
     """The substitute branch returns `ToolReturn(return_value=<framed TOON>,
-    metadata={"json": <the tool's own return>})` — §7 r1's decision, spelled."""
+    metadata={"json": <the tool's own return>})`."""
     value = _under_bar()
     out = agent_run(toolset=foreign_toolset(value))
     part = out.dispatched.part("fetch_rows")
@@ -126,8 +108,7 @@ def test_a_tool_body_that_returns_its_own_toolreturn_is_unwrapped_framed_and_los
 
 
 def _flatten(meta: dict) -> list:
-    """Every value reachable in a metadata mapping — the shape assertion, so neither merge
-    order can be spelled into the test as the expected one."""
+    """Every value reachable in a metadata mapping, so the test fixes no merge order."""
     out: list = []
     for v in meta.values():
         out.append(v)

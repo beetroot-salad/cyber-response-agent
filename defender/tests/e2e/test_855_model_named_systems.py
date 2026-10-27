@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 import shlex
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -35,9 +34,8 @@ MODEL_AUTHORED_COLUMNS = frozenset({"verb", "params", "raw_command"})
 
 def _bad_args(system: Any, params: dict = PARAMS, *,
               verb: str = "query", extra_key: str = "bogus_extra_arg") -> Turn:
-    """A call the pydantic ARGUMENT SCHEMA turns back — `bogus_extra_arg` is P-a's executed
-    `extra_argument` shape — so its row is written by `wrap_tool_validate` from the RAW pre-
-    validation arguments."""
+    """A call the pydantic argument schema turns back (an extra argument), so its row is written
+    by `wrap_tool_validate` from the raw pre-validation arguments."""
     assert extra_key not in ("system", "verb", "params", "query_id"), \
         f"extra_key={extra_key!r} is one of the tool's own arguments — it would overwrite that " \
         "argument, or (for `query_id`) make the call valid, instead of adding an extra one"
@@ -47,15 +45,14 @@ def _bad_args(system: Any, params: dict = PARAMS, *,
 
 
 def _host_authored(row: dict) -> str:
-    """Every column of `row` the HOST wrote, as one searchable string — #1016 O1's oracle."""
+    """Every column of `row` the host wrote, as one searchable string."""
     return "\x00".join(
         str(v) for k, v in row.items() if k not in MODEL_AUTHORED_COLUMNS
     )
 
 
 def _model_authored(row: dict) -> str:
-    """The complement — the three columns O1 exempts (#1016 N1), joined the same way and for the
-    same reason."""
+    """The complement: the three model-authored columns, joined the same way."""
     return "\x00".join(
         str(v) for k, v in row.items() if k in MODEL_AUTHORED_COLUMNS
     )
@@ -92,8 +89,7 @@ def _summary(r: _Res) -> str:
 
 
 def _above_guard(r: _Res) -> list[dict]:
-    """The rows the above-guard placements' two guards COUNT — spent from
-    `record_query.in_rejection_domain`, the predicate #1015 made public for exactly this."""
+    """The rows the above-guard placements' two guards count (`record_query.in_rejection_domain`)."""
     return [row for row in r.own_rows if record_query.in_rejection_domain(row)]
 
 
@@ -125,9 +121,8 @@ def test_a_schema_rejected_call_cannot_name_a_system_of_record(tmp_path):
 
 
 def test_a_schema_rejected_call_on_a_real_system_still_records_it(tmp_path):
-    """A real system's schema rejection is recorded under that system and reaches the pitfalls
-    curator as ITS system skill's `execution.md` — the tenant's (#1108 P4 O1/O4/O7: spelled from
-    the draft's `KnowledgePaths`), not the product tree's `defender/skills/...`."""
+    """A real system's schema rejection keeps its system and reaches the pitfalls curator as the
+    tenant's `skills/<system>/execution.md`, not the product tree's."""
     r = _run(tmp_path, run_id="d855-real", turns=[_bad_args("elastic"), DONE])
 
     rows = _above_guard(r)
@@ -138,8 +133,6 @@ def test_a_schema_rejected_call_on_a_real_system_still_records_it(tmp_path):
     paths = [h["path"] for h in handoffs]
     assert len(paths) == 1, f"the rejection no longer reaches the pitfalls curator at all: {paths}"
     assert paths[0].endswith("skills/elastic/execution.md"), paths
-    # #1108 P4 (O1, O4, O7): the system skill the curator is pointed at is the TENANT's (its
-    # draft's `agent/skills/<system>/`, spelled from `KnowledgePaths`), never the product tree's.
     assert not paths[0].startswith("defender/"), (
         f"the pitfalls handoff still names the product tree's copy of the skill: {paths[0]}")
 
@@ -152,6 +145,8 @@ def test_an_unresolvable_call_cannot_name_a_system_of_record(tmp_path):
     assert len(rows) == 1, "the unresolvable branch stopped recording its row"
     assert rows[0]["exit_code"] == 64
     assert rows[0]["system"] == ""
+    assert _build_pitfalls_handoffs(_queued(rows), systems=frozenset({"elastic"})) == [], \
+        "the model's string became a handoff path the curator is pointed at"
 
 
 def test_no_row_names_a_system_the_dispatch_never_named(tmp_path):
@@ -208,13 +203,12 @@ def test_the_companion_repeat_guard_still_bounds_a_phantom_rejection_loop(tmp_pa
         "the model's own string crossed back into main's context on a refusal path"
 
 
-# #871 — the identity the coarsening took with it. Everything above is #855's, and stays: the
-# arms below add a fourteenth column and must not cost a single one of those negatives.
+# #871: a coarsened row keeps a distinct identity in a digest `system_key` column, without
+# loosening any of the negatives above.
 
 
 def test_three_different_undeclared_systems_are_three_calls_not_one_repeat(tmp_path):
-    """#871 — the companion guard's ONE property is that it never ends a lead for a call that
-    differs from its predecessors (#807 F-A, #826 item 4)."""
+    """The companion guard never ends a lead for a call that differs from its predecessors."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d871-distinct", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "ghostverb", PARAMS),
@@ -251,7 +245,7 @@ def test_three_different_undeclared_systems_are_three_calls_not_one_repeat(tmp_p
 
 
 def test_the_grant_checks_writer_mints_its_own_identity_too(tmp_path):
-    """The fix has TWO writers and the arms above reach the threshold through only one of them."""
+    """The grant-check writer, not only the schema writer, mints a distinct identity per ghost."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d871-grantpath", verbs=elastic_ok(rec), turns=[
         q("ghostone", "ghostverb", PARAMS), q("ghosttwo", "ghostverb", PARAMS),
@@ -286,8 +280,7 @@ def test_the_grant_checks_writer_mints_its_own_identity_too(tmp_path):
 
 
 def test_one_ghost_keys_the_same_through_both_above_guard_writers(tmp_path):
-    """`system_fingerprint`'s sole-ownership claim, bound ACROSS the two placements rather than
-    within each."""
+    """One fingerprint across both placements, so a loop alternating between them still trips."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d871-both-writers", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone"), q("ghostone", "query", PARAMS), _bad_args("ghostone"),
@@ -387,8 +380,7 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
 
 
 def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):
-    """N5 — the fingerprint is of a READABLE string, and a `system` argument that is not a string
-    has none."""
+    """Only a readable string is fingerprinted; a non-string `system` argument has none."""
     blank = _run(tmp_path / "blank", run_id="d871-n5", turns=[
         _bad_args(12345), _bad_args(True), _bad_args({"n": 1}), DONE,
     ])
@@ -415,8 +407,8 @@ def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):
 
 
 def test_an_invisible_system_string_is_folded_and_never_called_an_undeclared_system(tmp_path):
-    """The MESSAGE half of `names_something_readable`, at the seam — the fold half is pinned at
-    `test_826_deferred_defects` and nothing drove the two together."""
+    """The message and the fold of `names_something_readable` agree at the seam (the fold alone
+    is pinned in `test_826_deferred_defects`)."""
     r = _run(tmp_path, run_id="d871-invisible", turns=[
         _bad_args("\u200b"), _bad_args("\ufeff"), _bad_args("\u200b\u200b"), DONE,
     ])
@@ -450,8 +442,7 @@ def test_a_declared_system_is_never_folded_into_that_group(tmp_path):
 
 
 def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path):
-    """#1016 O1 — on a row whose `system` the host withheld, no column the HOST wrote echoes
-    anything the model wrote."""
+    """On a row whose `system` the host withheld, no host-written column echoes model text (#1016)."""
     rec = VerbRecorder()
     first = _run(tmp_path / "a", run_id="d1016-shapes-a", verbs=elastic_ok(rec), turns=[
         q("ghosttwo", "ghostverb", {"native_query": "FROM one"}),
@@ -565,8 +556,8 @@ def test_no_host_authored_column_of_a_coarsened_row_carries_model_text(tmp_path)
 
 
 def test_an_empty_system_argument_is_coarsened_like_every_other(tmp_path):
-    """The SIXTH shape, and the one a predicate written as "did the recorded value differ from
-    what the model SENT?" answers wrongly: a literal `system=""`."""
+    """A literal `system=""`: the shape a "did the recorded value differ from what the model
+    sent?" predicate gets wrong."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1016-empty", verbs=elastic_ok(rec), turns=[
         _bad_args("", {"native_query": "FROM one"}, verb="ghostverb",
@@ -602,8 +593,7 @@ def test_an_empty_system_argument_is_coarsened_like_every_other(tmp_path):
         f"a row whose identity columns say the host withheld a name: {leaks}"
     )
 
-    # And the row still SAYS something. O1 bounds what the host may put in that tail; it is not
-    # a licence to empty it — the same positive each of the five shapes above owes.
+    # The row still says something: the host may bound that tail, not empty it.
     schema, grant = rows
     assert "Extra inputs are not permitted" in _detail(schema), \
         "the schema placement stopped naming the error type, so its digest tells an operator " \
@@ -613,7 +603,7 @@ def test_an_empty_system_argument_is_coarsened_like_every_other(tmp_path):
 
 
 def test_a_row_that_kept_its_system_records_the_rejection_verbatim(tmp_path):
-    """#1016 O3 — the limit the fix may not overshoot, and the arm no existing test provides."""
+    """The coarsening does not reach rows that kept their system: they record verbatim (#1016)."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1016-declared", verbs=elastic_ok(rec), turns=[
         _bad_args("elastic", {"native_query": "FROM one"}),
@@ -646,13 +636,3 @@ def test_a_row_that_kept_its_system_records_the_rejection_verbatim(tmp_path):
     assert "unresolvable: elastic.nosuchverb" in grant["payload_digest"], \
         "the grant placement stopped recording `decision.refusal` for a DECLARED system, so " \
         "the row no longer says which verb was unresolvable"
-
-
-def test_the_dispatch_argument_is_the_only_system_the_run_can_name(tmp_path):
-    r = _run(tmp_path, run_id="d855-handoff",
-             turns=[_bad_args(PHANTOM), q(PHANTOM, "query", PARAMS), DONE])
-
-    handoffs = _build_pitfalls_handoffs(_queued(r.own_rows), systems=frozenset({"elastic"}))
-    paths = [h["path"] for h in handoffs]
-    assert not any(PHANTOM in p for p in paths), f"the curator is pointed at {paths}"
-    assert all(Path(p).parts[:2] == ("defender", "skills") for p in paths)

@@ -44,8 +44,7 @@ def _start_investigation_lane(run_dir: Path, docker) -> object:
 
 
 def _request(tmp_path: Path, *, writable: bool = True) -> object:
-    """A REAL `BoxRequest` in the shape the generic builder produces — the tier C8-new made
-    serve the drain lane AND the learning run-cycle."""
+    """A real `BoxRequest` for the generic builder, which serves the drain and learning lanes."""
     src = tmp_path / "wt"
     src.mkdir(parents=True, exist_ok=True)
     return box_mod.BoxRequest(
@@ -57,10 +56,8 @@ def _request(tmp_path: Path, *, writable: bool = True) -> object:
     )
 
 
-# M1 — the profile on the argv, on every lane
+# The profile on the argv, on every lane
 def test_box_argv_carries_the_alias_profile(tmp_path):
-    """alias_profile_seam — the rendered `docker run` argv carries `--security-opt seccomp=<the
-    shipped profile>`, pointing at a file that exists and parses as the deny profile."""
     rec = AliasProbeDocker()
     _start_investigation_lane(run_tree(tmp_path), rec)
 
@@ -195,8 +192,9 @@ def test_an_altered_or_unreadable_profile_faults_the_box_like_a_missing_one(tmp_
         _start_investigation_lane(run_tree(tmp_path / "second"), rec2)
 
 
-# M2 — the startup probe
+# The startup probe
 def test_startup_probe_refuses_each_banned_shape(tmp_path):
+    """The probe attempts exactly the ban's six (no scan-only shape) and leaves no alias behind."""
     run = run_tree(tmp_path)
     rec = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run, rec)
@@ -214,6 +212,13 @@ def test_startup_probe_refuses_each_banned_shape(tmp_path):
         f"the probe reported refusal while leaving an entry of a banned shape behind: {leftovers}"
     )
 
+    narrowed = shapes_named_in("docker exec box python3 -c os.symlinkat(); os.mknodat()")
+    assert narrowed == {"symlinkat", "mknodat"}, (
+        f"the shape reader cannot see a narrowed probe: it read {sorted(narrowed)} from an argv "
+        f"naming two shapes, so the equality above passes for a ban enforced on a subset — the "
+        f"partial enforcement O2 refuses to grade, reported as success"
+    )
+
 
 def test_startup_probe_ordinary_create_succeeds_in_the_same_exec(tmp_path):
     _start_investigation_lane(run_tree(tmp_path), AliasProbeDocker(BAN_IN_FORCE))
@@ -221,26 +226,6 @@ def test_startup_probe_ordinary_create_succeeds_in_the_same_exec(tmp_path):
     silent = AliasProbeDocker(ProbeVerdict(create_ok=False, cite="E1"))
     with pytest.raises(ban_not_in_force_error()):
         _start_investigation_lane(run_tree(tmp_path / "no-control"), silent)
-
-
-def test_startup_probe_set_is_the_banned_set_not_the_scrub_set(tmp_path):
-    """probe_set_matches_ban — the shape set the probe attempts is the BAN's set: the six denied
-    syscalls and no member of the reap scan's wider refusal set."""
-    rec = AliasProbeDocker(BAN_IN_FORCE)
-    _start_investigation_lane(run_tree(tmp_path), rec)
-
-    attempted = rec.shapes_attempted()
-    assert attempted == set(BANNED_SHAPES), f"the probe's attempted set drifted: {sorted(attempted)}"
-    assert not (attempted & set(SCAN_ONLY_SHAPES)), (
-        "the probe attempts a scan-only shape — it would fault every box at startup"
-    )
-
-    narrowed = shapes_named_in("docker exec box python3 -c os.symlinkat(); os.mknodat()")
-    assert narrowed == {"symlinkat", "mknodat"}, (
-        f"the shape reader cannot see a narrowed probe: it read {sorted(narrowed)} from an argv "
-        f"naming two shapes, so the equality above passes for a ban enforced on a subset — the "
-        f"partial enforcement O2 refuses to grade, reported as success"
-    )
 
 
 def test_the_alias_probe_runs_once_per_box_start(tmp_path):
@@ -294,16 +279,7 @@ def test_the_alias_probe_reruns_in_full_and_cleans_its_own_leavings_on_both_arms
     )
 
 
-# F4/D5 — the fault that must not be swallowed
-def test_box_start_faults_when_the_ban_is_not_in_force(tmp_path):
-    """probe_failure_faults_box_start — when the probe observes the ban absent, box startup
-    faults: no executor is returned, and no model turn is ever reached."""
-    rec = AliasProbeDocker(BAN_ABSENT)
-
-    with pytest.raises(ban_not_in_force_error()):
-        _start_investigation_lane(run_tree(tmp_path), rec)
-
-
+# The fault that must not be swallowed
 def test_ban_not_in_force_is_not_opt_out_able(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
 
@@ -323,8 +299,8 @@ def test_ban_not_in_force_is_not_opt_out_able(tmp_path, monkeypatch):
     "value", ["0", "true", "TRUE", "01", " 1", "1 ", "yes", "", "1\n"],
 )
 def test_the_unsandboxed_opt_out_matches_exactly_one_value(value, tmp_path, monkeypatch):
-    """unboxed_opt_out_exact_match — every near-miss spelling of the unsandboxed opt-out fails
-    CLOSED: only the exact string `1` degrades a box-startup fault to the host executor."""
+    """Near-miss spellings of the opt-out fail closed: only the exact `1` degrades a startup
+    fault to the host executor."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", value)
     rec = AliasProbeDocker(BAN_IN_FORCE,
                            create=DockerFault(rc=1, stderr="Cannot connect to the Docker daemon\n",
@@ -362,8 +338,7 @@ def _box_probe(box, run_dir: Path, name: str, source: str) -> dict:
     return json.loads(result.out.decode("utf-8", "replace").strip().splitlines()[-1])
 
 
-#: One probe body, three attempts, each reported as data. Used by the ordinary-operation
-#: confirmation; the deny-side confirmations reuse the same reporting shape.
+#: Three ordinary operations, each outcome reported as data.
 _ORDINARY_OPS_PROBE = """
 import json, os, socket
 out = {}
@@ -446,8 +421,6 @@ print(json.dumps(out))
 
 @requires_real_box
 def test_an_alias_between_two_artifacts_inside_the_tree_is_refused_too(live_run_base):
-    """intra_tree_alias_also_refused — an alias between two artifacts BOTH inside the shared tree
-    is refused as well, not merely one pointing outside it."""
     run = run_tree(live_run_base)
     first = run / "gather_raw" / "l-001" / "0.json"
     first.write_text("[]", encoding="utf-8")
