@@ -3,6 +3,7 @@ lifespan's sender is a task on the app's loop that stops before the repository c
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as _dt
 import inspect
 import threading
@@ -25,6 +26,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     BOB,
     NEW,
     T1,
+    T2,
     FakeSignIn,
     HOUR,
     World,
@@ -103,10 +105,11 @@ def test_the_lifespan_sender_runs_on_the_apps_loop_and_stops_before_the_reposito
     assert len(world.signin.every_call) == world.signin.calls_at_close
 
 
-def _leave_during_a_held_send(world: World, *, fails: bool = False) -> list[str]:
+def _leave_during_a_held_send(world: World, *, fails: bool = False, kind: str = "set_password") -> list[str]:
     """Run the lifespan; ask it to stop while the start-up pass's first set-password send is held at
     the provider (accepted there, not yet recorded), releasing the hold only after shutdown began.
-    With `fails`, the held call then raises. Returns the hook's progress: 'held', then 'released'."""
+    With `kind="notice"` the held email is the pass's first notification instead. With `fails`, the
+    held call then raises. Returns the hook's progress: 'held', then 'released'."""
     progress: list[str] = []
     release = threading.Event()
     sender_threads: list[threading.Thread] = []
@@ -122,7 +125,10 @@ def _leave_during_a_held_send(world: World, *, fails: bool = False) -> list[str]
         if fails:
             raise SignInUnavailable("the held send failed")
 
-    world.signin.during_send = held_at_the_provider
+    if kind == "set_password":
+        world.signin.during_send = held_at_the_provider
+    else:
+        world.mail.during_notice = held_at_the_provider
     # Released 3 s after shutdown is asked for: past r3's 2 s, so an API that stops waiting at a
     # deadline of its own closes before the release. Armed in `finally` so a failing check above
     # fails the test instead of hanging it.
@@ -191,6 +197,116 @@ def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(o
     failing.failing.clear()
     world.send_pending()  # control: BOB was pending and sendable all along
     assert world.signin.send_attempts[1:] == [world.signin.account_for(BOB)]
+
+
+def test_shutdown_during_a_notification_claims_no_further_notification() -> None:
+    """The stop is honoured between notifications too, not only between set-password emails (O8b)."""
+    world = World(tenants={T1: [ANN], T2: [BOB]}, send_interval=INTERVAL)
+    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+    world.invite(ann, T1, BOB)
+    world.invite(bob, T2, ANN)
+    world.repo = RecordingRepository(world.repo)
+    world.signin = ClosingSignIn()
+    world.build(administrators=(), tenants={T1: [ANN], T2: [BOB]})
+    assert _leave_during_a_held_send(world, kind="notice") == ["held", "released"]
+    names = world.repo.names()
+    assert names.index("send released") < names.index("settle_notification") < names.index("close"), names
+    assert names.count("claim_notification") == 1, names
+    _nothing_runs_after_shutdown(world)
+    assert len(world.mail.sent) == 1
+    world.send_pending()  # control: the other notification was pending and sendable all along
+    assert len(world.mail.sent) == 2
+
+
+def test_a_shutdown_that_is_itself_cancelled_still_lets_the_send_finish_and_closes_after_it() -> None:
+    """Cancelling the lifespan while it waits on the sender neither cuts the send short nor closes under it (D13, O8a, O8d)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL)
+    world.repo = RecordingRepository(world.repo)
+    world.signin = ClosingSignIn()
+    world.build(administrators=(), tenants={T1: [ANN]})
+    progress: list[str] = []
+
+    async def scenario() -> None:
+        release = asyncio.Event()
+
+        async def held_at_the_provider() -> None:
+            progress.append("held")
+            await release.wait()
+            progress.append("released")
+            world.repo.calls.append(("send released", asyncio.get_running_loop()))
+
+        world.signin.during_send = held_at_the_provider
+
+        async def serve() -> None:
+            async with world.app.router.lifespan_context(world.app):
+                await asyncio.Event().wait()
+
+        server = asyncio.create_task(serve())
+
+        async def until(condition: Any) -> None:
+            while not condition():
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(until(lambda: "held" in progress), 5)
+        server.cancel()  # shutdown begins: the lifespan sets the stop and waits on the sender
+        await asyncio.sleep(0.1)
+        server.cancel()  # and that wait is itself cancelled
+        with contextlib.suppress(asyncio.CancelledError):
+            await server
+        release.set()
+        await asyncio.wait_for(until(lambda: "close" in world.repo.names()), 5)
+
+    world.call(scenario)
+    assert progress == ["held", "released"]
+    names = world.repo.names()
+    assert names.index("send released") < names.index("settle_set_password") < names.index("close"), names
+    assert names.count("close") == 1, names[-5:]
+    assert names[-1] == "close", names[-5:]
+
+
+def test_shutdown_after_a_failed_pass_is_prompt_even_with_a_long_interval() -> None:
+    """A failed pass does not make the sender deaf to a stop for the rest of its interval (O8c, S-2)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=HOUR, failing_writes=True)
+    world.repo.failing.add("claim_set_password")
+
+    async def scenario() -> float:
+        loop = asyncio.get_running_loop()
+        stack = contextlib.AsyncExitStack()
+        await stack.enter_async_context(world.app.router.lifespan_context(world.app))
+        while not world.repo.refusals.get("claim_set_password"):
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)  # into the wait that follows the failed pass
+        leaving = loop.time()
+        await asyncio.wait_for(stack.aclose(), 5)  # a sender deaf to the stop fails here, not hangs
+        return loop.time() - leaving
+
+    assert world.call(scenario) < 2
+
+
+def test_an_idle_stop_sends_nothing_that_is_still_pending() -> None:
+    """Stopping between passes claims nothing more: an email that became due during the interval waits for a later run (O8b)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=HOUR)
+    with world.lifespan_client() as browser:
+        assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
+        world.sign_in(ANN, browser=browser)
+        assert world.invite(browser, T1, NEW).status_code == 202
+    assert world.signin.sends_to(NEW) == 0
+    world.send_pending()  # control: it was pending and sendable all along
+    assert world.signin.sends_to(NEW) == 1
+
+
+def test_the_background_sender_enforces_each_emails_deadline() -> None:
+    """The deadline holds in the sender loop, not only in a pass run by hand: a stuck email is deferred and the next is sent (O9)."""
+    world = World(tenants={T1: [ANN, BOB]}, start=False, send_interval=HOUR, send_deadline=_dt.timedelta(seconds=1))
+
+    async def stuck() -> None:
+        await asyncio.sleep(20)
+
+    world.signin.during_send = stuck
+    with world.lifespan_client():
+        assert wait_until(lambda: len(world.signin.set_password_sent) == 2, seconds=10)
+    attempts = sorted(world.call(world.repo.user_by_email, p).set_password_attempts for p in (ANN, BOB))
+    assert attempts == [0, 1]
 
 
 def test_the_bootstrap_finishes_before_the_lifespan_start_up_returns_and_before_any_send() -> None:
