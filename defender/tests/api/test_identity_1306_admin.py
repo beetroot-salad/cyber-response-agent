@@ -263,6 +263,6 @@ def test_an_unflagging_made_by_another_process_takes_effect_at_this_processs_nex
     assert ops.get("/admin/tenants").status_code == 200  # the session has been used
     other_process = IdentityService(world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
                                     bootstrap=Bootstrap(administrators=(), tenants={LAB: (ME,)}))
-    other_process.start()  # another API process, started with OPS removed from the file
+    world.call(other_process.start)  # another API process, started with OPS removed from the file
     assert ops.get("/admin/tenants").status_code == 403
     assert me(ops)["administrator"] is False

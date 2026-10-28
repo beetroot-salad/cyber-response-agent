@@ -703,12 +703,13 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
 def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
     """The demo store serves at least one stale investigation with its kind and one current
     one."""
+    import anyio
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
     from defender.api.demo import demo_deps, demo_sessions
 
-    deps = demo_deps((_TENANT,))
+    deps = anyio.run(demo_deps, (_TENANT,))
     client = TestClient(create_app(deps), base_url="https://testserver")
     session = demo_sessions((_TENANT,))[f"{_TENANT}-analyst"]
     auth = {"Cookie": f"__Host-defender_session={session}", "Origin": deps.frontend_origin}
