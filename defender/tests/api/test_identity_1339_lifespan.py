@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import datetime as _dt
 import inspect
+import logging
 import threading
 import time
 from typing import Any
@@ -105,10 +106,12 @@ def test_the_lifespan_sender_runs_on_the_apps_loop_and_stops_before_the_reposito
     assert len(world.signin.every_call) == world.signin.calls_at_close
 
 
-def _leave_during_a_held_send(world: World, *, fails: bool = False, kind: str = "set_password") -> list[str]:
+def _leave_during_a_held_send(world: World, *, fails: bool = False, kind: str = "set_password",
+                              at: str = "provider") -> list[str]:
     """Run the lifespan; ask it to stop while the start-up pass's first set-password send is held at
     the provider (accepted there, not yet recorded), releasing the hold only after shutdown began.
-    With `kind="notice"` the held email is the pass's first notification instead. With `fails`, the
+    With `kind="notice"` the held email is the pass's first notification instead; with `at` naming a
+    repository method, the hold is right after that call, before the provider. With `fails`, the
     held call then raises. Returns the hook's progress: 'held', then 'released'."""
     progress: list[str] = []
     release = threading.Event()
@@ -125,7 +128,9 @@ def _leave_during_a_held_send(world: World, *, fails: bool = False, kind: str = 
         if fails:
             raise SignInUnavailable("the held send failed")
 
-    if kind == "set_password":
+    if at != "provider":
+        world.repo.after[at] = held_at_the_provider
+    elif kind == "set_password":
         world.signin.during_send = held_at_the_provider
     else:
         world.mail.during_notice = held_at_the_provider
@@ -150,13 +155,15 @@ def _nothing_runs_after_shutdown(world: World) -> None:
     assert len(world.signin.every_call) == sent
 
 
-def test_shutdown_during_a_send_lets_it_finish_and_be_recorded_so_it_is_not_sent_again() -> None:
-    """Leaving mid-send waits for that email: it is recorded as sent, the service closes after it, and no later pass resends it (O8a, O8d)."""
-    world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL)
+@pytest.mark.parametrize("at", ["provider", "record_signin_account", "user"])
+def test_shutdown_during_a_send_lets_it_finish_and_be_recorded_so_it_is_not_sent_again(at: str) -> None:
+    """Leaving at any step of an email waits for that email: it reaches the provider, is recorded as sent, the service closes after it, and no later pass resends it (O8a, O8d)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL, failing_writes=True)
     world.repo = RecordingRepository(world.repo)
     world.signin = ClosingSignIn()
     world.build(administrators=(), tenants={T1: [ANN]})
-    assert _leave_during_a_held_send(world) == ["held", "released"]
+    assert _leave_during_a_held_send(world, at=at) == ["held", "released"]
+    assert world.signin.sends_to(ANN) == 1
     names = world.repo.names()
     assert names.index("send released") < names.index("settle_set_password") < names.index("close"), names
     assert names.count("close") == 1, names[-5:]
@@ -173,7 +180,7 @@ def test_shutdown_during_a_send_lets_it_finish_and_be_recorded_so_it_is_not_sent
 
 
 @pytest.mark.parametrize("outcome", ["sent", "failed", "repository_fails"])
-def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(outcome: str) -> None:
+def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(outcome: str, caplog: Any) -> None:
     """After shutdown is asked for, whether the email in flight went out, failed (deferred), or the repository raised, the sender claims nothing more; the rest stays sendable (O8b, O8d)."""
     world = World(tenants={T1: [ANN, BOB]}, start=False, send_interval=INTERVAL, failing_writes=True)
     failing = world.repo
@@ -182,7 +189,11 @@ def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(o
     world.repo = RecordingRepository(failing)
     world.signin = ClosingSignIn()
     world.build(administrators=(), tenants={T1: [ANN, BOB]})
-    assert _leave_during_a_held_send(world, fails=outcome == "failed") == ["held", "released"]
+    with caplog.at_level(logging.ERROR, logger="defender.identity"):
+        assert _leave_during_a_held_send(world, fails=outcome == "failed") == ["held", "released"]
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    if outcome == "repository_fails":  # D13: the error raised while stopping is logged, then the sender ends
+        assert any("pass failed" in m for m in errors), errors
     names = world.repo.names()
     settle = "settle_set_password" if outcome != "failed" else "defer_set_password"
     assert names.index("send released") < names.index(settle) < names.index("close"), names
@@ -251,9 +262,9 @@ def test_a_shutdown_that_is_itself_cancelled_still_lets_the_send_finish_and_clos
         server.cancel()  # shutdown begins: the lifespan sets the stop and waits on the sender
         await asyncio.sleep(0.1)
         server.cancel()  # and that wait is itself cancelled
-        with contextlib.suppress(asyncio.CancelledError):
-            await server
+        done, _ = await asyncio.wait({server}, timeout=5)
         release.set()
+        assert done == {server}, "the lifespan did not end when its wait on the sender was cancelled"
         await asyncio.wait_for(until(lambda: "close" in world.repo.names()), 5)
 
     world.call(scenario)
@@ -273,8 +284,11 @@ def test_shutdown_after_a_failed_pass_is_prompt_even_with_a_long_interval() -> N
         loop = asyncio.get_running_loop()
         stack = contextlib.AsyncExitStack()
         await stack.enter_async_context(world.app.router.lifespan_context(world.app))
-        while not world.repo.refusals.get("claim_set_password"):
-            await asyncio.sleep(0.01)
+        async def refused() -> None:
+            while not world.repo.refusals.get("claim_set_password"):
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(refused(), 5)
         await asyncio.sleep(0.1)  # into the wait that follows the failed pass
         leaving = loop.time()
         await asyncio.wait_for(stack.aclose(), 5)  # a sender deaf to the stop fails here, not hangs
