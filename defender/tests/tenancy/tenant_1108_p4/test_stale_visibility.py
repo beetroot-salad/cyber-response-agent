@@ -569,6 +569,7 @@ def _client(*investigations: Any) -> Any:
     import datetime as _dt
 
     pytest.importorskip("fastapi")
+    import anyio
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
@@ -584,11 +585,16 @@ def _client(*investigations: Any) -> Any:
         store.add_investigation(_TENANT, inv)
     now = lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC)  # noqa: E731
     repo = InMemoryIdentityRepository()
-    register_tenant(repo, TenantId(_TENANT))
-    ann = repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
-    repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by="system",
-                        created_at=now(), accepted_at=now())
-    repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
+
+    async def seed() -> None:
+        # The in-memory repository holds no loop state, so a throwaway loop seeds it.
+        await register_tenant(repo, TenantId(_TENANT), now=now())
+        ann = await repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
+        await repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by="system",
+                                  created_at=now(), accepted_at=now())
+        await repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
+
+    anyio.run(seed)
     identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
                                bootstrap=Bootstrap(administrators=(), tenants={}))
     deps = ApiDeps(
@@ -697,12 +703,13 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
 def test_o_warn_the_stub_seed_exercises_stale_and_current_knowledge():
     """The demo store serves at least one stale investigation with its kind and one current
     one."""
+    import anyio
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
     from defender.api.demo import demo_deps, demo_sessions
 
-    deps = demo_deps((_TENANT,))
+    deps = anyio.run(demo_deps, (_TENANT,))
     client = TestClient(create_app(deps), base_url="https://testserver")
     session = demo_sessions((_TENANT,))[f"{_TENANT}-analyst"]
     auth = {"Cookie": f"__Host-defender_session={session}", "Origin": deps.frontend_origin}

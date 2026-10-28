@@ -1,14 +1,21 @@
 """#1306: the sender — the only code that sends — and its re-checks (flow 1, O2, DC-3)."""
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
-import threading
+import logging
 import time
 from typing import Any
 
 import pytest
 
 pytest.importorskip("fastapi")
+
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
 
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
@@ -76,7 +83,10 @@ def test_a_re_invite_arriving_during_a_send_stays_pending(kind: str) -> None:
     """A send does not swallow a request that arrived while it ran (DC-3, flow 1)."""
     world, ann, _ = two_tenants()
     person = NEW if kind == "set_password" else BOB
-    again = lambda: world.invite(ann, T1, person)  # noqa: E731
+
+    async def again() -> None:  # the sync browser, off the loop's thread: the loop stays free to serve it
+        await asyncio.to_thread(world.invite, ann, T1, person)
+
     sent = lambda: world.signin.sends_to(NEW) if kind == "set_password" else len(world.mail.sent)  # noqa: E731
     world.invite(ann, T1, person)
     if kind == "set_password":
@@ -99,11 +109,11 @@ def test_a_second_sender_skips_what_the_first_is_sending_and_a_re_invite_is_not_
     world.invite(ann, T1, person)
     inside: list[Any] = []
 
-    def inside_the_send() -> None:
-        inside.append(world.invite(ann, T1, person).status_code)
+    async def inside_the_send() -> None:
+        inside.append((await asyncio.to_thread(world.invite, ann, T1, person)).status_code)
         now = world.clock()
         claim = world.repo.claim_set_password if kind == "set_password" else world.repo.claim_notification
-        inside.append(claim(now=now, hold_until=now + HOUR))
+        inside.append(await claim(now=now, hold_until=now + HOUR))
 
     if kind == "set_password":
         world.signin.during_send = inside_the_send
@@ -136,7 +146,7 @@ def test_a_revoked_invitation_is_dropped_by_the_sender_but_the_account_is_still_
     assert world.signin.sends_to(NINA) == 1  # positive control, same pass
     assert world.signin.sends_to(NEW) == 0
     assert world.signin.account_for(NEW)  # r6 order: the account precedes the re-check
-    dropped = world.repo.user_by_email(NEW)  # fixed details: a dropped send advances its sent counter
+    dropped = world.call(world.repo.user_by_email, NEW)  # fixed details: a dropped send advances its sent counter
     assert dropped.set_password_sent_seq == dropped.set_password_requested_seq > 0
     assert dropped.set_password_sent_at is None
     world.send_pending()
@@ -273,13 +283,12 @@ def test_an_invite_racing_the_invitees_first_sign_in_still_reaches_them() -> Non
     state = world.begin_signin(browser)
     signed_in: list[Any] = []
 
-    def sign_in() -> None:
-        signed_in.append(world.sign_in_response(browser, NEW, state=state, begin=False))
-
-    def between_the_read_and_the_request() -> None:
-        racer = threading.Thread(target=sign_in)
-        racer.start()
-        racer.join(timeout=2)  # an implementation that holds the user-row lock makes it wait
+    async def between_the_read_and_the_request() -> None:
+        racer = asyncio.ensure_future(asyncio.to_thread(
+            world.sign_in_response, browser, NEW, state=state, begin=False))
+        racer.add_done_callback(lambda done: signed_in.append(done.result()))
+        # an implementation that holds the user-row lock makes it wait
+        await asyncio.wait({racer}, timeout=2)
 
     world.repo.after["ensure_user"] = between_the_read_and_the_request
     assert world.invite(bob, T2, NEW).status_code == 202
@@ -331,6 +340,162 @@ def test_a_notification_that_fails_does_not_stop_the_next_ones_in_the_same_pass(
     world.clock.advance(HOUR + SECOND)
     world.send_pending()
     assert sorted(n.to for n in world.mail.sent) == [ANN, BOB]
+
+
+DEADLINE = _dt.timedelta(seconds=1)
+
+
+def test_each_email_has_a_thirty_second_deadline_by_default() -> None:
+    """The per-email deadline the sender enforces unless told otherwise (O9, D14)."""
+    assert World(tenants={T1: [ANN]}).service.send_deadline == _dt.timedelta(seconds=30)
+
+
+class _Emails:
+    """Two pending emails of one kind in a world whose service has a `DEADLINE` per email, with views
+    of how many reached the provider and each one's failed-attempt count."""
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        self.world = world = World(tenants={T1: [ANN], T2: [BOB]}, send_deadline=DEADLINE, failing_writes=True)
+        ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+        if kind == "set_password":
+            world.invite(ann, T1, NEW)
+            world.invite(ann, T1, NINA)
+            self._before = len(world.signin.set_password_sent)
+        else:
+            self._rows = [world.invite(ann, T1, BOB).json()["id"], world.invite(bob, T2, ANN).json()["id"]]
+
+    def sent(self) -> int:
+        if self.kind == "set_password":
+            return len(self.world.signin.set_password_sent) - self._before
+        return len(self.world.mail.sent)
+
+    def attempts(self) -> list[int]:
+        w = self.world
+        if self.kind == "set_password":
+            return sorted(w.call(w.repo.user_by_email, p).set_password_attempts for p in (NEW, NINA))
+        return sorted(w.call(w.repo.membership, r).notify_attempts for r in self._rows)
+
+    def hold(self, step: str, seconds: float, *, second: bool = False, every: bool = False) -> None:
+        """Make the first (or, with `second`, the next; with `every`, each) email spend `seconds` at
+        `step`: the provider call, or a repository call the send makes before it."""
+        w = self.world
+
+        async def held() -> None:
+            if every:
+                arm(held)
+            await asyncio.sleep(seconds)
+
+        if step == "provider":
+            def arm(hook: Any) -> None:
+                if self.kind == "set_password":
+                    w.signin.during_send = hook
+                else:
+                    w.mail.during_notice = hook
+        else:
+            name = "record_signin_account" if self.kind == "set_password" else "membership"
+
+            def arm(hook: Any) -> None:
+                w.repo.after[name] = hook
+
+        async def rearm() -> None:
+            arm(held)
+
+        arm(rearm if second else held)
+
+
+@pytest.mark.parametrize("second", [False, True], ids=["first", "second"])
+@pytest.mark.parametrize("step", ["provider", "repository"])
+@pytest.mark.parametrize("kind", ["set_password", "notice"])
+def test_an_email_that_outlives_its_deadline_is_deferred_and_the_pass_moves_on(
+        kind: str, step: str, second: bool, caplog: Any) -> None:
+    """Any email of a pass, stuck at any step, is abandoned at the deadline, logged, deferred with backoff like a failed send, and does not hold back the others (O9)."""
+    emails = _Emails(kind)
+    world = emails.world
+    emails.hold(step, 60, second=second)  # far past the deadline; only the deadline ends it in time
+    began = time.monotonic()
+    with caplog.at_level(logging.ERROR, logger="defender.identity"):
+        world.send_pending()
+    assert time.monotonic() - began < 10
+    assert [r for r in caplog.records if r.levelno == logging.ERROR and "stays pending" in r.getMessage()]
+    assert emails.attempts() == [0, 1]  # the stuck one was deferred like a failed send, the other was not
+    reached = emails.sent()
+    assert reached == (2 if step == "provider" else 1)  # a hold at the provider comes after it took the email
+    world.send_pending()
+    world.clock.advance(_dt.timedelta(seconds=29))
+    world.send_pending()
+    assert emails.sent() == reached  # backoff: not retried at once, nor before the first retry is due
+    world.clock.advance(HOUR)
+    world.send_pending()
+    assert emails.sent() == reached + 1  # the stuck one was never recorded, so it is retried (at-least-once)
+    world.clock.advance(HOUR + SECOND)
+    world.send_pending()
+    assert emails.sent() == reached + 1
+
+
+@pytest.mark.parametrize("kind", ["set_password", "notice"])
+def test_an_email_slower_than_usual_but_within_its_deadline_is_sent_and_recorded(kind: str) -> None:
+    """Each email gets the whole configured time, not a fraction of it nor a share of one per pass (O9, control)."""
+    emails = _Emails(kind)
+    emails.hold("provider", 0.6 * DEADLINE.total_seconds(), every=True)  # together past one deadline
+    emails.world.send_pending()
+    assert (emails.sent(), emails.attempts()) == (2, [0, 0])
+
+
+def test_deferring_a_stuck_email_is_not_cut_short_by_its_deadline() -> None:
+    """The deferral write runs outside the deadline: a slow one still completes and the pass goes on (O9, D14)."""
+    emails = _Emails("set_password")
+    world = emails.world
+    emails.hold("provider", 60)
+
+    async def slow_deferral() -> None:
+        await asyncio.sleep(1.5 * DEADLINE.total_seconds())
+
+    world.repo.after["defer_set_password"] = slow_deferral
+    world.send_pending()  # raises if the deferral was cut short
+    assert (emails.sent(), emails.attempts()) == (2, [0, 1])
+
+
+def test_an_email_that_keeps_outliving_its_deadline_backs_off_further_each_time() -> None:
+    """A timed-out email is deferred exactly like a failed send: the wait doubles with each attempt (O9; flow 1 backoff)."""
+    emails = _Emails("set_password")
+    world = emails.world
+    emails.hold("provider", 60)
+    world.send_pending()
+    assert emails.attempts() == [0, 1]
+    emails.hold("provider", 60)
+    world.clock.advance(_dt.timedelta(seconds=31))  # the first retry, 30 s on, times out again
+    world.send_pending()
+    assert (emails.sent(), emails.attempts()) == (3, [0, 2])
+    world.clock.advance(_dt.timedelta(seconds=31))
+    world.send_pending()
+    assert emails.sent() == 3  # now 60 s, not 30 s again
+    world.clock.advance(_dt.timedelta(seconds=30))
+    world.send_pending()
+    assert emails.sent() == 4
+
+
+def test_a_claim_that_outlives_the_deadline_ends_the_pass() -> None:
+    """The deadline covers the claim too: a claim that hangs fails the pass in time rather than stalling it (O9, D14)."""
+    world = World(tenants={T1: [ANN]}, send_deadline=DEADLINE, failing_writes=True)
+
+    async def hangs() -> None:
+        await asyncio.sleep(60)
+
+    world.repo.after["claim_set_password"] = hangs
+    began = time.monotonic()
+    with pytest.raises(TimeoutError):
+        world.send_pending()
+    assert time.monotonic() - began < 10
+
+
+@pytest.mark.parametrize("claim", ["claim_set_password", "claim_notification"])
+def test_a_repository_failure_while_claiming_raises_out_of_the_pass(claim: str) -> None:
+    """The deadline's handling defers emails but does not swallow a failing claim: it propagates out of the pass (flow 1, O9)."""
+    world = World(tenants={T1: [ANN]}, failing_writes=True)
+    world.repo.failing.add(claim)
+    with pytest.raises(InjectedFailure):
+        world.send_pending()
 
 
 def test_a_crash_between_creating_the_account_and_recording_it_is_retried_without_a_second_account() -> None:

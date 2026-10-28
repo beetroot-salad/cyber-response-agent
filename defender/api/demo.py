@@ -65,31 +65,34 @@ class _NoSignIn:
 
     _WHY = "the demo has no sign-in provider; use a seeded session cookie"
 
-    def create_account(self, *, username: str, email: str, required_actions: frozenset[str]) -> str:
+    async def create_account(self, *, username: str, email: str, required_actions: frozenset[str]) -> str:
         raise SignInUnavailable(self._WHY)
 
-    def send_set_password_email(self, account_id: str, *, lifespan: _dt.timedelta) -> None:
+    async def send_set_password_email(self, account_id: str, *, lifespan: _dt.timedelta) -> None:
         raise SignInUnavailable(self._WHY)
 
-    def has_otp(self, account_id: str) -> bool:
+    async def has_otp(self, account_id: str) -> bool:
         raise SignInUnavailable(self._WHY)
 
-    def require_otp_setup(self, account_id: str) -> None:
+    async def require_otp_setup(self, account_id: str) -> None:
         raise SignInUnavailable(self._WHY)
 
-    def begin_signin(self, *, state: str, nonce: str, code_challenge: str) -> str:
+    async def begin_signin(self, *, state: str, nonce: str, code_challenge: str) -> str:
         raise SignInUnavailable(self._WHY)
 
-    def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
+    async def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
         raise SignInUnavailable(self._WHY)
+
+    async def close(self) -> None:
+        """Nothing is open."""
 
 
 class _LoggedMail:
-    def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
+    async def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
         _logger.info("invitation %s to %s for tenant %s (not sent: demo)", invitation_id, to, tenant_id)
 
 
-def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NOW,
+async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NOW,
               frontend_origin: str = DEMO_FRONTEND_ORIGIN) -> ApiDeps:
     """Fakes seeded for `tenants`: the full seed in the first, one alert in each other."""
     if not tenants:
@@ -102,7 +105,7 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
     secrets = InMemorySecrets()
     store = InMemoryStore(clock)
     now = clock()
-    _seed(store, secrets, tenants[0], now)
+    await _seed(store, secrets, tenants[0], now)
     for n, tenant in enumerate(tenants[1:], start=9):
         store.add_alert(tenant, _alert(
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
@@ -110,13 +113,13 @@ def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NO
         ))
     people = InMemoryIdentityRepository()
     for tenant in tenants:
-        register_tenant(people, TenantId(tenant))
+        await register_tenant(people, TenantId(tenant), now=now)
         for role in DEMO_ROLES:
-            user = people.add_user(f"{role}@{tenant}.example", created_at=now, status="active",
+            user = await people.add_user(f"{role}@{tenant}.example", created_at=now, status="active",
                                    display_name=role.title())
-            people.add_membership(user.id, tenant, status="active", invited_by="system",
+            await people.add_membership(user.id, tenant, status="active", invited_by="system",
                                   created_at=now, accepted_at=now)
-            people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
+            await people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
     identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock,
                                bootstrap=Bootstrap(administrators=(), tenants={}),
@@ -152,7 +155,7 @@ def _alert(tenant: str, n: int, *, fired: _dt.datetime, title: str, severity: st
     )
 
 
-def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.datetime) -> None:
+async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.datetime) -> None:
     hour = _dt.timedelta(hours=1)
     brute = store.add_alert(tenant, _alert(
         tenant, 1, fired=now - 30 * hour, title="Repeated failed logins followed by success",
@@ -208,4 +211,4 @@ def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.
         system_id="siem", kind="siem", display_name="Event search", enabled=True,
         settings={"base_url": f"https://siem.{tenant}.example"},
     ))
-    secrets.put_credentials(tenant, "tickets", {"api_token": "demo-secret"})
+    await secrets.put_credentials(tenant, "tickets", {"api_token": "demo-secret"})

@@ -9,6 +9,12 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 from defender.tests.support.api._identity1306 import OPS as OPS_EMAIL  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
@@ -125,12 +131,12 @@ def test_a_session_of_a_user_who_is_not_active_is_not_a_caller() -> None:
     """Each request reads the user: a session row of an `invited` user is 401 (flow 4, P-A)."""
     world = World(tenants={T1: [ANN]})
     world.invite(world.sign_in(ANN), T1, NEW)
-    invited = world.repo.user_by_email(NEW)
+    invited = world.call(world.repo.user_by_email, NEW)
     assert invited.status == "invited"
-    world.repo.add_session("seeded-session-of-an-invited-user-0123", invited.id, now=T0, expires_at=T0 + SEVEN_DAYS)
+    world.call(world.repo.add_session, "seeded-session-of-an-invited-user-0123", invited.id, now=T0, expires_at=T0 + SEVEN_DAYS)
     assert world.client_with_cookie("seeded-session-of-an-invited-user-0123").get("/me").status_code == 401
-    ann = world.repo.user_by_email(ANN)  # control: the same seeding for an active user is a caller
-    world.repo.add_session("seeded-session-of-an-active-user-01234", ann.id, now=T0, expires_at=T0 + SEVEN_DAYS)
+    ann = world.call(world.repo.user_by_email, ANN)  # control: the same seeding for an active user is a caller
+    world.call(world.repo.add_session, "seeded-session-of-an-active-user-01234", ann.id, now=T0, expires_at=T0 + SEVEN_DAYS)
     assert world.client_with_cookie("seeded-session-of-an-active-user-01234").get("/me").status_code == 200
 
 
@@ -162,7 +168,7 @@ OPS: dict[str, Op] = {
     "logout": ("ann", lambda c, s: c.post("/auth/logout"), 204,
                lambda s: s.ann.get("/me").status_code == 200),
     "admin-invite": ("ops", lambda c, s: c.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": "zed@z.example"}),
-                     202, lambda s: not s.world.repo.memberships_of_tenant(EMPTY)),
+                     202, lambda s: not s.world.call(s.world.repo.memberships_of_tenant, EMPTY)),
 }
 
 

@@ -129,7 +129,7 @@ class InMemoryStore:
 
     # --- AlertsRepository ---------------------------------------------------------------
 
-    def list_alerts(
+    async def list_alerts(
         self,
         tenant_id: str,
         *,
@@ -148,15 +148,15 @@ class InMemoryStore:
         page = _newest_after(selected, lambda a: (a.fired_at, a.alert_id), after, limit)
         return [AlertSummary.model_validate(a.model_dump(exclude={"raw"})) for a in page]
 
-    def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None:
+    async def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None:
         return self._alerts.get((tenant_id, alert_id))
 
     # --- InvestigationsRepository -------------------------------------------------------
 
-    def create_investigation(
+    async def create_investigation(
         self, tenant_id: str, alert_id: str, client_request_id: str
     ) -> tuple[Investigation, bool]:
-        if self.get_alert(tenant_id, alert_id) is None:
+        if await self.get_alert(tenant_id, alert_id) is None:
             raise UnknownReference(f"no alert {alert_id!r}")
         investigation = Investigation(
             investigation_id=self._mint("inv"), alert_id=alert_id, status="queued",
@@ -164,7 +164,7 @@ class InMemoryStore:
         )
         return self.add_investigation(tenant_id, investigation), True
 
-    def list_investigations(
+    async def list_investigations(
         self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:
         found = [
@@ -174,33 +174,32 @@ class InMemoryStore:
         ]
         return _newest_after(found, lambda i: (i.created_at, i.investigation_id), after, limit)
 
-    def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
+    async def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
         if (tenant_id, investigation_id) in self._deleted:
             return None
         return self._investigations.get((tenant_id, investigation_id))
 
-    def _existing(self, tenant_id: str, investigation_id: str) -> Investigation:
-        investigation = self.get_investigation(tenant_id, investigation_id)
+    async def _existing(self, tenant_id: str, investigation_id: str) -> Investigation:
+        investigation = await self.get_investigation(tenant_id, investigation_id)
         if investigation is None:
             raise NotFound(f"no investigation {investigation_id!r}")
         return investigation
 
-    def cancel_investigation(self, tenant_id: str, investigation_id: str) -> Investigation:
-        aborted = self._existing(tenant_id, investigation_id).model_copy(
-            update={"status": "aborted", "finished_at": self._clock()}
-        )
+    async def cancel_investigation(self, tenant_id: str, investigation_id: str) -> Investigation:
+        existing = await self._existing(tenant_id, investigation_id)
+        aborted = existing.model_copy(update={"status": "aborted", "finished_at": self._clock()})
         return self.add_investigation(tenant_id, aborted)
 
-    def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
-        self._existing(tenant_id, investigation_id)
+    async def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
+        await self._existing(tenant_id, investigation_id)
         self._deleted.add((tenant_id, investigation_id))
 
     # --- LearningJobsRepository ---------------------------------------------------------
 
-    def create_learning_job(
+    async def create_learning_job(
         self, tenant_id: str, investigation_id: str, client_request_id: str
     ) -> tuple[LearningJob, bool]:
-        investigation = self.get_investigation(tenant_id, investigation_id)
+        investigation = await self.get_investigation(tenant_id, investigation_id)
         if investigation is None:
             raise UnknownReference(f"no investigation {investigation_id!r}")
         job = LearningJob(
@@ -210,7 +209,7 @@ class InMemoryStore:
         )
         return self.add_learning_job(tenant_id, job), True
 
-    def list_learning_jobs(
+    async def list_learning_jobs(
         self, tenant_id: str, *, investigation_id: str | None, after: TimePosition | None,
         limit: int,
     ) -> list[LearningJob]:
@@ -220,25 +219,25 @@ class InMemoryStore:
         ]
         return _newest_after(found, lambda j: (j.created_at, j.learning_job_id), after, limit)
 
-    def get_learning_job(self, tenant_id: str, learning_job_id: str) -> LearningJob | None:
+    async def get_learning_job(self, tenant_id: str, learning_job_id: str) -> LearningJob | None:
         return self._learning_jobs.get((tenant_id, learning_job_id))
 
     # --- LessonsRepository --------------------------------------------------------------
 
-    def list_lessons(self, tenant_id: str, *, after: str | None, limit: int) -> list[Lesson]:
+    async def list_lessons(self, tenant_id: str, *, after: str | None, limit: int) -> list[Lesson]:
         return _ids_after(self._lessons.of(tenant_id), lambda le: le.lesson_id, after, limit)
 
     # --- SystemsRepository --------------------------------------------------------------
 
-    def list_systems(
+    async def list_systems(
         self, tenant_id: str, *, after: str | None, limit: int
     ) -> list[SystemSettings]:
         return _ids_after(self._systems.of(tenant_id), lambda s: s.system_id, after, limit)
 
-    def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None:
+    async def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None:
         return self._systems.get((tenant_id, system_id))
 
-    def put_system(
+    async def put_system(
         self, tenant_id: str, system_id: str, body: SystemPut
     ) -> tuple[SystemSettings, bool]:
         created = (tenant_id, system_id) not in self._systems
@@ -258,29 +257,29 @@ class _InMemoryTransaction:
         self._actor = actor
         self._pending: list[AuditEvent] = []
 
-    def __enter__(self) -> _InMemoryTransaction:
+    async def __aenter__(self) -> _InMemoryTransaction:
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
+    async def __aexit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
         if exc_type is None:
             self._store.audit_events.extend(self._pending)
 
-    def create_investigation(self, alert_id: str, client_request_id: str) -> tuple[Investigation, bool]:
-        return self._store.create_investigation(self._tenant_id, alert_id, client_request_id)
+    async def create_investigation(self, alert_id: str, client_request_id: str) -> tuple[Investigation, bool]:
+        return await self._store.create_investigation(self._tenant_id, alert_id, client_request_id)
 
-    def cancel_investigation(self, investigation_id: str) -> Investigation:
-        return self._store.cancel_investigation(self._tenant_id, investigation_id)
+    async def cancel_investigation(self, investigation_id: str) -> Investigation:
+        return await self._store.cancel_investigation(self._tenant_id, investigation_id)
 
-    def delete_investigation(self, investigation_id: str) -> None:
-        self._store.delete_investigation(self._tenant_id, investigation_id)
+    async def delete_investigation(self, investigation_id: str) -> None:
+        await self._store.delete_investigation(self._tenant_id, investigation_id)
 
-    def create_learning_job(self, investigation_id: str, client_request_id: str) -> tuple[LearningJob, bool]:
-        return self._store.create_learning_job(self._tenant_id, investigation_id, client_request_id)
+    async def create_learning_job(self, investigation_id: str, client_request_id: str) -> tuple[LearningJob, bool]:
+        return await self._store.create_learning_job(self._tenant_id, investigation_id, client_request_id)
 
-    def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
-        return self._store.put_system(self._tenant_id, system_id, body)
+    async def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
+        return await self._store.put_system(self._tenant_id, system_id, body)
 
-    def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
+    async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
         self._pending.append(AuditEvent(
             tenant_id=self._tenant_id, user_id=self._actor, action=action, target=target,
             at=self._clock(), detail=detail,
@@ -291,10 +290,10 @@ class InMemorySecrets:
     def __init__(self) -> None:
         self._credentials: dict[tuple[str, str], dict[str, str]] = {}
 
-    def put_credentials(self, tenant_id: str, system_id: str, credentials: dict[str, str]) -> None:
+    async def put_credentials(self, tenant_id: str, system_id: str, credentials: dict[str, str]) -> None:
         self._credentials[(tenant_id, system_id)] = dict(credentials)
 
-    def has_credentials(self, tenant_id: str, system_id: str) -> bool:
+    async def has_credentials(self, tenant_id: str, system_id: str) -> bool:
         return (tenant_id, system_id) in self._credentials
 
 
@@ -302,7 +301,7 @@ class StubSystemChecker:
     """Answers from configuration alone; the real check calls the system through the
     credential proxy."""
 
-    def check(self, tenant_id: str, system: System) -> SystemCheck:
+    async def check(self, tenant_id: str, system: System) -> SystemCheck:
         if not system.enabled:
             return SystemCheck(ok=False, detail="the system is disabled")
         if not system.has_credentials:
@@ -315,5 +314,5 @@ class StubArtifactLinks:
 
     ORIGIN = "https://artifacts.invalid"
 
-    def signed_url(self, tenant_id: str, investigation_id: str, key: str) -> str:
+    async def signed_url(self, tenant_id: str, investigation_id: str, key: str) -> str:
         return f"{self.ORIGIN}/{tenant_id}/{investigation_id}/{key}?signature=stub"

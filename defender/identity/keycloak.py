@@ -46,7 +46,7 @@ class KeycloakSignIn:
         redirect_uri: str,
         admin_client_id: str,
         admin_client_secret: str,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
         self._issuer = issuer.rstrip("/")
@@ -55,7 +55,7 @@ class KeycloakSignIn:
         self._redirect_uri = redirect_uri
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
-        self._http = httpx.Client(transport=transport, timeout=_TIMEOUT_SECONDS)
+        self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
         # Keycloak serves every realm under <base>/realms/<name>; the admin API sits beside it. The
         # admin client's `manage-users` role reaches only its own realm, which is the sign-in realm.
         base, realm = self._issuer.rsplit("/realms/", 1)
@@ -64,12 +64,12 @@ class KeycloakSignIn:
         self._keys: dict[str, Any] = {}
         self._admin_token_held: tuple[str, _dt.datetime] | None = None
 
-    def close(self) -> None:
-        self._http.close()
+    async def close(self) -> None:
+        await self._http.aclose()
 
     # --- browser sign-in ---------------------------------------------------------------------
 
-    def begin_signin(self, *, state: str, nonce: str, code_challenge: str) -> str:
+    async def begin_signin(self, *, state: str, nonce: str, code_challenge: str) -> str:
         """The URL to send the browser to: password prompt forced, PKCE S256."""
         query = urllib.parse.urlencode({
             "response_type": "code",
@@ -84,19 +84,19 @@ class KeycloakSignIn:
         })
         return f"{self._oidc}/auth?{query}"
 
-    def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
+    async def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
         """Exchange the code, verify the ID token, and return who signed in and how."""
-        id_token = self._exchange_code(code, code_verifier)
-        claims = self._verify(id_token, nonce)
+        id_token = await self._exchange_code(code, code_verifier)
+        claims = await self._verify(id_token, nonce)
         # Only the name the person gave: `preferred_username` is the id our own code chose.
         name = claims.get("name") or ""
         amr = claims.get("amr")
         methods = tuple(m for m in amr if isinstance(m, str)) if isinstance(amr, list) else ()
         return VerifiedSignIn(account_id=claims["sub"], name=str(name), amr=methods)
 
-    def _exchange_code(self, code: str, code_verifier: str) -> str:
+    async def _exchange_code(self, code: str, code_verifier: str) -> str:
         try:
-            response = self._http.post(
+            response = await self._http.post(
                 f"{self._oidc}/token",
                 auth=(self._client_id, self._client_secret),
                 data={
@@ -122,13 +122,13 @@ class KeycloakSignIn:
             raise SignInRefused("the token response carries no ID token")
         return id_token
 
-    def _verify(self, id_token: str, nonce: str) -> dict[str, Any]:
+    async def _verify(self, id_token: str, nonce: str) -> dict[str, Any]:
         """The ID token's claims once signature, algorithm, issuer, audience, expiry and nonce hold."""
         try:
             header = jwt.get_unverified_header(id_token)
             if header.get("alg") != _ALGORITHM:
                 raise SignInRefused("the ID token is not signed with RS256")
-            key = self._key_for(header.get("kid"))
+            key = await self._key_for(header.get("kid"))
             claims = jwt.decode(
                 id_token,
                 key,
@@ -152,19 +152,19 @@ class KeycloakSignIn:
             raise SignInRefused("the ID token's nonce does not match")
         return claims
 
-    def _key_for(self, kid: object) -> Any:
+    async def _key_for(self, kid: object) -> Any:
         """The signing key published under `kid`; one refetch of the key set on an unknown id."""
         if not isinstance(kid, str) or not kid:
             raise SignInRefused("the ID token names no signing key")
         if kid not in self._keys:
-            self._keys = self._fetch_keys()
+            self._keys = await self._fetch_keys()
         if kid not in self._keys:
             raise SignInRefused("the ID token names an unknown signing key")
         return self._keys[kid]
 
-    def _fetch_keys(self) -> dict[str, Any]:
+    async def _fetch_keys(self) -> dict[str, Any]:
         try:
-            response = self._http.get(f"{self._oidc}/certs")
+            response = await self._http.get(f"{self._oidc}/certs")
             response.raise_for_status()
             published = response.json()["keys"]
         except httpx.HTTPError as error:
@@ -186,7 +186,7 @@ class KeycloakSignIn:
 
     # --- the admin API -----------------------------------------------------------------------
 
-    def create_account(self, *, username: str, email: str, required_actions: frozenset[str]) -> str:
+    async def create_account(self, *, username: str, email: str, required_actions: frozenset[str]) -> str:
         """Create a verified, enabled account and return its id; an existing one is found, not duplicated."""
         try:
             actions = sorted(_REQUIRED_ACTIONS[name] for name in required_actions)
@@ -194,16 +194,16 @@ class KeycloakSignIn:
             raise ValueError(f"unknown required action {error.args[0]!r}") from error
         body = {"username": username, "email": email, "emailVerified": True, "enabled": True,
                 "requiredActions": actions}
-        response = self._admin("POST", self._admin_users_url, json=body, accept=(201, 409))
+        response = await self._admin("POST", self._admin_users_url, json=body, accept=(201, 409))
         if response.status_code == httpx.codes.CONFLICT:  # the username or email exists
-            return self._find_by_username(username)
+            return await self._find_by_username(username)
         account_id = response.headers.get("location", "").rstrip("/").rsplit("/", 1)[-1]
         if not account_id:
             raise SignInUnavailable("keycloak created the account but named no id")
         return urllib.parse.unquote(account_id)
 
-    def _find_by_username(self, username: str) -> str:
-        response = self._admin("GET", self._admin_users_url, params={"username": username, "exact": "true"})
+    async def _find_by_username(self, username: str) -> str:
+        response = await self._admin("GET", self._admin_users_url, params={"username": username, "exact": "true"})
         try:
             hits = [u for u in response.json()
                     if isinstance(u.get("username"), str) and u["username"].casefold() == username.casefold()]
@@ -212,42 +212,42 @@ class KeycloakSignIn:
             # The conflict came from something else (an email another account holds): no wrong id.
             raise SignInUnavailable("keycloak reports a conflict but has no such account") from error
 
-    def send_set_password_email(self, account_id: str, *, lifespan: _dt.timedelta) -> None:
+    async def send_set_password_email(self, account_id: str, *, lifespan: _dt.timedelta) -> None:
         """Have Keycloak email the account an action link to set its password."""
-        self._admin(
+        await self._admin(
             "PUT", f"{self._user_url(account_id)}/execute-actions-email",
             params={"lifespan": int(lifespan.total_seconds())}, json=["UPDATE_PASSWORD"],
         )
 
-    def has_otp(self, account_id: str) -> bool:
+    async def has_otp(self, account_id: str) -> bool:
         """Whether the account holds a one-time-code credential."""
-        response = self._admin("GET", f"{self._user_url(account_id)}/credentials")
+        response = await self._admin("GET", f"{self._user_url(account_id)}/credentials")
         try:
             return any(isinstance(c, dict) and c.get("type") == "otp" for c in response.json())
         except (ValueError, TypeError) as error:
             raise SignInUnavailable("keycloak's credential list is unreadable") from error
 
-    def require_otp_setup(self, account_id: str) -> None:
+    async def require_otp_setup(self, account_id: str) -> None:
         """Make the account set up a one-time code at its next sign-in, keeping its other pending actions."""
         url = self._user_url(account_id)
         try:
-            user = self._admin("GET", url).json()
+            user = (await self._admin("GET", url)).json()
             existing = user.get("requiredActions") or []
             user["requiredActions"] = [*existing, *(a for a in ("CONFIGURE_TOTP",) if a not in existing)]
         except (ValueError, AttributeError, TypeError) as error:
             raise SignInUnavailable("keycloak's account record is unreadable") from error
-        self._admin("PUT", url, json=user)
+        await self._admin("PUT", url, json=user)
 
     def _user_url(self, account_id: str) -> str:
         return f"{self._admin_users_url}/{urllib.parse.quote(account_id, safe='')}"
 
-    def _admin_token(self) -> str:
+    async def _admin_token(self) -> str:
         """A client-credentials token, reused until shortly before Keycloak says it expires."""
         held = self._admin_token_held
         if held is not None and self._clock() < held[1]:
             return held[0]
         try:
-            response = self._http.post(f"{self._oidc}/token", auth=self._admin_client,
+            response = await self._http.post(f"{self._oidc}/token", auth=self._admin_client,
                                        data={"grant_type": "client_credentials"})
             response.raise_for_status()
             body = response.json()
@@ -263,11 +263,11 @@ class KeycloakSignIn:
             self._admin_token_held = (token, self._clock() + _dt.timedelta(seconds=lifetime) - _ADMIN_TOKEN_MARGIN)
         return token
 
-    def _admin(self, method: str, url: str, *, accept: tuple[int, ...] = (), **kwargs: Any) -> httpx.Response:
+    async def _admin(self, method: str, url: str, *, accept: tuple[int, ...] = (), **kwargs: Any) -> httpx.Response:
         """One admin API call; any non-2xx (other than the `accept`ed statuses) or transport error is unavailable."""
         try:
-            response = self._http.request(
-                method, url, headers={"Authorization": f"Bearer {self._admin_token()}"}, **kwargs)
+            response = await self._http.request(
+                method, url, headers={"Authorization": f"Bearer {await self._admin_token()}"}, **kwargs)
         except httpx.HTTPError as error:
             _log.warning("keycloak admin %s failed: %s", method, type(error).__name__)
             raise SignInUnavailable("keycloak's admin API is unreachable") from error
