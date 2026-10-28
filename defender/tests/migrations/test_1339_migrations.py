@@ -18,7 +18,7 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
-IDENTITY_TABLES = {"tenants", "users", "memberships", "sessions"}
+IDENTITY_TABLES = {"users", "memberships", "sessions"}  # #1214: `tenants` moved to `tenancy`
 UNKNOWN_REVISION = "f00dfeedbeef"
 ROOT = Path(__file__).resolve().parents[3]  # the checkout under test, put first on the child's path
 
@@ -159,7 +159,7 @@ def test_the_migrated_schema_is_the_schema_the_models_declare(migrated_database)
 
     # The comparison sees what O3 is about: CHECKs, the partial unique index, and no server defaults (P4).
     migrated = catalog(migrated_database)
-    assert [s for (s,) in migrated["schemas"] if s != "public"] == ["identity"]
+    assert [s for (s,) in migrated["schemas"] if s != "public"] == ["identity", "tenancy"]
     assert any(c[:2] == ("identity", "users") and c[3] == "c" for c in migrated["constraints"])
     assert any(i[:2] == ("identity", "memberships") and "WHERE" in i[3] and "invited" in i[3]
                for i in migrated["indexes"])
@@ -171,8 +171,8 @@ _DRIFTS = {
     "a CHECK's text": "ALTER TABLE identity.users DROP CONSTRAINT {check}, ADD CONSTRAINT {check} CHECK (true)",
     "a constraint's name": "ALTER TABLE identity.users RENAME CONSTRAINT {check} TO renamed_by_hand",
     "a partial index's predicate": "DROP INDEX identity.{partial}; CREATE UNIQUE INDEX {partial} ON identity.memberships (user_id, tenant_id) WHERE status = 'invited'",
-    "a server default": "ALTER TABLE identity.tenants ALTER COLUMN created_at SET DEFAULT now()",
-    "a column's type modifier": "ALTER TABLE identity.tenants ALTER COLUMN created_at TYPE timestamptz(3)",
+    "a server default": "ALTER TABLE tenancy.tenants ALTER COLUMN created_at SET DEFAULT now()",
+    "a column's type modifier": "ALTER TABLE tenancy.tenants ALTER COLUMN created_at TYPE timestamptz(3)",
 }
 
 
@@ -223,7 +223,7 @@ def test_autogenerate_ignores_tables_in_public_and_still_sees_drift_in_a_feature
 def test_tenants_created_at_is_a_column_the_repository_must_supply(migrated_database):
     """D/P4: `tenants.created_at` exists and has no server default (the caller passes `now`)."""
     rows = execute(migrated_database, """SELECT column_default FROM information_schema.columns
-                   WHERE table_schema = 'identity' AND table_name = 'tenants' AND column_name = 'created_at'""")
+                   WHERE table_schema = 'tenancy' AND table_name = 'tenants' AND column_name = 'created_at'""")
     assert rows == [(None,)]
 
 
