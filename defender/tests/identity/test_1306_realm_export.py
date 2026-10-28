@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 
 import pytest
 import yaml  # tests may load YAML raw (see tests/tenancy/tenant_1108_p4/test_dev_compose.py)
@@ -231,3 +232,28 @@ def test_keycloak_keeps_its_data_in_the_compose_postgres_and_imports_the_realm_e
     assert "--import-realm" in (command.split() if isinstance(command, str) else command)
     mounted = [str(v).split(":")[0] for v in keycloak.get("volumes", [])]
     assert any((COMPOSE.parent / m).resolve() == REALM_EXPORT.resolve() for m in mounted), mounted
+
+
+def _databases_created_on_first_init(postgres: dict) -> set[str]:
+    """POSTGRES_DB plus every `CREATE DATABASE` in a script mounted into the image's init directory."""
+    environment = postgres.get("environment", {})
+    if isinstance(environment, list):
+        environment = dict(item.split("=", 1) for item in environment)
+    created = {str(environment.get("POSTGRES_DB", environment.get("POSTGRES_USER", "postgres")))}
+    for volume in postgres.get("volumes", []):
+        source, _, target = str(volume).partition(":")
+        if not target.split(":")[0].startswith("/docker-entrypoint-initdb.d"):
+            continue
+        path = COMPOSE.parent / source
+        for script in ([path] if path.is_file() else sorted(path.glob("*"))):
+            created |= set(re.findall(r'CREATE DATABASE\s+"?(\w+)"?', script.read_text(encoding="utf-8"), re.I))
+    return created
+
+
+def test_the_dev_postgres_is_17_and_creates_the_application_database_beside_keycloaks():
+    """O7 (#1339): PostgreSQL 17 by default, and first initialisation creates `defender` and `keycloak`."""
+    postgres = _services()["postgres"]
+    default = re.fullmatch(r"postgres:\$\{POSTGRES_VERSION:-([^}]+)\}", postgres["image"])
+    assert default, postgres["image"]
+    assert default.group(1).split(".")[0] == "17"
+    assert {"defender", "keycloak"} <= _databases_created_on_first_init(postgres)
