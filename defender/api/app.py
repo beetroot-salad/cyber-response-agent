@@ -67,8 +67,6 @@ SESSION_COOKIE = "__Host-defender_session"
 PRELOGIN_COOKIE = "__Host-defender_prelogin"
 _PRELOGIN_MAX_AGE = 600
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-#: How long the sender loop may take to stop when the app shuts down.
-_SENDER_STOP_WAIT = 2.0
 
 _logger = logging.getLogger(__name__)
 
@@ -543,34 +541,32 @@ async def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
     return _invitation(await deps.identity.admin_invite(caller, tenant_id, body.email))
 
 
-async def _send_loop(identity: IdentityService) -> None:
-    """Run the sender now and then every `send_interval` until cancelled. A failing pass never
-    stops the loop."""
-    while True:
-        try:
-            await identity.send_pending()
-        except Exception:
-            _logger.exception("a sender pass failed; the next pass tries again")
-        await asyncio.sleep(identity.send_interval.total_seconds())
+async def _send_then_close(identity: IdentityService, stop: asyncio.Event) -> None:
+    """The sender until `stop`, then the service's close: in one task, so nothing closes what the
+    sender uses while it runs, even when the lifespan waiting on it is itself cancelled."""
+    try:
+        await identity.run_sender(stop)
+    finally:
+        await identity.close()
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Apply the bootstrap before serving, run the sender as a task on this loop, and on shutdown
-    stop the sender before the service closes what it holds."""
+    """Apply the bootstrap before serving and run the sender as a task on this loop. On shutdown
+    the sender finishes the email it is on, then the service closes."""
     identity: IdentityService = app.state.deps.identity
     try:
         await identity.start()
-        sender = asyncio.create_task(_send_loop(identity), name="identity-sender")
-        try:
-            yield
-        finally:
-            sender.cancel()
-            _, running = await asyncio.wait({sender}, timeout=_SENDER_STOP_WAIT)
-            if running:
-                _logger.error("the sender did not stop within %s s of shutdown", _SENDER_STOP_WAIT)
-    finally:
+    except BaseException:
         await identity.close()
+        raise
+    stop = asyncio.Event()
+    sender = asyncio.create_task(_send_then_close(identity, stop), name="identity-sender")
+    try:
+        yield
+    finally:
+        stop.set()
+        await asyncio.shield(sender)
 
 
 def create_app(deps: ApiDeps) -> FastAPI:

@@ -3,13 +3,15 @@ bootstrap and the sender. The only code that sends. Routes translate; repositori
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import datetime as _dt
 import hashlib
 import logging
 import secrets
 from collections.abc import Awaitable, Callable
-from typing import Literal
+from typing import Any, Literal
 
 from defender._model import model
 from defender.records.formats import TenantId, TenantRefused
@@ -41,6 +43,8 @@ _RETRY_LAST = _dt.timedelta(hours=1)
 #: How long a claimed send is skipped by every other sender: well past a send's port calls, so
 #: two API processes do not send it twice, and short enough that a crashed one's send comes back.
 _SEND_HOLD = _dt.timedelta(minutes=5)
+#: One email's claim, sends and record together: past it the email is deferred like a failed send.
+SEND_DEADLINE = _dt.timedelta(seconds=30)
 _PRELOGIN_PARTS = 3
 
 
@@ -108,6 +112,7 @@ class IdentityService:
         self, repo: IdentityRepository, *, signin: SignInPort, mail: MailPort,
         clock: Callable[[], _dt.datetime], bootstrap: Bootstrap,
         send_interval: _dt.timedelta = _dt.timedelta(seconds=30),
+        send_deadline: _dt.timedelta = SEND_DEADLINE,
         session_idle_limit: _dt.timedelta = SESSION_IDLE_LIMIT,
     ) -> None:
         self._repo = repo
@@ -116,6 +121,7 @@ class IdentityService:
         self._clock = clock
         self._bootstrap = bootstrap
         self.send_interval = send_interval
+        self.send_deadline = send_deadline
         self._session_idle_limit = session_idle_limit
         self._listed = frozenset(
             {*bootstrap.administrators, *(e for emails in bootstrap.tenants.values() for e in emails)})
@@ -210,25 +216,54 @@ class IdentityService:
             audit.emit("member.invite", actor=audit.SYSTEM, tenant_id=tenant, target=row.id)
 
     # --- the sender --------------------------------------------------------------------------
-    async def send_pending(self) -> None:
-        """One pass of the sender, the only code that sends. A failure of one send leaves that
-        send pending and does not stop the others; a repository failure propagates."""
-        await self._send_set_passwords()
-        await self._send_notifications()
-
-    async def _send_set_passwords(self) -> None:
-        tried: set[str] = set()
-        while True:
-            now = self._clock()
-            user = await self._repo.claim_set_password(now=now, hold_until=now + _SEND_HOLD, skip=tried)
-            if user is None:
-                return
-            tried.add(user.id)
+    async def run_sender(self, stop: asyncio.Event) -> None:
+        """Pass now and then every `send_interval` until `stop` is set. A stop never interrupts an
+        email: the sender ends before claiming the next one, or during its wait. A failing pass is
+        logged and never ends the loop by itself."""
+        while not stop.is_set():
             try:
-                await self._send_set_password(user)
+                await self.send_pending(stop)
             except Exception:
-                _logger.exception("set-password send for user %s failed; it stays pending", user.id)
-                await self._repo.defer_set_password(user.id, until=self._retry_at(user.set_password_attempts))
+                _logger.exception("a sender pass failed; the next pass tries again")
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), self.send_interval.total_seconds())
+
+    async def send_pending(self, stop: asyncio.Event | None = None) -> None:
+        """One pass of the sender, the only code that sends: whole, or until `stop` is set. A failure
+        of one send leaves that send pending and does not stop the others; a repository failure
+        propagates."""
+        await self._send_each(stop, self._repo.claim_set_password, self._send_set_password,
+                              self._defer_set_password, "set-password send for user")
+        await self._send_each(stop, self._repo.claim_notification, self._send_notification,
+                              self._defer_notification, "notification for invitation")
+
+    async def _send_each(self, stop: asyncio.Event | None, claim: Callable[..., Awaitable[Any]],
+                         send: Callable[[Any], Awaitable[None]], defer: Callable[[Any], Awaitable[None]],
+                         what: str) -> None:
+        """Claim and send one email at a time until none is due or `stop` is set. Each email's claim,
+        sends and record share one `send_deadline`; a send that fails or outlives it is deferred."""
+        tried: set[str] = set()
+        while stop is None or not stop.is_set():
+            now = self._clock()
+            row = None
+            try:
+                async with asyncio.timeout(self.send_deadline.total_seconds()):
+                    row = await claim(now=now, hold_until=now + _SEND_HOLD, skip=tried)
+                    if row is None:
+                        return
+                    tried.add(row.id)
+                    await send(row)
+            except Exception:
+                if row is None:
+                    raise
+                _logger.exception("%s %s failed; it stays pending", what, row.id)
+                await defer(row)
+
+    async def _defer_set_password(self, user: User) -> None:
+        await self._repo.defer_set_password(user.id, until=self._retry_at(user.set_password_attempts))
+
+    async def _defer_notification(self, row: Membership) -> None:
+        await self._repo.defer_notification(row.id, until=self._retry_at(row.notify_attempts))
 
     async def _still_wanted(self, user: User) -> bool:
         if user.status != "invited":
@@ -251,20 +286,6 @@ class IdentityService:
         sent = self._clock()
         await self._repo.settle_set_password(
             user.id, user.set_password_requested_seq, sent_at=sent, expires_at=sent + INVITATION_LIFETIME)
-
-    async def _send_notifications(self) -> None:
-        tried: set[str] = set()
-        while True:
-            now = self._clock()
-            row = await self._repo.claim_notification(now=now, hold_until=now + _SEND_HOLD, skip=tried)
-            if row is None:
-                return
-            tried.add(row.id)
-            try:
-                await self._send_notification(row)
-            except Exception:
-                _logger.exception("notification for invitation %s failed; it stays pending", row.id)
-                await self._repo.defer_notification(row.id, until=self._retry_at(row.notify_attempts))
 
     def _retry_at(self, failed_before: int) -> _dt.datetime:
         return self._clock() + min(_RETRY_FIRST * 2 ** failed_before, _RETRY_LAST)
