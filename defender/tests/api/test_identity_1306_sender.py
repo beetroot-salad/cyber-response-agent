@@ -341,6 +341,48 @@ def test_a_notification_that_fails_does_not_stop_the_next_ones_in_the_same_pass(
     assert sorted(n.to for n in world.mail.sent) == [ANN, BOB]
 
 
+DEADLINE = _dt.timedelta(milliseconds=200)
+
+
+def test_each_email_has_a_thirty_second_deadline_by_default() -> None:
+    """The per-email deadline the sender enforces unless told otherwise (O9, D14)."""
+    assert World(tenants={T1: [ANN]}).service.send_deadline == _dt.timedelta(seconds=30)
+
+
+@pytest.mark.parametrize("kind", ["set_password", "notice"])
+def test_an_email_that_outlives_its_deadline_is_deferred_and_the_pass_moves_on(kind: str) -> None:
+    """A provider call that hangs is abandoned at the deadline, retried like a failed send, and does not hold back the next email (O9)."""
+    world = World(tenants={T1: [ANN], T2: [BOB]}, send_deadline=DEADLINE)
+    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+    if kind == "set_password":
+        world.invite(ann, T1, NEW)
+        world.invite(ann, T1, NINA)
+        before = len(world.signin.set_password_sent)
+        sent = lambda: len(world.signin.set_password_sent) - before  # noqa: E731
+    else:
+        world.invite(ann, T1, BOB)
+        world.invite(bob, T2, ANN)
+        sent = lambda: len(world.mail.sent)  # noqa: E731
+
+    async def hangs() -> None:
+        await asyncio.sleep(10)  # far past the deadline; only the deadline ends it in time
+
+    if kind == "set_password":
+        world.signin.during_send = hangs
+    else:
+        world.mail.during_notice = hangs
+    began = time.monotonic()
+    world.send_pending()
+    assert time.monotonic() - began < 5
+    assert sent() == 2  # the hung one reached the provider, and the next one still went out
+    world.clock.advance(HOUR + SECOND)
+    world.send_pending()
+    assert sent() == 3  # the hung one was never recorded, so it is retried (at-least-once)
+    world.clock.advance(HOUR + SECOND)
+    world.send_pending()
+    assert sent() == 3
+
+
 def test_a_crash_between_creating_the_account_and_recording_it_is_retried_without_a_second_account() -> None:
     """Create-or-find on the username: the retry finds the account and sends once (P-C, flow 1)."""
     world, ann, _ = two_tenants()

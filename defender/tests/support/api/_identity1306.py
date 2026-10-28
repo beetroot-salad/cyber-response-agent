@@ -547,7 +547,7 @@ class World:
     def __init__(self, *, administrators: Sequence[str] = (),
                  tenants: Mapping[str, Sequence[str]] | None = None, start: bool = True,
                  failing_sends: int = 0, send_interval: _dt.timedelta | None = None,
-                 failing_writes: bool = False) -> None:
+                 send_deadline: _dt.timedelta | None = None, failing_writes: bool = False) -> None:
         self.clock = Clock()
         self.store = InMemoryStore(self.clock)
         self.repo: Any = InMemoryIdentityRepository()
@@ -562,6 +562,7 @@ class World:
         self.app: Any = None
         self.service: Any = None
         self.send_interval = send_interval
+        self.send_deadline = send_deadline
         self.build(administrators=administrators, tenants=tenants or {})
         if start:
             self.call(self.service.start)
@@ -586,7 +587,9 @@ class World:
         self._loop.stop()
 
     def build(self, *, administrators: Sequence[str], tenants: Mapping[str, Sequence[str]]) -> None:
-        extra = {} if self.send_interval is None else {"send_interval": self.send_interval}
+        extra: dict[str, Any] = {} if self.send_interval is None else {"send_interval": self.send_interval}
+        if self.send_deadline is not None:
+            extra["send_deadline"] = self.send_deadline
         self.service = IdentityService(
             self.repo, signin=self.signin, mail=self.mail, clock=self.clock,
             bootstrap=Bootstrap(administrators=tuple(administrators),
