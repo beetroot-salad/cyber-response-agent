@@ -65,12 +65,13 @@ def _template(server: str) -> str:
 
     name = f"defender_tmpl_{os.environ.get('PYTEST_XDIST_WORKER', 'main')}_{os.getpid()}"
     _drop(server, name)
-    upgrade(_create(server, name, template="template0"))
+    dsn = _create(server, name, template="template0")
+    atexit.register(_drop, server, name)
+    upgrade(dsn)
     [(open_backends,)] = execute(server, "SELECT count(*) FROM pg_stat_activity WHERE datname = %s", (name,))
     assert open_backends == 0, (
         f"upgrade() returned with {open_backends} connection(s) still open on the database it migrated; "
         "it must leave none open (a database cannot be cloned from a template in use)")
-    atexit.register(_drop, server, name)
     return name
 
 

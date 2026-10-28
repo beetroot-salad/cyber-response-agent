@@ -172,6 +172,7 @@ _DRIFTS = {
     "a constraint's name": "ALTER TABLE identity.users RENAME CONSTRAINT {check} TO renamed_by_hand",
     "a partial index's predicate": "DROP INDEX identity.{partial}; CREATE UNIQUE INDEX {partial} ON identity.memberships (user_id, tenant_id) WHERE status = 'invited'",
     "a server default": "ALTER TABLE identity.tenants ALTER COLUMN created_at SET DEFAULT now()",
+    "a column's type modifier": "ALTER TABLE identity.tenants ALTER COLUMN created_at TYPE timestamptz(3)",
 }
 
 

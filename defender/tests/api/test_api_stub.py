@@ -1103,12 +1103,15 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
 
 
 def _api_routes(routes: Any) -> Any:
-    """Every `APIRoute` under `routes`, looking inside included routers (FastAPI includes them lazily)."""
+    """Every route under `routes` as it is served: an included router (FastAPI includes them lazily)
+    yields its effective routes, which carry include-level `dependencies=` as well."""
     for route in routes:
         if isinstance(route, APIRoute):
             yield route
-        elif hasattr(route, "original_router"):
-            yield from _api_routes(route.original_router.routes)
+        elif hasattr(route, "effective_candidates"):
+            yield from _api_routes(route.effective_candidates())
+        elif hasattr(route, "dependant"):
+            yield route
 
 
 def _walk_dependants(dependant: Any) -> Any:
