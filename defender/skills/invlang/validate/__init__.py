@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
 from defender._vocab import normalized_disposition
-from defender.records._artifact_schema import register_invlang_validator
+from defender.records.formats import register_invlang_validator
 from .. import _walkers, vocab
-from .._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw, _unquote
+from .._cells import _row_cells, _row_dict, split_cells, _split_cells_raw, _unquote
 from .._types import Block, RowError
 from ..parser import (
     _CONCLUDE_SUBTABLE_FIELDS,
@@ -489,7 +489,7 @@ __all__ = [
     "_row_states_something",
     "_seed_vertex_state",
     "_settled_predictions",
-    "_split_cells",
+    "split_cells",
     "_split_cells_raw",
     "_swap_cell",
     "_tests_tokens",

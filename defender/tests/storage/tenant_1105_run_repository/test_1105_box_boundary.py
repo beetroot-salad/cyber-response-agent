@@ -105,7 +105,7 @@ def _daemon() -> tuple[bool, Path | None, frozenset[str]]:
         return False, None, frozenset()
     anchor = H.WORKTREE / ".defender-runs"
     if is_dood():
-        mounts = box_mod._shared_mounts(box_mod._docker)
+        mounts = box_mod._shared_mounts(box_mod.run_docker)
         if not mounts or not box_mod._covered(H.DEFENDER, mounts):
             return False, None, frozenset()
         # The repo tree is shared with the daemon (defender_dir is bound out of it), so a data

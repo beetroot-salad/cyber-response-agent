@@ -256,7 +256,7 @@ class _DockerExec:
         return str(self.inside / host.relative_to(self.tree))
 
     def _run(self, *argv: str) -> _Ran:
-        done = box_mod._docker(["docker", "exec", "-w", str(self.inside), self.name, *argv])
+        done = box_mod.run_docker(["docker", "exec", "-w", str(self.inside), self.name, *argv])
         rc = done.returncode
         return _Ran(-(rc - 128) if rc > 128 else rc, done.stdout, done.stderr)
 
@@ -277,7 +277,7 @@ def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
     agent = _tenant_agent(base)
     box = box_mod.start_box(
         run_dir, DEFENDER, spec=box_mod.BoxSpec(runtime=runtime),
-        tenant_agent=agent, staged_token=agent.parent / "token", docker=box_mod._docker,
+        tenant_agent=agent, staged_token=agent.parent / "token", docker=box_mod.run_docker,
     )
     try:
         # A startup fault under DEFENDER_ALLOW_UNSANDBOXED=1 degrades to the host executor,
@@ -319,7 +319,7 @@ def _lane_box(base: Path, runtime: str) -> Iterator[_DockerExec]:
         )
         writable = [m for m in request.mounts if m.writable]
         assert len(writable) == 1, f"the drain box mounts {writable} writable, not its one lane"
-        box = box_mod.start_box(request, docker=box_mod._docker)
+        box = box_mod.start_box(request, docker=box_mod.run_docker)
         try:
             assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
             yield _DockerExec(box.name, Path(writable[0].source), Path(writable[0].target))

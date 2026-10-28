@@ -6,9 +6,9 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from defender.tenancy._exports import regular_files as _regular_files
-from defender.tenancy._exports import remove_entry as _remove_entry
-from defender.tenancy._tenant import Tenant
+from defender.tenancy import regular_files as _regular_files
+from defender.tenancy import remove_entry as _remove_entry
+from defender.tenancy import Tenant
 from defender import box
 from defender._model_view import ModelView
 from defender.investigation.permission.grant import path_operands

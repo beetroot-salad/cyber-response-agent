@@ -24,12 +24,12 @@ from ..agent_definition import ResolvedRoots
 from defender._agent_role import AgentRole
 from defender._model_view import ModelView
 
-from defender.configuration._env import env_int
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.configuration import env_int
+from defender.knowledge import KnowledgePaths
 from defender.investigation.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
-from defender.knowledge._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import (
     LOAD_KINDS as _LOAD_KINDS,
     lesson_name as _lesson_name,

@@ -25,7 +25,7 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
-from defender.records._locations import DataRoot, RunsBase, EpisodesRoot
+from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
 
 import logging
 import json
@@ -33,7 +33,7 @@ import os
 import sys
 from pathlib import Path
 
-# Hand-rolled rather than `_venv.reexec_into_venv`: this must run before any
+# Hand-rolled rather than `venv_guard.reexec_into_venv`: this must run before any
 # `defender.*` import, and reaching that helper is one.
 _DEFENDER_DIR = Path(__file__).resolve().parent
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"
@@ -52,13 +52,13 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _log  # noqa: E402
-from defender.records import _provenance  # noqa: E402
+from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
-from defender.tenancy import _tenant  # noqa: E402
-from defender.records._episode_handle import Episode  # noqa: E402
+from defender import tenancy  # noqa: E402
+from defender.records.formats import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.investigation import driver  # noqa: E402
 from defender import providers  # noqa: E402
@@ -82,10 +82,10 @@ DEFENDER_DIR = _DEFENDER_DIR
 
 
 from defender._first_party_key import (  # noqa: E402,F401
-    _read_env_key,
+    read_env_key,
     resolve_first_party_key,
 )
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 
 _logger = logging.getLogger(__name__)
 
@@ -463,7 +463,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
 
 def _resolve_run_tenant(
-    tenant: _tenant.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
+    tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
     copy: run_knowledge.RunCopy | None = None,
 ) -> RunTenant:
     """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
@@ -495,7 +495,7 @@ def _family_pin(ns: argparse.Namespace, pin: str | None, episode: Any) -> str | 
     recorded) keeps `pin` as given, as before. An ordinary run's `pin` is kept."""
     if episode is None:
         return pin
-    from defender.records._knowledge_pin import PinUnreadable, read_pin
+    from defender.records.formats import PinUnreadable, read_pin
 
     try:
         family = read_pin(episode.view())
@@ -521,7 +521,7 @@ def _knowledge_pin(ns: argparse.Namespace) -> str | None:
 
 
 def _publish_report(
-    publish: Callable[..., object] | None, tenant: _tenant.Tenant, data_root: DataRoot,
+    publish: Callable[..., object] | None, tenant: tenancy.Tenant, data_root: DataRoot,
 ) -> run_knowledge.PublishReport:
     """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
     — the tenant id and the data root (O8: no login material passes through the run process)
@@ -530,9 +530,9 @@ def _publish_report(
     same recorder the launcher uses."""
     try:
         launch = publish if publish is not None else _default_publish()
-        line = launch(str(tenant.id), data_root=_tenant.data_root_for_child(data_root))
+        line = launch(str(tenant.id), data_root=tenancy.data_root_for_child(data_root))
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
-        from defender.tenancy._publish_status import record_report
+        from defender.tenancy import record_report
 
         line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
         record_report(tenant, line, by="launch-time publish")
@@ -547,7 +547,7 @@ def _default_publish() -> Callable[..., object]:
 
 
 def _knowledge_source(
-    tenant: _tenant.Tenant, *, pin: str | None, publish: Callable[..., object] | None,
+    tenant: tenancy.Tenant, *, pin: str | None, publish: Callable[..., object] | None,
     data_root: DataRoot,
 ) -> run_knowledge.KnowledgeSource:
     """Which export this run reads and why: the pinned one (no publish), else `current` after
@@ -564,7 +564,7 @@ def _knowledge_source(
     return source
 
 
-def _copy_knowledge(tenant: _tenant.Tenant, source: run_knowledge.KnowledgeSource,
+def _copy_knowledge(tenant: tenancy.Tenant, source: run_knowledge.KnowledgeSource,
                     run_id: str) -> run_knowledge.RunCopy:
     """The run's own copy of its export (U9), or the refusal before the box."""
     try:
@@ -572,14 +572,14 @@ def _copy_knowledge(tenant: _tenant.Tenant, source: run_knowledge.KnowledgeSourc
     except (run_knowledge.KnowledgeRefused, OSError) as refused:
         sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
     try:
-        _tenant.check_run_settings(copy.settings)
+        tenancy.check_run_settings(copy.settings)
     except TenantRefused as refused:
         copy.remove()
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     return copy
 
 
-def _early_run(ns: argparse.Namespace, accepted: _tenant.Tenant, world: Any,
+def _early_run(ns: argparse.Namespace, accepted: tenancy.Tenant, world: Any,
                episode_runs: Any) -> Run:
     """The run's handle, settled before its knowledge is copied (the copy is named by its id) and
     handed to setup whole (#1279 rev 6): a sibling's arm from its episode's roster, else a fresh
@@ -639,7 +639,7 @@ def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path,
 def _announce_provenance(run_dir: Path) -> None:
     """Log what this run was made against, read back from the stamp (not re-asking git) so
     the operator sees the record itself, including whether the tree was dirty."""
-    rec = _provenance.read(RunPaths(run_dir).provenance)
+    rec = formats.read_provenance(RunPaths(run_dir).provenance)
     if rec is None:
         _logger.info("commit=unrecorded")
         return
@@ -668,11 +668,11 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
     primed recording and depends on nothing the manifest does not say. The manifest records
     its served systems, so no tenant is resolved to read it: `tenant` is never called here.
     """
-    from defender.records import _family
+    from defender.records import formats
 
     del tenant  # the manifest is the whole record; see the docstring
-    family = _family.load_family(episode.view(), expected_episode_id=episode.dir.name)
-    return _family.resume_world_from(family, world_label, episode.dir, arm_ids=arm_ids)
+    family = formats.load_family(episode.view(), expected_episode_id=episode.dir.name)
+    return formats.resume_world_from(family, world_label, episode.dir, arm_ids=arm_ids)
 
 
 def _screened_source_alert(episode: Episode) -> Path:
@@ -719,7 +719,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
         # run on as an ordinary investigation.
         sys.exit(f"[run.py] --episode {ns.episode}: no episode is held for it")
     from defender.records import RunRefused
-    from defender.records._family import FamilyError
+    from defender.records.formats import FamilyError
 
     if ns.update_ticket:
         sys.exit(
@@ -733,7 +733,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 
 def _materialize_run(  # noqa: PLR0913 — the builder's whole call
-    alert: Path, *, tenant: _tenant.Tenant, model: str | None, run: Run | None = None,
+    alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
     world: Any = None, settings: Path | None = None,
     knowledge: run_knowledge.KnowledgeSource | None = None,
 ) -> Run:
@@ -757,26 +757,26 @@ def _request_data_root(ns: argparse.Namespace) -> DataRoot:
     """The request's tenant id checked (`--tenant` is required, there is no default), then the
     data root resolved — once, here — or a `[run.py]` refusal before the preflight."""
     try:
-        _tenant.requested_tenant_id(ns.tenant)
-        return _tenant.resolve_data_root()
+        tenancy.requested_tenant_id(ns.tenant)
+        return tenancy.resolve_data_root()
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
 def _accept_request_tenant(
     ns: argparse.Namespace, *, data_root: DataRoot, box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...],
-) -> _tenant.Tenant:
+) -> tenancy.Tenant:
     """The request's tenant, accepted, or a `[run.py]` refusal before the preflight. Every run
     names it with `--tenant`, a sibling included: it comes from the request (for a platform,
     the acting user's authentication context), never from a record or a stamp, and there is no
     default. It is accepted under `data_root` (`_request_data_root`) through
-    `_tenant.accept_tenant` — the one acceptance every entry point shares; a sibling's
+    `tenancy.accept_tenant` — the one acceptance every entry point shares; a sibling's
     episode is then looked up under that tenant's own folder (`_open_episode_runs`).
     `box_mounted` is what the run's box mounts besides the checkout — a sibling's arm
     container — and the tenant's settings must sit under none of it."""
     try:
-        tenant_id = _tenant.requested_tenant_id(ns.tenant)
-        return _tenant.accept_tenant(
+        tenant_id = tenancy.requested_tenant_id(ns.tenant)
+        return tenancy.accept_tenant(
             data_root, tenant_id, defender_dir=DEFENDER_DIR, box_mounted=box_mounted,
             clone_tree=False)
     except TenantRefused as refused:
@@ -791,15 +791,15 @@ def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> tuple[R
     read."""
     if ns.episode is None:
         return ()
-    from defender.records._episode_handle import EpisodeRefused
+    from defender.records.formats import EpisodeRefused
 
     try:
-        return (_tenant.box_mounted_arm_container(data_root, ns.tenant, ns.episode),)
+        return (tenancy.box_mounted_arm_container(data_root, ns.tenant, ns.episode),)
     except (EpisodeRefused, TenantRefused) as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
 
 
-def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
+def _open_episode_runs(ns: argparse.Namespace, accepted: tenancy.Tenant) -> Any:
     """The sibling's episode view, in its sibling form (`require_roster=True`, O4b): the episode is
     walked from the accepted tenant's own folder, no link followed at any level, and its arm
     roster must have been published — an episode that never reached RUNS, a roster that does not
@@ -808,7 +808,7 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
     ordinary run."""
     if ns.episode is None:
         return None
-    from defender.records._episode_handle import EpisodeRefused
+    from defender.records.formats import EpisodeRefused
     from defender.records import RunRefused
 
     try:
@@ -923,7 +923,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
             # adapters' own settings checks over those settings — a start at which no granted
             # system is usable refused here (O-8, a sibling's own start too) — and handed to the
             # lifecycle whole, so the investigation reads that roster and does not judge again.
-            from defender.records._family import family_identities
+            from defender.records.formats import family_identities
 
             known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
             systems = _judge_start(

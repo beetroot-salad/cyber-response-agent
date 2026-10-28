@@ -19,8 +19,8 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 GOLDEN = "queryrules"
 
 #: The two flat-tier rules by base name; `_flat` spells them through `S.QUERY_RULE_PUBLIC`.
-_JSP = "_json_safe_params"
-_RK = "_request_key"
+_JSP = "json_safe_params"
+_RK = "query_request_key"
 
 
 def _g() -> Any:

@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
-    from defender.tenancy._tenant import Tenant
+    from defender.tenancy import Tenant
 
 _logger = logging.getLogger(__name__)
 
@@ -69,10 +69,10 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
 
 def command_line_tenant(parser: argparse.ArgumentParser, raw_tenant: str) -> Tenant:
     """Accept an explicitly selected tenant before a command touches state or outputs."""
-    from defender.tenancy import _tenant
+    from defender import tenancy
 
     try:
-        return _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
+        return tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
     except TenantRefused as refused:
         parser.error(str(refused))
 

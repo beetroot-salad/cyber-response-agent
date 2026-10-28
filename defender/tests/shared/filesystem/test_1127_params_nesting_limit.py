@@ -193,7 +193,7 @@ def _write_outcome(run, params: Any) -> str:  # noqa: ANN001 — a `RunState` (#
 def _cleaner_refuses(params: Any) -> bool:
     """The params cleaner both writers share, asked directly: does it refuse `params`? A
     refusal must be `ParamsTooDeep`; any other raise fails the arm."""
-    err = raised(lambda: _query_rules._json_safe_params(params))
+    err = raised(lambda: _query_rules.json_safe_params(params))
     if err is None:
         return False
     assert_refused_as_too_deep(err, "the params cleaner")

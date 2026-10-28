@@ -18,7 +18,7 @@ import yaml
 
 from defender import _yaml
 from defender._io import TEXT_READ_ERRORS, read_text_utf8
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge import KnowledgePaths
 from defender.kit.verbs import VerbContext
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -76,7 +76,7 @@ def registry_path(agent_root: Path) -> Path:
     return KnowledgePaths(Path(agent_root)).system_skill_dir(SYSTEM) / "registry.yaml"
 
 
-def _literal_chars(value: str) -> int:
+def literal_chars(value: str) -> int:
     """How many characters of `value` a name must match exactly (bracket expressions excluded)."""
     return sum(1 for ch in _BRACKET_EXPR_RE.sub("", value) if ch not in _WILDCARD_CHARS)
 
@@ -88,7 +88,7 @@ def _blanket_scope_reason(field: str, value: str) -> str | None:
         return f"`{field}` is blank, which scopes the sanction to nothing and to everything"
     if scoped.lower() in _BLANKET_SCOPES:
         return f"`{field}` is {value!r}, a blanket scope"
-    if _literal_chars(scoped) < TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS:
+    if literal_chars(scoped) < TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS:
         return (
             f"`{field}` is {value!r}, which carries fewer than "
             f"{TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS} literal characters — a scope that is "
@@ -97,7 +97,7 @@ def _blanket_scope_reason(field: str, value: str) -> str | None:
     return None
 
 
-def _parse_date(value: str) -> dt.date | None:
+def parse_date(value: str) -> dt.date | None:
     try:
         return dt.date.fromisoformat(value.strip())
     except ValueError:
@@ -147,7 +147,7 @@ def _read_entry(raw: Any) -> tuple[dict[str, str] | None, str]:
         reason = _blanket_scope_reason(field, entry[field])
         if reason is not None:
             return None, f"entry {entry['id']!r}: {reason}"
-    added_at, review_by = _parse_date(entry["added_at"]), _parse_date(entry["review_by"])
+    added_at, review_by = parse_date(entry["added_at"]), parse_date(entry["review_by"])
     if added_at is None or review_by is None:
         return None, (
             f"entry {entry['id']!r}: `added_at` and `review_by` are ISO dates "
@@ -258,7 +258,7 @@ def find_entry(
             continue
         if not fnmatchcase(host, entry["host_scope"]):
             continue
-        added_at, review_by = _parse_date(entry["added_at"]), _parse_date(entry["review_by"])
+        added_at, review_by = parse_date(entry["added_at"]), parse_date(entry["review_by"])
         if added_at is None or review_by is None:
             continue
         if not added_at <= now <= review_by:

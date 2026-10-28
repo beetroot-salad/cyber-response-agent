@@ -11,7 +11,7 @@ import pytest
 
 from defender import _log
 from defender.learning.frontend import serialize
-from defender.knowledge._query_rules import _json_safe_params
+from defender.knowledge._query_rules import json_safe_params
 
 NAN, INF = float("nan"), float("inf")
 
@@ -34,12 +34,12 @@ def _logged(value):
 
 @pytest.mark.parametrize("value", _FINITE + _NON_FINITE, ids=lambda v: type(v).__name__)
 def test_the_log_and_the_query_record_make_the_same_value(value):
-    assert _json_safe_params(value) == _logged(value)
+    assert json_safe_params(value) == _logged(value)
     json.dumps(_logged(value), allow_nan=False)
 
 
 def test_the_log_and_the_query_record_spell_non_finite_as_the_standard_text():
-    assert _json_safe_params({"x": [NAN, (INF, -INF)]}) == {"x": ["NaN", ["Infinity", "-Infinity"]]}
+    assert json_safe_params({"x": [NAN, (INF, -INF)]}) == {"x": ["NaN", ["Infinity", "-Infinity"]]}
 
 
 def test_the_lessons_page_writes_non_finite_as_null():
@@ -62,7 +62,7 @@ def test_only_the_log_cuts_a_deep_value_and_it_cuts_below_six_levels():
     for _ in range(6):
         cut = cut["k"]
     assert cut == "{'k': 'x'}", "a nested map must count toward the cap like a nested list"
-    assert _json_safe_params(_nested(9, "x")) == _nested(9, "x")
+    assert json_safe_params(_nested(9, "x")) == _nested(9, "x")
     assert serialize._json_safe(_nested(9, "x")) == _nested(9, "x")
 
 
@@ -83,7 +83,7 @@ import itertools  # noqa: E402
 from defender._io import json_safe  # noqa: E402
 from defender.learning.judge.family import mapping_key  # noqa: E402
 from defender.investigation import observe  # noqa: E402
-from defender.knowledge._query_rules import _request_key
+from defender.knowledge._query_rules import query_request_key
 from defender.tests.support.integrations._defender_sql import EXIT_OK, run_sql_py  # noqa: E402
 
 
@@ -155,7 +155,7 @@ def test_a_denial_and_the_repeat_key_tell_the_same_calls_apart(a, b):
     """Two calls share a denial fingerprint exactly when they share a repeat key — the two
     surfaces identify a call by one rule, not two."""
     same_digest = observe._params_digest(a) == observe._params_digest(b)
-    same_key = _request_key("elastic", "probe", a) == _request_key("elastic", "probe", b)
+    same_key = query_request_key("elastic", "probe", a) == query_request_key("elastic", "probe", b)
     assert same_digest == same_key
 
 
@@ -165,7 +165,7 @@ def test_the_judges_envelope_key_is_the_repeat_key(a, b):
     a call exactly as the recorder does."""
     for params in (a, b):
         assert mapping_key({"system": "elastic", "verb": "probe", "params": params}) \
-            == _request_key("elastic", "probe", params)
+            == query_request_key("elastic", "probe", params)
 
 
 def test_mixed_key_types_neither_crash_the_fingerprint_nor_the_repeat_key():
@@ -175,8 +175,8 @@ def test_mixed_key_types_neither_crash_the_fingerprint_nor_the_repeat_key():
     assert json_safe(params, non_finite="text") == {
         "1": "a", "b": 2, "false": "f", "null": "n", "1.5": "x"}
     observe._params_digest(params)
-    _request_key("elastic", "probe", params)
+    query_request_key("elastic", "probe", params)
 
 
 def test_params_that_are_not_a_map_key_as_no_params():
-    assert _request_key("elastic", "probe", ["x"]) == _request_key("elastic", "probe", {})
+    assert query_request_key("elastic", "probe", ["x"]) == query_request_key("elastic", "probe", {})

@@ -55,7 +55,7 @@ from ._payload import (
     _first_wins_pairs as _first_wins_pairs,
     _has_extra_keys as _has_extra_keys,
     _is_nonrepresentable_leaf as _is_nonrepresentable_leaf,
-    _lead_id_from_args as _lead_id_from_args,
+    lead_id_from_args as lead_id_from_args,
     _message_from_payload as _message_from_payload,
     _tool_name as _tool_name,
     load_payload as load_payload,

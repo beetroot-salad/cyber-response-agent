@@ -36,8 +36,8 @@ from .tools import (
     LeadStop,
 )
 
-from defender.knowledge._corpus import QueryTemplate, is_established, iter_query_templates
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge import QueryTemplate, is_established, iter_query_templates
+from defender.knowledge import KnowledgePaths
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh

@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from defender.tenancy._tenant import ISSUER_ROLE
+from defender.tenancy import ISSUER_ROLE
 
 TOKEN_TTL = 600
 CLOCK_SKEW = 30

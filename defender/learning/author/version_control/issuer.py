@@ -18,8 +18,8 @@ from pathlib import Path
 import httpx
 
 from defender import _io
-from defender.tenancy._tenant import ForgeBinding, Tenant, read_forge_binding
-from defender.records._tenant_id import TenantRefused
+from defender.tenancy import ForgeBinding, Tenant, read_forge_binding
+from defender.records.formats import TenantRefused
 
 from .auth import ForgejoAuthError, ForgejoIdentity
 from .model import DeliveryRefused

@@ -22,7 +22,7 @@ from ..schema import (
 )
 from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
-from defender.records._run_id import run_id_fault
+from defender.records.formats import run_id_fault
 
 from ._structure import PAST_CASE, _cell, _check_vocab, _folded_grounding
 from ._state import (

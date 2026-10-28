@@ -11,7 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender import _git
 from defender._io import Held, is_plain_entry, stat_entry
-from defender.knowledge._knowledge import AGENT_REL
+from defender.knowledge import AGENT_REL
 from defender.learning.core import config as _loop_config
 from defender.learning.core.lane_trees import DrainTrees, TreeFor
 from defender.learning.leads.lead_extraction import LeadAuthorError

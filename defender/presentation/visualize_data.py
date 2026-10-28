@@ -7,7 +7,7 @@ from pathlib import Path
 from defender._clock import parse_iso_utc
 from defender._io import read_text_utf8
 from defender.records import RUN_LAYOUT, RunPaths
-from defender.configuration._pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
+from defender.configuration import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.presentation.visualize_primitives import slugify
 
 

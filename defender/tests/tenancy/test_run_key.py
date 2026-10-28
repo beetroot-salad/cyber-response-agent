@@ -17,13 +17,13 @@ import run  # noqa: E402
 def test_read_env_key_parses_quotes_and_export(tmp_path):
     f = tmp_path / ".env"
     f.write_text('# comment\nexport ANTHROPIC_API_KEY="sk-ant-api03-abc"\nOTHER=1\n')
-    assert run._read_env_key(f) == "sk-ant-api03-abc"
+    assert run.read_env_key(f) == "sk-ant-api03-abc"
 
 
 def test_read_env_key_absent_returns_none(tmp_path):
     f = tmp_path / ".env"
     f.write_text("ELASTIC_PASSWORD=hunter2\n")
-    assert run._read_env_key(f) is None
+    assert run.read_env_key(f) is None
 
 
 def test_explicit_env_file_wins(tmp_path, monkeypatch):

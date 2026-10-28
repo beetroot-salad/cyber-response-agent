@@ -90,12 +90,12 @@ def _held_still(path: Path) -> bool:
 
 def _exec(box: box_mod.BoxExecutor, *argv: str, cwd: Path | None = None) -> tuple[int, str]:
     flags = ["-w", str(cwd)] if cwd is not None else []
-    proc = box_mod._docker(["docker", "exec", *flags, box.name, *argv])
+    proc = box_mod.run_docker(["docker", "exec", *flags, box.name, *argv])
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
 def _status(name: str) -> str:
-    return box_mod._docker(["docker", "inspect", "-f", "{{.State.Status}}", name]).stdout.strip()
+    return box_mod.run_docker(["docker", "inspect", "-f", "{{.State.Status}}", name]).stdout.strip()
 
 
 def _writers(box: box_mod.BoxExecutor) -> int:
@@ -107,7 +107,7 @@ def _writers(box: box_mod.BoxExecutor) -> int:
 def _leave_a_writer(box: box_mod.BoxExecutor, target: Path) -> None:
     """A detached loop inside `box` appending to `target`: what an agent leaves running."""
     loop = f"while :; do printf X >> {shlex.quote(str(target))}; sleep 0.05; done"
-    started = box_mod._docker(["docker", "exec", "-d", box.name, "sh", "-c", loop])
+    started = box_mod.run_docker(["docker", "exec", "-d", box.name, "sh", "-c", loop])
     assert started.returncode == 0, started.stderr
 
 
@@ -194,7 +194,7 @@ def _the_box_life(  # noqa: PLR0915 — one box's whole life
                 assert not os.path.lexists(draft / argv[-1]), f"`{' '.join(argv)}` left a link"
             (draft / "plain1195").unlink()
 
-        assert box_mod._docker(["docker", "start", box.name]).returncode == 0
+        assert box_mod.run_docker(["docker", "start", box.name]).returncode == 0
         assert _status(box.name) == "running"
         ran: list[bool] = []
         got = X.caught(lambda: _one_run(runs, ran))
@@ -205,7 +205,7 @@ def _the_box_life(  # noqa: PLR0915 — one box's whole life
     finally:
         box_mod.stop_box(box)
 
-    probe = box_mod._docker(["docker", "inspect", "-f", "{{.State.Status}}", request.name])
+    probe = box_mod.run_docker(["docker", "inspect", "-f", "{{.State.Status}}", request.name])
     assert probe.returncode != 0, f"a container still holds {request.name}: {probe.stdout}"
     rel = f"agent/{LANES[0]}/{LEFT}"
     changes = batch.change_set()

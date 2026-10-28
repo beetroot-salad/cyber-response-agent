@@ -25,9 +25,7 @@ from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.knowledge import _corpus
 from defender import _git
-from defender.systems import _scaffold_rules
 from defender._io import Held
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
@@ -564,7 +562,7 @@ def main(argv: list[str]) -> int:
                    help=f"the defender run, by its id — its folder holds "
                         f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
-    from defender.tenancy._command_line_run import open_command_line_run
+    from defender.tenancy import open_command_line_run
 
     # The request's tenant, accepted under the configured data root, and its run opened by id
     # through that tenant's repository (a link at the run's name is never followed). A refusal
@@ -603,7 +601,6 @@ __all__ = [
     "_VALID_PAYLOAD_STATUSES",
     "_answered_after_batch",
     "_check_promoted_template",
-    "_corpus",
     "_covers_rule",
     "_departed_drafts",
     "_done_sentinel",
@@ -636,7 +633,6 @@ __all__ = [
     "_refuse_lost_provenance",
     "_repairs_the_id",
     "_run_locked",
-    "_scaffold_rules",
     "_skills_content_rule",
     "_skills_path_rule",
     "_skills_rule",

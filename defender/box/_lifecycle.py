@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
-from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
-from defender.records._tenant_id import TenantId
+from defender.records.formats import RUN_ID_ALLOWED, is_valid_run_id
+from defender.records.formats import TenantId
 from defender.configuration import publish_root
 from defender.records import RUN_LAYOUT
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
-    _BOX_MARK_ENV,
+    BOX_MARK_ENV,
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BoxFault,
@@ -38,7 +38,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport
@@ -168,7 +168,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     # the environment are the model view's constants — the same for every run on every host.
     # Only the bind SOURCES name host paths; the daemon needs them, and the box never sees them.
     env_pairs = {**infra_env(Path(MODEL_DEFENDER), Path(MODEL_RUN)), **_LOCALE_ENV,
-                 **CLOCK_ENV, **_BOX_MARK_ENV}
+                 **CLOCK_ENV, **BOX_MARK_ENV}
     if any(m.target == MODEL_AGENT for m in lane):
         env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
     _input_dir_source(run_dir)
@@ -690,7 +690,7 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
 
 def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
-    spec: BoxSpec | None = None, docker: DockerFn = _docker, tenant_agent: Path | None = None,
+    spec: BoxSpec | None = None, docker: DockerFn = run_docker, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
     tenant_id: TenantId | None = None, staged_token: Path | None = None,
 ) -> BoxExecutor:
@@ -785,7 +785,7 @@ def _carried_docker(box: object) -> DockerFn:
     A sandboxed box that carries none is a `BoxFault`, never a silent fall back to a daemon it
     was not created through."""
     if not getattr(box, "sandboxed", False):
-        return _docker
+        return run_docker
     docker = getattr(box, "docker", None)
     if docker is None:
         raise BoxFault(

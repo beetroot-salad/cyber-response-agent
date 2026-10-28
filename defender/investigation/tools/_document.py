@@ -19,7 +19,7 @@ from defender.records import RUN_LAYOUT, RunPaths
 from .. import compaction, permission
 
 # The byte ruler the artifact bounds are measured with, so reported "bytes" match what the gate judges.
-from defender.records._artifact_schema import _utf8_len
+from defender.records.formats import utf8_len
 from ._deps import AgentDeps
 from ._bash import _resolved
 from ._files import _closed_for_investigation_write, _write_operand
@@ -119,7 +119,7 @@ def committed_document_refusal(read: CompanionRead) -> str | None:
     Kept beside `flagged_in` so both agree on what "could not read" means. An unreadable
     document (`text is None`) returns `None`: the close decides that case once, before any gate.
     An absent document also returns `None`; that is the entry-price gate's question."""
-    from defender.records._artifact_schema import committed_investigation_reason
+    from defender.records.formats import committed_investigation_reason
 
     if not read.text:
         return None
@@ -170,7 +170,7 @@ def flagged_write_refusal(
 
     `offered_text=False` for the close, which proposed no bytes of its own. Both spellings lead
     with the same fragment so the model can tell a refusal from an accept by the first sentence."""
-    from defender.records._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE, render_diagnostic
+    from defender.records.formats import UNCHANGED_LEAD, UNCHANGED_NOTICE, render_diagnostic
 
     # The close's opening says no disposition was recorded, not "nothing was committed", which
     # would contradict "the row LANDED" below.
@@ -191,7 +191,7 @@ def flagged_write_refusal(
 def _warning_return(lead: str, diags: tuple[Diagnostic, ...]) -> str:
     """An accept that carries a warning. Leads with the bytes and never uses the
     unchanged-notice wording, so the model does not mistake it for a refusal and re-emit."""
-    from defender.records._artifact_schema import render_diagnostic
+    from defender.records.formats import render_diagnostic
 
     if not diags:
         return lead
@@ -245,8 +245,8 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
     # UTF-8 bytes, not characters: the size cap is in bytes and invlang rows carry multi-byte
     # symbols.
     lead = (
-        f"appended {_utf8_len(text)} bytes to investigation.md "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-        f"({_utf8_len(new_text)} total)"
+        f"appended {utf8_len(text)} bytes to investigation.md "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        f"({utf8_len(new_text)} total)"
     )
     # The gate accepted a warn-only document without returning diagnostics, so derive them
     # again in memory over the bytes just written.
@@ -262,7 +262,7 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
 def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
     """Lessons for what this write left open — appended to the return, or ""."""
     try:
-        from defender.knowledge._corpus import iter_lessons
+        from defender.knowledge import iter_lessons
         from defender.investigation.lessons_engine.lessons_frontier import (
             WRITE_RETURN_LEAD,
             match_loaded,
@@ -363,7 +363,7 @@ def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
     declaration substituted for a row, an embedded line break forging a second row, a fence
     delimiter closing the block early, or too few cells (silently padded). This keeps committed
     `:V`/`:E` records immutable."""
-    from defender.skills.invlang._cells import _split_cells
+    from defender.skills.invlang import split_cells
     from defender.skills.invlang.parser import HEADER_RE
 
     # Every line break the parser honours, not just `\n`.
@@ -377,7 +377,7 @@ def _new_row_shape_reason(new_row: str, cells: int | None) -> str | None:
     # An unlocatable block skips only the cell-count check, not the checks above.
     if cells is None:
         return None
-    got = len(_split_cells(new_row))
+    got = len(split_cells(new_row))
     if got != cells:
         return f"it has {got} cells but the block declares {cells}"
     return None
@@ -392,7 +392,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
 
     The set is re-derived here: `prepare=` only filters offers, so this body is the guard. The
     result faces the same `decide_write` as every other write."""
-    from defender.records._artifact_schema import UNCHANGED_LEAD, UNCHANGED_NOTICE
+    from defender.records.formats import UNCHANGED_LEAD, UNCHANGED_NOTICE
 
     p = _investigation_path(deps)
     if _closed_for_investigation_write(deps, p):
@@ -480,7 +480,7 @@ def _tool_fix_row(deps: AgentDeps, old_row: str, new_row: str) -> str:
     verb = "deleted" if not new_row else "repaired"
     lead = (
         f"{verb} {len(whole)} flagged row(s) in investigation.md "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-        f"({_utf8_len(new_text)} bytes total) — the change LANDED."
+        f"({utf8_len(new_text)} bytes total) — the change LANDED."
     )
     # `fix_row` can move the frontier (`:R attr_updates` rows close slots; a delete reopens
     # one). Recall must run here: the next `append_block` would see the repair in `before`.

@@ -28,15 +28,15 @@ from defender._agent_role import AgentRole
 from ..permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap_fresh
-from defender.records._artifact_schema import _utf8_len
-from defender.configuration._env import FatalConfigError, env_int
+from defender.records.formats import utf8_len
+from defender.configuration import FatalConfigError, env_int
 from defender.kit.faults import USAGE_EXIT_CODE
 from defender.investigation.sql_engine import sql as defender_sql
 from defender.investigation import record_query
 from defender.investigation.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
-from defender.knowledge._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import lesson_name as _lesson_name
 from ._deps import (
     AgentDeps,
@@ -318,7 +318,7 @@ __all__ = [
     "_tool_write_file",
     "_write_operand",
     "_under",
-    "_utf8_len",
+    "utf8_len",
     "_warn_over",
     "_warning_return",
     "box_mod",

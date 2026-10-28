@@ -30,7 +30,7 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.core.state import FINDINGS, LearningState
-from defender.knowledge._knowledge import LESSONS
+from defender.knowledge import LESSONS
 
 
 

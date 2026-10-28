@@ -6,11 +6,11 @@ import json
 from pathlib import Path
 
 from defender._model import model
-from defender.records._episode_handle import Episode
-from defender.records._episode_paths import LAYOUT
+from defender.records.formats import Episode
+from defender.records.formats import LAYOUT
 from defender._io import NotPlainEntry, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
-from defender.knowledge._query_rules import ParamsTooDeep
+from defender.knowledge import ParamsTooDeep
 
 from .ledger import CAPTURED, LedgerError, ServedCall, request_key, served_line
 

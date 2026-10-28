@@ -4,8 +4,8 @@ import argparse
 import os
 from pathlib import Path
 
-from defender.knowledge._corpus import as_list, iter_lessons
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge import as_list, iter_lessons
+from defender.knowledge import KnowledgePaths
 from defender._io import use_utf8_stdio
 
 #: The variable naming the run's agent root (the run copy's `agent/`, `/agent` in a box): every
@@ -13,7 +13,7 @@ from defender._io import use_utf8_stdio
 AGENT_DIR_ENV = "DEFENDER_AGENT_DIR"
 
 # No `reexec_into_venv` re-export: this module imports pydantic (via `_corpus`/`_io`), which is
-# what the guard exists to avoid, so scripts take it from `defender.execution._venv`.
+# what the guard exists to avoid, so scripts take it from `defender.execution.venv_guard`.
 __all__ = [
     "iter_lessons", "use_utf8_stdio",
     "NoAgentRoot", "as_list", "as_str_set", "csv_set", "rel_to_repo", "resolve_corpus",

@@ -26,7 +26,7 @@ from pathlib import Path, PurePath
 
 from typing import Any, Final, Literal
 
-from defender._filesystem.write import NotPlainEntry as NotPlainEntry, _FILE_MODE as _FILE_MODE, _mark_alias as _mark_alias, _refuse_unless_plain_stat as _refuse_unless_plain_stat
+from defender._filesystem.write import NotPlainEntry as NotPlainEntry, _FILE_MODE as _FILE_MODE, mark_alias as mark_alias, _refuse_unless_plain_stat as _refuse_unless_plain_stat
 
 from defender._filesystem.json import parse_jsonl_row as parse_jsonl_row
 
@@ -424,10 +424,10 @@ def _open_refusal(e: OSError, where: Path) -> OSError:
     reader-less FIFO, a socket) and EISDIR (a directory) are the unmarked non-plain row; any
     other errno is the open's own failure, unmarked."""
     if e.errno == errno.ELOOP:
-        return _mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=True)
+        return mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=True)
     if e.errno in (errno.ENXIO, errno.EISDIR):
-        return _mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=False)
-    return _mark_alias(e, is_alias=False)
+        return mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)), is_alias=False)
+    return mark_alias(e, is_alias=False)
 
 
 
@@ -471,7 +471,7 @@ def _read_leaf(
 
 
 
-def _refused_by(e: BaseException) -> RefusalKind:
+def refusal_kind_of(e: BaseException) -> RefusalKind:
     """The `REFUSED_*` kind of a refused read's exception. The core already marks the cases
     apart: `NotPlainEntry` is an entry at the name, alias-marked for a link or hard link; a
     linked folder on the way is a bare `ELOOP`; a file used as a folder is
@@ -637,7 +637,7 @@ class Bound:
         except FileNotFoundError:
             return None, True, None, None
         except TEXT_READ_ERRORS as e:
-            return None, False, _read_reason(e), _refused_by(e)
+            return None, False, _read_reason(e), refusal_kind_of(e)
         return data, False, None, None
 
     def read_jsonl(self, name: str | PurePath) -> tuple[list[dict], int, RecordRead]:

@@ -58,7 +58,7 @@ def dood_anchor() -> Path | None:
     unobservable here."""
     from defender import box as box_mod
 
-    mounts = box_mod._shared_mounts(box_mod._docker)
+    mounts = box_mod._shared_mounts(box_mod.run_docker)
     if not mounts or not box_mod._covered(_DEFENDER, mounts):
         return None
     return _DEFENDER.parent / ".defender-runs"

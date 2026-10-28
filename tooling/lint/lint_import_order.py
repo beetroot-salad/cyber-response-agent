@@ -11,7 +11,8 @@ file plus the fully resolved module it names (`from defender.records import sess
 as `defender.records.session_store`), so a listed entry never covers a second import.
 
 Besides the order, two adapter rules (#1080 O4): `integrations/` imports only `kit`, the flat
-tier, `knowledge` and itself; and nothing outside `integrations/` imports it. The named reach-ins
+tier, `knowledge`, the `lazy_door` helper its door binds (#1315) and itself; and nothing outside
+`integrations/` imports it. The named reach-ins
 that remain are baseline entries owned by #1172, so they fail like any other once gone. That the
 API loads no `investigation` or `learning` module is a question of what Python executes, not of
 spelling, so it is answered by importing (`defender/tests/api/test_1080_api_loads.py`), not here.
@@ -46,7 +47,7 @@ LABEL = "lint_import_order"
 #: Bottom to top. A pair with no imports either way is ordered arbitrarily; swap it when an import
 #: first needs the other direction.
 ORDER = (
-    "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records", "database",
+    "lazy_door", "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records", "database",
     "tenancy", "identity", "migrations", "knowledge", "box", "integrations", "systems", "hooks", "skills",
     "investigation", "learning", "presentation", "run_common", "agents", "run", "cli", "api",
 )
@@ -55,7 +56,7 @@ _RANK = {node: rank for rank, node in enumerate(ORDER)}
 _EXCLUDED = ("tests", ".venv", "__pycache__")
 _ADAPTERS = "integrations"
 #: What the adapters may import besides themselves.
-_ADAPTER_IMPORTS = frozenset({"kit", "_flat", "knowledge"})
+_ADAPTER_IMPORTS = frozenset({"lazy_door", "kit", "_flat", "knowledge"})
 _OWNER = re.compile(r"#\d+")
 
 _HEADER = (
@@ -102,12 +103,14 @@ class _Import:
 
 
 def _resolved(node: ast.Import | ast.ImportFrom, package: str,
-              modules: dict[str, str]) -> Iterator[str]:
+              modules: dict[str, str], doors: dict[str, frozenset[str]]) -> Iterator[str]:
     """Each `defender.` module an import statement names; a from-import of a submodule names the
-    submodule."""
+    submodule, and of a name a lazy door serves names `door.name`. A statement that binds a
+    door module itself names nothing here: `_door_uses` names what the file reads through it."""
     if isinstance(node, ast.Import):
         for alias in node.names:
-            if alias.name == "defender" or alias.name.startswith("defender."):
+            if (alias.name == "defender" or alias.name.startswith("defender.")) \
+                    and alias.name not in doors:
                 yield alias.name
         return
     source = _astlib.import_source(node, package)
@@ -115,17 +118,44 @@ def _resolved(node: ast.Import | ast.ImportFrom, package: str,
         return
     for alias in node.names:
         sub = f"{source}.{alias.name}"
-        yield sub if _scanned(sub, modules) else source
+        if sub in doors:
+            continue
+        if alias.name in doors.get(source, ()):
+            yield sub
+        else:
+            yield sub if _scanned(sub, modules) else source
 
 
-def _imports(rel: str, tree: ast.Module, modules: dict[str, str]) -> Iterator[_Import]:
-    _module, package = _astlib.module_and_package(rel)
+def _door_uses(tree: ast.Module, env: _astlib.ModuleEnv,
+               doors: dict[str, frozenset[str]]) -> Iterator[tuple[int, str]]:
+    """What a file reads through a door module it bound: `door.name` for a served name, else the
+    door itself (any other attribute, or the module object used bare). So a baseline entry for a
+    reach-in through a door covers the names it reads, never the whole door (#1315)."""
+    reads: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            base = _astlib.origin(node.value, env)
+            if base in doors:
+                reads.add(id(node.value))
+                yield node.lineno, (f"{base}.{node.attr}" if node.attr in doors[base] else base)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and id(node) not in reads \
+                and isinstance(node.ctx, ast.Load) and _astlib.origin(node, env) in doors:
+            yield node.lineno, _astlib.origin(node, env)  # type: ignore[misc]
+
+
+def _imports(rel: str, tree: ast.Module, modules: dict[str, str],
+             doors: dict[str, frozenset[str]]) -> Iterator[_Import]:
+    module, package = _astlib.module_and_package(rel)
 
     with _astlib.scan_guard(rel):
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
-                for module in _resolved(node, package, modules):
-                    yield _Import(rel, node.lineno, module)
+                for target in _resolved(node, package, modules, doors):
+                    yield _Import(rel, node.lineno, target)
+        env = _astlib.module_env(tree, module, package)
+        for line, target in _door_uses(tree, env, doors):
+            yield _Import(rel, line, target)
 
 
 def _files(root: Path) -> dict[str, str]:
@@ -142,9 +172,13 @@ def scan(root: Path) -> list[Finding]:
     unplaced = sorted({node_of(rel) for rel in modules.values()} - _RANK.keys())
     if unplaced:
         raise Unplaced(", ".join(unplaced))
+    trees = {rel: _astlib.read_and_parse(root / rel, rel)[1] for rel in modules.values()}
+    #: Each lazy door (#1315) and the names it serves.
+    doors = {module: frozenset(homes) for module, rel in modules.items()
+             if (homes := _astlib.homes_of(trees[rel], rel))}
     imports: dict[str, list[_Import]] = {}
-    for rel in modules.values():
-        imports[rel] = list(_imports(rel, _astlib.read_and_parse(root / rel, rel)[1], modules))
+    for rel, tree in trees.items():
+        imports[rel] = list(_imports(rel, tree, modules, doors))
 
     findings: list[Finding] = []
     for rel, found in imports.items():

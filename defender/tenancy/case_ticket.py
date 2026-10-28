@@ -7,10 +7,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from defender.records import _alert_input
-from defender.records._alert_input import AlertFacts
+from defender.records import formats
+from defender.records.formats import AlertFacts
 from defender._model import model
-from defender.records._report import ReportUnreadable, require_report
+from defender.records.formats import ReportUnreadable, require_report
 from defender.records import Run
 from defender.kit.settings import pointer_to
 from defender.tenancy.tenant_settings import read_regular_bytes
@@ -264,7 +264,7 @@ def read_case_record(run: Run, *, mapping: CaseMapping | CaseTicketError) -> Cas
     _thawed(mapping)
     # The signature is the run's recorded one (A1): never read off the alert again. A folder
     # with no usable record has none, and the existing fallback label stands.
-    record = _alert_input.parse_alert_record(run.facts.alert_record.read() or "")
+    record = formats.parse_alert_record(run.facts.alert_record.read() or "")
     signature_id = (record.signature if record is not None else None) or _SIGNATURE_FALLBACK
 
     return CaseRecord(

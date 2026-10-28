@@ -42,7 +42,7 @@ def _first_wins_pairs(pairs: list[tuple[str, Any]]) -> dict:
 
 
 
-def _lead_id_from_args(args: Any) -> str | None:
+def lead_id_from_args(args: Any) -> str | None:
     if isinstance(args, str):
         try:
             args = json.loads(args, object_pairs_hook=_first_wins_pairs)
@@ -72,7 +72,7 @@ def _extract_lead_id(payload_text: str) -> str | None:
         for part in parts:
             if not isinstance(part, dict) or part.get("part_kind") != "tool-call":
                 continue
-            lead_id = _lead_id_from_args(part.get("args"))
+            lead_id = lead_id_from_args(part.get("args"))
             if lead_id is not None:
                 return lead_id
         return None

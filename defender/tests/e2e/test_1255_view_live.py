@@ -34,7 +34,7 @@ def _real_box(tmp_path: Path, run_id: str):
     RunPaths(run_dir).investigation.write_text(
         (golden / "investigation.md").read_text(encoding="utf-8"), encoding="utf-8")
     agent, token = layout.staged()
-    box = box_mod.start_box(run_dir, layout.checkout, docker=box_mod._docker,
+    box = box_mod.start_box(run_dir, layout.checkout, docker=box_mod.run_docker,
                             tenant_agent=agent, tenant_id=layout.tenant.id, staged_token=token)
     return layout, run_dir, box
 

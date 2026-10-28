@@ -26,7 +26,7 @@ from .._cells import (
     _require,
     _row_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _row_dict,
-    _split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
+    split_cells,  # noqa: F401 — re-export: invlang tests import it from `parser`
     _split_csv,
     _split_csv_or_semi,
     _split_quoted,  # noqa: F401 — re-export: invlang tests import it from `parser`
@@ -262,7 +262,7 @@ __all__ = [
     "_row_cells",
     "_row_dict",
     "_row_first_cell",
-    "_split_cells",
+    "split_cells",
     "_split_csv",
     "_split_csv_or_semi",
     "_split_quoted",

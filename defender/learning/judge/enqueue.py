@@ -14,8 +14,8 @@ import yaml
 from defender._io import ENTRY_FILE, Bound
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
-from defender.records._episode_paths import LAYOUT
-from defender.records import _alert_input
+from defender.records.formats import LAYOUT
+from defender.records import formats
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
 from defender.learning.core.retired import retired_keys
 from defender.learning.core.state import (
@@ -51,7 +51,7 @@ LANE_WORLD = LANE_QUESTIONER
 _PLAN_PREFIX = str(LAYOUT.family) + "#"
 
 
-def rule_key_of(record: _alert_input.AlertRecord | None) -> str:
+def rule_key_of(record: formats.AlertRecord | None) -> str:
     """The recorded signature verbatim, or the explicit unkeyed fallback."""
     signature = None if record is None else record.facts.signature
     return signature if signature is not None else "unkeyed"

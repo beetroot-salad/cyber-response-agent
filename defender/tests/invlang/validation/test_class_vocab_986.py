@@ -126,7 +126,7 @@ def test_a_class_grammar_position_is_not_an_attrs_vocabulary():
 
 
 def test_a_quoted_value_is_judged_as_the_value_it_quotes():
-    """`_split_cells` keeps quotes, so one value can arrive bare from a `:V` attrs cell and
+    """`split_cells` keeps quotes, so one value can arrive bare from a `:V` attrs cell and
     quoted from a `:R attr_updates` cell; the vocabulary must answer the same for both."""
     assert validate_companion(
         _vertex_doc('v-001|compute|web-server/internal/known-corp|db-1|kind="container"'),

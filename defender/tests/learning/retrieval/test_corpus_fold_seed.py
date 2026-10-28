@@ -73,7 +73,7 @@ def test_d0_byte_shape_two_sections(tmp_path):
 def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(tmp_path):
     """``reexec_into_venv`` finds ``defender/.venv`` from ITS OWN path, so a caller may sit at any
     depth in the tree."""
-    venv = importlib.import_module("defender.execution._venv")
+    venv = importlib.import_module("defender.execution.venv_guard")
     assert venv._DEFENDER_DIR == DEFENDER, (
         "the anchor must be defender/ itself — the interpreter lives at defender/.venv")
     venv_py = DEFENDER / ".venv" / "bin" / "python3"
@@ -86,7 +86,7 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(t
     caller.write_text(textwrap.dedent(f"""
         import sys
         sys.path.insert(0, {str(REPO_ROOT)!r})
-        from defender.execution._venv import reexec_into_venv
+        from defender.execution.venv_guard import reexec_into_venv
         reexec_into_venv(__file__)
         sys.stdout.write(repr((sys.executable, sys.argv)))
     """), encoding="utf-8")

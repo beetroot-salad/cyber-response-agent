@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from defender._model import model
-from defender.records._tenant_id import TenantId, TenantRefused
+from defender.records.formats import TenantId, TenantRefused
 
 from . import audit
 from .bootstrap import Bootstrap

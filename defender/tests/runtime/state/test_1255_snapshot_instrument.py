@@ -84,7 +84,7 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
     arm, ep, base = _launch_arm(tmp_path, world)
     token = T.world_id(ep, world)
 
-    stamp = _provenance.read(RunPaths(arm).provenance)
+    stamp = _provenance.read_provenance(RunPaths(arm).provenance)
     if stamp is not None:
         assert stamp.parent_run_id is None, (
             f"the arm's stamp names its parent run {stamp.parent_run_id!r} inside the box")

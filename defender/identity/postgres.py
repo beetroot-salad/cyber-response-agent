@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender.database import async_engine, sessions
-from defender.records._tenant_id import TenantId
+from defender.records.formats import TenantId
 
 from .errors import DataRuleViolation
 from .memory import TOUCH_AFTER, check_membership_fields, session_hash

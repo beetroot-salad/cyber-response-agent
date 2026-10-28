@@ -54,15 +54,15 @@ def test_every_record_location_is_rejected_without_receiver_tracking():
 
 
 @pytest.mark.parametrize("source", [
-    "from defender.tenancy._tenant import _unwrap_data_root as raw\ndef f(value):\n    return raw(value)\n",
+    "from defender.tenancy._tenant import unwrap_data_root as raw\ndef f(value):\n    return raw(value)\n",
     "import defender.records._layout as layout\ndef f(path):\n    return layout.RunsBase(path)\n",
-    "from defender.records._locations import _unwrap_learning_root as raw\ndef f(value):\n    return raw(value)\n",
-    "from defender.records import _locations as loc\ndef f(value):\n    convert = loc._unwrap_learning_root\n    return convert(value)\n",
+    "from defender.records._locations import unwrap_learning_root as raw\ndef f(value):\n    return raw(value)\n",
+    "from defender.records import _locations as loc\ndef f(value):\n    convert = loc.unwrap_learning_root\n    return convert(value)\n",
     "def f(value):\n    return value._record_location_path\n",
     "def f(value):\n    return value.__reduce__()[1][0]\n",
     "def f(value):\n    return value.__getstate__()\n",
     "from defender.records._locations import LearningRoot\ndef f(value, path):\n    if isinstance(value, (alias := LearningRoot)):\n        return alias(path)\n",
-    "from typing import Annotated\nfrom defender.records._locations import _unwrap_learning_root as raw\ndef f(value: Annotated[object, raw(outside)]):\n    return value\n",
+    "from typing import Annotated\nfrom defender.records._locations import unwrap_learning_root as raw\ndef f(value: Annotated[object, raw(outside)]):\n    return value\n",
     "from defender.records._locations import LearningRoot as Root\nconstructor = Root\n",
     "def f(runs_base):\n    return runs_base\n",
     "def f(value):\n    return value.run_end_sidecar(value.parent)\n",
@@ -76,17 +76,17 @@ def test_type_annotations_and_safe_forwarding_remain_legal():
 
 
 def test_conversion_permissions_are_function_and_role_specific():
-    source = "from defender.records._locations import _unwrap_learning_root as raw\nclass LearningState:\n    def open(self, value):\n        return raw(value)\n    def unrelated(self, value):\n        return raw(value)\n"
+    source = "from defender.records._locations import unwrap_learning_root as raw\nclass LearningState:\n    def open(self, value):\n        return raw(value)\n    def unrelated(self, value):\n        return raw(value)\n"
     found = findings("learning/core/state.py", source)
     assert len(found) == 1
     assert "LearningState.unrelated" in found[0]
-    wrong_role = source.replace("_unwrap_learning_root", "_unwrap_data_root")
+    wrong_role = source.replace("unwrap_learning_root", "unwrap_data_root")
     assert len(findings("learning/core/state.py", wrong_role)) == 2
     assert findings("tenancy/_tenant.py", "def f(value):\n    return value._record_location_path\n")
 
 
 def test_conversion_defaults_do_not_inherit_body_permissions():
-    source = "from defender.records._locations import _unwrap_learning_root as raw\nclass LearningState:\n    def open(self, value=raw(outside)):\n        return raw(value)\n"
+    source = "from defender.records._locations import unwrap_learning_root as raw\nclass LearningState:\n    def open(self, value=raw(outside)):\n        return raw(value)\n"
     found = findings("learning/core/state.py", source)
     assert len(found) == 1
     assert ":3 " in found[0]
@@ -96,7 +96,7 @@ def test_all_declared_storage_boundaries_have_narrow_permissions():
     gate = load_lint_gate("lint_run_records", name="locations_1210_matrix")
     for (role, rel), functions in gate.CONVERSION_PERMISSIONS.items():
         for qualified in functions:
-            prefix = f"from defender.records._locations import _unwrap_{role} as raw\n"
+            prefix = f"from defender.records._locations import unwrap_{role} as raw\n"
             if "." in qualified:
                 cls, method = qualified.split(".")
                 source = prefix + f"class {cls}:\n    def {method}(self, value):\n        return raw(value)\n"

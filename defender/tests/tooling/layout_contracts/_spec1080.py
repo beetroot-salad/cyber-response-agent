@@ -40,12 +40,12 @@ TENANCY = "defender/tenancy"
 #: The price table and process bootstrap keep dependency-free package initializers; neither
 #: needs to import provider objects or load the LLM stack merely to read configuration.
 PRICING = "defender/configuration/_pricing.py"
-VENV = "defender/execution/_venv.py"
+VENV = "defender/execution/venv_guard.py"
 QUERY_RULES = "defender/knowledge/_query_rules.py"
 
 #: Query rule base name -> its spelling; the identity map while the public rename is parked
 #: (#1165). Every file of this suite reads a rule's spelling from here, so a rename is made here.
-QUERY_RULE_PUBLIC = {"_json_safe_params": "_json_safe_params", "_request_key": "_request_key"}
+QUERY_RULE_PUBLIC = {"json_safe_params": "json_safe_params", "query_request_key": "query_request_key"}
 
 #: What the API program must never load: the learning loop and every former `defender.runtime`
 #: module (#1308 placed them by layer). A package covers its submodules.
@@ -208,7 +208,7 @@ def moved(name: str, *, home: str | None = None) -> Any:
 
 
 def query_rule(base_name: str) -> Any:
-    """A flat-tier query rule by its base spelling (`_json_safe_params`, ...), under the spelling
+    """A flat-tier query rule by its base spelling (`json_safe_params`, ...), under the spelling
     `QUERY_RULE_PUBLIC` gives it."""
     return moved(QUERY_RULE_PUBLIC.get(base_name, base_name), home=QUERY_RULES)
 

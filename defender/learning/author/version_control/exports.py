@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from defender.records._locations import (_unwrap_exports_root, _unwrap_drafts_root, _unwrap_knowledge_lock)
+from defender.records.formats import unwrap_exports_root, unwrap_drafts_root, unwrap_knowledge_lock
 
 import contextlib
 import os
@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import IO
 
 from defender import _flock, _io
-from defender.tenancy._exports import POINTER as _POINTER
-from defender.tenancy._exports import TenantExport, current_export, lock_pid
-from defender.tenancy._exports import remove_entry as _remove_entry
-from defender.tenancy._tenant import Tenant, parse_tenant_id_bytes
+from defender.tenancy import POINTER as _POINTER
+from defender.tenancy import TenantExport, current_export, lock_pid
+from defender.tenancy import remove_entry as _remove_entry
+from defender.tenancy import Tenant, parse_tenant_id_bytes
 
 from .files import _rename_new, _sweep_temporaries
 from .model import (
@@ -59,7 +59,7 @@ def tenant_lock(tenant: Tenant) -> Iterator[None]:
     `* -filter` write to the clone's `info/attributes`, and a draft's build, rename and sweep;
     never across network I/O, a box window or a commit. A second taker fails at once with
     `LockBusy` naming the holder's pid; it never waits."""
-    path = _unwrap_knowledge_lock(tenant.knowledge_lock)
+    path = unwrap_knowledge_lock(tenant.knowledge_lock)
     with _io.hold(path.parent) as folder:
         handle = _io.open_lock_at(folder, path.name)
     try:
@@ -95,7 +95,7 @@ def sweep_dead_owners(tenant: Tenant, *, temporaries_only: bool = False) -> None
     lock. A live owner's folder is kept however old it is, and a folder mid-build is owned: a
     draft is built under this lock, and a run copy (built without it) under a name that carries
     its owner (`tenancy._owner.owned_temporary`) from the instant it exists."""
-    for root in (_unwrap_drafts_root(tenant.drafts), tenant.run_knowledge):
+    for root in (unwrap_drafts_root(tenant.drafts), tenant.run_knowledge):
         if not _io.entry_present(root):
             continue
         for name in sorted(os.listdir(root)):
@@ -117,7 +117,7 @@ def publish_locked(
     repository.fast_forward(upstream)
     export = write_export(tenant, upstream, files)
     if _pointed_at(tenant) != upstream:
-        _io.write_guarded(_unwrap_exports_root(tenant.exports) / _POINTER, f"{upstream}\n", mode="replace")
+        _io.write_guarded(unwrap_exports_root(tenant.exports) / _POINTER, f"{upstream}\n", mode="replace")
     return export
 
 
@@ -137,7 +137,7 @@ def materialise_export(tenant: Tenant, commit: str) -> TenantExport:
     with _refusals():
         if not isinstance(commit, str) or not _OID.fullmatch(commit):
             raise DeliveryRefused(f"{commit!r} is not a full commit id")
-        existing = _unwrap_exports_root(tenant.exports) / commit
+        existing = unwrap_exports_root(tenant.exports) / commit
         # An export already there is kept as it is, so the clone is not opened for it: only a
         # missing export needs the clone's objects.
         repository = None if _io.entry_present(existing) else _clone_holding(tenant, commit)
@@ -201,7 +201,7 @@ def write_export(tenant: Tenant, commit: str, files: dict[str, bytes]) -> Tenant
     """`<T>/exports/<commit>/`, written whole into a fresh folder beside it and renamed into
     place; an export already there is immutable and kept as it is. The caller holds the
     lock, so any staging folder found is a dead publisher's and is removed first."""
-    exports = _unwrap_exports_root(tenant.exports)
+    exports = unwrap_exports_root(tenant.exports)
     _sweep_temporaries(exports, _PUBLISHING_PREFIX)
     final = exports / commit
     if _io.entry_present(final):
@@ -238,7 +238,7 @@ def build_draft(
     there. A build that fails removes its temporary; one killed leaves only that temporary,
     whose dead owner the next publish or batch start sweeps. The caller holds the lock."""
     files = agent_blobs(repository, commit)
-    drafts = _unwrap_drafts_root(tenant.drafts)
+    drafts = unwrap_drafts_root(tenant.drafts)
     temporary = f"{_DRAFT_TEMPORARY}{batch_id}-{secrets.token_hex(4)}"
     try:
         with _io.hold_new(drafts, temporary, exclusive=True) as draft:
@@ -278,4 +278,4 @@ def draft_path(tenant: Tenant, batch_id: str) -> Path:
     drafts root stays with this owner."""
     if not _plain_component(batch_id):
         raise DeliveryRefused(f"{batch_id!r} is not a plain batch id")
-    return _unwrap_drafts_root(tenant.drafts) / batch_id
+    return unwrap_drafts_root(tenant.drafts) / batch_id

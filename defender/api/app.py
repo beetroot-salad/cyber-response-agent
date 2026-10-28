@@ -17,7 +17,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from defender import identity as _identity
 from defender.identity import Authenticated, IdentityService
 from defender.identity.service import SESSION_LIFETIME
-from defender.records._tenant_id import TenantId
+from defender.records.formats import TenantId
 
 from .models import (
     RECORD_ID_PATTERN,

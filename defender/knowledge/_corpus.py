@@ -224,7 +224,7 @@ def _lessons(corpus: Tree, spelled: Path, label: Callable[[Path], str],
 
 
 _HEADING_RE = re.compile(r"^## (.+)$")
-_FENCE_RE = re.compile(r"^(?:```|~~~)")
+FENCE_LINE_RE = re.compile(r"^(?:```|~~~)")
 
 
 @model(frozen=True)
@@ -267,7 +267,7 @@ def section_bodies(body: str) -> dict[str, str]:
     pos = 0
     fenced = False
     for line in body.splitlines(keepends=True):
-        if _FENCE_RE.match(line.lstrip()):
+        if FENCE_LINE_RE.match(line.lstrip()):
             fenced = not fenced
         elif not fenced and (m := _HEADING_RE.match(line)):
             heads.append((m.group(1).strip(), pos, pos + len(line)))
@@ -388,7 +388,7 @@ def _memoized_template(text: str, path: Path) -> tuple[QueryTemplate | None, str
     ), ""
 
 
-def _template_names(view: Bound, where: Path) -> list[str]:
+def template_names(view: Bound, where: Path) -> list[str]:
     """The catalog's template names, `<sys>/*.md` and `<sys>/_draft/*.md`, by name whatever
     stands there, in path order, from one listing of the catalog's fixed shape (three levels).
     A `<sys>` or `<sys>/_draft` entry that is not a real directory (a link, a FIFO) is never
@@ -413,7 +413,7 @@ def _template_names(view: Bound, where: Path) -> list[str]:
 
 
 def iter_query_templates(catalog: Tree, *, where: Path | None = None) -> Iterator[QueryTemplate]:
-    """Every template of the catalog (see `_template_names`), in path order, `path` spelled
+    """Every template of the catalog (see `template_names`), in path order, `path` spelled
     `<where>/<name>` (see `Tree`). One that cannot be read or parsed is warned and skipped; an
     absent catalog yields nothing, a refused one is warned and yields nothing. A `Path` catalog
     is bound when iteration starts and closed when it ends or the iterator is closed."""
@@ -422,7 +422,7 @@ def iter_query_templates(catalog: Tree, *, where: Path | None = None) -> Iterato
 
 def _templates(catalog: Tree, spelled: Path) -> Iterator[QueryTemplate]:
     with _viewed(catalog) as view:
-        for name in _template_names(view, spelled):
+        for name in template_names(view, spelled):
             template, reason = _template_at(view, name, spelled / name)
             if template is None:
                 _logger.warning(f"warn: skipping {name.rsplit('/', 1)[-1]} ({reason})")

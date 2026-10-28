@@ -70,7 +70,7 @@ def _call_args(part: Any) -> dict:
     """A `ToolCallPart`'s arguments as a dict: a dict as-is, a JSON string decoded, anything
     else as `{}` (unattributable either way).
 
-    For fence counting only. Lead ids go through `session_store._lead_id_from_args`, whose
+    For fence counting only. Lead ids go through `session_store.lead_id_from_args`, whose
     duplicate-key rule this bare `loads` does not share.
     """
     args = getattr(part, "args", None)
@@ -230,7 +230,7 @@ def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path,
             if isinstance(part, ToolCallPart):
                 # The store's own extractor (first-wins on duplicate JSON keys), so this and the
                 # `gather_boundary` view never name different leads for one hostile call.
-                lead_id = session_store._lead_id_from_args(getattr(part, "args", None))
+                lead_id = session_store.lead_id_from_args(getattr(part, "args", None))
                 if lead_id:
                     pending[part.tool_call_id] = lead_id
                     # Counted on the call, not the return: the question is "could this call have

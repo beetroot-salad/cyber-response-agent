@@ -13,16 +13,16 @@ REPO_ROOT = HERE.parents[3]
 if (_root := str(REPO_ROOT)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.execution._venv import reexec_into_venv  # noqa: E402
+from defender.execution.venv_guard import reexec_into_venv  # noqa: E402
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
 from defender._clock import z_seconds
-from defender.knowledge._corpus import iter_lessons
+from defender.knowledge import iter_lessons
 from defender._io import json_safe, use_utf8_stdio
-from defender.knowledge._knowledge import LESSONS, LESSONS_QUESTIONER, KnowledgePaths
-from defender.records._tenant_id import TenantRefused
+from defender.knowledge import LESSONS, LESSONS_QUESTIONER, KnowledgePaths
+from defender.records.formats import TenantRefused
 
 
 def _json_safe(obj):
@@ -150,7 +150,7 @@ def _group_lessons(agent_root: Path, name: str, spec: GroupSpec) -> list[dict]:
 def published_agent_root(tenant) -> Path:
     """The `agent/` of the export the tenant's `current` names: the knowledge the page shows.
     `DeliveryRefused` when nothing is published for the tenant."""
-    from defender.tenancy._exports import current_export
+    from defender.tenancy import current_export
 
     return current_export(tenant).path / "agent"
 
@@ -180,11 +180,11 @@ def main(argv: list[str]) -> int:
     if args.agent_root is not None:
         agent_root = args.agent_root
     else:
-        from defender.tenancy import _tenant
-        from defender.tenancy._exports import DeliveryRefused
+        from defender import tenancy
+        from defender.tenancy import DeliveryRefused
 
         try:
-            tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), args.tenant)
+            tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), args.tenant)
             agent_root = published_agent_root(tenant)
         except (TenantRefused, DeliveryRefused) as refused:
             parser.error(str(refused))

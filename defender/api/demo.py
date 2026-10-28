@@ -16,8 +16,8 @@ from collections.abc import Callable, Sequence
 from functools import partial
 
 from defender.records import RUN_LAYOUT
-from defender.tenancy._tenant import is_valid_tenant_id
-from defender.records._tenant_id import TenantId
+from defender.tenancy import is_valid_tenant_id
+from defender.records.formats import TenantId
 
 from defender.identity import (
     Bootstrap,

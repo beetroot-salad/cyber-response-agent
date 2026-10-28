@@ -8,7 +8,7 @@ from pathlib import Path
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._untrusted import wrap_fresh
-from defender.knowledge._corpus import Lesson
+from defender.knowledge import Lesson
 from defender.investigation.lessons_engine._lessons_common import (
     NoAgentRoot,
     agent_knowledge,

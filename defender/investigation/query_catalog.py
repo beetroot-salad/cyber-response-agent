@@ -27,7 +27,7 @@ from pydantic_ai.exceptions import (
 )
 
 
-from defender.knowledge._knowledge import SKILLS
+from defender.knowledge import SKILLS
 from defender._model_view import MODEL_AGENT
 
 from defender.hooks.budget_enforcer import BudgetKill
@@ -44,7 +44,7 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender.systems import circuit_breaker
 from defender.systems import system_status
 from defender.records.run_end import CallRecordWriteFailed
-from defender.systems.verbs import GRANTED, ServingAbort, _ann_name, _resolved_hints
+from defender.systems.verbs import GRANTED, ServingAbort, ann_name, resolved_hints
 from defender.kit.verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.kit.verbs import model_facing_params
 
@@ -68,7 +68,7 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 
 
-#: What a param renders as when its annotation could not be resolved. `_resolved_hints` then
+#: What a param renders as when its annotation could not be resolved. `resolved_hints` then
 #: returns `{}` for the whole verb and `validate_params` type-checks nothing, so printing the
 #: annotation would promise a check that is not made.
 UNENFORCED_TYPE = "type unenforced"
@@ -190,7 +190,7 @@ def _json_default(value: Any) -> str:
 
 def _rendered_param(param: inspect.Parameter, hints: Mapping[str, Any]) -> str:
     """One declared param as a `"name": <descriptor>` entry of a `params={…}` body."""
-    inner = _ann_name(hints[param.name]) if param.name in hints else UNENFORCED_TYPE
+    inner = ann_name(hints[param.name]) if param.name in hints else UNENFORCED_TYPE
     if param.default is not inspect.Parameter.empty:
         inner = f"{inner}, default {_json_default(param.default)}"
     return f'"{param.name}": <{inner}>'
@@ -283,7 +283,7 @@ def _list_verbs_line(
             return None, None
         # `model_facing_params`: wrapper-only params are refused, so they are not published.
         params = model_facing_params(decision.fn)
-        hints = _resolved_hints(decision.fn)
+        hints = resolved_hints(decision.fn)
         rendered = ", ".join(_rendered_param(p, hints) for p in params.values())
         # `shown`, not raw `system`: the line the lead copies must not carry an unescaped name.
         line = f'query(system="{shown}", verb="{verb}", params={{{rendered}}})'

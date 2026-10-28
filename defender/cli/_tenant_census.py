@@ -9,10 +9,10 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
-from defender.knowledge._corpus import QueryTemplate, is_established
+from defender.knowledge import QueryTemplate, is_established
 from defender._paths import adapters_under
 from defender.learning.leads.declared_systems import declared_systems_over, read_adapters
-from defender.learning.leads._errors import LeadAuthorError
+from defender.learning.leads import LeadAuthorError
 from defender.investigation import lead_zero as lead_zero_mod
 from defender.systems.correlation import correlation_grant
 from defender.systems.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
@@ -26,7 +26,7 @@ from defender.systems.verb_dispositions import (
 )
 from defender.systems.verb_grant import GrantError
 from defender.systems.verbs import RosterRead
-from defender.tenancy._tenants import AGENT_HALF
+from defender.tenancy import AGENT_HALF
 
 
 class CensusUnavailable(Exception):

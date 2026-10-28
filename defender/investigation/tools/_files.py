@@ -17,9 +17,9 @@ from defender.records import RunPaths
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 
-from defender.records import _alert_input
+from defender.records import formats
 from defender._untrusted import wrap_fresh
-from defender.knowledge._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import LOAD_KIND_READ as _LOAD_KIND_READ
 from ._deps import AgentDeps, _bounded_read, _cap_for, _overflow_filter_hint, _record_lesson_load
 from ._bash import _deny_authored_read, _grep_lines, _is_cross_agent_read, _is_learning_role, _resolve_operand, _resolved, _rooted_operand
@@ -71,8 +71,8 @@ def _check_alert_digest(deps: AgentDeps, p: Path) -> None:
     if p != paths.alert.resolve():
         return
     try:
-        _alert_input.verified_alert(paths.alert, paths.alert_record, run_name=None)
-    except _alert_input.AlertReplaced as e:
+        formats.verified_alert(paths.alert, paths.alert_record, run_name=None)
+    except formats.AlertReplaced as e:
         raise ModelRetry(str(e)) from None
 
 

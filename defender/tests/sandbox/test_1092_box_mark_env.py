@@ -34,7 +34,7 @@ def _request(root: Path, run_dir: Path, env: dict[str, str] | None = None) -> Bo
 
 # ---- d29 -------------------------------------------------------------------------------------
 def test_the_run_dir_lane_argv_carries_env_defender_box_1(tmp_path):
-    assert box_mod._BOX_MARK_ENV == {"DEFENDER_BOX": "1"}  # type: ignore[attr-defined]
+    assert box_mod.BOX_MARK_ENV == {"DEFENDER_BOX": "1"}  # type: ignore[attr-defined]
     assert "DEFENDER_BOX" in BOX_ENV_ALLOWLIST
     run_dir = make_run_dir(tmp_path)
     argv = box_mod._create_argv(
@@ -97,7 +97,7 @@ def test_each_granted_shim_execs_bare_python3_when_defender_box_is_set_and_the_v
 def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherwise(tmp_path):
     tree = tmp_path / "defender"
     (tree / "execution").mkdir(parents=True)
-    shutil.copy(DEFENDER / "execution/_venv.py", tree / "execution/_venv.py")
+    shutil.copy(DEFENDER / "execution/venv_guard.py", tree / "execution/venv_guard.py")
     venv_bin = tree / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     stub = venv_bin / "python3"
@@ -106,8 +106,8 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
     code = (
         "import sys\n"
         f"sys.path.insert(0, {str(tree / 'execution')!r})\n"
-        "import _venv\n"
-        "_venv.reexec_into_venv('lessons_fm.py')\n"
+        "import venv_guard\n"
+        "venv_guard.reexec_into_venv('lessons_fm.py')\n"
         "print('NO-EXEC')\n"
     )
 

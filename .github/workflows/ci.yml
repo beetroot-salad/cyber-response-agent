@@ -728,8 +728,14 @@ jobs:
       - name: Import-order fence (shrinking baseline)
         run: defender/.venv/bin/python tooling/lint/lint_import_order.py
 
-      # Venv guard (#1080): execution/_venv.py is standard-library-only, and every script that
-      # re-executes into the venv does so before any other defender import.
+      # Private-import fence (#1315): an underscore module or name below a top-level area is
+      # private to that area; other areas take it through a public module or the area's lazy
+      # door, and every door's served names, type mirror and homes agree. No baseline.
+      - name: Private-import fence (no baseline)
+        run: defender/.venv/bin/python tooling/lint/lint_private_imports.py
+
+      # Venv guard (#1080): execution/venv_guard.py, its package door and the door helper are
+      # standard-library-only, and every script that re-executes into the venv does so before any other defender import.
       - name: Venv-guard fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_venv_guard.py
 

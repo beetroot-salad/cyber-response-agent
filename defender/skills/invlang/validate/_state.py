@@ -12,7 +12,7 @@ from typing import Any
 from defender._model import model
 
 from .. import _walkers, vocab
-from .._cells import _row_cells, _row_dict, _split_cells, _split_cells_raw, _unquote
+from .._cells import _row_cells, _row_dict, split_cells, _split_cells_raw, _unquote
 from .._types import Block, RowError
 from ..parser import (
     _LEAD_PREFIX_RE,
@@ -78,7 +78,7 @@ def _candidate_refusal(
         _row_cells(block, candidate, len(cols))
     except RowError as e:
         return str(e)
-    back = _split_cells(candidate)
+    back = split_cells(candidate)
     if len(back) != len(cols):
         return (
             f"it splits to {len(back)} cells but the block declares {len(cols)} — "

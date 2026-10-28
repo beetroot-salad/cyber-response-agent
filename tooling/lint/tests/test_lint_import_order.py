@@ -141,6 +141,26 @@ def test_any_import_of_adapter_code_from_outside_is_found(tmp_path):
         "imports-adapters:cli/tacit_cli.py:defender.integrations._transport"]
 
 
+_DOOR = ('_HOMES = {**dict.fromkeys(("load_config", "split_status"), "_transport")}\n'
+         "__getattr__ = None\n")
+
+
+@pytest.mark.parametrize(("src", "expected"), [
+    ("from defender.integrations import load_config\n", ["defender.integrations.load_config"]),
+    ("from defender import integrations\nintegrations.load_config()\nintegrations.split_status()\n",
+     ["defender.integrations.load_config", "defender.integrations.split_status"]),
+    ("import defender.integrations as t\nt.load_config()\n", ["defender.integrations.load_config"]),
+    ("from defender import integrations\nintegrations.other()\n", ["defender.integrations"]),
+    ("from defender import integrations\nuse(integrations)\n", ["defender.integrations"]),
+], ids=["from-door", "door-alias", "import-as", "unserved-attribute", "bare-module"])
+def test_a_read_through_a_door_is_judged_by_the_name_it_reads(tmp_path, src, expected):
+    """#1315: a baseline entry for a reach-in through a lazy door covers the names the file reads,
+    never every name the door serves."""
+    root = _tree(tmp_path, {"integrations/__init__.py": _DOOR, "integrations/_transport.py": "",
+                            "investigation/writer.py": src})
+    assert _prints(_GATE.scan(root)) == [f"imports-adapters:investigation/writer.py:{e}" for e in expected]
+
+
 def test_importing_a_folder_package_by_name_is_judged(tmp_path):
     root = _tree(tmp_path, {"records/store.py": "from defender import learning\n",
                             "learning/core.py": ""})

@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 from pydantic import AwareDatetime
 
 from defender._model import model
-from defender.records import _knowledge_status
+from defender.records import formats
 
 from .models import (
     Alert,
@@ -106,10 +106,10 @@ class InMemoryStore:
         stamp has none, or there is no run), by the rule `InvestigationsRepository` states."""
         key = (tenant_id, investigation_id)
         investigation = self._investigations[key]
-        status = _knowledge_status.knowledge_status(
+        status = formats.knowledge_status(
             record_text, stamp_names_source=stamp_knowledge_source is not None)
         knowledge = None if status is None else InvestigationKnowledge.model_validate({
-            "status": "current" if status.kind == _knowledge_status.FRESH else status.kind,
+            "status": "current" if status.kind == formats.FRESH else status.kind,
             "commit": status.commit, "stale_kind": status.stale_kind})
         updated = investigation.model_copy(update={"knowledge": knowledge})
         self._investigations[key] = updated

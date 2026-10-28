@@ -18,7 +18,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path, PurePath
 
-from defender.knowledge._corpus import QueryTemplate
+from defender.knowledge import QueryTemplate
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, RecordRead, bind
 from defender._model import model
