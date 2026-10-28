@@ -52,19 +52,19 @@ BASELINE_PATH = Path(__file__).with_name("lint_duplicate_helpers_baseline.json")
 EXCLUDED_DIRS = (".venv", "tests", "runs")
 
 # Accepted-boilerplate excludes (by path substring):
-#   connect/examples/   — adapter scaffold templates, meant to be copied
+#   connect/examples/    — adapter scaffold templates, meant to be copied
+#   migrations/versions/ — Alembic revisions: each defines `upgrade`/`downgrade`, and a revision is a
+#                          frozen snapshot that repeats its small helpers rather than import code that changes
 #
 # No filename-suffix exclusion: adapter duplication under `integrations/` gets fixed or
 # carries a written `# lint-dup: ok`.
-EXCLUDED_PATH_PARTS = ("skills/connect/examples/",)
+EXCLUDED_PATH_PARTS = ("skills/connect/examples/", "migrations/versions/")
 
 # Module-level names legitimately defined in many modules (entry points). Never reported.
 ALLOWLIST_NAMES = frozenset(
     {
         "main",  # every script's entry point
         "run",  # generic per-module driver entry
-        "upgrade",  # an Alembic revision's entry points (`upgrade`/`downgrade`), one per revision file
-        "downgrade",
     }
 )
 
